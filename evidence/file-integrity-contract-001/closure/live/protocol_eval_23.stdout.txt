@@ -1,0 +1,168 @@
+
+[Usage: 366 input tokens, 199 output tokens | Time: 10.69s | Finish: stop]
+{"task": "java_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 366 input tokens, 183 output tokens | Time: 2.34s | Finish: stop]
+{"task": "java_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 599 input tokens, 154 output tokens | Time: 2.65s | Finish: stop]
+{"task": "java_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 599 input tokens, 162 output tokens | Time: 2.10s | Finish: stop]
+{"task": "java_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 344 input tokens, 150 output tokens | Time: 2.35s | Finish: stop]
+{"task": "python_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 344 input tokens, 168 output tokens | Time: 2.17s | Finish: stop]
+{"task": "python_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 589 input tokens, 110 output tokens | Time: 1.90s | Finish: stop]
+{"task": "python_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 589 input tokens, 124 output tokens | Time: 1.60s | Finish: stop]
+{"task": "python_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 367 input tokens, 136 output tokens | Time: 2.14s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 367 input tokens, 129 output tokens | Time: 1.65s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 606 input tokens, 86 output tokens | Time: 1.61s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 606 input tokens, 85 output tokens | Time: 1.10s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 330 input tokens, 162 output tokens | Time: 2.43s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 330 input tokens, 162 output tokens | Time: 2.06s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 575 input tokens, 60 output tokens | Time: 1.25s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 575 input tokens, 64 output tokens | Time: 0.83s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 380 input tokens, 195 output tokens | Time: 2.91s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 380 input tokens, 192 output tokens | Time: 2.44s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 625 input tokens, 153 output tokens | Time: 2.50s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 625 input tokens, 152 output tokens | Time: 1.99s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 267 input tokens, 118 output tokens | Time: 1.82s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 267 input tokens, 118 output tokens | Time: 1.50s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 216 input tokens, 83 output tokens | Time: 1.31s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 216 input tokens, 83 output tokens | Time: 1.06s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 283 input tokens, 131 output tokens | Time: 1.99s | Finish: stop]
+{"task": "python_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 283 input tokens, 137 output tokens | Time: 1.78s | Finish: stop]
+{"task": "python_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 232 input tokens, 231 output tokens | Time: 3.10s | Finish: stop]
+{"task": "python_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 232 input tokens, 226 output tokens | Time: 2.84s | Finish: stop]
+{"task": "python_new", "model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 391 input tokens, 148 output tokens | Time: 11.32s | Finish: stop]
+{"task": "java_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 391 input tokens, 144 output tokens | Time: 2.05s | Finish: stop]
+{"task": "java_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 624 input tokens, 118 output tokens | Time: 2.49s | Finish: stop]
+{"task": "java_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "INVALID_EDIT_PROTOCOL"}
+
+[Usage: 624 input tokens, 112 output tokens | Time: 1.59s | Finish: stop]
+{"task": "java_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 363 input tokens, 132 output tokens | Time: 2.35s | Finish: stop]
+{"task": "python_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 363 input tokens, 132 output tokens | Time: 1.85s | Finish: stop]
+{"task": "python_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 608 input tokens, 114 output tokens | Time: 2.22s | Finish: stop]
+{"task": "python_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 608 input tokens, 112 output tokens | Time: 1.57s | Finish: stop]
+{"task": "python_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 382 input tokens, 113 output tokens | Time: 2.06s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 382 input tokens, 107 output tokens | Time: 1.50s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 621 input tokens, 77 output tokens | Time: 1.70s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 621 input tokens, 76 output tokens | Time: 1.08s | Finish: stop]
+{"task": "properties_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 347 input tokens, 98 output tokens | Time: 1.82s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 347 input tokens, 96 output tokens | Time: 1.36s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 592 input tokens, 70 output tokens | Time: 1.59s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 592 input tokens, 72 output tokens | Time: 1.03s | Finish: stop]
+{"task": "yaml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 402 input tokens, 130 output tokens | Time: 2.34s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 402 input tokens, 112 output tokens | Time: 1.58s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "edits", "reason_code": null}
+
+[Usage: 650 input tokens, 165 output tokens | Time: 3.03s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "invalid", "reason_code": "MODEL_EDIT_PROTOCOL_INVALID"}
+
+[Usage: 650 input tokens, 189 output tokens | Time: 2.65s | Finish: stop]
+{"task": "xml_edit", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "edits", "reason_code": null}
+
+[Usage: 281 input tokens, 92 output tokens | Time: 1.70s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 281 input tokens, 126 output tokens | Time: 1.79s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 224 input tokens, 120 output tokens | Time: 2.08s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 224 input tokens, 251 output tokens | Time: 3.51s | Finish: stop]
+{"task": "markdown_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 297 input tokens, 359 output tokens | Time: 5.38s | Finish: stop]
+{"task": "python_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 297 input tokens, 301 output tokens | Time: 4.22s | Finish: stop]
+{"task": "python_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "kind": "file", "reason_code": null}
+
+[Usage: 240 input tokens, 363 output tokens | Time: 5.37s | Finish: stop]
+{"task": "python_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "file", "reason_code": null}
+
+[Usage: 240 input tokens, 343 output tokens | Time: 4.79s | Finish: stop]
+{"task": "python_new", "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "kind": "file", "reason_code": null}

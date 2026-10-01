@@ -1,0 +1,32 @@
+"""Diagnostic capture (not a result): the §23 java_edit/structured/qwen3-coder cell, raw text recorded."""
+import asyncio, json, os, sys
+sys.path.insert(0, os.path.dirname(__file__))
+import protocol_eval_23 as ev
+from kriya.agents.agent import DeveloperAgent
+from kriya.agents.response_protocol import parse_structured
+from kriya.config import load_config
+from kriya.core import LLMClient
+from kriya.workflow.file_integrity import FileIntegrityError, anchored_replaces, apply_line_block_edits
+from kriya.workflow.operations import CodeOperation
+
+async def main():
+    cfg = load_config(os.environ["KRIYA_CONFIG"])
+    name, path, source, goal, error = ev.TASKS[0]
+    llm = LLMClient(cfg)
+    raw = {}
+    real = llm.complete
+    async def cap(s, u, *a, **k):
+        t = await real(s, u, *a, **k); raw["t"] = t; return t
+    llm.complete = cap
+    await DeveloperAgent("developer", llm).run_generation(goal, f"Design: {goal}", f"=== {path} ===\n{source}",
+        known_target_files=[path], model_override=ev.MODELS[0], prior_error_context=error,
+        files_with_current_content={path}, operation_by_file={path: CodeOperation.REPAIR_WITH_PATCH},
+        edit_operations={path: ["anchored_edit"]})
+    parsed = parse_structured(raw["t"], path)
+    out = {"raw": raw["t"], "edits": parsed.edits}
+    try:
+        out["applied"] = apply_line_block_edits(source, anchored_replaces(parsed.edit_dicts())).text
+    except FileIntegrityError as e:
+        out["error"] = str(e)
+    print(json.dumps(out, indent=1))
+asyncio.run(main())

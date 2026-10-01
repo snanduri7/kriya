@@ -1,0 +1,65 @@
+Qualifying qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a for developer (inference settings sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e: temperature=0.7, reasoning=False, extra_body={"reasoning_effort":"none","top_p":0.8}) ...
+
+[Usage: 30 input tokens, 2 output tokens | Time: 8.98s | Finish: stop]
+  plain_completion             PASS           8.99s
+
+[Usage: 30 input tokens, 3 output tokens | Time: 0.23s | Finish: stop]
+  finish_reason_stop           PASS           0.24s
+
+[Usage: 49 input tokens, 19 output tokens | Time: 0.46s | Finish: stop]
+  structured_json              PASS           0.47s
+
+[Usage: 83 input tokens, 42 output tokens | Time: 0.82s | Finish: stop]
+  multiline_json               PASS           0.82s
+  native_tool_calls            UNAVAILABLE    0.00s
+  multiple_tool_calls          UNAVAILABLE    0.00s
+  tool_argument_integrity      UNAVAILABLE    0.00s
+
+[Usage: 40 input tokens, 51 output tokens | Time: 0.91s | Finish: stop]
+  streaming_assembly           PASS           0.91s
+
+[Usage: 38 input tokens, 16 output tokens | Time: 0.40s | Finish: length | OUTPUT_TRUNCATED]
+  output_truncation            PASS           0.41s
+
+[Usage: 56 input tokens, 3 output tokens | Time: 0.24s | Finish: stop]
+  reasoning_behavior           PASS           0.25s
+
+[Usage: 249 input tokens, 91 output tokens | Time: 1.67s | Finish: stop]
+  full_file_raw_content        PASS           1.68s
+
+[Usage: 269 input tokens, 110 output tokens | Time: 1.93s | Finish: stop]
+  anchored_edit_protocol       PASS           1.93s
+
+[Usage: 58 input tokens, 25 output tokens | Time: 0.57s | Finish: stop]
+  malformed_output_recovery    PASS           0.57s
+  timeout_semantics            PASS           0.01s
+
+[Usage: None input tokens, None output tokens | Time: 0.20s | Finish: unreported | CANCELLED]
+
+[Usage: 30 input tokens, 2 output tokens | Time: 0.20s | Finish: stop]
+  cancellation_semantics       PASS           0.40s
+  endpoint_error_semantics     PASS           0.05s
+  endpoint_restart_semantics   UNAVAILABLE    0.00s
+
+[Usage: 124 input tokens, 1 output tokens | Time: 0.28s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 120 input tokens, 1 output tokens | Time: 0.29s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 160 input tokens, 1 output tokens | Time: 0.32s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 149 input tokens, 1 output tokens | Time: 0.32s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 77 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 105 input tokens, 1 output tokens | Time: 0.27s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 131 input tokens, 1 output tokens | Time: 0.30s | Finish: length | OUTPUT_TRUNCATED]
+  tokenizer_measurement        PASS           2.05s
+  context_capacity             PASS          53.98s
+
+Summary: {'PASS': 15, 'FAIL': 0, 'UNAVAILABLE': 4}  measured limits: {'reasoning_observed': False, 'bytes_per_token_floor': 1.6852, 'non_ascii_bytes_per_token_floor': 3.1889, 'bytes_per_token_ceiling': 8.0}
+Runtime fingerprint: 5b32ac7818b221da22f60c8b8e9b4968b0398a3b50bd1332531298afeef3f1ad
+Qualification identity: b3618138d01493dd274ee45ee7d5f7fadb53bc87b7d0598cd394ad7bb01aa1f7
+Qualification policy: sha256:d34ab460fd768fb238717081c95f571dacc214c0d64d9c78dd3a4b2f0e549fff (model_qualification)
+Execution environment: sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d (darwin/arm64, metal Apple M1 Max, 64 GiB class, ollama/0.34.4; exact=True) - capacity evidence counts only here
+Record: /Users/sriramnanduri/.kriya/qualifications/b3618138d01493dd274ee45ee7d5f7fadb53bc87b7d0598cd394ad7bb01aa1f7.json
