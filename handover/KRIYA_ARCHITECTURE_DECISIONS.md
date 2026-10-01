@@ -1687,7 +1687,7 @@ KAD-028, KAD-029, KAD-030, KAD-031, KAD-059. Evidence: `evidence/provider-contra
 
 ## KAD-063 — Protocol and Payload Are Separate Trust Boundaries
 
-**Status:** ACTIVE (2026-09-30, FILE-INTEGRITY-CONTRACT-001; extended 2026-09-30 by its closure pass)  
+**Status:** ACTIVE — EXTENDED (2026-09-30, FILE-INTEGRITY-CONTRACT-001; extended 2026-09-30 by its closure pass and 2026-10-01 by FILE-INTEGRITY-CONTRACT-001B)  
 **Change class:** EXTEND (KAD-035, KAD-036)
 
 ### Decision
@@ -1722,6 +1722,16 @@ Revision identity used for mutation safety is `sha256(raw bytes)`. A file Kriya 
 - **A qualification case tests one named capability.** A protocol-fidelity qualification must not depend on unrelated model creativity or solution quality.
 - **Verification binds the whole tree it runs on.** That means the repository's tracked content plus the candidate. A gate that changes tracked content invalidates verification, and the changed bytes are never adopted.
 
+### Extension (FILE-INTEGRITY-CONTRACT-001B, 2026-10-01)
+
+- **Mutation authority is about the source of the bytes, not only the write site.** Every repository byte Kriya commits originates from a parsed Developer mutation intent or an explicit deterministic recovery authority. Planner, Architect and Reviewer text is never file content. An approved writer fed unauthorized bytes is still a bypass. The audit therefore maps every source of committed candidate bytes to a named authority.
+- **"Repository content" follows Git, including untracked files.** A file Git neither tracks nor ignores is repository content. A verification gate that creates one, other than candidate output or Kriya-authorized output, invalidates verification (`VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE`), because the verified tree would not be the committed one. Ignored output is not content. The only other exemptions have a named owner: CPython's PEP 3147 bytecode cache, and an output directory a Kriya gate itself designates.
+
+Why (MEASURED at `2e8b09f`):
+- A Planner's fenced shell line became `config.yaml` in a passing run that never called the Developer.
+- A compile gate's untracked `extra.properties` was verified against but not committed.
+- Evidence: `evidence/file-integrity-contract-001b/`, `handover/FILE_INTEGRITY_CONTRACT_001B.md`.
+
 Why (MEASURED):
 - Legacy prose after REPLACE entered payload that stayed valid `.properties`/YAML (F-1).
 - The sentinel protocol was 28/28 valid on both pinned models; strict legacy was 14/28 valid, refusing same-line markers.
@@ -1742,7 +1752,7 @@ Why (MEASURED):
 
 ### Related
 
-KAD-022..027, KAD-035, KAD-036, KAD-037. Evidence: `evidence/file-integrity-contract-001/`, `handover/FILE_INTEGRITY_CONTRACT_001.md`.
+KAD-022..027, KAD-035, KAD-036, KAD-037. Evidence: `evidence/file-integrity-contract-001/`, `handover/FILE_INTEGRITY_CONTRACT_001.md`; `evidence/file-integrity-contract-001b/`, `handover/FILE_INTEGRITY_CONTRACT_001B.md`.
 
 ---
 

@@ -100,3 +100,34 @@ No capability table was changed.
 ## Out of scope (unchanged)
 
 qwen3.6 `presence_penalty=1.5` (Q-1), per-role output budgets, Graphify, FILE-INTEGRITY behaviour.
+
+## Closure follow-up (2026-10-01): an unproven setting is never labelled effective
+
+Product commit `382a270`. The earlier sections stand as written.
+
+**Finding (MEASURED, F-4 probes):** `presence_penalty` has no observable effect at 0, 2 or 10 on either adapter, while `repeat_penalty` does. The native table nevertheless declared it SUPPORTED and `/v1` declared it SERVER_CONFIG_ONLY. As a result qwen3.6's Modelfile value (1.5) was shown and persisted as the *effective* setting.
+
+**Fix:**
+- `presence_penalty` is UNSUPPORTED on both adapters. It is never sent, and its effective value is unverified.
+- The served model's configured value is kept as `server_config_observed`: an observation of the server, never the effective value. Production doctor now shows qwen3.6's `presence_penalty` as `{effective: null, provenance: unverified, server_config_observed: 1.5, support: unsupported}`.
+- Strict production refuses any *requested* setting the adapter declares UNSUPPORTED (`PROVIDER_SETTING_UNSUPPORTED`). Outside production it is recorded and not sent. Before this, `enforce` refused only settings proven ineffective, so a requested-but-unprovable setting (e.g. `/v1` `keep_alive`) passed production silently.
+- The port's default request plan carries a setting only as the adapter's own `provider_capabilities` declare it. An adapter that declares nothing proves nothing and is refused in production, consistent with qualification's `require_verified_identity`.
+
+**Qualification impact (TRACED, spec A4):**
+
+| Question | Answer |
+|---|---|
+| Does an effective setting of either production binding change? | **No.** Neither requests `presence_penalty`. The settings digest is the wire body plus the requested server-only settings, and stays `sha256:482067b2…` (pinned by `test_the_production_bindings_inference_identity_is_unchanged`). |
+| Does what a PASS means change? | **No.** No case touches the setting. |
+| Does the runtime fingerprint change? | **No.** The served PARAMETERs are observed facts. |
+| Adapter version? | **Not bumped.** Request handling for the current bindings is unchanged. A binding that did request it gets a different wire/settings digest, so its records go stale by construction. |
+
+So the policy stays `/8`, there is no requalification, and the `/8` records stay current: `doctor --production` `model.qualification` PASS at `3d2bfd2`.
+
+**Not changed:** qwen3.6's inherited 1.5 (Q-1). Whether it, or any presence-penalty-like setting, affects code quality stays the deferred experiment `NATIVE-PRESENCE-PENALTY-001`.
+
+**Verification:**
+- Focused tests: `tests/test_provider_contract_001a.py`.
+- Mutation: 15/15 killed with Part B (`mutation/mutation_ab.txt`).
+- Full parallel suite at `3d2bfd2`: 7886 passed, 0 failed, 0 skipped.
+- `doctor --production` (v4): `production_ready=true` (`doctor/doctor_production_v4_3d2bfd2.json`).
