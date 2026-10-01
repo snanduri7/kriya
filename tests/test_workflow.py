@@ -7,10 +7,12 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.agents.agent import DeveloperAgent, RunVerifierAgent
 from kriya.agents.contracts import (
@@ -340,7 +342,7 @@ async def test_restore_public_contract_restores_owner_byte_for_byte_from_baselin
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -367,7 +369,7 @@ async def test_restore_public_contract_never_invokes_the_developer(tmp_path):
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -403,7 +405,7 @@ async def test_restore_public_contract_restores_multiple_owners_atomically(tmp_p
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner_a, owner_b],
         expected_files_upfront=[owner_a, owner_b],
         architect_basename_to_path={owner_a: owner_a, owner_b: owner_b},
@@ -458,7 +460,7 @@ async def test_restore_public_contract_still_restores_protected_evidence_as_befo
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -500,7 +502,7 @@ async def test_restore_public_contract_preserves_unrelated_baseline_content_exac
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -528,7 +530,7 @@ async def test_restore_public_contract_advances_phase_to_repair_behavior(tmp_pat
     assert state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -564,7 +566,7 @@ async def test_restore_public_contract_fails_closed_on_missing_baseline(tmp_path
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -634,7 +636,7 @@ async def test_narrow_recovery_preserves_other_generated_file(tmp_path):
         tier="full", is_exact=True, revision=content_revision(baseline_b),
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": owner_b, "content": repaired_b},
     ])
@@ -687,7 +689,7 @@ async def test_narrow_recovery_does_not_invent_never_generated_file(tmp_path):
         tier="full", is_exact=True, revision=content_revision(baseline_b),
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": owner_b, "content": repaired_b},
     ])
@@ -730,7 +732,7 @@ async def test_restored_owner_uses_restoration_content(tmp_path):
     state.api_contract_recovery.begin_restoration()
 
     ctx = _minimal_attempt_ctx(
-        tmp_path, developer=AsyncMock(),
+        tmp_path, developer=developer_double(),
         architect_files=[owner], expected_files_upfront=[owner],
         architect_basename_to_path={owner: owner},
     )
@@ -776,7 +778,7 @@ async def test_multi_file_recovery_cumulative_content(tmp_path):
         tier="full", is_exact=True, revision=content_revision(baseline_c),
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": owner_c, "content": repaired_c},
     ])
@@ -819,7 +821,7 @@ async def test_non_recovery_completeness_unchanged(tmp_path):
     state.last_candidate_contents = {owner_a: "def helper(x):\n    return x + 1\n"}
     state.api_contract_recovery = None
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": owner_b, "content": "def format(x):\n    return x\n"},
     ])
@@ -888,7 +890,7 @@ async def test_prv08_shaped_recovery_regression(tmp_path):
         tier="full", is_exact=True, revision=content_revision(original_summary),
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": summary_owner, "content": repaired_summary},
     ])
@@ -2690,7 +2692,7 @@ async def test_prv08_shaped_deterministic_integration(tmp_path):
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": summary_owner, "content": candidate_summary},
         {"filepath": service_owner, "content": candidate_service},
@@ -2733,7 +2735,7 @@ async def test_prv08_shaped_deterministic_integration(tmp_path):
     state2 = GenerationState()
     state2.attempt_number = 0
     state2.all_files_written = set()
-    developer2 = AsyncMock()
+    developer2 = developer_double()
     developer2.run_generation = AsyncMock(return_value=[
         {
             "filepath": unrelated_owner,
@@ -2793,7 +2795,7 @@ async def test_prv08_shaped_deterministic_integration(tmp_path):
     state3 = GenerationState()
     state3.attempt_number = 0
     state3.all_files_written = set()
-    developer3 = AsyncMock()
+    developer3 = developer_double()
     developer3.run_generation = AsyncMock(return_value=[
         {"filepath": record_owner, "content": candidate_record},
     ])
@@ -2840,7 +2842,7 @@ async def test_run_attempt_rejects_contract_change_on_a_later_attempt_not_just_t
     (tmp_path / caller).write_text('new Customer(id, "John", null, "Smith");\n')
     state.all_files_written = {owner}
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": owner,
         "content": (
@@ -2882,7 +2884,7 @@ async def test_run_attempt_hard_rejects_a_write_under_deny_all_write_scope(tmp_p
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "unexpected.py", "content": "print('should never be written')\n",
     }])
@@ -2935,7 +2937,7 @@ async def test_run_attempt_rejects_mixed_batch_with_unauthorized_target_under_al
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": app_path, "content": _PRV18_APP_FIXED},
         {"filepath": other_path, "content": "def helper():\n    return 2  # unauthorized change\n"},
@@ -2977,7 +2979,7 @@ async def test_run_attempt_accepts_single_authorized_target_under_allowlist(tmp_
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": app_path, "content": _PRV18_APP_FIXED},
     ])
@@ -3024,7 +3026,7 @@ async def test_run_attempt_accepts_trailing_slash_allowlist_entry_matching_bare_
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": target_path, "content": "# generated\n"},
     ])
@@ -3859,7 +3861,7 @@ async def test_run_attempt_classifies_surefire_fork_crash_and_records_obligation
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": test_path, "content": "class AppTest {}\n"},
     ])
@@ -3916,7 +3918,7 @@ async def test_run_attempt_ordinary_test_failure_records_no_process_boundary_obl
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": test_path, "content": "class AppTest {}\n"},
     ])
@@ -3970,7 +3972,7 @@ async def test_run_attempt_escalates_message_when_process_boundary_failure_recur
     )
 
     def _attempt_ctx(attempt_number):
-        developer = AsyncMock()
+        developer = developer_double()
         developer.run_generation = AsyncMock(return_value=[
             {"filepath": test_path, "content": "class AppTest {}\n"},
         ])
@@ -4057,7 +4059,7 @@ async def test_run_attempt_verification_only_subtask_never_invokes_developer(tmp
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a verification-only subtask"),
     )
@@ -4090,7 +4092,7 @@ async def test_run_attempt_verification_only_subtask_raises_typed_failure_on_tes
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a verification-only subtask"),
     )
@@ -4126,7 +4128,7 @@ async def test_run_attempt_verification_only_subtask_falls_through_without_a_dir
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer, goal="Run the application and confirm it starts",
@@ -4173,7 +4175,7 @@ async def test_run_attempt_application_runtime_verification_only_never_calls_dev
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for an application_runtime verification-only subtask"),
     )
@@ -4214,7 +4216,7 @@ async def test_run_attempt_runtime_verification_fails_closed_with_no_approval_ca
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for this verification-only shape"),
     )
@@ -4273,7 +4275,7 @@ async def test_run_attempt_intermediate_subtask_treats_inferred_runtime_verifica
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for this DENY_ALL verification shape"),
     )
@@ -4318,7 +4320,7 @@ async def test_run_attempt_terminal_subtask_still_executes_declared_runtime_veri
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True, "run_commands": [["python", "manage.py", "runserver"]],
@@ -4369,7 +4371,7 @@ async def test_run_attempt_allowlist_subtask_treats_inferred_runtime_verificatio
     state.all_files_written = set()
 
     manage_py = "manage.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": manage_py, "content": "# manage.py\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -4447,7 +4449,7 @@ async def test_run_attempt_allowlist_subtask_still_executes_declared_runtime_ver
     )
 
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -4582,7 +4584,7 @@ async def test_existing_finite_judgment_without_execution_mode_still_executes_th
     run_app_sequence still runs, run_managed_service_verification is never
     even imported into the decision."""
     app_path = "app.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -4636,7 +4638,7 @@ async def test_current_managed_service_judgment_reaches_execution_primitive_with
     left as a bare "python" token."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
@@ -4688,7 +4690,7 @@ def _managed_service_ctx_for_grounding(tmp_path, *, service_command):
     terminal (s4) managed_service subtask, varying only service_command."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     judgment = _managed_service_judgment()
     judgment["managed_service"]["service_command"] = service_command
@@ -4847,7 +4849,7 @@ async def test_future_managed_service_judgment_is_not_executed(tmp_path):
     runs normally."""
     plan = _managed_service_plan()
     manage_py = "manage.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": manage_py, "content": "# manage.py\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
@@ -4893,7 +4895,7 @@ async def _run_managed_service_terminal_attempt(tmp_path, judge_result):
     verification-only tests below ((9)/(10)) directly prove instead."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
@@ -4999,7 +5001,7 @@ async def _run_managed_service_terminal_attempt_with_files(tmp_path, judge_resul
     Django-shaped known_files list the shared helper doesn't provide."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment())
@@ -5106,7 +5108,7 @@ async def test_malformed_managed_service_contract_causes_zero_developer_calls(tm
     developer above) so "zero Developer calls" is a genuine, direct
     guarantee - not conflated with a mutating subtask's own unrelated
     initial-generation call for the files it legitimately owns."""
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
     )
@@ -5134,7 +5136,7 @@ async def test_compound_server_and_probe_managed_service_contract_is_rejected(tm
     probe field) is rejected the same way as a missing contract - never
     reaches run_managed_service_verification, zero Developer calls (same
     DENY_ALL verification-only shape as the test above)."""
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
     )
@@ -5187,7 +5189,7 @@ async def test_managed_service_readiness_and_probe_reject_non_local_host(tmp_pat
     enforcement. Uses the same DENY_ALL verification-only shape as the
     other malformed-contract tests so "zero Developer calls" is
     unambiguous."""
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
     )
@@ -5224,7 +5226,7 @@ async def test_managed_service_readiness_and_probe_accept_private_and_loopback_h
     restriction."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     private_judgment = _managed_service_judgment()
     private_judgment["managed_service"]["readiness"]["host"] = "192.168.1.50"
@@ -5272,7 +5274,7 @@ async def test_managed_service_judgment_with_explicitly_invalid_execution_mode_i
     directly, matching this suite's established convention of testing the
     workflow-layer boundary independent of the agent."""
     invalid_judgment = _managed_service_judgment(execution_mode="service")
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called for a malformed verification contract"),
     )
@@ -5314,7 +5316,7 @@ async def test_finite_commands_with_ordinary_shell_looking_argv_remain_unaffecte
     operator) - execution_mode="finite_command" short-circuits before
     _validate_and_convert_managed_service_contract is ever consulted."""
     app_path = "app.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -5368,7 +5370,7 @@ async def test_prv17_managed_service_semantic_shape_never_constructs_compound_co
     primitive."""
     plan = _managed_service_plan()
     views_py = "customers/views.py"
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": views_py, "content": "# views\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment(
@@ -5552,7 +5554,7 @@ async def test_verification_only_packaged_java_uses_grounded_runtime_and_launche
     test_source.write_text("package com.example; class AppTest {}", encoding="utf-8")
     (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("verification infrastructure must not invoke Developer repair"),
     )
@@ -5625,7 +5627,7 @@ async def test_verification_only_java_entrypoint_launch_failure_remains_infrastr
         encoding="utf-8",
     )
     (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("entrypoint launch failure must not enter product repair"),
     )
@@ -5881,7 +5883,7 @@ async def test_ungrounded_child_launch_is_rejected_before_surefire_and_targets_t
         "  public static void main(String[] args) {}\n}\n",
         encoding="utf-8",
     )
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": test_path,
         "content": (
@@ -5953,7 +5955,7 @@ async def test_unsafe_process_terminating_test_is_rejected_before_test_runner_an
         "public class Main {\n  public static void main(String[] args) {}\n}\n",
         encoding="utf-8",
     )
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": test_path,
         "content": (
@@ -6045,7 +6047,7 @@ async def test_prv12_production_candidate_path_uses_relevant_process_boundary_in
         ],
     })
     s3_verification = [item.model_dump(mode="json") for item in plan.subtask_by_id("s3").verification]
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": test_path,
         "content": (
@@ -6207,7 +6209,7 @@ public class AppTest {
         "integer argument. Input 21 must print RESULT=42. Invalid non-numeric input must "
         "exit non-zero with a clear error message. Include automated tests."
     )
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": test_path, "content": app_test,
     }])
@@ -6264,7 +6266,7 @@ async def test_run_attempt_runtime_verification_injects_synthetic_argv_when_cont
     supplies a synthetic value BEFORE the process is ever launched -
     proven here by inspecting the real command run_app_sequence receives,
     not just the end result."""
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
@@ -6298,7 +6300,7 @@ async def test_run_attempt_runtime_verification_injects_synthetic_argv_when_cont
 @pytest.mark.asyncio
 async def test_run_attempt_runtime_verification_supplies_and_closes_stdin_when_contract_requires_it(tmp_path):
     """Runtime Verification Contract Test C (PRV-06, 2026-08-29)."""
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True, "run_commands": [["java", "App"]],
@@ -6333,7 +6335,7 @@ async def test_run_attempt_runtime_verification_contract_incomplete_never_launch
     verifier deficiency, not an application defect) and the Developer must
     never be re-invoked to "fix" it. Distinguishes INVOCATION FAILURE from
     APPLICATION FAILURE per the spec's own Part 9."""
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be invoked to repair a verifier-caused gap"),
     )
@@ -6374,7 +6376,7 @@ async def test_run_attempt_application_runtime_verification_passes_with_zero_wri
     (tmp_path / "App.java").write_text("class App {}\n")
     before = (tmp_path / "App.java").read_text()
 
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True, "run_commands": [["java", "App"]],
@@ -6405,7 +6407,7 @@ async def test_run_attempt_application_runtime_verification_fails_with_typed_fai
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True, "run_commands": [["java", "App"]],
@@ -6435,7 +6437,7 @@ async def test_run_attempt_application_runtime_verifier_deterministic_process_ex
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True, "run_commands": [["mvn", "test"]],
@@ -6464,7 +6466,7 @@ async def test_run_attempt_application_runtime_verifier_deterministic_process_ex
 async def test_django_test_command_bypasses_application_entrypoint_infrastructure_classification(tmp_path):
     """PRV-17 production path: a process-based test runner is still TEST."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
@@ -6508,7 +6510,7 @@ async def test_run_attempt_mutating_subtask_with_planned_files_ignores_direct_ex
     app_path = "App.java"
     (tmp_path / app_path).write_text("class App {}\n")
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": app_path, "content": "class App { }\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -6548,7 +6550,7 @@ async def test_run_attempt_application_runtime_verification_only_cannot_write_po
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("Developer must never be called"),
     )
@@ -6678,7 +6680,7 @@ async def test_run_attempt_rejects_unrequested_second_entrypoint(tmp_path):
     (tmp_path / owner).write_text(_APP_MAIN_JAVA)
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": new_file,
         "content": (
@@ -6751,7 +6753,7 @@ async def test_run_attempt_rejects_incomplete_migration_before_spec_compliance(t
     (tmp_path / "pom.xml").write_text(_PRV05_POM_BOTH)
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": owner, "content": _PRV05_GSON_JSON_SERVICE,
     }])
@@ -6801,7 +6803,7 @@ async def test_run_attempt_migration_check_uses_grounding_goal_for_bounded_subta
     (tmp_path / "pom.xml").write_text(_PRV05_POM_BOTH)
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": owner, "content": _PRV05_GSON_JSON_SERVICE,
     }])
@@ -6839,7 +6841,7 @@ async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indete
     (tmp_path / owner).write_text("print('hi')\n")
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": owner, "content": "print('hi')\n",
     }])
@@ -6895,7 +6897,7 @@ async def test_run_attempt_suppresses_spec_compliance_indeterminate_when_migrati
     (tmp_path / owner).write_text("class JsonService {}\n")
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": owner, "content": "class JsonService {}\n",
     }])
@@ -11159,7 +11161,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         approval_callback=lambda diffs, reason: True,
         active_skills=[],
         active_skill_rules_snapshot={},
-        developer=AsyncMock(),
+        developer=developer_double(),
         run_verifier=default_run_verifier,
         spec_compliance=default_spec_compliance,
         skill_engine=MagicMock(),
@@ -11233,7 +11235,7 @@ async def test_run_attempt_isolated_compile_failure_raises_quality_gate_failure(
     GenerationState/AttemptContext and a mocked Developer/validator - no full
     WorkflowEngine, no Planner/Architect/Graph RAG mocks, no worktree setup."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "this is not valid python("}
     ])
@@ -11275,7 +11277,7 @@ async def test_run_attempt_rejects_a_new_file_that_redeclares_an_existing_class(
     graph.close()
 
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "src/main/java/protocol/Protocol.java",
         "content": "package protocol;\npublic class Protocol {\n    public Protocol() {}\n}\n",
@@ -11320,7 +11322,7 @@ async def test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_na
 
     state = GenerationState()
     state.all_files_written = {"app.py"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "class App:\n    def run(self):\n        pass\n"}
     ])
@@ -11362,7 +11364,7 @@ async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path):
 
     state = GenerationState()
     state.all_files_written = {"Protocol.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "Protocol.java",
         "content": "class Protocol {\n    int version;\n    String type;\n}\n",
@@ -11409,7 +11411,7 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
     state = GenerationState()
     state.all_files_written = {"Protocol.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "Protocol.java",
         "content": "class Protocol {\n    int protocolVersion;\n}\n",
@@ -11471,7 +11473,7 @@ async def test_run_attempt_records_unavailable_not_a_real_pass_when_spec_check_c
 
     state = GenerationState()
     state.all_files_written = {"Protocol.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "Protocol.java",
         "content": "class Protocol {\n    int protocolVersion;\n}\n",
@@ -11526,7 +11528,7 @@ async def test_run_attempt_strict_spec_compliance_fails_closed_on_unavailable_ch
 
     state = GenerationState()
     state.all_files_written = {"Protocol.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "Protocol.java",
         "content": "class Protocol {\n    int protocolVersion;\n}\n",
@@ -11590,7 +11592,7 @@ async def test_prv17_scaffold_gate_defers_future_health_endpoint_before_retry(tm
             ),
         ],
     )
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "manage.py", "content": "#!/usr/bin/env python\n",
     }])
@@ -11846,7 +11848,7 @@ async def test_run_attempt_goal_spec_reuses_settled_verdict_against_unchanged_ev
 
     state = GenerationState()
     state.all_files_written = {"App.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "content": app_content}])
     spec_compliance = AsyncMock()
     spec_compliance.check = AsyncMock(return_value={
@@ -11906,7 +11908,7 @@ async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path)
 
     state = GenerationState()
     state.all_files_written = {"App.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "App.java", "content": "public class App {\n    // materially different content\n}\n",
     }])
@@ -11968,7 +11970,7 @@ async def test_run_attempt_rejects_anchored_edit_for_unauthorized_target_before_
     state = GenerationState()
     state.all_files_written = {"App.java", "InMemoryService.java"}
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "App.java", "content": None,
          "edits": [{"search": "int x = 1;", "replace": "int x = 2;"}]},
@@ -12013,7 +12015,7 @@ async def test_bounded_spec_compliance_includes_verified_upstream_files(tmp_path
         "record Customer(String displayName) {}\n"
     )
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "CustomerService.java",
         "content": "class CustomerService { Customer find() { return null; } }\n",
@@ -12059,7 +12061,7 @@ async def test_spec_compliance_receives_authoritative_context_when_migration_alr
     must be called with an authoritative_context naming them up front, not
     just arbitrated after the fact."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "print('ok')\n",
     }])
@@ -12097,7 +12099,7 @@ async def test_spec_compliance_receives_authoritative_context_when_migration_alr
 @pytest.mark.asyncio
 async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "print('ok')\n",
     }])
@@ -12128,7 +12130,7 @@ async def test_authoritative_spec_compliance_unknown_requires_review(tmp_path):
 @pytest.mark.asyncio
 async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "print('ok')\n",
     }])
@@ -12157,7 +12159,7 @@ async def test_required_runtime_judge_infrastructure_failure_cannot_pass(tmp_pat
 @pytest.mark.asyncio
 async def test_behavioral_contract_rejects_build_only_verification_sequence(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "print('ok')\n",
     }])
@@ -12193,7 +12195,7 @@ async def test_run_attempt_skips_spec_compliance_gate_when_disabled(tmp_path):
     explicitly opts in, unlike run_verification_enabled's default-True gate."""
     state = GenerationState()
     state.all_files_written = {"app.py"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "def add(a, b): return a + b\n"}
     ])
@@ -12233,7 +12235,7 @@ async def test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end
     the active skill's own rules text (skills/ignite-java17/rules.txt's real
     "--add-opens" requirement) - never asked of the LLM."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "App.java", "content": "public class App {\n    public static void main(String[] args) {}\n}\n"},
         {"filepath": "Protocol.java", "content": "public class Protocol {\n    int version;\n}\n"},
@@ -12410,7 +12412,7 @@ async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_ent
     attempts re-editing a file the Developer itself repeatedly said needed no
     change, before finally corrupting it on attempt 8."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "Protocol.java", "content": "public class Protocol {\n    int version;\n}\n"},
         {"filepath": "ProtocolParser.java", "content": "public class ProtocolParser {\n    static Protocol decode() { return null; }\n}\n"},
@@ -12476,7 +12478,7 @@ async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_
         "    assert is_valid_email('user@example.com')\n"
     )
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "validation/email_rules.py", "content": "def is_valid_email(email):\n    return bool(email) and '@' in email\n"},
     ])
@@ -12524,7 +12526,7 @@ async def test_run_attempt_never_rewrites_a_developer_package_declaration_end_to
     package declaration BEFORE compile even runs, so the model never gets a
     chance to botch re-deriving it."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {
             "filepath": "src/main/java/Protocol.java",
@@ -12601,7 +12603,7 @@ async def test_run_attempt_deterministically_corrects_exec_main_class_end_to_end
     must be corrected to the real generated class before Quality Gates
     considers the attempt done."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {
             "filepath": "App.java",
@@ -12654,7 +12656,7 @@ async def test_run_attempt_full_set_escalation_passes_fallback_extra_body_to_dev
 
     state = GenerationState()
     state.budgets.retry_count = 1  # makes resolve_fallback_model actually resolve chain[0]
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "def add(a, b): return a + b\n"}
     ])
@@ -12702,7 +12704,7 @@ async def test_run_attempt_raises_cross_package_mismatch_end_to_end(tmp_path):
     (tmp_path / "Protocol.java").write_text("public class Protocol {\n    int version;\n}\n")
 
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "src/main/java/com/example/App.java",
         "content": (
@@ -12775,7 +12777,7 @@ async def test_run_attempt_cross_package_mismatch_fires_without_any_dependency_g
     (tmp_path / "Protocol.java").write_text("public class Protocol {\n    int version;\n}\n")
 
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "src/main/java/com/example/App.java",
         "content": (
@@ -12824,7 +12826,7 @@ async def test_run_attempt_includes_established_files_in_compile_check(tmp_path)
     live cross-package incident already proved can happen. Confirms
     run_compile_check is now called with ctx.established_files unioned in."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "x = 1\n"}])
     ctx = _minimal_attempt_ctx(tmp_path, developer=developer, established_files=["lib.py"])
 
@@ -12850,7 +12852,7 @@ async def test_run_attempt_includes_established_files_in_self_correction_scope(t
     session (self-diagnosis attribution, judge()'s files_written,
     _build_workspace_type_index's two layers)."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "content": "class App {}\n"}])
     cfg = AppConfig(paths={"memory": str(tmp_path / "isolated_memory")})
     cfg.autonomy.self_correction_loop_enabled = True
@@ -12889,7 +12891,7 @@ async def test_run_attempt_static_violation_can_attribute_to_an_established_file
         '<beans><bean class="org.apache.ignite.IgniteSpringBean"/></beans>'
     )
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "App.java",
         "content": "class App { void m() { Ignition.start(\"context.xml\"); } }\n",
@@ -12921,7 +12923,7 @@ async def test_run_attempt_misdirected_edit_can_target_an_established_file(tmp_p
     never be redirected there. Confirms it now can."""
     (tmp_path / "Helper.java").write_text("class Helper {\n  static final int Y = 5;\n}\n")
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "App.java", "edits": [
         {"search": "static final int Y = 5;", "replace": "static final int Y = 6;"}
     ]}])
@@ -12953,7 +12955,7 @@ async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_pa
     (tmp_path / "application").mkdir()
     (tmp_path / "application" / "Protocol.java").write_text("public class Protocol {}\n")
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "pom.xml", "content": "<project><build><plugins></plugins></build></project>"},
         {"filepath": "application/App.java", "content": "public class App { public static void main(String[] a) { new Protocol(); } }"},
@@ -12986,7 +12988,7 @@ async def test_run_attempt_uses_narrow_nonstandard_maven_source_directory(tmp_pa
 @pytest.mark.asyncio
 async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py",
         "content": None,
@@ -13010,7 +13012,7 @@ async def test_run_attempt_rejects_create_no_change_before_any_quality_gate(tmp_
 @pytest.mark.asyncio
 async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
         {"filepath": "test_app.py", "content": "# test placeholder\n"},
@@ -13043,7 +13045,7 @@ async def test_run_attempt_rejects_zero_tests_for_explicit_test_contract(tmp_pat
 async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_path):
     """End-to-end regression for the python_task_tracker live failure."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "task_tracker/store.py", "content": "class Store: pass\n"},
         {"filepath": "tests/__init__.py", "content": ""},
@@ -13077,7 +13079,7 @@ async def test_run_attempt_targets_real_test_module_not_package_initializer(tmp_
 @pytest.mark.asyncio
 async def test_run_attempt_zero_test_target_falls_back_to_suite_without_model_repair(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "def add(a, b): return a + b\n"},
         {"filepath": "test_app.py", "content": "from app import add\ndef test_add(): assert add(1, 2) == 3\n"},
@@ -13122,7 +13124,7 @@ async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_u
     goal_explicit_commands() called from attempt.py, before caching, before
     the approval-gate check), not just the pure function in isolation."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -13136,6 +13138,9 @@ async def test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_u
 
     cfg = AppConfig()
     cfg.autonomy.mode = "human-in-the-loop"
+    # The run succeeds, so the grader passes it. Stated explicitly: an unset
+    # grade was a bare AsyncMock whose .get("passed") is a truthy coroutine.
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "run succeeded", "likely_files": []})
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer, run_verifier=run_verifier,
         approval_callback=approval_callback, kernel=Kernel(config=cfg),
@@ -13164,7 +13169,7 @@ async def test_run_attempt_static_check_fires_before_compile_gate(tmp_path):
     kriya/workflow/static_checks.py BEFORE the expensive compile gate ever
     runs - PolymorphicValidator.run_compile_check must never be called."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "ProtocolApp.java", "content": (
             'public class ProtocolApp {\n'
@@ -13221,15 +13226,18 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path
     file; post-fix, each attempt starts clean."""
     _init_git_repo(tmp_path)
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
         "run_commands": [[sys.executable, "app.py"]],
         "command_source": "goal_explicit",
-        "success_criteria": "Prints a [VERIFICATION] verdict line",
+        "success_criteria": "Prints hi",
     })
+    # The run succeeds, so the grader passes it. Stated explicitly: an unset
+    # grade was a bare AsyncMock whose .get("passed") is a truthy coroutine.
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "run succeeded", "likely_files": []})
     ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
 
     tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
@@ -13243,7 +13251,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path
             pre_call_leftover_content.append(None)
         with open(tasks_json_path, "w") as f:
             f.write(f"attempt-{state.attempt_number}")
-        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n"}  # no self-reported marker: an ungrounded one is never a PASS (VER-006)
 
     # VAL-001 G1 D1 (2026-09-18): this test mocks developer.run_generation
     # directly, bypassing the real build_known_target_context() call a
@@ -13298,15 +13306,18 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
     instead of giving up."""
     assert not os.path.exists(os.path.join(str(tmp_path), ".git"))
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
         "should_run": True,
         "run_commands": [[sys.executable, "app.py"]],
         "command_source": "goal_explicit",
-        "success_criteria": "Prints a [VERIFICATION] verdict line",
+        "success_criteria": "Prints hi",
     })
+    # The run succeeds, so the grader passes it. Stated explicitly: an unset
+    # grade was a bare AsyncMock whose .get("passed") is a truthy coroutine.
+    run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "run succeeded", "likely_files": []})
     ctx = _minimal_attempt_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
 
     tasks_json_path = os.path.join(str(tmp_path), "tasks.json")
@@ -13320,7 +13331,7 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
             pre_call_leftover_content.append(None)
         with open(tasks_json_path, "w") as f:
             f.write(f"attempt-{state.attempt_number}")
-        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
+        return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n"}  # no self-reported marker: an ungrounded one is never a PASS (VER-006)
 
     # VAL-001 G1 D1 (2026-09-18): this test mocks developer.run_generation
     # directly, bypassing the real build_known_target_context() call a
@@ -13368,7 +13379,7 @@ async def test_run_attempt_static_check_scopes_likely_files_not_every_written_fi
     and pom.xml are also written but wholly unrelated, and must NOT appear in
     likely_files."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "ProtocolApp.java", "content": (
             'public class ProtocolApp {\n'
@@ -13442,7 +13453,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuine
     state.all_files_written = {"ProtocolApp.java"}
     state.budgets.last_failure_signature = ("static_rule_violation", ("ignite_unclosed_resource",))
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "ProtocolApp.java", "content": None,
         "edits": [{
@@ -13518,7 +13529,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_pom_semantic_validati
         '    </dependencies>\n'
         '</project>\n'
     )
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "pom.xml", "content": None,
         "edits": [{"search": dangling_content.strip(), "replace": fixed_pom.strip()}],
@@ -13579,7 +13590,7 @@ async def test_run_attempt_diagnosis_mismatch_bounded_veto_bypasses_second_rejec
         }],
         "analysis": "I renamed `getValue` to `fetchValue` to match the goal's naming convention.",
     }]
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=mismatched_response)
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -13625,7 +13636,7 @@ async def test_run_attempt_diagnosis_mismatch_bypassed_for_targeted_test(tmp_pat
     state.budgets.last_failure_signature = ("targeted_test", ("dummy",))
     state.error_context = "test_store.py::test_add failed"
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "store.py", "content": None,
         # A real, non-identical change - NOT a whole-response no-op, so this
@@ -13676,7 +13687,7 @@ async def test_run_attempt_rejects_a_whole_response_no_op_edit(tmp_path):
     # even runs, not just for the fail types Layer 2 doesn't cover.
     state.budgets.last_failure_signature = ("compile", ("dummy",))
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "applicationContext.xml", "content": None,
         "edits": [{"search": xml_content, "replace": xml_content}],
@@ -13714,7 +13725,7 @@ async def test_no_op_edit_redirects_to_different_file_named_by_own_analysis(tmp_
     state.last_implicated_files = ["applicationContext.xml"]
     state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "applicationContext.xml", "content": None,
         "edits": [{"search": xml_content, "replace": xml_content}],
@@ -13755,7 +13766,7 @@ async def test_targeted_no_change_redirects_before_rerunning_quality_gates(tmp_p
     state.last_implicated_files = ["applicationContext.xml"]
     state.budgets.last_failure_signature = ("run_verification_hung", ("timeout",))
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "applicationContext.xml", "content": None, "edits": [],
         "analysis": (
@@ -13807,7 +13818,7 @@ async def test_targeted_no_change_without_fix_analysis_still_widens_before_gates
     state.all_files_written = {"applicationContext.xml"}
     state.last_implicated_files = ["applicationContext.xml"]
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "applicationContext.xml", "content": None,
         "edits": None, "analysis": None,
@@ -13858,7 +13869,7 @@ async def test_targeted_byte_identical_edit_cannot_erase_authoritative_locator(t
         "App.java": "=== Reported error location: App.java:1:13 ===\nclass App { MissingType value; }",
     }
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "App.java", "content": None,
         "edits": [{"search": source, "replace": source}],
@@ -14012,7 +14023,7 @@ async def test_run_attempt_no_op_check_does_not_flag_a_companion_edit(tmp_path):
         fh.write(java_content)
     state.all_files_written = {"App.java"}
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "App.java", "content": None,
         "edits": [
@@ -14040,7 +14051,7 @@ async def test_run_attempt_isolated_success_passes_quality_gates(tmp_path):
     recorded exactly one passing compile gate outcome - proving the isolated
     call path works for the success case too, not just failures."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "print('hi')\n"}
     ])
@@ -14071,7 +14082,7 @@ async def test_run_attempt_scopes_first_full_set_attempt_to_implicated_files_aft
     )
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "Protocol.java", "content": "class Protocol {}\n"}
     ])
@@ -14106,7 +14117,7 @@ async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
     state.budgets.scoped_full_set_failure_signature = state.budgets.last_failure_signature
     state.last_implicated_files = ["Protocol.java"]
     state.all_files_written = {"Protocol.java", "ProtocolApp.java", "ProtocolParser.java"}
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "Protocol.java", "content": "class Protocol {}\n"},
         {"filepath": "ProtocolApp.java", "content": "class ProtocolApp {}\n"},
@@ -14137,7 +14148,7 @@ async def test_run_attempt_reuses_planner_code_when_full_coverage(tmp_path):
     while still going through the exact same compile gate as any other
     attempt."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(
         side_effect=AssertionError("developer.run_generation() must not be called when Planner coverage is complete")
     )
@@ -14169,7 +14180,7 @@ async def test_run_attempt_falls_back_to_developer_when_planner_coverage_partial
     used at all (deliberately all-or-nothing) - falls through to the normal
     Developer generation path unchanged."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "print('from developer')\n"},
         {"filepath": "helper.py", "content": "print('helper from developer')\n"},
@@ -14199,7 +14210,7 @@ async def test_run_attempt_does_not_reuse_planner_code_on_retry(tmp_path):
     shortcut already uses."""
     state = GenerationState()
     state.budgets.retry_count = 1
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "app.py", "content": "print('from developer')\n"}
     ])
@@ -14243,7 +14254,7 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
     is exactly the shape that branch had ZERO real test coverage for before
     that finding - now this test genuinely exercises it."""
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('hi')\n"}])
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -14279,7 +14290,7 @@ async def test_run_attempt_persists_grader_reasoning_on_run_verification_failure
 @pytest.mark.asyncio
 async def test_run_attempt_accepts_expected_nonzero_only_after_application_started(tmp_path):
     state = GenerationState()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "raise SystemExit(2)\n",
     }])
@@ -14329,7 +14340,7 @@ async def test_run_attempt_accepts_expected_nonzero_only_after_application_start
 
 
 def _nonzero_app_attempt(tmp_path, *, goal, grade_mock):
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{
         "filepath": "app.py", "content": "raise SystemExit(2)\n",
     }])
@@ -14435,7 +14446,7 @@ async def test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit(tmp_p
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(side_effect=AssertionError("verification-only"))
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value={
@@ -15791,7 +15802,7 @@ async def test_run_attempt_does_not_fail_candidate_gates_on_planner_only_spec_re
     state.attempt_number = 0
     state.all_files_written = {owner}
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[{"filepath": owner, "content": (tmp_path / owner).read_text()}])
     spec_compliance = AsyncMock()
     spec_compliance.check = AsyncMock(return_value={
@@ -18419,7 +18430,7 @@ def _spy_compile_checks(monkeypatch):
 
     def spy(self, files):
         seen.append({
-            relpath: open(os.path.join(self.workspace_path, relpath), "rb").read()
+            relpath: Path(self.workspace_path, relpath).read_bytes()
             for relpath in files if os.path.isfile(os.path.join(self.workspace_path, relpath))
         })
         return original(self, files)
@@ -23812,9 +23823,9 @@ def test_create_git_worktree_carries_over_uncommitted_changes(tmp_path):
 
     worktree_path = create_git_worktree(str(tmp_path))
 
-    readme = open(os.path.join(worktree_path, "README.md")).read()
+    readme = Path(os.path.join(worktree_path, "README.md")).read_text()
     assert readme == "modified but uncommitted\n"
-    pom = open(os.path.join(worktree_path, "pom.xml")).read()
+    pom = Path(os.path.join(worktree_path, "pom.xml")).read_text()
     assert pom == "<project>uncommitted new file</project>\n"
 
 
@@ -23838,7 +23849,7 @@ def test_create_git_worktree_scopes_nested_workspace_without_enclosing_repo_mark
     worktree_path = create_git_worktree(str(nested_workspace))
 
     assert worktree_path != str(nested_workspace)
-    assert open(os.path.join(worktree_path, "goal.md")).read() == "Create a Maven application.\n"
+    assert Path(os.path.join(worktree_path, "goal.md")).read_text() == "Create a Maven application.\n"
     assert not os.path.exists(os.path.join(worktree_path, "requirements.txt"))
     assert os.path.exists(os.path.join(worktree_path, ".kriya-scoped-snapshot"))
     sandbox_git_probe = subprocess.run(
@@ -23960,9 +23971,9 @@ def test_create_git_worktree_carries_over_a_wholly_untracked_directory(tmp_path)
 
     worktree_path = create_git_worktree(str(tmp_path))
 
-    protocol = open(os.path.join(worktree_path, "src", "main", "java", "com", "example", "protocol", "Protocol.java")).read()
+    protocol = Path(os.path.join(worktree_path, "src", "main", "java", "com", "example", "protocol", "Protocol.java")).read_text()
     assert "public class Protocol" in protocol
-    parser = open(os.path.join(worktree_path, "src", "main", "java", "com", "example", "protocol", "ProtocolParser.java")).read()
+    parser = Path(os.path.join(worktree_path, "src", "main", "java", "com", "example", "protocol", "ProtocolParser.java")).read_text()
     assert "public class ProtocolParser" in parser
 
 
@@ -24012,7 +24023,7 @@ def test_create_git_worktree_reset_advances_to_new_commits_on_reuse(tmp_path):
     # not silently stay frozen at the original creation-time commit.
     worktree_path_again = create_git_worktree(str(tmp_path))
     assert worktree_path_again == worktree_path
-    pom = open(os.path.join(worktree_path, "pom.xml")).read()
+    pom = Path(os.path.join(worktree_path, "pom.xml")).read_text()
     assert pom == "<project>committed after worktree creation</project>\n"
 
 
@@ -25541,7 +25552,7 @@ async def test_known_target_context_supplies_the_real_source_content_separately(
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25574,7 +25585,7 @@ async def test_known_target_package_recorded_as_run_evidence(tmp_path):
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25611,7 +25622,7 @@ async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_pa
     state.last_implicated_files = []
     state.error_context = "a compile error"
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25643,7 +25654,7 @@ async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_
     state.last_implicated_files = []
     state.error_context = "a compile error"
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25675,7 +25686,7 @@ async def test_graph_context_excludes_a_path_already_shown_via_retry_evidence(tm
     state.last_implicated_files = []
     state.error_context = "a compile error"
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25719,7 +25730,7 @@ async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path):
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25758,7 +25769,7 @@ async def test_known_target_with_graph_rag_member_evidence_triggers_member_aware
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25790,7 +25801,7 @@ async def test_known_target_without_member_evidence_retains_file_level_fallback(
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25828,7 +25839,7 @@ async def test_c2_p0_large_file_production_reachable_member_retained_no_manual_h
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25877,7 +25888,7 @@ async def test_retry_failure_location_triggers_member_aware_retry_context_java(t
         likely_files=["Owner.java"],
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25912,7 +25923,7 @@ async def test_retry_failure_location_triggers_member_aware_retry_context_python
         likely_files=["owner.py"],
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25950,7 +25961,7 @@ async def test_retry_worktree_version_b_member_selected_over_stale_workspace_ver
         likely_files=["Owner.py"],
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -25990,7 +26001,7 @@ async def test_retry_failure_location_does_not_authorize_an_unimplicated_file(tm
         likely_files=["Owner.java"],
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -26026,7 +26037,7 @@ async def test_member_hint_generation_does_not_expand_write_authority(tmp_path):
         likely_files=["Owner.java"],
     )
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -26062,7 +26073,7 @@ async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path):
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,
@@ -26102,7 +26113,7 @@ async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_p
     state.attempt_number = 0
     state.all_files_written = set()
 
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[])
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer,

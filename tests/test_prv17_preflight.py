@@ -22,6 +22,7 @@ and kriya/workflow/retry_strategy.py)."""
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _strict_doubles import developer_double
 from pydantic import ValidationError
 
 from kriya.config import AppConfig
@@ -68,7 +69,7 @@ def _minimal_ctx(tmp_path, **overrides) -> AttemptContext:
         chain=[], targeted_max_retries=3,
         stream_callback=None, approval_callback=None,
         active_skills=[], active_skill_rules_snapshot={},
-        developer=AsyncMock(), run_verifier=AsyncMock(), spec_compliance=AsyncMock(),
+        developer=developer_double(), run_verifier=AsyncMock(), spec_compliance=AsyncMock(),
         skill_engine=MagicMock(), kernel=Kernel(config=AppConfig()),
         max_retries=4, web_lookup_query_callback=None,
         approve_web_lookup=AsyncMock(return_value=False),
@@ -249,7 +250,7 @@ async def test_prv17_preflight_pipeline(tmp_path):
     # allowlist - proven here for s2 of the SAME plan validated above,
     # authorized only for its own customers/views.py + customers/urls.py. ---
     s2_scope = ["customers/views.py", "customers/urls.py"]
-    developer = AsyncMock()
+    developer = developer_double()
     developer.run_generation = AsyncMock(return_value=[
         {"filepath": "customers/tests.py", "content": "# should never be authorized here\n"},
     ])

@@ -20,11 +20,10 @@ from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
+from kriya.workflow import validation_baseline as baseline_model
 from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.validation_baseline import (
     DeltaClassification,
-    TestOutcome,
-    TestStatus,
     ValidationBaseline,
     ValidationInvocation,
     ValidationOutcome,
@@ -42,6 +41,9 @@ from kriya.workflow.validation_baseline import (
     render_blocking_regression_evidence,
 )
 from kriya.workflow.workflow import WorkflowEngine
+
+# validation_baseline's TestStatus/TestOutcome are used module-qualified
+# (baseline_model.*): pytest tries to collect any Test* class name here.
 
 # ---------------------------------------------------------------------------
 # Fingerprint normalization
@@ -137,7 +139,7 @@ def test_pytest_adapter_extracts_failed_identities_and_aggregate_counts():
     assert parsed is not None
     outcomes, counts = parsed
     assert outcomes[0].test_id == "tests/x.py::test_a"
-    assert outcomes[0].status == TestStatus.FAIL
+    assert outcomes[0].status == baseline_model.TestStatus.FAIL
     assert counts["failed"] == 1
     assert counts["passed"] == 75
 
@@ -262,8 +264,8 @@ def test_9_previously_executed_test_disappearing_is_blocking():
 
 
 def test_newly_skipped_at_level2_is_blocking():
-    pre = (TestOutcome("tests/x.py::test_a", TestStatus.PASS),)
-    post = (TestOutcome("tests/x.py::test_a", TestStatus.SKIP),)
+    pre = (baseline_model.TestOutcome("tests/x.py::test_a", baseline_model.TestStatus.PASS),)
+    post = (baseline_model.TestOutcome("tests/x.py::test_a", baseline_model.TestStatus.SKIP),)
     result = classify_level2_delta(pre, post)
     assert result["tests/x.py::test_a"] == DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED
     assert DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED.value in {
@@ -273,7 +275,7 @@ def test_newly_skipped_at_level2_is_blocking():
 
 def test_new_test_not_in_pre_is_not_comparable_never_blocking():
     pre = ()
-    post = (TestOutcome("tests/x.py::test_brand_new", TestStatus.FAIL, "fp"),)
+    post = (baseline_model.TestOutcome("tests/x.py::test_brand_new", baseline_model.TestStatus.FAIL, "fp"),)
     result = classify_level2_delta(pre, post)
     assert result["tests/x.py::test_brand_new"] == DeltaClassification.NOT_COMPARABLE
     from kriya.workflow.validation_baseline import TERMINAL_BLOCKING_CLASSIFICATIONS

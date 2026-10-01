@@ -18,7 +18,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _strict_doubles import strict_engine
+from _strict_doubles import developer_double, strict_engine
 from click.testing import CliRunner
 
 from kriya.analyzer.java_members import extract_java_members
@@ -222,7 +222,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         approval_callback=None,
         active_skills=[],
         active_skill_rules_snapshot={},
-        developer=AsyncMock(),
+        developer=developer_double(),
         run_verifier=default_run_verifier,
         spec_compliance=default_spec_compliance,
         skill_engine=MagicMock(),
@@ -244,7 +244,7 @@ def _run_attempt_case(regions, candidate_content, plan_mentions_helper=False):
         java_path = os.path.join(td, "Target.java")
         with open(java_path, "w") as f:
             f.write(TARGET_SRC)
-        developer = AsyncMock()
+        developer = developer_double()
         developer.run_generation = AsyncMock(return_value=[
             {"filepath": "Target.java", "content": candidate_content},
         ])

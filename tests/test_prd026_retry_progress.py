@@ -10,6 +10,7 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.cli_output import no_progress_stop_message
 from kriya.config import AppConfig, FallbackModelConfig
@@ -224,7 +225,7 @@ def _ctx(tmp_path, config):
         recovery_contract_block="", required_files_prompt_block="", required_dependencies_prompt_block="",
         expected_files_upfront=["engine.py"], architect_basename_to_path={"engine.py": "engine.py"},
         chain=list(config.llm_chain), targeted_max_retries=3, stream_callback=None, approval_callback=None,
-        active_skills=[], active_skill_rules_snapshot={}, developer=AsyncMock(), run_verifier=AsyncMock(),
+        active_skills=[], active_skill_rules_snapshot={}, developer=developer_double(), run_verifier=AsyncMock(),
         spec_compliance=AsyncMock(), skill_engine=MagicMock(), kernel=Kernel(config=config), max_retries=4,
         web_lookup_query_callback=None, approve_web_lookup=AsyncMock(return_value=False),
         migration_resolution=resolve_migration_resolution("Fix a narrow bug", str(tmp_path)),
@@ -383,9 +384,10 @@ async def test_workflow_result_reports_terminal_no_progress(tmp_path):
     # The persisted trace carries the transition and terminal events.
     import json
     import sqlite3
+    from contextlib import closing
 
     from kriya.core.state_paths import trace_db_path
-    with sqlite3.connect(trace_db_path(cfg)) as db:
+    with closing(sqlite3.connect(trace_db_path(cfg))) as db:
         (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
     kinds = [event["kind"] for event in json.loads(events_json)]
     assert kinds.count("retry.progress_vector") == 4

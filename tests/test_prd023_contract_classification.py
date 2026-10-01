@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
@@ -233,7 +234,7 @@ async def test_the_pre_write_gate_escalates_and_the_approval_authorizes_the_cand
     from test_workflow import _minimal_attempt_ctx
 
     def run_ctx(escalation, callback):
-        developer = AsyncMock()
+        developer = developer_double()
         developer.run_generation = AsyncMock(return_value=[
             {"filepath": SUMMARY, "content": CANDIDATE[SUMMARY]},
             {"filepath": SERVICE, "content": CANDIDATE[SERVICE]},

@@ -13,6 +13,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig
@@ -58,7 +59,7 @@ def _rewrite(tmp_path, original, model_content, target="Target.java"):
     path = tmp_path / target
     if original is not None:
         path.write_bytes(original.encode("utf-8"))
-    developer = AsyncMock()
+    developer = developer_double()
     parsed = DeveloperAgent.parse_file_payload(model_content, target)
     assert parsed.kind == "file", parsed
     developer.run_generation = AsyncMock(return_value=[{"filepath": target, "content": parsed.content}])

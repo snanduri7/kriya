@@ -36,6 +36,7 @@ were touched here."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
 from kriya.config import AppConfig
@@ -205,7 +206,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     # endpoint invariant (owned by s4) never reaches SpecComplianceAgent's
     # own prompt for s1, and is reported as pending, not violated. ---
     scoped_s1, pending_s1 = _stage_scoped_spec_compliance_goal(
-        _ctx(tmp_path, plan, "s1", developer=AsyncMock())
+        _ctx(tmp_path, plan, "s1", developer=developer_double())
     )
     assert "/customers/health" not in scoped_s1
     assert "status" not in scoped_s1
@@ -213,7 +214,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
 
     (tmp_path / "manage.py").write_text("#!/usr/bin/env python\n")
     (tmp_path / "requirements.txt").write_text("Django>=5.0\n")
-    s1_developer = AsyncMock()
+    s1_developer = developer_double()
     s1_developer.run_generation = AsyncMock(return_value=[
         {"filepath": "manage.py", "content": "#!/usr/bin/env python\n"},
         {"filepath": "requirements.txt", "content": "Django>=5.0\n"},
@@ -255,7 +256,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     recovery_state.attempt_number = 1
     recovery_state.last_attempt_mode = "full_set"
     recovery_state.all_files_written = {"manage.py", "requirements.txt"}
-    recovery_developer = AsyncMock()
+    recovery_developer = developer_double()
     recovery_developer.run_generation = AsyncMock(
         side_effect=AssertionError("no Developer call is legal once every implicated file is future-owned"),
     )
@@ -286,7 +287,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     current_violation_state.attempt_number = 1
     current_violation_state.last_attempt_mode = "full_set"
     current_violation_state.all_files_written = {"manage.py", "requirements.txt"}
-    current_violation_ctx = _ctx(tmp_path, plan, "s1", developer=AsyncMock())
+    current_violation_ctx = _ctx(tmp_path, plan, "s1", developer=developer_double())
     current_violation_failure = QualityGateFailure(Failure(
         type="test", message="SyntaxError: invalid syntax in manage.py", likely_files=["manage.py"],
     ))
@@ -307,7 +308,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     # runs - the health-endpoint invariant IS due for s4, and a compliant
     # verdict passes candidate gates normally. ---
     scoped_s4, pending_s4 = _stage_scoped_spec_compliance_goal(
-        _ctx(tmp_path, plan, "s4", developer=AsyncMock(), completed_subtask_ids=frozenset(["s1", "s2", "s3"]))
+        _ctx(tmp_path, plan, "s4", developer=developer_double(), completed_subtask_ids=frozenset(["s1", "s2", "s3"]))
     )
     assert "/customers/health" in scoped_s4
     assert pending_s4 == []
@@ -324,7 +325,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
         "    def test_health(self):\n"
         "        self.assertEqual(Client().get('/customers/health').json(), {\"status\": \"ok\"})\n"
     )
-    s4_developer = AsyncMock()
+    s4_developer = developer_double()
     s4_developer.run_generation = AsyncMock(return_value=[
         {"filepath": "customers/views.py", "content": (tmp_path / "customers/views.py").read_text()},
         {"filepath": "customers/tests.py", "content": (tmp_path / "customers/tests.py").read_text()},
@@ -367,7 +368,7 @@ async def test_prv17_stage_contract_architecture(tmp_path):
     s6_state.attempt_number = 0
     s6_state.all_files_written = {"customers/views.py", "customers/tests.py"}
     s6_ctx = _ctx(
-        tmp_path, plan, "s4", developer=AsyncMock(), run_verifier=s6_run_verifier,
+        tmp_path, plan, "s4", developer=developer_double(), run_verifier=s6_run_verifier,
         completed_subtask_ids=frozenset(["s1", "s2", "s3"]), runtime_verification_required=True,
     )
     with patch(

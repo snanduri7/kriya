@@ -88,6 +88,15 @@ markers = [
 # lacking a local Ollama instance - CI's live-model job opts back in with
 # `pytest -m live_model`, and so can a developer who has Ollama running.
 addopts = "-m \"not live_model and not live_static_analysis\""
+# A coroutine that is never awaited is a bug: in tests it is almost always a
+# bare AsyncMock whose method result Kriya read as a value (a truthy
+# coroutine once passed a runtime grade by accident). When it is only
+# finalized by garbage collection, pytest reports it as an unraisable
+# exception, so both forms fail the run. Doubles: tests/_strict_doubles.py.
+filterwarnings = [
+    "error:coroutine .* was never awaited:RuntimeWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 
 [tool.ruff]
 line-length = 120

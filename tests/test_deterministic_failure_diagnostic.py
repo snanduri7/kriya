@@ -21,6 +21,7 @@ import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
@@ -391,7 +392,7 @@ def _minimal_ctx(tmp_path, **overrides) -> AttemptContext:
         expected_files_upfront=["Foo.java"], architect_basename_to_path={"Foo.java": "Foo.java"},
         chain=[], targeted_max_retries=3, stream_callback=None, approval_callback=None,
         active_skills=[], active_skill_rules_snapshot={},
-        developer=AsyncMock(), run_verifier=AsyncMock(), spec_compliance=AsyncMock(),
+        developer=developer_double(), run_verifier=AsyncMock(), spec_compliance=AsyncMock(),
         skill_engine=MagicMock(), kernel=Kernel(config=AppConfig()), max_retries=4,
         web_lookup_query_callback=None, approve_web_lookup=AsyncMock(return_value=False),
         established_files=["Foo.java"],

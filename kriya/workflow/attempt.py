@@ -3204,17 +3204,13 @@ async def _resolve_runtime_verification_grade(
         )
     # Mutate in place, matching every other branch in this module (e.g. the
     # timed-out branch's own grade["reasoning"]=.../grade["passed"]=False
-    # above) - NOT dict(grade), which requires the real Mapping protocol
-    # (.keys() + iteration). ctx.run_verifier.grade() always returns a
-    # freshly-constructed dict in production (RunVerifierAgent.grade()'s own
-    # implementation), so there is no shared-mutable-state risk to guard
-    # against by copying - and copying is exactly what broke two pre-existing
-    # tests (test_run_attempt_cleans_up_runtime_artifacts_between_attempts
-    # [_without_git]) whose own run_verifier=AsyncMock() only configures
-    # .judge, not .grade: an unconfigured AsyncMock's auto-child .keys()
-    # returns a coroutine, not a real iterable, which dict() cannot consume
-    # but plain item assignment (used everywhere else already) tolerates
-    # fine. Caught by the user's own independent pytest run, not self-review.
+    # above). ctx.run_verifier.grade() always returns a freshly-constructed
+    # dict in production (RunVerifierAgent.grade()'s own implementation), so
+    # there is no shared-mutable-state risk to guard against by copying. Test
+    # doubles must return a real dict too: on a bare AsyncMock this
+    # assignment is only recorded, and the truthy grade.get("passed") read
+    # later turned this forced non-PASS into a PASS (two cleanup tests passed
+    # that way until their doubles were made strict).
     grade["reasoning"] = (
         "A deterministic check found a self-reported verification marker but rejected it as "
         "ungrounded (present but never demonstrated to gate on anything). No independent "

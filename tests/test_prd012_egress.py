@@ -104,10 +104,10 @@ def test_a_non_local_model_endpoint_is_recorded_as_refused_under_local_only():
 
 
 def test_mcp_explicit_destinations_is_recorded_as_refused_when_contained():
-    cfg = _production_cfg()
-    cfg.mcp = {"srv": {"command": "python3", "capabilities": {"network": "explicit_destinations",
-                                                                "network_hosts": ["api.example.com"]}}}
-    cfg = AppConfig.model_validate(cfg.model_dump())
+    data = _production_cfg().model_dump()
+    data["mcp"] = {"srv": {"command": "python3", "capabilities": {"network": "explicit_destinations",
+                                                                  "network_hosts": ["api.example.com"]}}}
+    cfg = AppConfig.model_validate(data)
     decision = _by_channel(cfg)["mcp_server:srv"]
     assert decision.capability is EgressCapability.EXPLICIT_DESTINATIONS
     assert decision.allowed is False
@@ -160,7 +160,9 @@ def test_every_embedding_client_in_kriya_is_governed():
             if not name.endswith(".py"):
                 continue
             path = os.path.join(dirpath, name)
-            for node in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None))
                     == "OllamaEmbeddingClient" and "egress_policy" not in {k.arg for k in node.keywords}

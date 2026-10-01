@@ -81,6 +81,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _strict_doubles import developer_double
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
@@ -147,7 +148,7 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         approval_callback=None,
         active_skills=[],
         active_skill_rules_snapshot={},
-        developer=AsyncMock(),
+        developer=developer_double(),
         run_verifier=AsyncMock(),
         spec_compliance=AsyncMock(),
         skill_engine=MagicMock(),

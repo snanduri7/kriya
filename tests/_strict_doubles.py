@@ -13,7 +13,7 @@ import os
 import shutil
 import tempfile
 from typing import Any, Dict, Optional
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from kriya.config.config import AppConfig
 from kriya.core.events import EventSystem
@@ -99,3 +99,15 @@ def strict_engine(config: Optional[AppConfig] = None) -> MagicMock:
     engine = MagicMock()
     engine.kernel = strict_kernel(config)
     return engine
+
+
+def developer_double() -> AsyncMock:
+    """A ``DeveloperAgent`` double whose ``llm`` reports no call metrics yet.
+
+    The attempt reads ``developer.llm.last_call_metrics`` (a dict or None on a
+    real LLMClient) and calls ``.get()`` on it; on a bare AsyncMock that is an
+    auto-created AsyncMock, so every field became an un-awaited coroutine
+    object instead of a value. Tests still assign the methods they drive."""
+    developer = AsyncMock()
+    developer.llm.last_call_metrics = None
+    return developer
