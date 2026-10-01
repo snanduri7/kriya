@@ -1,5 +1,7 @@
-import subprocess, sys
+import subprocess
+import sys
 from pathlib import Path
+
 ROOT = Path(sys.argv[1])
 TESTS = ["tests/test_runtime_maven_acquisition.py"]
 M = [
@@ -26,15 +28,19 @@ M = [
 ]
 surv = 0
 for label, rel, old, new in M:
-    p = ROOT / rel; t = p.read_text()
+    p = ROOT / rel
+    t = p.read_text()
     if t.count(old) != 1:
-        print(label, "ANCHOR", t.count(old)); surv += 1; continue
+        print(label, "ANCHOR", t.count(old))
+        surv += 1
+        continue
     p.write_text(t.replace(old, new))
     try:
         r = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", *TESTS], cwd=ROOT, capture_output=True, text=True, timeout=1500)
     finally:
         p.write_text(t)
-    k = r.returncode != 0; surv += not k
-    fail = [l for l in r.stdout.splitlines() if l.startswith("FAILED")][:1]
+    k = r.returncode != 0
+    surv += not k
+    fail = [line for line in r.stdout.splitlines() if line.startswith("FAILED")][:1]
     print(label, "KILLED" if k else "SURVIVED", fail[0][:110] if fail else "", flush=True)
 print(f"{len(M)-surv}/{len(M)} killed")

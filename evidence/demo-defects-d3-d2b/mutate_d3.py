@@ -1,5 +1,7 @@
-import subprocess, sys
+import subprocess
+import sys
 from pathlib import Path
+
 ROOT = Path(sys.argv[1])
 TESTS = ["tests/test_d3_runtime_prerequisite.py"]
 M = [
@@ -21,14 +23,18 @@ M = [
 ]
 surv = 0
 for label, rel, old, new in M:
-    p = ROOT / rel; t = p.read_text()
+    p = ROOT / rel
+    t = p.read_text()
     if t.count(old) != 1:
-        print(label, "ANCHOR", t.count(old)); surv += 1; continue
+        print(label, "ANCHOR", t.count(old))
+        surv += 1
+        continue
     p.write_text(t.replace(old, new))
     try:
         r = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", *TESTS], cwd=ROOT, capture_output=True, text=True, timeout=900)
     finally:
         p.write_text(t)
-    k = r.returncode != 0; surv += not k
+    k = r.returncode != 0
+    surv += not k
     print(label, "KILLED" if k else "SURVIVED", flush=True)
 print(f"{len(M)-surv}/{len(M)} killed")
