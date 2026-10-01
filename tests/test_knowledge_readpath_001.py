@@ -10,6 +10,7 @@ import os
 import sqlite3
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from _milestone_proof_harness import CHAIN, CHAIN_OUTPUTS, FakeEngine, _milestone, _run, _workspace
 from _strict_doubles import strict_kernel
@@ -57,14 +58,14 @@ class _EmbeddingSpy:
     def patches(self):
         queries = self.queries
 
-        async def one(_client, text, client=None, is_query=False):
-            del client
+        async def one(_client, text, client=None, is_query=False, deadline=None):
+            del client, deadline
             if is_query:
                 queries.append(text)
             return await EMBEDDER.get_embedding(text)
 
-        async def many(_client, texts, is_query=False):
-            del is_query
+        async def many(_client, texts, is_query=False, deadline=None):
+            del is_query, deadline
             return await EMBEDDER.get_embeddings(texts)
 
         return (patch.object(OllamaEmbeddingClient, "get_embedding", new=one),
@@ -266,9 +267,12 @@ def test_a_missing_store_is_simply_empty_and_is_never_created(tmp_path):
 def test_an_unusable_query_vector_is_reported_not_scored(tmp_path):
     cfg = _config(tmp_path)
     _store_with(cfg, [(FACT, EMBEDDER._vector(FACT), cfg.embedding.model)])
-    with patch.object(OllamaEmbeddingClient, "get_embedding", new=AsyncMock(return_value=[0.0] * 256)):
+    # EMBEDDING-CONTRACT-001: the provider answers with a zero vector; the
+    # client refuses it as malformed, so nothing is scored against it.
+    zero = httpx.Response(200, json={"embeddings": [[0.0] * 256]}, request=httpx.Request("POST", "http://x"))
+    with patch.object(OllamaEmbeddingClient, "_post", new=AsyncMock(return_value=zero)):
         retrieval = asyncio.run(retrieve_learned_references(cfg, QUESTION))
-    assert retrieval.references == () and "no usable query vector" in retrieval.unavailable_reason
+    assert retrieval.references == () and "EMBEDDING_MALFORMED_RESPONSE" in retrieval.unavailable_reason
 
 
 def test_the_egress_boundary_holds_and_is_reported(tmp_path):

@@ -126,12 +126,30 @@ class DeterministicHashingEmbedder:
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
         return [value / norm for value in vector]
 
-    async def get_embedding(self, text: str, is_query: bool = False) -> List[float]:
-        del is_query
+    admission_misses = 0  # nothing is ever refused
+
+    async def get_embedding(self, text: str, is_query: bool = False, deadline: Optional[float] = None) -> List[float]:
+        del is_query, deadline
         return self._vector(text)
 
     async def get_embeddings(self, texts: Sequence[str]) -> List[List[float]]:
         return [self._vector(text) for text in texts]
+
+    async def embed(self, texts: Sequence[str], *, is_query: bool = False,
+                    deadline: Optional[float] = None) -> List[List[float]]:
+        del is_query, deadline
+        return [self._vector(text) for text in texts]
+
+    async def fingerprint(self) -> Any:
+        """Its own identity (EMBEDDING-CONTRACT-001), never a served model's."""
+        from kriya.memory.embedding import PREPROCESSING_VERSION, SEGMENTATION_VERSION, EmbeddingFingerprint
+
+        return EmbeddingFingerprint(
+            model="deterministic-feature-hash", model_digest=f"kriya-feature-hash-{self.dimensions}",
+            adapter="kriya-deterministic-hashing/1", dimension=self.dimensions, served_context=1 << 20,
+            prefix_policy="none", preprocessing_version=PREPROCESSING_VERSION,
+            segmentation_version=SEGMENTATION_VERSION,
+        )
 
 
 _WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")

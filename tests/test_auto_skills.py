@@ -2,6 +2,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _fake_embedding import native_embed_response
 
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.config import AppConfig
@@ -51,12 +52,7 @@ async def test_auto_skills_generation_and_injection(tmp_path):
         # Mock embedding post responses
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [
-                {"embedding": [0.1] * 384}
-            ]
-        }
-        mock_post.return_value = mock_response
+        mock_post.side_effect = native_embed_response(384)
         
         # Run indexing (which triggers extract conventions and saves skill files)
         await analyzer.index_repository(cfg)

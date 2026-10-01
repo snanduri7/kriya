@@ -160,7 +160,7 @@ def test_healthy_deployment_is_blocked_only_by_the_missing_exact_runtime_qualifi
         ("containment.oci_smoke", lambda cfg, ws: None, ("kriya.production_doctor._Docker.resolve", None, (None, {"error": "docker CLI not found"})), CheckStatus.UNAVAILABLE),
         ("containment.oci_smoke", lambda cfg, ws: None, ("kriya.production_doctor.probe_oci_containment", FileNotFoundError("image absent"), None), CheckStatus.UNAVAILABLE),
         ("model.connectivity", lambda cfg, ws: None, ("kriya.production_doctor.probe_llm_runtime", ConnectionError("offline"), None), CheckStatus.UNAVAILABLE),
-        ("embedding.connectivity", lambda cfg, ws: None, ("kriya.production_doctor.probe_embedding", ConnectionError("offline"), None), CheckStatus.UNAVAILABLE),
+        ("embedding.contract", lambda cfg, ws: None, ("kriya.production_doctor.probe_embedding", ConnectionError("offline"), None), CheckStatus.UNAVAILABLE),
     ],
 )
 def test_required_boundary_failures_block_production(tmp_path, check_id, mutation, boundary_patch, expected):
@@ -194,7 +194,7 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
         "model.connectivity", "model.runtime_fingerprint", "model.provider_contract", "model.qualification",
         # FILE-INTEGRITY-CONTRACT-001 (deliberate characterization change): the response protocol row.
         "model.response_protocol",
-        "embedding.connectivity", "context.recall_certification", "lsp.java", "models.role_independence",
+        "embedding.contract", "context.recall_certification", "lsp.java", "models.role_independence",
         "semantic.precision_boundary",
         # PRD-031A (deliberate characterization change): seven static-analysis rows.
         "static_analysis.configuration", "static_analysis.provider", "static_analysis.capability",

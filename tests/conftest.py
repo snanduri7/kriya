@@ -69,6 +69,31 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _no_embedding_identity_probe(request, monkeypatch):
+    """EMBEDDING-CONTRACT-001: OllamaEmbeddingClient.fingerprint() asks the
+    real endpoint for the model's digest and served context; a mocked test
+    must never reach a developer's live Ollama. The identity is a fixed fake
+    whose dimension comes from the instance's own (usually patched)
+    get_embedding. A test of the real probe marks itself
+    real_embedding_identity and injects its own transport."""
+    if request.node.get_closest_marker("real_embedding_identity") or request.node.get_closest_marker("live_model"):
+        yield
+        return
+    from _fake_embedding import fake_fingerprint
+
+    from kriya.memory.embedding import OllamaEmbeddingClient
+
+    async def fingerprint(client):
+        if client._fingerprint is None:
+            client._fingerprint = fake_fingerprint(len(await client.get_embedding("kriya embedding identity probe")),
+                                                   client.model)
+        return client._fingerprint
+
+    monkeypatch.setattr(OllamaEmbeddingClient, "fingerprint", fingerprint)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _scripted_developer_answers_speak_the_requested_protocol(request, monkeypatch):
     """FILE-INTEGRITY-CONTRACT-001: the production Developer protocol is the
     structured sentinel protocol, while most scripted model answers in this

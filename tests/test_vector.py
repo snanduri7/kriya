@@ -7,24 +7,21 @@ from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
 
 @pytest.mark.asyncio
 async def test_ollama_embedding_client():
+    """EMBEDDING-CONTRACT-001: one endpoint, /api/embed, with truncate: false."""
     client = OllamaEmbeddingClient(base_url="http://localhost:11434/v1", model="nomic-embed-text:latest", egress_policy="local_only")
-    
-    # Mock httpx AsyncClient post
+
     with patch("httpx.AsyncClient.post") as mock_post:
-        # Standard OpenAI layout response mock
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json = MagicMock(return_value={
-            "data": [
-                {
-                    "embedding": [0.1, 0.2, 0.3]
-                }
-            ]
-        })
+        mock_response.json = MagicMock(return_value={"embeddings": [[0.1, 0.2, 0.3]]})
         mock_post.return_value = mock_response
-        
+
         vector = await client.get_embedding("hello vector")
-        assert vector == [0.1, 0.2, 0.3]
+    assert vector == [0.1, 0.2, 0.3]
+    url = mock_post.call_args.args[0]
+    body = mock_post.call_args.kwargs["json"]
+    assert url == "http://localhost:11434/api/embed"
+    assert body["truncate"] is False and body["input"] == ["search_document: hello vector"]
 
 def test_local_vector_store(tmp_path):
     index_file = tmp_path / "vector_index.json"

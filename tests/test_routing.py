@@ -72,7 +72,9 @@ async def test_ensure_fitted_raises_loudly_on_unreachable_embed_model():
     # measured 18 points worse on routing accuracy in the validating spike).
     cfg = AppConfig()
     router = Router(cfg)
-    router._embed_client.get_embeddings = AsyncMock(return_value=[[0.0, 0.0, 0.0]])
+    from kriya.memory.embedding import EmbeddingUnavailableError
+
+    router._embed_client.get_embeddings = AsyncMock(side_effect=EmbeddingUnavailableError("model not pulled"))
     with pytest.raises(RoutingModelUnavailable):
         await router.route("anything")
 

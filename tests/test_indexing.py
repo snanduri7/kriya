@@ -2,10 +2,12 @@ import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.config import AppConfig
+from kriya.memory.vector import deserialize_embedding
 
 
 def _init_git_repo(tmp_path):
@@ -14,11 +16,23 @@ def _init_git_repo(tmp_path):
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
 
 
+def _embed_post(dimension=384, fail_for=()):
+    """A native /api/embed answer: one vector per input. An input containing
+    any of ``fail_for`` fails the request with a connection error (retried
+    once by the client, then EMBEDDING_UNAVAILABLE)."""
+    async def post(_client, url, json=None, **_kwargs):
+        if any(marker in text for text in json["input"] for marker in fail_for):
+            raise httpx.ConnectError("embedding server unavailable")
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"embeddings": [[0.1] * dimension for _ in json["input"]]}
+        return response
+    return post
+
+
 def _mock_embedding_post():
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"data": [{"embedding": [0.1] * 384}]}
-    return mock_response
+    """Compatibility name for the shared native mock."""
+    return _embed_post()
 
 
 @pytest.mark.asyncio
@@ -35,21 +49,12 @@ async def test_indexing_repository_files(tmp_path):
     analyzer = RepositoryAnalyzer(str(tmp_path))
     
     # Mock embedding response
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [
-                {"embedding": [0.1] * 384}
-            ]
-        }
-        mock_post.return_value = mock_response
-        
+    with patch("httpx.AsyncClient.post", new=_embed_post()):
         callback_files = []
         def progress_cb(filepath, idx, total):
             callback_files.append(filepath)
             
-        await analyzer.index_repository(cfg, progress_callback=progress_cb)
+        await analyzer.index_repository(cfg, generate_conventions_skill=False, progress_callback=progress_cb)
         
         # Verify both files were indexed
         assert "main.py" in callback_files
@@ -62,55 +67,55 @@ async def test_indexing_repository_files(tmp_path):
 
 @pytest.mark.asyncio
 async def test_indexing_does_not_cache_a_file_whose_embedding_failed(tmp_path):
-    """Regression test for a real bug found live, 2026-08-12 (SME architecture
-    review): OllamaEmbeddingClient silently substitutes an all-zero "dummy"
-    vector on any embedding-API failure to degrade gracefully - index_repository()
-    previously treated that as a normal successful chunk and unconditionally
-    updated the file's cache metadata (mtime/hash), so a transient embedding
-    failure permanently corrupted that file's RAG entries: it became silently
-    unsearchable forever, and a later non---force `kriya analyze` would see the
-    mtime/hash as already up-to-date and never retry it. Fixed: a file with any
-    zero-vector chunk no longer gets its cache metadata updated, so the NEXT
-    (non-force) index_repository() call retries it automatically."""
-    py_file = tmp_path / "broken_embedding.py"
-    py_file.write_text("x = 1\n")
+    """Regression (2026-08-12 SME review), restated by EMBEDDING-CONTRACT-001:
+    a file whose embedding fails gets no current vectors (never a placeholder
+    vector), is not cached as up to date, is reported failed, and the next
+    non-force run retries it."""
+    (tmp_path / "broken_embedding.py").write_text("x = 1\n")
+    (tmp_path / "healthy.py").write_text("y = 2\n")
 
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-
     analyzer = RepositoryAnalyzer(str(tmp_path))
 
     from kriya.memory.vector import LocalVectorStore
 
-    # Run 1: the embedding server is unreachable for every request (both the
-    # primary OpenAI-shaped endpoint and the Ollama-native fallback
-    # get_embedding()/get_embeddings() try internally) - degrades to a
-    # zero-vector per OllamaEmbeddingClient's own graceful-degradation
-    # contract.
-    with patch("httpx.AsyncClient.post", side_effect=Exception("embedding server unavailable")):
-        await analyzer.index_repository(cfg)
+    # Run 1: the server answers the identity probe and healthy.py, but every
+    # request for broken_embedding.py fails.
+    with patch("httpx.AsyncClient.post", new=_embed_post(fail_for=("broken_embedding.py",))):
+        report = await analyzer.index_repository(cfg, generate_conventions_skill=False)
+    assert report.failed == {"broken_embedding.py": "EMBEDDING_UNAVAILABLE"} and report.indexed == 1
 
-    # The file's cache metadata must NOT have been updated - proves the next
-    # run will retry it instead of treating it as already up-to-date.
     store = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
-    assert "broken_embedding.py" not in store.file_metadata
+    assert "broken_embedding.py" not in store.file_metadata and "healthy.py" in store.file_metadata
+    current = {row[0] for row in store.conn.execute("SELECT filepath FROM vector_chunks WHERE is_current = 1")}
+    assert current == {"healthy.py"}  # no vector of the failed file is current
+    zero_vectors = [blob for (blob,) in store.conn.execute("SELECT embedding FROM vector_chunks")
+                    if not any(deserialize_embedding(blob))]
+    assert zero_vectors == []
+    store.close()
 
-    # Run 2 (still non---force): the embedding server is healthy now - this
-    # must actually retry the file (not skip it as "up-to-date"), confirming
-    # the fix's whole point, not just that metadata was left unset.
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        # Same dimension (768) as OllamaEmbeddingClient's zero-vector default
-        # from run 1's failure above - a mismatched dimension here would trip
-        # LocalVectorStore.verify_model()'s own (unrelated, pre-existing)
-        # index-consistency check, not the behavior this test is about.
-        mock_response.json.return_value = {"data": [{"embedding": [0.1] * 768}]}
-        mock_post.return_value = mock_response
-        await analyzer.index_repository(cfg)
-
+    # Run 2 (still non-force), healthy server: the file is retried, not skipped.
+    with patch("httpx.AsyncClient.post", new=_embed_post()):
+        report = await analyzer.index_repository(cfg, generate_conventions_skill=False)
+    assert report.failed == {} and report.indexed == 1
     store2 = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
     assert "broken_embedding.py" in store2.file_metadata
+    store2.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_identity_probe_stops_indexing(tmp_path):
+    """EMBEDDING-CONTRACT-001: the dimension is never assumed - with the
+    embedding server down, nothing is indexed and the error is typed."""
+    from kriya.memory.embedding import EmbeddingUnavailableError
+
+    (tmp_path / "a.py").write_text("x = 1\n")
+    cfg = AppConfig()
+    cfg.paths.memory = str(tmp_path / "memory")
+    with patch("httpx.AsyncClient.post", new=_embed_post(fail_for=("",))):
+        with pytest.raises(EmbeddingUnavailableError):
+            await RepositoryAnalyzer(str(tmp_path)).index_repository(cfg, generate_conventions_skill=False)
 
 
 @pytest.mark.asyncio
@@ -128,10 +133,9 @@ async def test_indexing_covers_languages_beyond_the_original_hardcoded_four(tmp_
     cfg.paths.memory = str(tmp_path / "memory")
     analyzer = RepositoryAnalyzer(str(tmp_path))
 
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_post.return_value = _mock_embedding_post()
+    with patch("httpx.AsyncClient.post", new=_embed_post()):
         callback_files = []
-        await analyzer.index_repository(cfg, progress_callback=lambda f, i, t: callback_files.append(f))
+        await analyzer.index_repository(cfg, generate_conventions_skill=False, progress_callback=lambda f, i, t: callback_files.append(f))
 
     assert "app.js" in callback_files
     assert "main.go" in callback_files
@@ -159,10 +163,9 @@ async def test_indexing_changed_flag_includes_a_staged_but_unmodified_file(tmp_p
     cfg.paths.memory = str(tmp_path / "memory")
     analyzer = RepositoryAnalyzer(str(tmp_path))
 
-    with patch("httpx.AsyncClient.post") as mock_post:
-        mock_post.return_value = _mock_embedding_post()
+    with patch("httpx.AsyncClient.post", new=_embed_post()):
         callback_files = []
-        await analyzer.index_repository(cfg, changed=True, progress_callback=lambda f, i, t: callback_files.append(f))
+        await analyzer.index_repository(cfg, generate_conventions_skill=False, changed=True, progress_callback=lambda f, i, t: callback_files.append(f))
 
     assert "staged_only.py" in callback_files
     assert "committed.py" not in callback_files  # unchanged since the initial commit

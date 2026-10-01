@@ -124,21 +124,48 @@ def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     }
 
 
+class EmbeddingContractViolation(Exception):
+    """The embedding provider answered, but not under the contract."""
+
+
 def probe_embedding(cfg: AppConfig) -> Dict[str, Any]:
+    """EMBEDDING-CONTRACT-001: reachable, exact identity (digest, served
+    context, the dimension of a real probe vector), ``truncate: false``
+    honoured (an over-context input is refused, never silently embedded), and
+    any existing code index built under the same fingerprint. Raises
+    EmbeddingError when the provider cannot be used, EmbeddingContractViolation
+    when it can but the contract does not hold."""
     import asyncio
 
-    from kriya.memory.vector import OllamaEmbeddingClient
+    from kriya.memory.embedding import EmbeddingInputTooLongError, configured_client
 
-    vector = asyncio.run(
-        OllamaEmbeddingClient(
-            base_url=cfg.embedding.base_url,
-            model=cfg.embedding.model,
-            egress_policy=cfg.autonomy.egress_policy,
-        ).get_embedding("kriya production doctor")
-    )
-    if not vector or not any(value != 0.0 for value in vector):
-        raise RuntimeError("embedding endpoint returned an empty or all-zero vector")
-    return {"model": cfg.embedding.model, "dimensions": len(vector)}
+    async def measure():
+        client = configured_client(cfg)
+        fingerprint = await client.fingerprint()
+        try:
+            await client.get_embedding("kriya " * (fingerprint.served_context * 2))
+        except EmbeddingInputTooLongError:
+            return fingerprint
+        raise EmbeddingContractViolation(
+            f"an input over the served context ({fingerprint.served_context}) was embedded instead of refused - "
+            "the provider truncates silently")
+
+    fingerprint = asyncio.run(measure())
+    evidence: Dict[str, Any] = {**fingerprint.to_dict(), "truncate_false_honoured": True}
+    index_path = os.path.join(cfg.paths.memory, "vector_index.db")
+    if os.path.exists(index_path):
+        from kriya.memory.vector import LocalVectorStore
+
+        store = LocalVectorStore(index_path)
+        try:
+            evidence["index_fingerprint"] = store.active_fingerprint()
+        finally:
+            store.close()
+        if evidence["index_fingerprint"] != fingerprint.digest:
+            raise EmbeddingContractViolation(
+                f"the code index was built under embedding identity {evidence['index_fingerprint']}, the served "
+                f"model is {fingerprint.digest}: semantic retrieval is unavailable until it is re-indexed")
+    return evidence
 
 
 class _Docker:
@@ -383,7 +410,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "model.provider_contract",
     "model.qualification",
     "model.response_protocol",
-    "embedding.connectivity",
+    "embedding.contract",
     "context.recall_certification",
     "lsp.java",
     "models.role_independence",
@@ -1079,10 +1106,16 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
 
 def _check_embedding(ctx: _Context) -> DoctorCheck:
     try:
-        return _check("embedding.connectivity", CheckStatus.PASS, evidence=probe_embedding(ctx.cfg))
+        return _check("embedding.contract", CheckStatus.PASS, evidence=probe_embedding(ctx.cfg))
+    except EmbeddingContractViolation as violation:
+        return _check(
+            "embedding.contract", CheckStatus.FAIL, evidence={"error": str(violation)},
+            remediation="Use an embedding endpoint that refuses over-context input instead of truncating it, "
+                        "and re-index with `kriya analyze --force` after any embedding model change.",
+        )
     except Exception as error:
         return _check(
-            "embedding.connectivity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)},
+            "embedding.contract", CheckStatus.UNAVAILABLE, evidence={"error": str(error)},
             remediation="Start the configured embedding endpoint and pull its model.",
         )
 
@@ -1350,7 +1383,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("model.provider_contract", True, _check_provider_contract),
     ("model.qualification", True, _check_qualification),
     ("model.response_protocol", True, _check_response_protocol),
-    ("embedding.connectivity", True, _check_embedding),
+    ("embedding.contract", True, _check_embedding),
     ("context.recall_certification", _recall_certification_required, _check_recall_certification),
     ("lsp.java", False, _check_lsp),
     ("models.role_independence", _role_independence_required, _check_role_independence),

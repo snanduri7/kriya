@@ -13,6 +13,7 @@ import sqlite3
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _fake_embedding import StaticEmbedder, fake_fingerprint, seed_index
 
 from kriya.analyzer.graph import DependencyGraph
 from kriya.config import AppConfig
@@ -49,13 +50,7 @@ NOTHING = [0.0, 0.0, 0.0, 1.0]  # orthogonal to every document
 LIMITS = RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30)
 
 
-class _Embedder:
-    def __init__(self, vector):
-        self.vector = vector
-
-    async def get_embedding(self, text, is_query=False):
-        del text, is_query
-        return list(self.vector)
+_Embedder = StaticEmbedder
 
 
 def _retrieve(tmp_path, goal, query_vector):
@@ -66,8 +61,7 @@ def _retrieve(tmp_path, goal, query_vector):
     for path, content in FILES.items():
         (repo / path).write_text(content)
         graph.index_file(path, content, mtime=0.0)
-        if path in EMBEDDINGS:
-            store.add_document(path, content, EMBEDDINGS[path], chunk_index=0, model_name="m", dimensions=4)
+    seed_index(store, [(path, FILES[path], vector) for path, vector in EMBEDDINGS.items()])
     graph.close()
     try:
         return asyncio.run(gr.retrieve_graph_context(
@@ -180,8 +174,7 @@ async def _run_with_index(tmp_path, *, mode, responses, approval_callback=None):
     dim = 768
     doc_emb = [1.0] + [0.0] * (dim - 1)
     vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
-    vs.add_document("Existing.txt", "chunk one", doc_emb, chunk_index=0, model_name=cfg.embedding.model,
-                    dimensions=dim)
+    seed_index(vs, [("Existing.txt", "chunk one", doc_emb)], fake_fingerprint(dim, cfg.embedding.model))
     vs.close()
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=responses)

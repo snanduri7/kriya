@@ -403,14 +403,11 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     click.echo("  - Testing connection...")
 
     try:
-        from kriya.memory.vector import OllamaEmbeddingClient
-        client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model, egress_policy=cfg.autonomy.egress_policy)
         import asyncio
-        emb = asyncio.run(client.get_embedding("test connectivity"))
-        if emb and any(v != 0.0 for v in emb):
-            click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
-        else:
-            click.secho("  - [WARNING] Generated empty or zero embedding vector.", fg="yellow")
+
+        from kriya.memory.embedding import configured_client
+        emb = asyncio.run(configured_client(cfg).get_embedding("test connectivity"))
+        click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
     except Exception as e:
         click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
@@ -1889,11 +1886,24 @@ def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
                 progress_bar.update(1)
 
             async def run_indexing():
-                await analyzer.index_repository(cfg, changed=changed, force=force, progress_callback=progress_callback)
+                return await analyzer.index_repository(cfg, changed=changed, force=force,
+                                                       progress_callback=progress_callback)
 
-            asyncio.run(run_indexing())
+            report = asyncio.run(run_indexing())
             if progress_bar:
                 progress_bar.render_finish()
+            if report is not None and report.failed:
+                # EMBEDDING-CONTRACT-001: a file without current vectors is
+                # never reported as indexed.
+                reasons: Dict[str, int] = {}
+                for reason in report.failed.values():
+                    reasons[reason] = reasons.get(reason, 0) + 1
+                click.secho(
+                    f"Indexing incomplete: {report.indexed} file(s) indexed, {len(report.failed)} failed "
+                    f"({', '.join(f'{r}={n}' for r, n in sorted(reasons.items()))}). Failed files have no "
+                    "current vectors and will be retried on the next run.", fg="red", err=True,
+                )
+                sys.exit(1)
             click.secho("Success: Semantic index compiled and cached to disk.", fg="green", err=True)
     except Exception as e:
         click.secho(f"Analysis failed: {e}", fg="red", err=True)
@@ -4183,16 +4193,14 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     cfg: AppConfig = ctx.obj['config']
     
+    from kriya.memory.embedding import EmbeddingError, configured_client
     from kriya.memory.learned_knowledge import learned_knowledge_db_path
-    from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+    from kriya.memory.vector import LocalVectorStore
     from kriya.tools.web import fetch_url_text
-    
-    embed_client = OllamaEmbeddingClient(
-        base_url=cfg.embedding.base_url,
-        model=cfg.embedding.model,
-        egress_policy=cfg.autonomy.egress_policy,
-    )
-    
+
+    embed_client = configured_client(cfg)
+    embedding_failed_sources: List[str] = []
+
     os.makedirs(cfg.paths.memory, exist_ok=True)
     vector_store = LocalVectorStore(learned_knowledge_db_path(cfg))
     
@@ -4206,26 +4214,17 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
             start += chunk_size - overlap
             
         click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
-        embeddings = await embed_client.get_embeddings(chunks)
-
-        # get_embeddings() silently substitutes an all-zero "dummy" vector on any
-        # failure (embedding server unreachable, malformed response) to degrade
-        # gracefully - reasonable for a caller like ask's RAG lookup, where a
-        # dummy query vector is naturally filtered out by the similarity-score
-        # threshold. But here that dummy vector gets WRITTEN permanently into the
-        # index - confirmed live as a real bug: the content becomes silently
-        # unsearchable forever (a zero vector never ranks meaningfully against a
-        # real query) while still being reported as "Successfully indexed" with
-        # no indication anything went wrong.
-        failed_count = sum(1 for emb in embeddings if not any(v != 0.0 for v in emb))
-        if failed_count:
+        try:
+            embeddings = await embed_client.get_embeddings(chunks)
+        except EmbeddingError as error:
+            # EMBEDDING-CONTRACT-001: nothing is written for a source whose
+            # embeddings failed - never a placeholder vector.
             click.secho(
-                f"Warning: embedding generation failed for {failed_count}/{len(chunks)} chunk(s) of "
-                f"{source_name} (embedding server unreachable or returned an error). Those chunks "
-                f"were still indexed but will NOT be findable via similarity search. Check your "
-                f"embedding server connection and re-run this 'kriya learn' command to fix it.",
-                fg="yellow",
+                f"Error: embedding failed for {source_name} ({error}); nothing was indexed for it. "
+                "Check the embedding server and re-run this 'kriya learn' command.", fg="red",
             )
+            embedding_failed_sources.append(source_name)
+            return False
 
         # Clear existing learned chunks matching source_name
         vector_store.remove_learned_knowledge(source_name)
@@ -4311,10 +4310,14 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     try:
         asyncio.run(process_sources())
-        click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
     except Exception as e:
         click.secho(f"Learning process failed: {e}", fg="red")
         sys.exit(1)
+    if embedding_failed_sources:
+        click.secho(f"Learning incomplete: embedding failed for {len(embedding_failed_sources)} source(s): "
+                    f"{', '.join(embedding_failed_sources)}.", bold=True, fg="red")
+        sys.exit(1)
+    click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
 
 @main.command(name="fix")
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")

@@ -143,7 +143,7 @@ async def test_external_embedding_endpoint_is_refused_before_any_request_and_not
     client = OllamaEmbeddingClient(
         base_url="https://embeddings.attacker.example/v1", model="m", egress_policy="local_only",
     )
-    with patch("kriya.memory.vector.httpx.AsyncClient", side_effect=AssertionError("no request may be made")):
+    with patch("kriya.memory.embedding.httpx.AsyncClient", side_effect=AssertionError("no request may be made")):
         with pytest.raises(EgressViolationError):
             await client.get_embedding("repository code")
         with pytest.raises(EgressViolationError):

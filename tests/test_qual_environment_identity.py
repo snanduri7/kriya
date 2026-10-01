@@ -231,7 +231,8 @@ def test_the_runtime_fingerprint_names_every_portable_component():
 # INF-001 inventory: provider-native calls outside the model runtime adapter,
 # each named here on purpose (none is part of model qualification).
 INF_001_INVENTORY = {
-    "kriya/memory/vector.py": "OllamaEmbeddingClient's native /api/embeddings fallback (embeddings, not inference)",
+    "kriya/memory/embedding.py": "OllamaEmbeddingClient: the native /api/embed client and the /api/tags + /api/show "
+                                 "identity probe (EMBEDDING-CONTRACT-001; embeddings, not inference)",
 }
 _PROVIDER_CODE = (
     r"(?<!for )\bprovider\s*(==|!=|not\s+in|in)\s*",  # a provider comparison/membership (not a loop variable)

@@ -22551,8 +22551,9 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     high_emb = [1.0] + [0.0] * (dim - 1)
     low_emb = [0.6, 0.8] + [0.0] * (dim - 2)
     vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
-    vs.add_document("HighRel.txt", "chunk one", high_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
-    vs.add_document("LowRel.txt", "chunk two", low_emb, chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    from _fake_embedding import fake_fingerprint, seed_index
+    seed_index(vs, [("HighRel.txt", "chunk one", high_emb), ("LowRel.txt", "chunk two", low_emb)],
+               fake_fingerprint(dim, cfg.embedding.model))
     vs.close()
 
     kernel = Kernel(config=cfg)
@@ -22710,7 +22711,8 @@ async def test_workflow_pre_plan_grounding_resolves_nested_member_g1_shaped(tmp_
     from kriya.memory.vector import LocalVectorStore
     dim = 768
     vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
-    vs.add_document("engine.py", chunk_text, [1.0] + [0.0] * (dim - 1), chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    from _fake_embedding import fake_fingerprint, seed_index
+    seed_index(vs, [("engine.py", chunk_text, [1.0] + [0.0] * (dim - 1))], fake_fingerprint(dim, cfg.embedding.model))
     vs.close()
 
     kernel = Kernel(config=cfg)

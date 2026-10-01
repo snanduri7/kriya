@@ -1,4 +1,4 @@
-import asyncio
+import json
 import logging
 import os
 import re
@@ -7,149 +7,17 @@ import struct
 from typing import Any, Dict, List, NamedTuple, Optional
 
 import click
-import httpx
 import numpy as np
 
 from kriya.core.db import get_connection
 
+# EMBEDDING-CONTRACT-001: the client lives in kriya.memory.embedding; this
+# import path stays for its callers.
+from kriya.memory.embedding import EmbeddedSegment as EmbeddedSegment
+from kriya.memory.embedding import EmbeddingFingerprint as EmbeddingFingerprint
+from kriya.memory.embedding import OllamaEmbeddingClient as OllamaEmbeddingClient
+
 logger = logging.getLogger(__name__)
-
-class OllamaEmbeddingClient:
-    """Queries OpenAI-compatible or local Ollama endpoints for vector embeddings."""
-
-    def __init__(self, base_url: str, model: str, *, egress_policy: str) -> None:
-        """``egress_policy`` is required (autonomy.egress_policy): embedding
-        requests carry repository code and goal text, so they obey the same
-        local_only boundary as LLMClient (PRD-012). No default - a caller
-        cannot construct an ungoverned client by omission."""
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.egress_policy = egress_policy
-        self.detected_dimensions = 768
-
-    def _enforce_egress(self) -> None:
-        """Raised before any request and never swallowed by the graceful
-        dummy-vector degradation below: a refused endpoint is a boundary,
-        not an outage."""
-        if self.egress_policy == "local_only":
-            from kriya.core.llm import EgressViolationError, is_local_url
-
-            if not is_local_url(self.base_url):
-                raise EgressViolationError(
-                    f"Egress violation: embedding request to external endpoint '{self.base_url}' "
-                    "blocked under 'local_only' policy."
-                )
-
-    async def get_embedding(self, text: str, client: Optional[httpx.AsyncClient] = None, is_query: bool = False) -> List[float]:
-        """Fetch embedding vector for the given text segment."""
-        self._enforce_egress()
-        if "nomic" in self.model.lower():
-            prefix = "search_query: " if is_query else "search_document: "
-            if not text.startswith(prefix):
-                text = prefix + text
-        try:
-            if client is None:
-                async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client_instance:
-                    emb = await self._get_embedding_with_client(text, client_instance)
-            else:
-                emb = await self._get_embedding_with_client(text, client)
-            if emb:
-                self.detected_dimensions = len(emb)
-            return emb
-        except Exception as e:
-            logger.error(f"Failed to fetch embedding: {e}", exc_info=True)
-            # Return dummy vector if model is not running to degrade gracefully
-            return [0.0] * self.detected_dimensions
-
-    async def _get_embedding_with_client(self, text: str, client: httpx.AsyncClient) -> List[float]:
-        # Attempt standard OpenAI /v1/embeddings format
-        url = f"{self.base_url}/embeddings"
-        payload = {
-            "input": text,
-            "model": self.model
-        }
-        headers = {"Content-Type": "application/json"}
-        
-        resp = await client.post(url, json=payload, headers=headers)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            return data["data"][0]["embedding"]
-            
-        # Fallback to Ollama native /api/embeddings if base_url is root
-        ollama_root = self.base_url.replace("/v1", "")
-        url_fallback = f"{ollama_root}/api/embeddings"
-        payload_fallback = {
-            "model": self.model,
-            "prompt": text
-        }
-        
-        resp_fb = await client.post(url_fallback, json=payload_fallback)
-        resp_fb.raise_for_status()
-        data_fb = resp_fb.json()
-        return data_fb["embedding"]
-
-    async def get_embeddings(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
-        """Fetch multiple embedding vectors concurrently and batched to optimize performance."""
-        if not texts:
-            return []
-        self._enforce_egress()
-
-        batch_size = 32
-        batches = [texts[i:i + batch_size] for i in range(0, len(texts), batch_size)]
-        
-        all_embeddings = []
-        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-            for batch in batches:
-                processed_batch = []
-                for text in batch:
-                    if "nomic" in self.model.lower():
-                        prefix = "search_query: " if is_query else "search_document: "
-                        if not text.startswith(prefix):
-                            text = prefix + text
-                    processed_batch.append(text)
-                
-                try:
-                    # Attempt standard OpenAI batch format
-                    url = f"{self.base_url}/embeddings"
-                    payload = {
-                        "input": processed_batch,
-                        "model": self.model
-                    }
-                    headers = {"Content-Type": "application/json"}
-                    
-                    resp = await client.post(url, json=payload, headers=headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        batch_embs = [item["embedding"] for item in data["data"]]
-                        if batch_embs:
-                            self.detected_dimensions = len(batch_embs[0])
-                        all_embeddings.extend(batch_embs)
-                        continue
-                    
-                    # Fallback to concurrent single fetches
-                    ollama_root = self.base_url.replace("/v1", "")
-                    url_fallback = f"{ollama_root}/api/embeddings"
-                    
-                    async def fetch_single_fallback(t, url_fallback=url_fallback):
-                        payload_fb = {
-                            "model": self.model,
-                            "prompt": t
-                        }
-                        resp_fb = await client.post(url_fallback, json=payload_fb)
-                        resp_fb.raise_for_status()
-                        emb = resp_fb.json()["embedding"]
-                        self.detected_dimensions = len(emb)
-                        return emb
-                    
-                    fallback_tasks = [fetch_single_fallback(t) for t in processed_batch]
-                    batch_embs = await asyncio.gather(*fallback_tasks)
-                    all_embeddings.extend(batch_embs)
-                except Exception as e:
-                    logger.error(f"Failed to fetch batch embedding: {e}", exc_info=True)
-                    all_embeddings.extend([[0.0] * self.detected_dimensions for _ in processed_batch])
-                    
-        return all_embeddings
 
 
 def serialize_embedding(vector: List[float]) -> bytes:
@@ -263,6 +131,17 @@ class LearnedKnowledgeMatches(NamedTuple):
     other_embedding_rows: int
 
 
+# EMBEDDING-CONTRACT-001 (E1/E3): every vector row is bound to its source
+# revision, span, segment, index generation and embedding fingerprint, and is
+# current only until its file is republished or marked stale. Rows from before
+# the contract carry no fingerprint, so a fingerprinted query never sees them.
+_VECTOR_COLUMNS = (
+    ("parent_chunk", "INTEGER"), ("segment_index", "INTEGER DEFAULT 0"), ("span_start", "INTEGER"),
+    ("span_end", "INTEGER"), ("source_digest", "TEXT"), ("fingerprint", "TEXT"),
+    ("generation", "INTEGER DEFAULT 0"), ("is_current", "INTEGER DEFAULT 1"),
+)
+
+
 class LocalVectorStore:
     """SQLite-backed local vector store."""
 
@@ -287,6 +166,17 @@ class LocalVectorStore:
                 model_name TEXT,
                 dimensions INTEGER,
                 PRIMARY KEY (filepath, chunk_index)
+            )
+        """)
+        existing = {row[1] for row in cursor.execute("PRAGMA table_info(vector_chunks)")}
+        for column, decl in _VECTOR_COLUMNS:
+            if column not in existing:
+                cursor.execute(f"ALTER TABLE vector_chunks ADD COLUMN {column} {decl}")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS embedding_identity (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                fingerprint TEXT NOT NULL,
+                details TEXT NOT NULL
             )
         """)
         cursor.execute("""
@@ -362,6 +252,61 @@ class LocalVectorStore:
                 f"'kriya analyze --force'."
             )
 
+    def active_fingerprint(self) -> Optional[str]:
+        """The embedding fingerprint digest the index's current vectors carry."""
+        row = self.conn.execute("SELECT fingerprint FROM embedding_identity WHERE id = 1").fetchone()
+        return row[0] if row else None
+
+    def has_vectors(self) -> bool:
+        return self.conn.execute("SELECT 1 FROM vector_chunks LIMIT 1").fetchone() is not None
+
+    def reset_index(self, fingerprint: "EmbeddingFingerprint") -> None:
+        """Drop every vector, lexical row and cache entry, and adopt
+        ``fingerprint`` (a forced or first index under a new identity)."""
+        with self.conn:
+            for table in ("vector_chunks", "fts_chunks" if self.use_fts else "fts_chunks_fallback", "file_metadata"):
+                self.conn.execute(f"DELETE FROM {table}")
+            self.conn.execute(
+                "INSERT OR REPLACE INTO embedding_identity (id, fingerprint, details) VALUES (1, ?, ?)",
+                (fingerprint.digest, json.dumps(fingerprint.to_dict(), sort_keys=True)),
+            )
+
+    def publish_file(self, filepath: str, segments: List["EmbeddedSegment"], *, source_digest: str,
+                     fingerprint: str) -> None:
+        """Make ``segments`` the file's current vectors in one transaction:
+        either every vector of this revision is current, or the previous
+        state is untouched (E1)."""
+        lexical = "fts_chunks" if self.use_fts else "fts_chunks_fallback"
+        with self.conn:
+            generation = (self.conn.execute(
+                "SELECT COALESCE(MAX(generation), 0) FROM vector_chunks WHERE filepath = ?", (filepath,),
+            ).fetchone()[0] or 0) + 1
+            self.conn.execute("DELETE FROM vector_chunks WHERE filepath = ?", (filepath,))
+            self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
+            for row, segment in enumerate(segments):
+                self.conn.execute(
+                    "INSERT INTO vector_chunks (filepath, chunk_index, text, embedding, model_name, dimensions,"
+                    " parent_chunk, segment_index, span_start, span_end, source_digest, fingerprint,"
+                    " generation, is_current) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                    (filepath, row, segment.text, serialize_embedding(segment.vector), len(segment.vector),
+                     segment.parent_chunk, segment.segment_index, segment.start_line, segment.end_line,
+                     source_digest, fingerprint, generation),
+                )
+                self.conn.execute(
+                    f"INSERT INTO {lexical} (filepath, chunk_index, text, split_text) VALUES (?, ?, ?, ?)",
+                    (filepath, row, segment.text, split_camel_snake(segment.text)),
+                )
+
+    def mark_stale(self, filepath: str) -> None:
+        """The file changed and its new revision could not be embedded: its
+        previous vectors stay stored but are no longer current, and its
+        previous text leaves the lexical index (neither may pass for the
+        current revision)."""
+        lexical = "fts_chunks" if self.use_fts else "fts_chunks_fallback"
+        with self.conn:
+            self.conn.execute("UPDATE vector_chunks SET is_current = 0 WHERE filepath = ?", (filepath,))
+            self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
+
     def load(self) -> None:
         pass
 
@@ -426,18 +371,29 @@ class LocalVectorStore:
             
         self.conn.commit()
 
-    def query(self, query_embedding: List[float], top_k: int = 5, model_name: str = "default", dimensions: int = 768) -> List[Dict[str, Any]]:
+    def query(self, query_embedding: Optional[List[float]], top_k: int = 5, model_name: str = "default",
+              dimensions: int = 768, fingerprint: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Cosine top-k over the current vectors. With ``fingerprint`` (every
+        production caller) only rows embedded under exactly that identity are
+        compared; a different active identity is never queried as current."""
         if not query_embedding:
             return []
 
-        try:
-            self.verify_model(model_name, dimensions)
-        except ValueError as e:
-            click.secho(f"Warning: {e}. Degrading query to lexical-only FTS matching.", fg="yellow", bold=True, err=True)
-            return []
-
         cursor = self.conn.cursor()
-        cursor.execute("SELECT filepath, chunk_index, text, embedding FROM vector_chunks")
+        if fingerprint is not None:
+            # Every row carries the fingerprint it was embedded under, so a
+            # different identity selects nothing.
+            cursor.execute(
+                "SELECT filepath, chunk_index, text, embedding FROM vector_chunks"
+                " WHERE is_current = 1 AND fingerprint = ?", (fingerprint,))
+        else:
+            try:
+                self.verify_model(model_name, dimensions)
+            except ValueError as e:
+                click.secho(f"Warning: {e}. Degrading query to lexical-only FTS matching.", fg="yellow", bold=True,
+                            err=True)
+                return []
+            cursor.execute("SELECT filepath, chunk_index, text, embedding FROM vector_chunks WHERE is_current = 1")
         rows = cursor.fetchall()
 
         if not rows:
@@ -597,8 +553,14 @@ class LocalVectorStore:
             logger.warning(f"Lexical query failed: {e}")
         return results
 
-    def query_hybrid(self, query_text: str, query_embedding: List[float], top_k: int = 5, model_name: str = "default", dimensions: int = 768) -> List[Dict[str, Any]]:
-        vector_results = self.query(query_embedding, top_k=top_k * 4, model_name=model_name, dimensions=dimensions)
+    def query_hybrid(self, query_text: str, query_embedding: Optional[List[float]], top_k: int = 5,
+                     model_name: str = "default", dimensions: int = 768,
+                     fingerprint: Optional[str] = None) -> List[Dict[str, Any]]:
+        """RRF over the vector and lexical legs. A None ``query_embedding``
+        (semantic unavailable) leaves only the lexical leg - its hits keep
+        their own single-leg standing, never the weight of agreement."""
+        vector_results = self.query(query_embedding, top_k=top_k * 4, model_name=model_name, dimensions=dimensions,
+                                    fingerprint=fingerprint)
         lexical_results = self.query_lexical(query_text, top_k=top_k * 4)
 
         # PRD027-PRECISION-001: each hit also carries its rank in each leg

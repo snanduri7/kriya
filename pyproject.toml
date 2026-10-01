@@ -86,6 +86,7 @@ markers = [
     "certification_case: PRD-035 case identity (case id, task class) of a live_certification test",
     "state_machine: fast deterministic state-machine tier (retry/recovery/fallback, resume, verification/commit, budgets); run with `pytest -m state_machine` - never carries a live marker (tests/state_machine/test_sm_tier_guard.py)",
     "developer_answers_verbatim: FILE-INTEGRITY-CONTRACT-001 - the scripted per-file Developer answers reach the parser exactly as written (no translation into the protocol the prompt asks for; see tests/conftest.py::_scripted_developer_answers_speak_the_requested_protocol)",
+    "real_embedding_identity: EMBEDDING-CONTRACT-001 - the test exercises OllamaEmbeddingClient.fingerprint() itself (through an injected transport); every other test gets a fixed fake identity (tests/conftest.py::_no_embedding_identity_probe)",
     "live_static_analysis: requires the exact pinned static-analysis scanner (Semgrep 1.178.0; Docker + the pinned image for OCI cases) - excluded by default, run explicitly with `pytest -m live_static_analysis`",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for

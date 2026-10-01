@@ -322,6 +322,13 @@ falls back to the host's tools.
     afterwards, so they never end up in your project or in a commit. Changing or deleting one of your project's
     files while running is still a hard failure. Only the step that runs your application gets this; builds and
     tests may still create nothing but their own tool output.
+- **Code search embeddings.** Kriya embeds code through Ollama's `/api/embed` and asks it never to truncate. A chunk
+  too long for the embedding model is split into pieces instead, so nothing is silently cut off. If an embedding
+  fails, Kriya never stores a placeholder: the file is reported as failed, keeps no current vectors, and is retried on
+  the next `kriya analyze` (which then exits non-zero and lists the failures). The index records the exact embedding
+  model it was built with; if you change or re-pull that model, `kriya analyze --force` rebuilds it, and until then
+  searches use only text and code-structure matches (the run records `semantic_unavailable`). `kriya doctor
+  --production` checks all of this in its `embedding.contract` row.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 

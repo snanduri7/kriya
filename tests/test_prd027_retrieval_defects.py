@@ -14,6 +14,8 @@ certification exposed. Each test fails on the pre-fix code:
 """
 import asyncio
 
+from _fake_embedding import StaticEmbedder, seed_index
+
 from kriya.analyzer.analyzer import CONFIGURATION_INDEX_EXTENSIONS, RepositoryAnalyzer
 from kriya.analyzer.graph import DependencyGraph
 from kriya.config import AppConfig
@@ -23,23 +25,15 @@ from kriya.workflow.context_certification import DeterministicHashingEmbedder
 from kriya.workflow.graph_retrieval import retrieve_graph_context
 
 
-class _FixedEmbedder:
-    def __init__(self, vector):
-        self.vector = vector
-
-    async def get_embedding(self, text, is_query=False):
-        return list(self.vector)
-
-
 def test_graph_retrieval_queries_with_the_real_embedding_dimension(tmp_path):
     (tmp_path / "Target.java").write_text("class Target {}\n")
     (tmp_path / "Other.java").write_text("class Other {}\n")
     store = LocalVectorStore(str(tmp_path / "vector_index.db"))
-    store.add_document("Target.java", "class Target {}", [1.0, 0.0, 0.0], chunk_index=0, model_name="m", dimensions=3)
-    store.add_document("Other.java", "class Other {}", [0.0, 1.0, 0.0], chunk_index=0, model_name="m", dimensions=3)
+    seed_index(store, [("Target.java", "class Target {}", [1.0, 0.0, 0.0]),
+                       ("Other.java", "class Other {}", [0.0, 1.0, 0.0])])
 
     result = asyncio.run(retrieve_graph_context(
-        "zzzz qqqq", str(tmp_path), embed_client=_FixedEmbedder([1.0, 0.0, 0.0]), vector_store=store,
+        "zzzz qqqq", str(tmp_path), embed_client=StaticEmbedder([1.0, 0.0, 0.0]), vector_store=store,
         dependency_graph_path=None, limits=RetrievalLimits(top_k=1, max_hops=2, max_neighborhood_results=30),
         embedding_model="m", budget_limit=lambda: 4000,
     ))

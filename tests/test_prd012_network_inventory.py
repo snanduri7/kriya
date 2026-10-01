@@ -23,7 +23,7 @@ INVENTORY = {
     ("kriya/core/llm.py", "httpx.AsyncClient"): (
         1, "the transport of LLMClient._client_for's AsyncOpenAI (trust_env=False: never an inherited "
            "proxy); same egress_policy check as above"),
-    ("kriya/memory/vector.py", "httpx.AsyncClient"): (
+    ("kriya/memory/embedding.py", "httpx.AsyncClient"): (
         2, "autonomy.egress_policy: OllamaEmbeddingClient._enforce_egress before any request "
            "(egress_policy is a required constructor argument)"),
     ("kriya/tools/search.py", "httpx.AsyncClient"): (

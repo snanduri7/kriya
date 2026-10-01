@@ -1711,17 +1711,31 @@ async def _maybe_run_developer_investigation(
         vector_index_path = os.path.join(ctx.kernel.config.paths.memory, "vector_index.db")
         if not os.path.exists(vector_index_path):
             return []
-        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-        embed_client = OllamaEmbeddingClient(
-            base_url=ctx.kernel.config.embedding.base_url, model=ctx.kernel.config.embedding.model,
-            egress_policy=ctx.kernel.config.autonomy.egress_policy,
-        )
-        query_emb = await embed_client.get_embedding(query, is_query=True)
+        from types import SimpleNamespace
+
+        from kriya.memory.embedding import configured_client, run_deadline
+        from kriya.memory.vector import LocalVectorStore
+        from kriya.workflow.graph_retrieval import semantic_query_embedding
+
         store = LocalVectorStore(vector_index_path)
         try:
+            # EMBEDDING-CONTRACT-001: an unavailable semantic leg is recorded,
+            # and only the lexical leg answers - never a zero-vector search.
+            availability = SimpleNamespace(semantic_unavailable=None)
+            query_emb, fingerprint = await semantic_query_embedding(
+                configured_client(ctx.kernel.config), store, query, availability,
+                run_deadline(ctx.kernel.config),
+            )
+            if availability.semantic_unavailable:
+                state.record_event(RunEvent(
+                    kind="retrieval.semantic_unavailable", attempt=state.attempt_number,
+                    source="investigation.search_code", authority=EventAuthority.ADVISORY,
+                    message=f"semantic search unavailable ({availability.semantic_unavailable}); lexical only",
+                    details={"reason_code": availability.semantic_unavailable},
+                ))
             return store.query_hybrid(
                 query, query_emb, top_k=5, model_name=ctx.kernel.config.embedding.model,
-                dimensions=len(query_emb),
+                dimensions=len(query_emb) if query_emb else 0, fingerprint=fingerprint,
             )
         finally:
             store.close()

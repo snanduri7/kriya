@@ -21,11 +21,14 @@ buckets are consumed.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package
+
+logger = logging.getLogger(__name__)
 
 # PRD027-PRECISION-001: why the graph walk started from the files it did.
 EXPANSION_CORROBORATED = "CORROBORATED_EXPANSION_SEED"
@@ -94,6 +97,9 @@ class GraphRetrievalResult:
     # PRD027-PRECISION-001: the files the graph walk started from and why.
     expansion_seed_files: List[str] = field(default_factory=list)
     expansion_seed_reason: Optional[str] = None
+    # EMBEDDING-CONTRACT-001: why the semantic leg did not run (a typed
+    # embedding reason code); only the lexical leg then contributed.
+    semantic_unavailable: Optional[str] = None
 
 
 # PRD027-SCORE-NORMALIZATION-001: the tier of direct query evidence. Each
@@ -126,6 +132,36 @@ def evidence_scores(direct: Dict[str, float], expanded: Dict[str, float]) -> Dic
     return ranked
 
 
+async def semantic_query_embedding(
+    embed_client: Any, vector_store: Any, query: str, result: Any, deadline: Optional[float] = None,
+) -> Tuple[Optional[List[float]], Optional[str]]:
+    """(query vector, fingerprint digest) for the semantic leg, or (None,
+    fingerprint) with ``result.semantic_unavailable`` set to the typed reason
+    when the embedding failed or the index was built under another identity:
+    the lexical leg then runs alone and stale vectors are never queried
+    (EMBEDDING-CONTRACT-001). An exhausted run deadline is not an embedding
+    failure: it propagates."""
+    from kriya.memory.embedding import EMBEDDING_IDENTITY_CHANGED, EmbeddingError
+
+    try:
+        fingerprint = (await embed_client.fingerprint()).digest
+    except EmbeddingError as error:
+        result.semantic_unavailable = error.reason_code
+        logger.warning("Semantic retrieval unavailable (%s); lexical retrieval only.", error)
+        return None, None
+    if vector_store.active_fingerprint() != fingerprint:
+        result.semantic_unavailable = EMBEDDING_IDENTITY_CHANGED
+        logger.warning("Vector index identity differs from the served embedding model; lexical retrieval only "
+                       "until 'kriya analyze --force' re-indexes it.")
+        return None, fingerprint
+    try:
+        return await embed_client.get_embedding(query, is_query=True, deadline=deadline), fingerprint
+    except EmbeddingError as error:
+        result.semantic_unavailable = error.reason_code
+        logger.warning("Semantic retrieval unavailable (%s); lexical retrieval only.", error)
+        return None, fingerprint
+
+
 async def retrieve_graph_context(
     goal: str,
     workspace_path: str,
@@ -136,6 +172,7 @@ async def retrieve_graph_context(
     limits: RetrievalLimits,
     embedding_model: str,
     budget_limit: Callable[[], int],
+    deadline: Optional[float] = None,
 ) -> GraphRetrievalResult:
     """Retrieve and assemble the Graph RAG context for ``goal``.
     ``budget_limit`` is evaluated only when there are hits to assemble, as it
@@ -147,13 +184,10 @@ async def retrieve_graph_context(
     )
 
     result = GraphRetrievalResult()
-    query_emb = await embed_client.get_embedding(goal, is_query=True)
-    # The index is keyed by (model, dimension): pass the real query
-    # dimension, never query_hybrid's 768 default - a non-768 embedding
-    # model otherwise silently degraded code retrieval to lexical-only
-    # (found by the PRD-027 certification suite).
+    query_emb, fingerprint = await semantic_query_embedding(embed_client, vector_store, goal, result, deadline)
     matches = vector_store.query_hybrid(
-        goal, query_emb, top_k=limits.top_k, model_name=embedding_model, dimensions=len(query_emb),
+        goal, query_emb, top_k=limits.top_k, model_name=embedding_model,
+        dimensions=len(query_emb) if query_emb else 0, fingerprint=fingerprint,
     )
     good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
     grounding_resolver = CurrentSourceResolver(workspace_path, None)

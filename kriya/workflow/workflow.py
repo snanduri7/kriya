@@ -2529,12 +2529,9 @@ class WorkflowEngine:
             db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
             
             if os.path.exists(vector_index_path):
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=self.kernel.config.embedding.base_url,
-                    model=self.kernel.config.embedding.model,
-                    egress_policy=self.kernel.config.autonomy.egress_policy,
-                )
+                from kriya.memory.embedding import configured_client, run_deadline
+                from kriya.memory.vector import LocalVectorStore
+                embed_client = configured_client(self.kernel.config)
                 vector_store = LocalVectorStore(vector_index_path)
                 
                 # MA2.6 - retrieval_limits_for(control.process_profile.context_depth)
@@ -2560,6 +2557,7 @@ class WorkflowEngine:
                         embed_client=embed_client, vector_store=vector_store,
                         dependency_graph_path=db_path, limits=retrieval_limits,
                         embedding_model=self.kernel.config.embedding.model,
+                        deadline=run_deadline(self.kernel.config),
                         # The graph pool, never more than the Planner's own request
                         # has room for beside its system prompt and the text known
                         # so far (PROMPT-BUDGET-FIT-001A; the rest is fitted when
@@ -2574,6 +2572,16 @@ class WorkflowEngine:
                     # RESOURCE-SQLITE-CLOSE-001: used for this one call only.
                     vector_store.close()
                 graph_retrieval_result = retrieval
+                if retrieval.semantic_unavailable:
+                    # EMBEDDING-CONTRACT-001: a run that retrieved without its
+                    # semantic leg says so - never a silent lexical-only run.
+                    state.record_event(RunEvent(
+                        kind="retrieval.semantic_unavailable", attempt=0, source="graph_retrieval",
+                        authority=EventAuthority.ADVISORY,
+                        message=f"semantic retrieval unavailable ({retrieval.semantic_unavailable}); "
+                                "lexical and graph retrieval only",
+                        details={"reason_code": retrieval.semantic_unavailable},
+                    ))
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints
                 verified_grounding = retrieval.verified_grounding
@@ -2595,6 +2603,8 @@ class WorkflowEngine:
                             "matched_files": list(retrieval.matched_files),
                         },
                     ))
+        except InferenceDeadlineError:
+            raise  # the run's own deadline, not a retrieval failure
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
             

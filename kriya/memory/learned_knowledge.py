@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import Any, List, Tuple
 
 from kriya.core.llm import EgressViolationError
-from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+from kriya.memory.vector import LocalVectorStore
 
 LEARNED_KNOWLEDGE_DB = "web_knowledge.db"
 # How many learned chunks one request may show, and the cosine similarity a
@@ -85,17 +85,13 @@ async def retrieve_learned_references(cfg: Any, query: str) -> LearnedRetrieval:
     path = learned_knowledge_db_path(cfg)
     if not query.strip() or not os.path.exists(path):
         return LearnedRetrieval()
-    client = OllamaEmbeddingClient(
-        base_url=cfg.embedding.base_url,
-        model=cfg.embedding.model,
-        egress_policy=cfg.autonomy.egress_policy,
-    )
+    from kriya.memory.embedding import EmbeddingError, configured_client, run_deadline
+
     try:
-        embedding = await client.get_embedding(query, is_query=True)
-    except EgressViolationError as exc:
+        embedding = await configured_client(cfg).get_embedding(query, is_query=True, deadline=run_deadline(cfg))
+    except (EgressViolationError, EmbeddingError) as exc:
+        # EMBEDDING-CONTRACT-001: a typed reason, never a zero-vector query.
         return LearnedRetrieval(unavailable_reason=str(exc))
-    if not any(embedding):
-        return LearnedRetrieval(unavailable_reason="the embedding endpoint returned no usable query vector")
     try:
         store = LocalVectorStore(path)
         try:

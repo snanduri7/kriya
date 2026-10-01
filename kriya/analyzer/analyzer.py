@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field
@@ -422,6 +423,19 @@ def _prune_departed_roots() -> None:
             _ANALYZE_CACHE.pop(key, None)
 
 
+@dataclass
+class IndexReport:
+    """EMBEDDING-CONTRACT-001: what an index_repository() pass did. A file in
+    ``failed`` (path -> reason code) has no current vectors for its present
+    revision; ``analyze`` exits non-zero when any did."""
+
+    fingerprint: str
+    indexed: int = 0
+    failed: Dict[str, str] = field(default_factory=dict)
+    segmented_chunks: int = 0
+    admission_misses: int = 0
+
+
 class RepositoryAnalyzer:
     """Analyzes workspace directory to extract language, frameworks, architecture and dependencies."""
 
@@ -834,27 +848,30 @@ class RepositoryAnalyzer:
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
 
-        # Probe model dimensions dynamically and verify
-        test_emb = await client.get_embedding("test")
-        detected_dim = len(test_emb)
-        
+        # EMBEDDING-CONTRACT-001: the served model's identity is measured (a
+        # real probe embedding, digest, served context) before anything is
+        # indexed - a failed probe stops indexing; the dimension is never
+        # assumed. Vectors of another identity are never mixed with these.
+        from kriya.memory.embedding import EmbeddingError, EmbeddingIdentityChangedError, embed_chunks
+
         try:
-            store.verify_model(cfg.embedding.model, detected_dim)
-        except ValueError as e:
-            if force:
-                logger.info("Forcing re-index due to model/dimension mismatch. Wiping existing vector index...")
-                cursor = store.conn.cursor()
-                cursor.execute("DELETE FROM vector_chunks")
-                if store.use_fts:
-                    cursor.execute("DELETE FROM fts_chunks")
-                else:
-                    cursor.execute("DELETE FROM fts_chunks_fallback")
-                cursor.execute("DELETE FROM file_metadata")
-                store.conn.commit()
-            else:
-                store.close()
-                graph.close()
-                raise e
+            fingerprint = await client.fingerprint()
+            active = store.active_fingerprint()
+            if active is None or force:
+                # A first index, a pre-contract index (rows without any
+                # identity: re-embedded in full), or an explicit --force.
+                store.reset_index(fingerprint)
+            elif active != fingerprint.digest:
+                raise EmbeddingIdentityChangedError(
+                    f"the vector index was built under embedding identity {active[:12]}, the served model is "
+                    f"{fingerprint.digest[:12]} ({fingerprint.model}); re-index with 'kriya analyze --force'",
+                    details={"index": active, "served": fingerprint.to_dict()},
+                )
+        except Exception:
+            store.close()
+            graph.close()
+            raise
+        report = IndexReport(fingerprint=fingerprint.digest)
         
         # 2. Find target files (respecting nested gitignores and system ignore filters)
         # RepositoryAnalyzer.analyze() already detects far more languages via
@@ -988,68 +1005,31 @@ class RepositoryAnalyzer:
                 # unset on any failure path (see below), so a later
                 # non-`--force` run naturally retries this exact file.
                 # Clear old chunks first to support re-indexing clean
-                store.remove_file(rel_path)
-
-                # Index in dependency graph
                 graph.index_file(rel_path, content, mtime, file_hash)
 
-                # Chunk file with metadata headers
-                chunks = chunk_file_with_metadata_headers(content, rel_path)
-
-                chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
-                embedding_failed = False
-                if chunk_texts:
-                    # Generate all embeddings concurrently
-                    embs = await client.get_embeddings(chunk_texts)
-
-                    for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
-                        # get_embeddings() silently substitutes an all-zero
-                        # "dummy" vector on any failure (embedding server
-                        # unreachable, malformed response) to degrade
-                        # gracefully - reasonable for a query-time caller,
-                        # where a dummy query vector naturally scores
-                        # near-zero and gets filtered out, but not here: a
-                        # zero-vector chunk is genuinely unsearchable
-                        # forever once written.
-                        if not any(v != 0.0 for v in emb):
-                            embedding_failed = True
-                        store.add_document(
-                            filepath=rel_path,
-                            text=chunk_text,
-                            embedding=emb,
-                            chunk_index=chunk_idx,
-                            model_name=cfg.embedding.model,
-                            dimensions=len(emb)
-                        )
-                # Store new cache metadata (including hash and mtime) -
-                # but NOT when any chunk's embedding silently degraded to
-                # a zero-vector above. Found live, 2026-08-12 (SME
-                # architecture review): a transient embedding-API failure
-                # during indexing previously got cached as a normal
-                # successful mtime/hash match, so a later non-`--force`
-                # `kriya analyze` would see the file as already
-                # up-to-date (per the fast-path skip check above) and
-                # never retry it - permanent, silent corruption of that
-                # file's RAG entries, recoverable only via `--force`.
-                # Deliberately leaving file_metadata unset here (the
-                # dependency graph's own cached mtime/hash, written
-                # above via graph.index_file, is NOT similarly gated -
-                # graph indexing has no embedding step to fail) means
-                # the fast-path skip's `cached_mtime == mtime` check
-                # will not match on the next run, so it naturally
-                # retries this file instead of skipping it forever.
-                if embedding_failed:
-                    logger.warning(
-                        f"Embedding generation failed for one or more chunks of '{rel_path}' "
-                        "(embedding server unreachable or returned an error) - indexed with a "
-                        "placeholder vector for those chunks, which will NOT be findable via "
-                        "similarity search. This file's cache metadata was deliberately not "
-                        "updated, so the next 'kriya analyze' run will retry it automatically."
-                    )
-                else:
-                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                chunks = [c for c in chunk_file_with_metadata_headers(content, rel_path) if c["text"].strip()]
+                with open(filepath, "rb") as raw:
+                    source_digest = hashlib.sha256(raw.read()).hexdigest()
+                try:
+                    segments = await embed_chunks(client, chunks, fingerprint.served_context)
+                except EmbeddingError as embedding_error:
+                    # E1: this revision is not current until every vector of
+                    # it exists; the previous vectors stay stored but stale,
+                    # and the cache entry is cleared so the next run retries.
+                    store.mark_stale(rel_path)
+                    if rel_path in store.file_metadata:
+                        del store.file_metadata[rel_path]
+                    report.failed[rel_path] = embedding_error.reason_code
+                    logger.warning(f"Embedding failed for '{rel_path}' ({embedding_error}); its previous "
+                                   "vectors are no longer current and it will be retried next run.")
+                    continue
+                store.publish_file(rel_path, segments, source_digest=source_digest, fingerprint=fingerprint.digest)
+                store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                report.indexed += 1
+                report.segmented_chunks += sum(1 for seg in segments if seg.segment_index > 0)
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
+                report.failed[rel_path] = type(e).__name__
                 
         # Remove deleted files from cached index
         cached_files = list(store.file_metadata.keys())
@@ -1061,14 +1041,16 @@ class RepositoryAnalyzer:
                     graph.clear_file(cached_file)
                 
         # 4. Save persistent cache index
+        report.admission_misses = getattr(client, "admission_misses", 0)
         store.save()
-        logger.info("Semantic repository indexing completed.")
+        logger.info("Semantic repository indexing completed: %d indexed, %d failed.",
+                    report.indexed, len(report.failed))
         store.close()
         graph.close()
-        
+
         # 5. Auto-Generate Codebase Conventions Skill
         if not generate_conventions_skill:
-            return
+            return report
         repo_slug = os.path.basename(self.root_path).lower().strip(".")
         if not repo_slug:
             repo_slug = "root"
@@ -1157,3 +1139,4 @@ class RepositoryAnalyzer:
             except Exception as ex:
                 logger.error(f"Failed to auto-generate skill conventions: {ex}", exc_info=True)
                 click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red", err=True)
+        return report
