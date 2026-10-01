@@ -12,13 +12,13 @@ Retrieval/indexing commits since the snapshot: `c57d21f` (EMBEDDING-CONTRACT-001
 | E-01 `analyze --changed` deletes unchanged files | STILL OPEN | TRACED: deletion set = change-filtered `files_to_index` (analyzer.py deleted-files loop) | FIXED slice 2: deletions = (every path any index layer holds) − full walk; regression + mutation |
 | E-02 Java symbols miss 30–60 % | STILL OPEN | TRACED: regex `_parse_java` (graph.py), fake spans `idx+5`/`idx+2`; no tree-sitter | FIXED slice 1: graph reads the tree-sitter model (methods+ctors 36.2 %→100 % on commons-lang) |
 | E-03 graph adds noise | PARTIALLY CLOSED | PRD-027 corroborated seeds narrow the walk; extraction still regex | improved indirectly by E-02 |
-| E-04 target member dropped by per-file packing | STILL OPEN | packing tiers unchanged | Stage 7 (T0 never dropped) |
+| E-04 target member dropped by per-file packing | STILL OPEN | packing tiers unchanged | ADDRESSED slice 4 (service API): T0 member packing keeps the gold body 100 % vs 0 % for the old per-file packer when the file exceeds a 2,000-token budget; not yet wired into Developer prompts |
 | E-05 failed query embedding → zero vector | CLOSED | `c57d21f` | — |
 | E-06 no scale to 300k LOC | STILL OPEN | brute-force NumPy scan | PARTIALLY ADDRESSED slice 3: deterministic structural locate p95 ≤ 34 ms on commons-lang (208k LOC) and Kriya (121k LOC), warm refresh 0.03 s; vector scan unchanged |
 | E-07 Ruby | DEFERRED | out of scope by owner decision | — |
 | E-08 Spring XML namespaces | STILL OPEN | namespace strip predates snapshot; measured failure stands | not in this batch unless reached |
 | E-09 `async def` not indexed | STILL OPEN | TRACED: graph.py `_parse_python` has no `AsyncFunctionDef` | FIXED slice 1 (`async def` in the graph; model carries `async`) |
-| E-10 signatures tier drops fields | STILL OPEN | context_budget.py unchanged | Stage 7 (T0 header carries fields) |
+| E-10 signatures tier drops fields | STILL OPEN | context_budget.py unchanged | ADDRESSED in T0 package (enclosing fields/constructors); context_budget tiers unchanged |
 | E-11 huge chunks vs 2048 context | PARTIALLY CLOSED | truncation fixed by segmentation (`c57d21f`); chunk size/header bloat remain | later |
 | E-12 index identity / refresh / relative memory | PARTIALLY CLOSED | embedding fingerprint carries versions; no parser identity; `_ensure_repository_indexed` only indexes an EMPTY graph (workflow.py) | PARTIALLY FIXED slice 2: graph manifest binds schema + tree-sitter + grammar + parser versions + embedding fingerprint + repository revision; per-file raw sha256; another identity is re-parsed (vectors untouched). Refresh-before-run still open |
 | E-13 `skills/` indexed as code | STILL OPEN | index walk filters by `.gitignore` only | FIXED slice 2: skill-package marker + configured skills/memory roots + `.kriya` excluded; a code dir named `skills` stays indexed |
@@ -72,6 +72,10 @@ seam (`DependencyGraph._parse_java` / `find_symbol_locations`). No engine conver
 | `graph.py` import of `JAVA_METHOD_SIGNATURE_CORE` | — | DELETED (slice 1) |
 | substring tag matching (`tag in dep`, `tag in goal`, `lib in name`) at 5 sites | `skill.mentions_term` | REPLACED (slice 2) |
 | analyzer's file-cache-only deletion loop | union of index layers − full walk | REPLACED (slice 2) |
+| `java_members.py` regex/brace-depth scanner (`_DECL_RE`, `_annotations_for`, `_matching_close_brace_line`, type/annotation regexes; ~230 lines) | structural model | DELETED (slice 4) |
+| `java_member_boundaries` primary-type-only limit | every type's methods/constructors (`Outer.Inner.m`) | REPLACED (slice 4) |
+| old retrieval lexical leg for localization | `CodeIntelligenceService.locate` | NOT YET DELETED — deletion target once locate is wired into `retrieve_graph_context`/Planner grounding |
+| `graph.find_java_main_class` line regexes | structural model (top-level types + main signature) | NAMED DELETION TARGET |
 
 ## 4. Code Intelligence boundary
 

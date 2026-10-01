@@ -76,3 +76,14 @@ scored (commons-lang 51 of 251).
 Not met yet: the ≥90 % recall@5 target holds for error/stack goals and the Petclinics, not for free-text
 goals on large repos (commons-lang 0.64, Kriya 0.52). Behavior goals ("fix week-year formatting") are the gap;
 they are where the vector leg and a structured LLM ambiguity step (CI-6, deferred) would add evidence.
+
+## Member packing (MEASURED, `pack_bench.py`, budget 2,000 tokens, mined loc-N gold members at HEAD)
+
+| Repo | cases (file > budget) | gold body present: old per-file packer | member packing (T0) | median tokens old / T0 | T0 over budget |
+|---|---|---|---|---|---|
+| commons-lang | 200 (181) | 9.5 % (0 % when file > budget) | 100 % | 40 / 697 | 12 |
+| httpx | 65 (61) | 6.2 % (0 %) | 100 % | 666 / 664 | 0 |
+| Kriya | 89 (85) | 4.5 % (0 %) | 100 % | 31 / 2,167 | 45 (members themselves > 2,000 tokens) |
+| spring-petclinic | 12 (0) | 100 % | 100 % | 1,112 / 586 | 0 |
+
+T0 is never trimmed: an over-budget target is reported, not cut.

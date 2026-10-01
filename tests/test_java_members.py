@@ -207,12 +207,11 @@ def test_interface_method_has_no_body_and_is_detected():
     assert all(m.visibility == "package-private" for m in members)
 
 
-def test_record_compact_canonical_constructor_is_not_detected():
-    """Documented limitation: a record's COMPACT canonical constructor
-    (no parameter list at all) is out of scope for this scanner, which
-    requires a parenthesized parameter list for every constructor. An
-    ordinary (explicit-parameter-list) canonical constructor IS detected
-    normally - only the parameter-list-free compact form is missed."""
+def test_record_compact_canonical_constructor_is_detected():
+    """Code Intelligence R1 removed this former documented limitation: the
+    tree-sitter model sees a record's COMPACT canonical constructor (no
+    parameter list of its own); its parameter types are the record
+    components, and its span covers its real body."""
     source = (
         "public record Customer(long id, String name) {\n"
         "    public Customer {\n"
@@ -222,7 +221,10 @@ def test_record_compact_canonical_constructor_is_not_detected():
         "}"
     )
     members = extract_java_members(source)
-    assert [m.name for m in members] == ["greet"]
+    assert [m.name for m in members] == ["Customer", "greet"]
+    compact = members[0]
+    assert compact.kind == "constructor" and compact.parameter_types == ("long", "String")
+    assert (compact.start_line, compact.end_line) == (2, 4) and compact.visibility == "public"
 
 
 def test_second_top_level_type_members_not_scanned():
@@ -392,3 +394,28 @@ def test_frozen_a1_target_default_driver_service_inventory():
 
     assert by_name["findDriverChecked"][0].visibility == "private"
     assert by_name["find"][0].kind == "method"
+
+
+# --- Code Intelligence R1: shapes the regex scanner could not read ---
+
+def test_text_block_containing_declaration_text_is_not_a_member():
+    source = (
+        "public class Foo {\n"
+        "    String sql = \"\"\"\n"
+        "        public void injected() { }\n"
+        "        \"\"\";\n"
+        "    void real() { }\n"
+        "}"
+    )
+    assert [m.name for m in extract_java_members(source)] == ["real"]
+
+
+def test_enum_body_methods_and_constructors_are_direct_members():
+    source = "public enum Tier {\n    GOLD(1), SILVER(2);\n    Tier(int rank) { }\n    int rank() { return 1; }\n}"
+    members = extract_java_members(source)
+    assert [(m.kind, m.name) for m in members] == [("constructor", "Tier"), ("method", "rank")]
+
+
+def test_nested_type_members_stay_out_of_the_primary_inventory():
+    source = "public class Outer {\n    void a() { }\n    static class Inner {\n        void b() { }\n    }\n}"
+    assert [m.name for m in extract_java_members(source)] == ["a"]

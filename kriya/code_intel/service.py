@@ -237,6 +237,12 @@ class CodeIntelligenceService:
                             index_current=digest == indexed.source_digest and not (
                                 self.overlay and indexed.path in self.overlay.data))
 
+    def build_context(self, symbol_id: str, budget_tokens: Optional[int] = None, **options):
+        """The T0..T2 member package for a localized target (packing.py)."""
+        from kriya.code_intel.packing import build_package
+
+        return build_package(self, symbol_id, budget_tokens, **options)
+
     def _lookup_id(self, symbol_id: str) -> Optional[Symbol]:
         if self.overlay:
             hit = next((s for s in self.overlay.symbols() if s.symbol_id == symbol_id), None)

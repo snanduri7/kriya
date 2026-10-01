@@ -9,13 +9,13 @@ import os
 import subprocess
 
 import pytest
+from _fake_embedding import StaticEmbedder
 
 from kriya.analyzer.analyzer import RepositoryAnalyzer, RepositoryModel, chunk_file_with_metadata_headers
 from kriya.analyzer.graph import DependencyGraph
 from kriya.config import AppConfig
 from kriya.memory.vector import LocalVectorStore
 from kriya.skills.skill import Skill, fact_match, mentions_term
-from _fake_embedding import StaticEmbedder
 
 
 def _git(repo, *args):

@@ -156,6 +156,9 @@ def test_a_stale_index_is_never_mutation_input(service, workspace):
     assert member.text.startswith("long discount(") and member.source_digest == hashlib.sha256(
         path.read_bytes()).hexdigest()
     assert service.member_at(PRICING_PATH, discount.declaration.start_line + 3).name == "discount"
+    # Line 24 is now the last line of total(Item); in the stale index it was
+    # discount's first line - only the current bytes give the right member.
+    assert service.member_at(PRICING_PATH, 24).parameter_types == ("Item",)
     path.write_text(PRICING.replace("    long discount", "    long rebate"))
     assert service.get_member(discount.symbol_id) is None
 
@@ -243,3 +246,55 @@ def test_member_at_uses_the_most_specific_declaration():
     structure = parse_text("A.java", "class A {\n  class B {\n    void f() {\n      int x;\n    }\n  }\n}\n")
     assert structure.symbol_at_line(4).lookup_key == "A.B.f"
     assert structure.symbol_at_line(2).lookup_key == "A.B"
+
+
+# --- Stage 7: member-level packing (T0..T2) ---
+
+def test_t0_carries_the_exact_member_bound_to_path_digest_span_and_id(service, workspace):
+    target = service.find_symbol("PriceCalculator.discount")[0]
+    package = service.build_context(target.symbol_id)
+    rendered = package.render()
+    digest = hashlib.sha256((workspace / PRICING_PATH).read_bytes()).hexdigest()
+    assert package.member_text == service.get_member(target.symbol_id).text
+    assert f"{PRICING_PATH}:24-29 sha256={digest} id={target.symbol_id}" in rendered
+    # the enclosing header: package, only the imports the member uses, type, fields, constructors
+    assert "package shop.pricing;" in package.header and "import java.util.List;" not in package.header
+    assert "public class PriceCalculator" in package.header
+    assert any("private final TaxTable taxTable" in line for line in package.header)
+    assert any("public PriceCalculator(TaxTable taxTable)" in line for line in package.header)
+    # stable material first, the volatile authoritative member last
+    assert rendered.rstrip().endswith(package.member_text)
+
+
+def test_t1_collaborators_and_t2_linked_tests(service, workspace):
+    test_path = "src/test/java/shop/pricing/PriceCalculatorTest.java"
+    (workspace / test_path).parent.mkdir(parents=True)
+    (workspace / test_path).write_text("package shop.pricing;\nclass PriceCalculatorTest {\n"
+                                       "  void testTotalWithTax() { }\n  void testDiscount() { }\n}\n")
+    service.refresh([test_path])
+    total = next(s for s in service.find_symbol("PriceCalculator.total") if s.parameter_types == ("List<Item>",))
+    package = service.build_context(total.symbol_id)
+    assert [key for key, _ in package.collaborators] == ["shop.pricing.TaxTable"]
+    assert package.collaborators[0][1] == ["long tax(long cents)"]
+    assert [sig for _, sig in package.tests] == ["void testTotalWithTax()"]
+    assert "import java.util.List;" in package.header  # used by this member
+
+
+def test_t0_is_never_dropped_for_a_budget_and_optional_tiers_yield_first(service):
+    target = service.find_symbol("PriceCalculator.discount")[0]
+    tiny = service.build_context(target.symbol_id, budget_tokens=5)
+    assert tiny.over_budget and tiny.member_text.startswith("long discount(") and tiny.collaborators == []
+    total = next(s for s in service.find_symbol("PriceCalculator.total") if s.parameter_types == ("List<Item>",))
+    full = service.build_context(total.symbol_id)
+    tight = service.build_context(total.symbol_id, budget_tokens=len(full.render()) // 4 - 5)
+    assert tight.member_text == full.member_text and not tight.over_budget
+    assert tight.dropped and len(tight.collaborators) < len(full.collaborators)
+
+
+def test_t0_comes_from_the_candidate_overlay_when_one_is_active(service):
+    changed = PRICING.replace("return cents * percent / 100;", "return cents * percent / 1000;")
+    view = service.with_overlay({PRICING_PATH: changed.encode()})
+    target = view.find_symbol("PriceCalculator.discount")[0]
+    package = view.build_context(target.symbol_id)
+    assert "/ 1000;" in package.member_text
+    assert package.source_digest == hashlib.sha256(changed.encode()).hexdigest()

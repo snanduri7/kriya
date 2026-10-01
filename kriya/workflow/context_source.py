@@ -27,7 +27,6 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
-from kriya.analyzer.java_members import extract_java_members
 from kriya.core.file_stamp import file_stamp, unchanged_since
 from kriya.workflow.edit_safety import content_revision
 
@@ -356,22 +355,33 @@ def python_member_ranges(content: str) -> Dict[str, Tuple[int, int]]:
 
 
 def java_member_boundaries(content: str) -> List[MemberBoundary]:
-    """Reuses extract_java_members() as-is (already precise line spans per
-    constructor/method) - member_id is "EnclosingType.methodName" to match
-    Python's own dotted convention above; an overloaded method (same name,
-    different parameters) gets ITS OWN entry keyed by the same member_id as
-    its sibling overload, since JavaMember's own `signature` field (not
-    exposed here) is what actually disambiguates overloads - out of scope
-    for this narrow boundary lookup, which addresses "this named member",
-    not "this exact overload"."""
-    members = extract_java_members(content)
-    return [
-        MemberBoundary(
-            member_id=f"{m.enclosing_type}.{m.name}" if m.enclosing_type else m.name,
-            start_line=m.start_line, end_line=m.end_line,
-        )
-        for m in members
-    ]
+    """Every constructor and method of every type in the file, from the
+    Code Intelligence structural model (tree-sitter). member_id is the
+    file-relative dotted path - "EnclosingType.methodName", or
+    "Outer.Inner.methodName" for a nested type's member - matching Python's
+    convention above. Spans start at the declaration's first non-annotation
+    token and end at the body's closing brace (a body-less declaration is one
+    line). Overloads share a member_id, each with its own boundary (this
+    lookup addresses "this named member", not "this exact overload").
+    A file the parser cannot read yields no boundaries, never a guess."""
+    from kriya.code_intel.model import ParseState
+    from kriya.code_intel.parsing import parse_text
+
+    structure = parse_text("Member.java", content)
+    if structure.state is ParseState.PARSE_FAILED:
+        return []
+    prefix = f"{structure.namespace}." if structure.namespace else ""
+    boundaries = []
+    for symbol in structure.symbols:
+        if symbol.kind not in ("method", "constructor"):
+            continue
+        start = symbol.signature.start_line
+        boundaries.append(MemberBoundary(
+            member_id=symbol.lookup_key[len(prefix):] if symbol.lookup_key.startswith(prefix) else symbol.lookup_key,
+            start_line=start, end_line=symbol.body.end_line if symbol.body is not None else start,
+        ))
+    boundaries.sort(key=lambda b: (b.start_line, b.member_id))
+    return boundaries
 
 
 def python_member_boundaries(content: str) -> List[MemberBoundary]:
