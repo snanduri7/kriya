@@ -138,6 +138,7 @@ def test_a_second_kriya_writer_is_refused_before_any_model_work(chaos_case, tmp_
     finally:
         holder.kill()
         holder.wait()
+        holder.stdout.close()  # kill/wait never close the PIPE (ResourceWarning in a later test)
     outcome = type(error).__name__ if error is not None else typed_failure(result)
     chaos_case.observe(outcome, model_requests=0, runs_recorded=len(scan_run_records(str(workspace)).records))
 
