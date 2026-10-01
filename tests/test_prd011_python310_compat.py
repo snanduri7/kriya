@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE_ROOT = os.path.join(REPO_ROOT, "kriya")
@@ -55,7 +56,7 @@ def test_tomllib_is_imported_only_through_tomlcompat():
     for path in _python_sources():
         if os.path.realpath(path) == os.path.realpath(TOMLCOMPAT):
             continue
-        tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
         for node in ast.walk(tree):
             names = []
             if isinstance(node, ast.Import):
@@ -86,7 +87,7 @@ _PY311_ONLY_ATTRIBUTES = {
 def test_no_python_311_only_syntax_or_stdlib_names():
     offenders = []
     for path in _python_sources():
-        tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
         rel = os.path.relpath(path, REPO_ROOT)
         for node in ast.walk(tree):
             if type(node).__name__ == "TryStar":

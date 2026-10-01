@@ -10,6 +10,7 @@ subcommand (status/diff/log/branch/blame/commit only)."""
 import ast
 import os
 from collections import Counter
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,7 +58,7 @@ def _network_clients():
                     continue
                 path = os.path.join(dirpath, name)
                 rel = os.path.relpath(path, REPO_ROOT)
-                for node in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
+                for node in ast.walk(ast.parse(Path(path).read_text(encoding="utf-8"))):
                     if not isinstance(node, ast.Call):
                         continue
                     func = node.func
