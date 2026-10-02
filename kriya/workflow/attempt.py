@@ -2331,6 +2331,32 @@ def _declares_test_verification(required_verification: Iterable[Dict[str, Any]])
                for item in required_verification or ())
 
 
+# Failures that judge only the Developer's RESPONSE (its shape, its anchors,
+# its consistency) - never evidence that a file is the cause of anything.
+_RESPONSE_VALIDITY_FAILURES = frozenset({
+    "operation_contract", "anchored_edit", "structural_corruption", "no_op_edit", "diagnosis_mismatch",
+})
+
+
+def _only_response_validity_failures(state: GenerationState) -> bool:
+    """Positive evidence that every failure of this run so far only judged a
+    malformed or inconsistent Developer response (its shape, anchors,
+    consistency) - never a gate, locator or misdirection that is evidence
+    about a file. Then a targeted retry's targets are simply the stage's own
+    planned files, and a well-formed NO CHANGE NEEDED is answered by the
+    gates exactly as on a first attempt (live: spring-petclinic s3 - two
+    protocol failures, then NO CHANGE on its own test file, was turned into
+    an attribution dispute, re-attributed to another stage's file and
+    stranded). Unknown provenance (no recorded failure) is not that evidence."""
+    family = state.budgets.last_failure_signature  # the active family; repair feedback inherits it
+    failed = [outcome for outcome in state.gate_outcomes if outcome.get("success") is False]
+    if family is None and not failed:
+        return False
+    if family and family[0] not in _RESPONSE_VALIDITY_FAILURES:
+        return False
+    return all(outcome.get("type") in _RESPONSE_VALIDITY_FAILURES for outcome in failed)
+
+
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
     this Developer invocation (kriya/workflow/edit_capability.py), decided
@@ -7590,7 +7616,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # different known file, redirect there. Otherwise preserve a preceding
     # deterministic locator; only genuinely ungrounded scope widens.
     all_targets_rejected = all_results_are_no_change(files)
-    if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+    if (state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected
+            and not _only_response_validity_failures(state)):
         state.record_event(RunEvent(
             kind="operation.no_change",
             attempt=state.attempt_number,
