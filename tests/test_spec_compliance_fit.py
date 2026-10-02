@@ -77,3 +77,29 @@ def test_an_upstream_file_this_candidate_did_not_change_is_named_not_shown():
                           {"StringUtils.java": BIG_BEFORE, "CharUtils.java": upstream})
     assert "=== CharUtils.java (unchanged by this candidate; not shown) ===" in prompt
     assert "class CharUtils" not in prompt and "+" + CHANGED in prompt
+
+
+def test_the_response_schema_names_requirement_verdicts_whenever_ids_are_shown():
+    """Live matrix (commons-lang chop/strip-accents enforce terminals): the
+    verifier was asked for requirement_verdicts in the user message while the
+    system prompt's "return ONLY" schema omitted the field - measured 0/4
+    verdicts (4/4 with the field in the schema), so every terminal read
+    UNKNOWN and blocked a candidate that passed every gate."""
+    from kriya.agents.agent import REQUIREMENT_VERDICTS_SCHEMA
+    from kriya.workflow.requirements import derive_requirements
+
+    config = AppConfig()
+    agent = SpecComplianceAgent("spec_compliance", MagicMock(config=config))
+    sent = []
+
+    async def escalation(llm, system, prompt, *args, **kwargs):
+        sent.append(system)
+        return '{"compliant": true, "reasoning": "ok", "missing_requirements": []}'
+
+    files = {"A.java": "class A {}\n"}
+    with patch("kriya.agents.agent.call_with_escalation", new=escalation):
+        asyncio.run(agent.check(GOAL, ["A.java"], files, requirements=derive_requirements(GOAL)))
+        asyncio.run(agent.check(GOAL, ["A.java"], files))
+    with_ids, without = sent
+    assert with_ids.endswith(REQUIREMENT_VERDICTS_SCHEMA) and '"requirement_verdicts"' in with_ids
+    assert without == agent.system_prompt  # no requirement ids: the prompt is unchanged

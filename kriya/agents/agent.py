@@ -2860,6 +2860,19 @@ class RunVerifierAgent(BaseAgent):
             )
         return result(verdict, reason_code, reasoning, likely_files, answered=True)
 
+# The verdict field the response schema names whenever requirement ids are
+# shown: stated only in the user message it contradicted the system prompt's
+# "return ONLY {compliant, reasoning, missing_requirements, likely_files}" and
+# the model followed the schema (live matrix, measured: 0/4 verdicts; with the
+# field in the schema 4/4) - every enforce terminal then read UNKNOWN and
+# blocked a candidate that had passed every gate.
+REQUIREMENT_VERDICTS_SCHEMA = (
+    "\nWhen the request lists requirement ids (REQ-n), the JSON object MUST also contain "
+    '"requirement_verdicts": [{"id": "REQ-n", "verdict": "satisfied" | "missing" | "unverifiable", '
+    '"evidence": "file and identifier, or why"}, ...] with exactly one entry per listed id.'
+)
+
+
 class SpecComplianceAgent(BaseAgent):
     """Drives the Goal Spec Compliance Gate: checks whether the goal's LITERALLY
     named requirements (an exact field/method/class name, an exact type, an exact
@@ -3005,13 +3018,14 @@ class SpecComplianceAgent(BaseAgent):
                 "be confirmed from source text alone. Never report a requirement missing because "
                 "it is stated in general terms."
             )) + "\n"
+        system_prompt = self.system_prompt + (REQUIREMENT_VERDICTS_SCHEMA if requirement_items else "")
         head = f"{context_block}=== Goal ===\n{goal}\n\n{requirements_block}=== Files Generated ===\n"
         tail = ("\n\nDoes this code satisfy every concrete, literally-named requirement in the "
                 "goal, per the rules above?")
         from kriya.workflow.context_budget import agent_request_capacity, fit_spec_compliance_files
 
         files_block = fit_spec_compliance_files(
-            agent_request_capacity(self.llm.config, self, "spec_compliance"), (self.system_prompt, head, tail),
+            agent_request_capacity(self.llm.config, self, "spec_compliance"), (system_prompt, head, tail),
             files_written, file_contents, baseline_contents,
         ).value
         prompt = f"{head}{files_block}{tail}"
@@ -3039,7 +3053,7 @@ class SpecComplianceAgent(BaseAgent):
 
         try:
             response_str = await call_with_escalation(
-                self.llm, self.system_prompt, prompt, self._candidates(),
+                self.llm, system_prompt, prompt, self._candidates(),
                 json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
