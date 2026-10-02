@@ -892,7 +892,8 @@ class RepositoryAnalyzer:
         )
         
         from kriya.analyzer.graph import DependencyGraph
-        from kriya.code_intel.parsing import language_for_path, parse_file
+        from kriya.code_intel.model import ParseState
+        from kriya.code_intel.parsing import is_structural_path, parse_file
         from kriya.code_intel.store import StructuralStore
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
@@ -1059,11 +1060,15 @@ class RepositoryAnalyzer:
                 # published or not current (publish_file/mark_stale), and the
                 # file cache unset, so the next non-force run retries it.
                 if not graph_current:
-                    structure = parse_file(rel_path, raw_bytes) if language_for_path(rel_path) else None
+                    # Code (tree-sitter) and configuration (Spring XML,
+                    # application properties/YAML, E-08) share the store.
+                    structure = parse_file(rel_path, raw_bytes) if is_structural_path(rel_path) else None
                     graph.index_file(rel_path, content, mtime, file_hash, source_digest=source_digest,
                                      structure=structure)
-                    if structure is not None:
+                    if structure is not None and structure.state is not ParseState.UNSUPPORTED:
                         structural.publish(structure, raw_bytes)
+                    else:
+                        structural.remove(rel_path)
                     report.restructured += 1
                 if vectors_current:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}

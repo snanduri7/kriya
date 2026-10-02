@@ -21,13 +21,14 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional
 
 from kriya.code_intel import locate as loc
-from kriya.code_intel.model import FileStructure, ParseState, Span, Symbol, source_digest
-from kriya.code_intel.parsing import language_for_path, parse_file
+from kriya.code_intel.model import CONFIG_KINDS, FileStructure, ParseState, Span, Symbol, source_digest
+from kriya.code_intel.parsing import is_structural_path, parse_file
 from kriya.code_intel.store import StructuralStore, identifier_terms
 
 # Kinds a localization result may name (types are kept: a goal can target one).
 _LOCATABLE = frozenset({"method", "constructor", "function", "field", "attribute", "variable", "enum_constant",
-                        "annotation_element", "class", "interface", "enum", "record", "annotation_type"})
+                        "annotation_element", "class", "interface", "enum", "record", "annotation_type",
+                        *CONFIG_KINDS})
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class CandidateOverlay:
         self.data: Dict[str, bytes] = {p: b for p, b in files.items() if b is not None}
         self.tombstones = frozenset(p for p, b in files.items() if b is None)
         self.structures: Dict[str, FileStructure] = {
-            p: parse_file(p, b) for p, b in self.data.items() if language_for_path(p)}
+            p: parse_file(p, b) for p, b in self.data.items() if is_structural_path(p)}
 
     @property
     def shadowed(self) -> frozenset:
@@ -71,7 +72,8 @@ class CandidateOverlay:
 
 
 def discover_source_files(root: str) -> List[str]:
-    """Tracked and untracked-not-ignored files with a structural parser."""
+    """Tracked and untracked-not-ignored files with a structural parser
+    (code or configuration)."""
     result = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=root,
                             capture_output=True, text=True)
     if result.returncode != 0:
@@ -82,7 +84,7 @@ def discover_source_files(root: str) -> List[str]:
         candidates = found
     else:
         candidates = result.stdout.splitlines()
-    return sorted(p for p in candidates if language_for_path(p) and os.path.isfile(os.path.join(root, p)))
+    return sorted(p for p in candidates if is_structural_path(p) and os.path.isfile(os.path.join(root, p)))
 
 
 class CodeIntelligenceService:
@@ -129,6 +131,10 @@ class CodeIntelligenceService:
                 report.unchanged += 1
                 continue
             structure = parse_file(path, data)
+            if structure.state is ParseState.UNSUPPORTED:
+                if path in known:
+                    self.store.remove(path)
+                continue
             self.store.publish(structure, data)
             report.parsed.append(path)
             if structure.state is not ParseState.PARSED:
@@ -194,11 +200,15 @@ class CodeIntelligenceService:
         with open(absolute, "rb") as handle:
             return handle.read()
 
+    def current_bytes(self, path: str) -> Optional[bytes]:
+        """The CURRENT raw bytes of ``path`` (overlay, else workspace)."""
+        return self._current(path)
+
     def current_structure(self, path: str) -> Optional[FileStructure]:
         if self.overlay and path in self.overlay.structures:
             return self.overlay.structures[path]
         data = self._current(path)
-        return parse_file(path, data) if data is not None and language_for_path(path) else None
+        return parse_file(path, data) if data is not None and is_structural_path(path) else None
 
     def member_at(self, path: str, line: int) -> Optional[Symbol]:
         """The most specific declaration containing ``line`` of the CURRENT

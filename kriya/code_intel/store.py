@@ -161,6 +161,20 @@ class StructuralStore:
         return [s for s in self._select("s.name = ?", (last,), exclude_paths)
                 if s.lookup_key == suffix or s.lookup_key.endswith("." + suffix)]
 
+    def by_return_type(self, value: str, kind: Optional[str] = None) -> List[Symbol]:
+        """Symbols whose recorded type text is ``value`` (a bean's class)."""
+        if kind is None:
+            return self._select("s.return_type = ?", (value,))
+        return self._select("s.return_type = ? AND s.kind = ?", (value, kind))
+
+    def by_kind(self, kind: str) -> List[Symbol]:
+        return self._select("s.kind = ?", (kind,))
+
+    def by_lookup_prefix(self, prefix: str, kind: Optional[str] = None) -> List[Symbol]:
+        escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where = "s.lookup_key LIKE ? ESCAPE '\\'" + (" AND s.kind = ?" if kind else "")
+        return self._select(where, (escaped + "%", kind) if kind else (escaped + "%",))
+
     def by_path(self, path: str) -> List[Symbol]:
         return self._select("s.path = ?", (path,))
 

@@ -24,13 +24,23 @@ from kriya.code_intel.model import (
 
 # Bump when the extraction rules below change what is produced for the same
 # bytes (a stored structure under an older version is then never reused).
-STRUCTURAL_PARSER_VERSION = "ci-structural/1"
+# /2: configuration structure (config_parsing.py: Spring XML, properties, YAML).
+STRUCTURAL_PARSER_VERSION = "ci-structural/2"
 
 _LANGUAGE_BY_EXTENSION = {".java": "java", ".py": "python"}
 
 
 def language_for_path(path: str) -> Optional[str]:
+    """The CODE language (tree-sitter) of ``path``, or None."""
     return _LANGUAGE_BY_EXTENSION.get(os.path.splitext(path)[1].lower())
+
+
+def is_structural_path(path: str) -> bool:
+    """Code or configuration the structural index holds (configuration
+    files are decided by name; a non-Spring XML parses UNSUPPORTED)."""
+    from kriya.code_intel.config_parsing import config_language_for_path
+
+    return language_for_path(path) is not None or config_language_for_path(path) is not None
 
 
 def _version(distribution: str) -> str:
@@ -45,6 +55,7 @@ def parser_identity() -> ParserIdentity:
     return ParserIdentity(
         tree_sitter=_version("tree-sitter"), java_grammar=_version("tree-sitter-java"),
         python_grammar=_version("tree-sitter-python"), structural_parser=STRUCTURAL_PARSER_VERSION,
+        pyyaml=_version("PyYAML"),
     )
 
 
@@ -72,6 +83,10 @@ def parse_file(path: str, data: bytes) -> FileStructure:
     identity = parser_identity().digest
     language = language_for_path(path)
     if language is None:
+        from kriya.code_intel.config_parsing import config_language_for_path, parse_config_file
+
+        if config_language_for_path(path) is not None:
+            return parse_config_file(path, data)
         return FileStructure(path, "", digest, ParseState.UNSUPPORTED, identity, detail="no structural parser")
     try:
         tree = _parse_tree(language, data)
