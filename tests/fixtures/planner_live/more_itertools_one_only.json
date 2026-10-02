@@ -1,0 +1,142 @@
+{
+ "acceptance_criteria": [
+  {
+   "description": "The one() and only() functions must correctly handle falsy user-supplied exceptions without dropping them",
+   "id": "ac1",
+   "method": "judgment",
+   "tool_name": null
+  }
+ ],
+ "extension_points": [],
+ "global_invariants": [
+  {
+   "id": "gi1",
+   "statement": "The one() and only() functions must preserve the truthiness of user-supplied exception arguments so that falsy exceptions are not dropped."
+  }
+ ],
+ "integration_relationships": [],
+ "kind": "task",
+ "plan_id": "20261002T095541-2fc72ae0",
+ "refactor_baseline": null,
+ "subtasks": [
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the one() function in more_itertools/more.py to ensure that falsy custom exceptions are properly handled and not dropped",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s1",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "one_function_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that the modified one() function correctly handles falsy exceptions by running existing tests",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the only() function in more_itertools/more.py to ensure that falsy custom exceptions are properly handled and not dropped",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s2",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "only_function_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that the modified only() function correctly handles falsy exceptions by running existing tests",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1",
+    "s2"
+   ],
+   "description": "Run regression tests to confirm that the fixes for one() and only() do not break existing functionality",
+   "execution_method": "model",
+   "execution_role": "verification",
+   "id": "s3",
+   "ownership_justification": {},
+   "planned_files": [],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "one_function_fix",
+    "only_function_fix"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Execute all existing tests for one() and only() functions to ensure no regression",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  }
+ ]
+}

@@ -184,6 +184,7 @@ from kriya.workflow.ownership_findings import (
     settle_findings,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
+from kriya.workflow.plan_normalization import coalesce_same_file_owners
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -4311,6 +4312,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes.append("STRUCTURED_PLAN_EMPTY")
                 else:
                     plan, _ = canonicalize_planned_file_actions(raw_plan, workspace_path)
+                    # PR-1: one owning work unit per mutable file - unordered
+                    # same-file implementation units are merged when safe
+                    # (deterministic; an unsafe split still reaches the
+                    # validator's typed ownership conflict and bounded repair).
+                    plan, coalesced = coalesce_same_file_owners(plan)
+                    if coalesced:
+                        ledger.record_and_persist(
+                            workspace_path, "structured_plan_normalized", run_id=run_id,
+                            repair_attempt=repair_attempts, merges=coalesced,
+                        )
                     # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
                     # longer refused here - they now execute through the
                     # governed path in the per-subtask loop below (real

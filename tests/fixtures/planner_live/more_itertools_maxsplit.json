@@ -1,0 +1,285 @@
+{
+ "acceptance_criteria": [
+  {
+   "description": "When maxsplit is 0, splitting an empty iterable should not yield an empty list",
+   "id": "ac1",
+   "method": "judgment",
+   "tool_name": null
+  }
+ ],
+ "extension_points": [],
+ "global_invariants": [
+  {
+   "id": "gi1",
+   "statement": "When maxsplit is 0, splitting an empty iterable should not yield an empty list"
+  }
+ ],
+ "integration_relationships": [],
+ "kind": "task",
+ "plan_id": "20261002T095920-c0c173b7",
+ "refactor_baseline": null,
+ "subtasks": [
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the split_after function to handle empty iterables when maxsplit is 0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s1",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "split_after_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that split_after handles empty iterables correctly with maxsplit=0",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the split_before function to handle empty iterables when maxsplit is 0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s2",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "split_before_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that split_before handles empty iterables correctly with maxsplit=0",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the split_at function to handle empty iterables when maxsplit is 0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s3",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "split_at_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that split_at handles empty iterables correctly with maxsplit=0",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the split_when function to handle empty iterables when maxsplit is 0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s4",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "more_itertools/more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "split_when_fix"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Verify that split_when handles empty iterables correctly with maxsplit=0",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1",
+    "s2",
+    "s3",
+    "s4"
+   ],
+   "description": "Add regression tests for the empty iterable edge case with maxsplit=0",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s5",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "python"
+     ],
+     "path": "tests/test_more.py",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "split_after_fix",
+      "split_before_fix",
+      "split_at_fix",
+      "split_when_fix"
+     ]
+    }
+   ],
+   "provides": [
+    "regression_tests_added"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "split_after_fix",
+    "split_before_fix",
+    "split_at_fix",
+    "split_when_fix"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Run regression tests to confirm empty iterable behavior with maxsplit=0",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5"
+   ],
+   "description": "Verify that the implemented changes do not break existing functionality",
+   "execution_method": "model",
+   "execution_role": "verification",
+   "id": "s6",
+   "ownership_justification": {},
+   "planned_files": [],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "regression_tests_added"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Run full test suite to ensure no regression in existing functionality",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  }
+ ]
+}
