@@ -767,6 +767,26 @@ def _preserve_member_exact_precision(
     return new_item
 
 
+def _record_known_target_package(state: GenerationState, items: Iterable[ContextItem]) -> None:
+    """Record a known-target or retry-member package per path. A package
+    can render several member_exact units for one file (every member
+    localization grounded, every overload of an ambiguous name), listed in
+    rank order: the path's record is its highest-ranked member - never
+    whichever unit happened to be listed last - and every member unit is kept
+    in ``known_target_member_items`` for edit authority. A path without
+    member units records its last (broadest) item, as before."""
+    by_path: Dict[str, List[ContextItem]] = {}
+    for item in items:
+        by_path.setdefault(item.path, []).append(item)
+    for path, path_items in by_path.items():
+        members = [item for item in path_items if item.tier == "member_exact" and item.member_id is not None]
+        state.known_target_context_items[path] = members[0] if members else path_items[-1]
+        if members:
+            state.known_target_member_items[path] = members
+        else:
+            state.known_target_member_items.pop(path, None)
+
+
 def _classify_retry_target_source_origin(
     state: GenerationState, ctx: "AttemptContext", path: str,
 ) -> str:
@@ -996,6 +1016,14 @@ def _prepare_retry_context(
         },
     )
     _record_authority_expansions(state, expansions)
+    # The run's own grounding - the members localization found for each
+    # authorized target, verified against the CURRENT bytes exactly as on
+    # attempt 1 (no new authority) - stays part of every retry's T0, after
+    # the failure-grounded members: a failure that names no line (a protocol
+    # error, an invented anchor) must never evict the causal member.
+    for path, member_ids in _resolve_known_target_member_hints(ctx, list(target_files or ())).items():
+        hinted = retry_member_hints.setdefault(path, [])
+        hinted.extend(member_id for member_id in member_ids if member_id not in hinted)
     retry_package = _retry_package_for_attempt(
         state, ctx, target_files=target_files, prompt_window=prompt_window,
         exclude=retry_member_hints.keys(),
@@ -1031,13 +1059,7 @@ def _prepare_retry_context(
         # exists to produce. Apply member-scoped (more precise) entries
         # LAST so they are never overwritten by a broader same-path
         # overview - never the reverse.
-        state.known_target_context_items.update({
-            item.path: item
-            for item in sorted(
-                retry_member_package.relevant_files,
-                key=lambda item: item.member_id is not None,
-            )
-        })
+        _record_known_target_package(state, retry_member_package.relevant_files)
         state.record_event(RunEvent(
             kind="context.retry_member_hint_package",
             attempt=state.attempt_number,
@@ -2353,6 +2375,15 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         # the whole current file present verbatim in this request's mandatory
         # text is exact anchor source - checked on the bytes, not on a label.
         # Whole-file replacement authority stays D1's alone.
+        # Every other member unit rendered for the path (all members
+        # localization grounded, every overload of an ambiguous name) counts
+        # when it is of the current revision and its bytes are in this
+        # request's mandatory text.
+        for member in state.known_target_member_items.get(path, ()):
+            if (member is not item and member.is_exact and member.content
+                    and (not member.revision or member.revision == content_shown_revision)
+                    and member.content in mandatory_context):
+                shown.extend(shown_exact_texts(member.tier, member.content))
         if content.strip() and content in mandatory_context:
             shown = [("shown_full", content)]
         capabilities[path] = build_edit_capability(
@@ -6897,13 +6928,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # context's own identical update() - a grounded member_id entry
             # must never be silently overwritten by a broader, less precise
             # same-path overview merely because it happens to sort later.
-            state.known_target_context_items.update({
-                item.path: item
-                for item in sorted(
-                    known_target_package.relevant_files,
-                    key=lambda item: item.member_id is not None,
-                )
-            })
+            _record_known_target_package(state, known_target_package.relevant_files)
             # Internal evidence (WP6/observability) - never the full source,
             # just enough to answer "what tier/omission did each known
             # target actually get" from the run trace alone.
