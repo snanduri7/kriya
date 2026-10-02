@@ -815,6 +815,20 @@ loop returning the identical plan for checks whose fix is fully determined by th
   authorized; `completion_kind` is in the result only when the whole attempt passed, and the controller records
   reason code `VERIFIED_NO_CHANGE` on the SubtaskResult.
 
+### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 first slice
+
+Ecosystem knowledge sits behind two narrow ports (`ports.py`), traced from the verification core's call sites:
+`LanguageAdapter` (`language`, `has_sources`, `source_files`) and `BuildAdapter` (`build_system`, `language`,
+`tools`, `detects`, `output_roots`, `compile` -> result or `None` = not decided, `run_tests`). The registry is
+closed and in-process (`JAVA`, `MAVEN`, `build_adapter_for_tool`; no plugin discovery). First dogfood, moved
+unchanged: `MavenBuildAdapter` owns the dependency-regression check and `mvn clean compile` gate, the `mvn test`
+gate, Maven's gate output roots and the `pom.xml` marker; `JavaLanguageAdapter` owns Java source detection and
+enumeration (two distinct skip sets, as before). `PolymorphicValidator` delegates at those seams; an undecided
+compile falls through to Gradle / javac exactly as before. Adapters run only through the validator handle
+(containment, registry-scoped acquisition, gate binding) and never import a process API
+(`tests/test_capability_adapters.py`, including an AST tripwire that the moved seams carry no Maven literal).
+Gradle, javac, Python and Ruby remain inline for later slices.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
