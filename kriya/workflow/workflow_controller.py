@@ -184,7 +184,7 @@ from kriya.workflow.ownership_findings import (
     settle_findings,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
-from kriya.workflow.plan_normalization import coalesce_same_file_owners
+from kriya.workflow.plan_normalization import coalesce_same_file_owners, derive_verification_contracts
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -4318,10 +4318,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # (deterministic; an unsafe split still reaches the
                     # validator's typed ownership conflict and bounded repair).
                     plan, coalesced = coalesce_same_file_owners(plan)
-                    if coalesced:
+                    # A verification unit's contract is what its own
+                    # depends_on consumes (deterministic restatement).
+                    plan, derived_contracts = derive_verification_contracts(plan)
+                    if coalesced or derived_contracts:
                         ledger.record_and_persist(
                             workspace_path, "structured_plan_normalized", run_id=run_id,
                             repair_attempt=repair_attempts, merges=coalesced,
+                            derived_contracts=derived_contracts,
                         )
                     # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
                     # longer refused here - they now execute through the

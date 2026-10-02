@@ -28,9 +28,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, PlannedFile, Subtask
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, ExecutionRole, PlannedFile, Subtask
 
 COALESCED_FILE_OWNERS = "PLAN_FILE_OWNERS_COALESCED"
+VERIFICATION_CONTRACT_DERIVED = "PLAN_VERIFICATION_CONTRACT_DERIVED"
 
 
 def _mutates(subtask: Subtask) -> bool:
@@ -154,3 +155,33 @@ def coalesce_same_file_owners(plan: EngineeringPlan) -> Tuple[EngineeringPlan, L
         plan = EngineeringPlan.model_validate(plan.model_copy(update={
             "subtasks": subtasks, "integration_relationships": relationships}).model_dump(mode="json"))
         records.append({"reason_code": COALESCED_FILE_OWNERS, "path": path, "kept": keep_id, "absorbed": absorb_id})
+
+
+def derive_verification_contracts(plan: EngineeringPlan) -> Tuple[EngineeringPlan, List[Dict[str, Any]]]:
+    """A verification unit that states no semantic contract gets
+    ``requires`` = what the units it ``depends_on`` provide.
+
+    Live (spring-framework-petclinic, both Spring tasks; 5 plans in 3 runs):
+    a multi-stage plan's terminal verification unit owned no file, depended
+    on every implementation unit and declared neither provides nor requires;
+    validate_plan's SUBTASK_SEMANTIC_CONTRACT_MISSING repair never converged
+    (the identical plan three times). Its depends_on already states what it
+    consumes - its dependencies' outputs - so ``requires`` restates the
+    Planner's own edges; nothing is invented. Left unchanged (and still
+    rejected by the validator) when the unit has no dependency or its
+    dependencies provide nothing. Pure; one record per derived contract."""
+    provides = {st.id: st.provides for st in plan.subtasks}
+    records: List[Dict[str, Any]] = []
+    subtasks = []
+    for st in plan.subtasks:
+        if st.execution_role == ExecutionRole.VERIFICATION and not st.provides and not st.requires:
+            derived = _union(*(provides.get(dep, []) for dep in st.depends_on))
+            if derived:
+                st = st.model_copy(update={"requires": derived})
+                records.append({"reason_code": VERIFICATION_CONTRACT_DERIVED, "subtask": st.id,
+                                "requires": derived, "from_depends_on": list(st.depends_on)})
+        subtasks.append(st)
+    if not records:
+        return plan, records
+    return EngineeringPlan.model_validate(
+        plan.model_copy(update={"subtasks": subtasks}).model_dump(mode="json")), records

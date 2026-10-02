@@ -1,0 +1,201 @@
+{
+ "acceptance_criteria": [
+  {
+   "description": "Repeated pet type lookups do not query the database again after initial load, demonstrating successful caching",
+   "id": "ac1",
+   "method": "judgment",
+   "tool_name": null
+  }
+ ],
+ "extension_points": [],
+ "global_invariants": [
+  {
+   "id": "gi1",
+   "statement": "Pet type lookups must be cached to avoid repeated database queries, similar to how vets are cached."
+  }
+ ],
+ "integration_relationships": [],
+ "kind": "task",
+ "plan_id": "20261002T182933-9be2b5f3",
+ "refactor_baseline": null,
+ "subtasks": [
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Modify the ClinicServiceImpl to implement pet type caching using the same pattern as vet caching",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s1",
+   "mutation_targets": [
+    {
+     "action": "modify",
+     "file": "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+     "requirement_ids": [
+      "REQ-1"
+     ],
+     "target_id": "java:src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java#org.springframework.samples.petclinic.service.ClinicServiceImpl.findPetTypes()"
+    }
+   ],
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [],
+     "path": "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "petTypeCache"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Compile the modified ClinicServiceImpl to ensure no syntax or dependency errors",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1"
+   ],
+   "description": "Update the PetTypeFormatter to utilize cached pet types instead of direct database lookups",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s2",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [],
+     "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "petTypeCache"
+     ]
+    }
+   ],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "petTypeCache"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Compile the modified PetTypeFormatter to ensure no syntax or dependency errors",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1"
+   ],
+   "description": "Update PetController to use cached pet types in populatePetTypes method",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s3",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [],
+     "path": "src/main/java/org/springframework/samples/petclinic/web/PetController.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": [
+      "petTypeCache"
+     ]
+    }
+   ],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "petTypeCache"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Compile the modified PetController to ensure no syntax or dependency errors",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [
+    "s1",
+    "s2",
+    "s3"
+   ],
+   "description": "Verify that the caching behavior works correctly by running relevant tests",
+   "execution_method": "model",
+   "execution_role": "verification",
+   "id": "s4",
+   "ownership_justification": {},
+   "planned_files": [],
+   "provides": [],
+   "relevant_global_invariant_ids": [
+    "gi1"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Run PetTypeFormatterTests to ensure pet type formatting works with caching",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    },
+    {
+     "description": "Run PetControllerTests to verify that pet types are correctly populated using cache",
+     "requires_runtime_execution": false,
+     "tool_name": "test",
+     "type": "tool",
+     "verifier_kind": "test"
+    }
+   ]
+  }
+ ]
+}
