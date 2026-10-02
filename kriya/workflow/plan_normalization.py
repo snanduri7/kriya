@@ -152,3 +152,45 @@ def coalesce_same_file_owners(plan: EngineeringPlan) -> Tuple[EngineeringPlan, L
         plan = EngineeringPlan.model_validate(plan.model_copy(update={
             "subtasks": subtasks, "integration_relationships": relationships}).model_dump(mode="json"))
         records.append({"reason_code": COALESCED_FILE_OWNERS, "path": path, "kept": keep_id, "absorbed": absorb_id})
+
+
+DEMOTED_UNREQUESTED_TEST_UNIT = "PLAN_UNREQUESTED_TEST_MUTATION_DEMOTED"
+
+
+def demote_unrequested_test_units(plan: EngineeringPlan, goal: str) -> Tuple[EngineeringPlan, List[Dict[str, Any]]]:
+    """PR-2: a Planner-added implementation unit whose every planned file is
+    a test file, for a goal that does not ask for tests, is verification -
+    "run/verify the tests" - not Developer mutation work. Live (Spring Boot
+    page size): the implementation units passed every gate, then an added
+    "Update OwnerControllerTests to verify ..." unit (no requirement, the
+    same judgment criterion as the implementation) failed on its own and
+    stopped the run. Such a unit becomes execution_role=verification with no
+    files, keeping its dependencies, capabilities and verifiers (a test
+    verifier added when it named none), so the existing verification
+    machinery runs the tests. A goal that asks for tests keeps every test
+    mutation unit unchanged."""
+    from kriya.workflow.acceptance import goal_explicitly_requires_tests
+    from kriya.workflow.generation_manifest import FileRole, classify_file_role
+    from kriya.workflow.plan_schema import ExecutionRole, VerificationMethod, VerificationMethodType, VerifierKind
+
+    if goal_explicitly_requires_tests(goal):
+        return plan, []
+    records: List[Dict[str, Any]] = []
+    subtasks = []
+    for st in plan.subtasks:
+        if (_mutates(st) and st.execution_role == ExecutionRole.IMPLEMENTATION
+                and all(classify_file_role(pf.path) is FileRole.TEST for pf in st.planned_files)):
+            verification = list(st.verification)
+            if not any(v.verifier_kind == VerifierKind.TEST for v in verification):
+                verification.append(VerificationMethod(
+                    type=VerificationMethodType.TOOL, tool_name="test", verifier_kind=VerifierKind.TEST,
+                    description=f"Run the existing tests ({', '.join(pf.path for pf in st.planned_files)})"))
+            records.append({"reason_code": DEMOTED_UNREQUESTED_TEST_UNIT, "subtask": st.id,
+                            "files": [pf.path for pf in st.planned_files]})
+            st = st.model_copy(update={"execution_role": ExecutionRole.VERIFICATION, "planned_files": [],
+                                       "verification": verification})
+        subtasks.append(st)
+    if not records:
+        return plan, []
+    return EngineeringPlan.model_validate(plan.model_copy(update={"subtasks": subtasks}).model_dump(mode="json")), \
+        records
