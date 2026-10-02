@@ -24,7 +24,12 @@ git clone https://github.com/encode/httpx.git && git -C httpx checkout b5addb64f
 ## Tools
 
 - `coverage.py <repo>...` — structural coverage of the tree-sitter model vs the pre-R1 regex extractors; no model calls.
-- `loc_bench.py` — the loc-N localization benchmark (generator + evaluator); see its docstring.
+- `loc_bench.py` — loc-N, the cheap localization benchmark (generator + evaluator; `--index` adds the vector
+  channel with the configured local embedding model); see its docstring. ci-20 is the separate, expensive
+  end-to-end benchmark.
+- `pack_bench.py` — member packing vs the old per-file packer.
+- `vector_bench.py` — E-06 vector query cost at 10k/30k/45k chunks.
+- `ci6_bench.py` — the CI-6 ambiguity-only model call, live (production config and model).
 
 ## Structural coverage (MEASURED, 2026-10-01)
 
@@ -76,6 +81,99 @@ scored (commons-lang 51 of 251).
 Not met yet: the ≥90 % recall@5 target holds for error/stack goals and the Petclinics, not for free-text
 goals on large repos (commons-lang 0.64, Kriya 0.52). Behavior goals ("fix week-year formatting") are the gap;
 they are where the vector leg and a structured LLM ambiguity step (CI-6, deferred) would add evidence.
+
+## Slice 2 (MEASURED 2026-10-02, branch `feature/code-intelligence-r1-integration`)
+
+### loc-N corpus
+
+724 cases, generated automatically (mined one/two-member commits, subject = goal, gold re-found at HEAD;
+plus 30 seeded synthetic compiler-error / stack-trace / traceback cases per repo); nothing hand-curated.
+Categories: symbol-named, behavior (free text), error/test, and `hygiene` - code-tidying subjects ("Add final
+modifier", "Remove unnecessary else") that name no behavior and so carry no localization signal for any
+system (deterministic phrase list; a 30-case review of commons-lang "behavior" found ~25 such). Hygiene is
+counted, not scored as behavior. Unlocatable subjects (no shared word with the gold files) are skipped and
+counted: commons-lang 105.
+
+| Repo | cases | symbol | behavior | error/test | hygiene |
+|---|---|---|---|---|---|
+| commons-lang (dev set) | 430 | 233 | 78 | 54 (30 synthetic) | 65 |
+| spring-petclinic | 42 | 1 | 5 | 32 (30) | 4 |
+| spring-framework-petclinic | 38 | 1 | 4 | 33 (30) | 0 |
+| httpx | 95 | 17 | 38 | 39 (30) | 1 |
+| Kriya (at `dbada33`) | 119 | 25 | 40 | 53 (30) | 1 |
+
+### Localization before → after (member level; after = production fused retrieval with the vector channel)
+
+Before = the pre-batch production retrieval leg: `query_hybrid` (vector + BM25 RRF) over the regex-chunked
+index, chunk → member by header. After = `retrieve_graph_context`'s fused Code Intelligence query
+(deterministic channels + vector channel over the structurally-chunked index). Same cases, same query
+embeddings (nomic-embed-text, served locally). Latency is per query, warm (E-06 matrix cache).
+
+| Repo | category | n | recall@1 after / before | recall@5 after / before | p50 / p95 ms (after) |
+|---|---|---|---|---|---|
+| commons-lang | all | 430 | 0.384 / 0.181 | **0.558** / 0.267 | 21.7 / 40.5 |
+| commons-lang | symbol | 233 | 0.549 / 0.318 | **0.815** / 0.446 |  |
+| commons-lang | behavior | 78 | 0.026 / 0.0 | **0.141** / 0.051 |  |
+| commons-lang | error/test | 54 | 0.611 / 0.056 | **0.667** / 0.111 |  |
+| commons-lang | hygiene | 65 | 0.031 / 0.015 | 0.046 / 0.015 |  |
+| spring-petclinic | all | 42 | 0.786 / 0.381 | **0.833** / 0.643 | 6.8 / 7.7 |
+| spring-petclinic | behavior | 5 | 0.2 / 0.2 | 0.2 / 0.2 |  |
+| spring-petclinic | error/test | 32 | 0.938 / 0.438 | **0.969** / 0.719 |  |
+| spring-framework-petclinic | all | 38 | 0.842 / 0.316 | **0.895** / 0.553 | 6.9 / 7.8 |
+| spring-framework-petclinic | behavior | 4 | 0.25 / 0.25 | 0.75 / 0.75 |  |
+| spring-framework-petclinic | error/test | 33 | 0.909 / 0.333 | **0.909** / 0.545 |  |
+| httpx | all | 95 | 0.474 / 0.211 | **0.695** / 0.432 | 12.2 / 17.4 |
+| httpx | symbol | 17 | 0.588 / 0.176 | **0.765** / 0.471 |  |
+| httpx | behavior | 38 | 0.105 / 0.053 | **0.421** / 0.316 |  |
+| httpx | error/test | 39 | 0.795 / 0.385 | **0.949** / 0.538 |  |
+| Kriya | all | 119 | 0.454 / 0.252 | **0.664** / 0.420 | 41.8 / 60.3 |
+| Kriya | symbol | 25 | 0.56 / 0.16 | **0.88** / 0.40 |  |
+| Kriya | behavior | 40 | 0.25 / 0.15 | **0.625** / 0.275 |  |
+| Kriya | error/test | 53 | 0.566 / 0.358 | **0.585** / 0.528 |  |
+
+Petclinic symbol (n=1) rows omitted from the table (1.0 after on both). Synthetic error cases: recall@1 = 1.0
+on every repo. Per-channel diagnosis (gold rank by deterministic / BM25 / vector / fused, every case) is in the
+`--out` JSON. The weakest layer found and fixed: Java vector chunks came from the one-line method regex (only
+57 % of commons-lang behavior-gold members had a chunk of their own, none carried Javadoc); structural chunks
+(`5ac5913`) raised the old leg's commons-lang symbol recall@5 0.446 → 0.803 on its own. Fusion variants
+(vector weight 0/10/20/30, rank decay 3/10) were compared on the dev set and confirmed on the held-out repos;
+none dominates, the principled default (10 / 10) is kept. Remaining gap: commons-lang behavior (0.141) - most
+of its commit subjects describe the change, not the behavior (sample in the loc-N output).
+
+### E-06 vector query cost (`vector_bench.py`, dim 768, fingerprinted query)
+
+| chunks | before: first / steady query, traced peak | after: first / steady, peak |
+|---|---|---|
+| 10,000 | 2,265 / 2,200 ms, 337 MB | 128 / 1.1 ms, 32 MB |
+| 30,000 | 6,536 / 6,551 ms, 1,011 MB | 464 / 3.7 ms, 95 MB |
+| 45,000 | 10,212 / 9,932 ms, 1,517 MB | 609 / 5.1 ms, 143 MB |
+
+Real indexes in this benchmark: commons-lang 12,575 chunks, Kriya 17,981. No vector service, no new dependency.
+
+### Spring XML / configuration (E-08, pinned spring-framework-petclinic)
+
+Old graph parser: 12 beans (single-line `<bean id>` only), 0 bean references, failures on 2 of 5 Spring XML
+files. New: 7 Spring XML files PARSED (incl. test config), 20 beans with exact spans, 6 bean references
+(`ref`, `p:x-ref`, nested `<ref>`), 5 component scans (incl. `jpa:repositories`), 4 imports/placeholders, 24
+properties/constructor args, 8 property keys; spring-petclinic application*.properties: 22 keys with profiles.
+
+### CI-6: deterministic ambiguity threshold and the ambiguity-only call
+
+Calibration on all 724 loc-N cases (fused): "clear" = top-1 rests on exact evidence and leads top-2 by ≥ 10
+→ 233 cases (32 %), 4.7 % false-confident (11; 10 = a goal naming a public method whose fix is in a helper it
+calls). Every synthetic error case is clear (150/150, none wrong). Flat for margins 10-40.
+
+Live (`ci6_bench.py`, production config, pinned qwen3-coder 30B, ollama_native schema-constrained output):
+
+| Repo | ambiguous (needs the model) | calls measured | top-1 before → after the decision | median prompt tokens | median s |
+|---|---|---|---|---|---|
+| commons-lang | 74.7 % | 60 | 0.367 → 0.483 | 986 | 3.6 |
+| Kriya | 73.9 % | 40 | 0.25 → 0.25 | 954 | 4.5 |
+| httpx | 65.3 % | 30 | 0.267 → 0.300 | 756 | 3.8 |
+| spring-petclinic | 28.6 % | 10 | 0.3 → 0.3 | 1,017 | 4.0 |
+| spring-framework-petclinic | 21.1 % | 8 | 0.25 → 0.375 | 1,024 | 5.8 |
+
+Pooled: 148 calls, top-1 0.304 → 0.365. Explicit/error-driven goals (synthetic) never call the model.
 
 ## Member packing (MEASURED, `pack_bench.py`, budget 2,000 tokens, mined loc-N gold members at HEAD)
 
