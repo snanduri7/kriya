@@ -477,6 +477,10 @@ class IndexReport:
     # structure was dropped for a parser/schema identity change.
     restructured: int = 0
     structure_rebuilt: bool = False
+    # The vector index was built under another embedding identity (another
+    # model, dimension, served context or preprocessing version): it was
+    # dropped and every file re-embedded under the served one. Its digest.
+    embedding_rebuilt_from: Optional[str] = None
 
 
 class RepositoryAnalyzer:
@@ -900,27 +904,30 @@ class RepositoryAnalyzer:
         # real probe embedding, digest, served context) before anything is
         # indexed - a failed probe stops indexing; the dimension is never
         # assumed. Vectors of another identity are never mixed with these.
-        from kriya.memory.embedding import EmbeddingError, EmbeddingIdentityChangedError, embed_chunks
+        from kriya.memory.embedding import EmbeddingError, embed_chunks
 
         try:
             fingerprint = await client.fingerprint()
             active = store.active_fingerprint()
-            if active is None or force:
+            if active is None or force or active != fingerprint.digest:
                 # A first index, a pre-contract index (rows without any
-                # identity: re-embedded in full), or an explicit --force.
+                # identity), an explicit --force, or an index of another
+                # identity: dropped and adopted in ONE transaction, then every
+                # file is re-embedded through the normal path. Vectors of two
+                # identities never coexist, and queries only ever read rows
+                # of the served identity.
                 store.reset_index(fingerprint)
-            elif active != fingerprint.digest:
-                raise EmbeddingIdentityChangedError(
-                    f"the vector index was built under embedding identity {active[:12]}, the served model is "
-                    f"{fingerprint.digest[:12]} ({fingerprint.model}); re-index with 'kriya analyze --force'",
-                    details={"index": active, "served": fingerprint.to_dict()},
-                )
         except Exception:
             store.close()
             graph.close()
             structural.close()
             raise
         report = IndexReport(fingerprint=fingerprint.digest)
+        if active is not None and not force and active != fingerprint.digest:
+            report.embedding_rebuilt_from = active
+            logger.warning(
+                "The vector index was built under embedding identity %s; the served model is %s (%s). "
+                "Rebuilding it under the served identity.", active[:12], fingerprint.digest[:12], fingerprint.model)
         # Structure built by another parser/schema identity is never reused.
         report.structure_rebuilt = graph.adopt_structural_identity(fingerprint.digest)
         if report.structure_rebuilt:

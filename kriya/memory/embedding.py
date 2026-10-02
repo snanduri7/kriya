@@ -75,10 +75,6 @@ class EmbeddingInputTooLongError(EmbeddingError):
     reason_code = EMBEDDING_INPUT_TOO_LONG
 
 
-class EmbeddingIdentityChangedError(EmbeddingError):
-    reason_code = EMBEDDING_IDENTITY_CHANGED
-
-
 def prefix_policy(model: str) -> str:
     """The query/document prefix the model expects (nomic's task prefixes)."""
     return "nomic-search-v1" if "nomic" in model.lower() else "none"

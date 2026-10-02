@@ -249,7 +249,7 @@ async def semantic_query_embedding(
     if vector_store.active_fingerprint() != fingerprint:
         result.semantic_unavailable = EMBEDDING_IDENTITY_CHANGED
         logger.warning("Vector index identity differs from the served embedding model; lexical retrieval only "
-                       "until 'kriya analyze --force' re-indexes it.")
+                       "until 'kriya analyze' rebuilds it under the served identity.")
         return None, fingerprint
     try:
         return await embed_client.get_embedding(query, is_query=True, deadline=deadline), fingerprint

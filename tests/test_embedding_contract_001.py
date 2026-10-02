@@ -25,7 +25,6 @@ from kriya.core.llm import INFERENCE_DEADLINE_EXHAUSTED, EgressViolationError, I
 from kriya.memory.embedding import (
     EMBEDDING_IDENTITY_CHANGED,
     EmbeddedSegment,
-    EmbeddingIdentityChangedError,
     EmbeddingInputTooLongError,
     EmbeddingMalformedResponseError,
     EmbeddingUnavailableError,
@@ -199,19 +198,62 @@ def test_vectors_of_another_identity_are_never_queried_as_current(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_an_identity_change_needs_a_forced_reindex(tmp_path):
+async def test_an_identity_change_rebuilds_the_index_under_the_served_identity(tmp_path):
+    """No --force to remember: an index of another identity is dropped and
+    re-embedded in full through the normal path; the two never coexist."""
     (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
     analyzer = RepositoryAnalyzer(str(tmp_path))
     first = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([1.0, 0.0], "model-a"),
                                             generate_conventions_skill=False)
-    with pytest.raises(EmbeddingIdentityChangedError):
-        await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([1.0, 0.0], "model-b"),
-                                        generate_conventions_skill=False)
-    forced = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([1.0, 0.0], "model-b"),
-                                             force=True, generate_conventions_skill=False)
-    assert forced.fingerprint != first.fingerprint and forced.indexed == 1
+    assert first.embedding_rebuilt_from is None and first.indexed == 2
+    rebuilt = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([0.0, 1.0], "model-b"),
+                                              generate_conventions_skill=False)
+    assert rebuilt.fingerprint != first.fingerprint and rebuilt.embedding_rebuilt_from == first.fingerprint
+    assert rebuilt.indexed == 2 and not rebuilt.failed  # every file, not only changed ones
+    store = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    try:
+        assert store.active_fingerprint() == rebuilt.fingerprint
+        assert {r[0] for r in store.conn.execute("SELECT DISTINCT fingerprint FROM vector_chunks")} == {
+            rebuilt.fingerprint}
+        assert store.query([1.0, 0.0], fingerprint=first.fingerprint) == []
+    finally:
+        store.close()
+    again = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([0.0, 1.0], "model-b"),
+                                            generate_conventions_skill=False)
+    assert again.embedding_rebuilt_from is None and again.indexed == 0  # now current: nothing re-embedded
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_identity_rebuild_never_leaves_a_mixed_index(tmp_path):
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
+    cfg = AppConfig()
+    cfg.paths.memory = str(tmp_path / "memory")
+    analyzer = RepositoryAnalyzer(str(tmp_path))
+    first = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([1.0, 0.0], "model-a"),
+                                            generate_conventions_skill=False)
+
+    class FailsOnB(StaticEmbedder):
+        async def embed(self, texts, *, is_query=False, deadline=None):
+            if any("y = 2" in t for t in texts):
+                raise EmbeddingUnavailableError("endpoint down")
+            return await super().embed(texts, is_query=is_query, deadline=deadline)
+
+    partial = await analyzer.index_repository(cfg, embedding_client=FailsOnB([0.0, 1.0], "model-b"),
+                                              generate_conventions_skill=False)
+    assert partial.embedding_rebuilt_from == first.fingerprint and list(partial.failed) == ["b.py"]
+    store = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    try:
+        rows = store.conn.execute("SELECT filepath, fingerprint FROM vector_chunks").fetchall()
+        assert {fp for _, fp in rows} == {partial.fingerprint} and {p for p, _ in rows} == {"a.py"}
+    finally:
+        store.close()
+    resumed = await analyzer.index_repository(cfg, embedding_client=StaticEmbedder([0.0, 1.0], "model-b"),
+                                              generate_conventions_skill=False)
+    assert resumed.embedding_rebuilt_from is None and resumed.indexed == 1 and not resumed.failed
 
 
 @pytest.mark.asyncio

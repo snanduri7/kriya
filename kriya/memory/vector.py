@@ -274,7 +274,7 @@ class LocalVectorStore:
                 f"Vector index at '{self.db_path}' contains rows from {len(mismatched)} other "
                 f"model/dimension combination(s) besides the configured '{model_name}' (dim: {dimensions}) "
                 f"- those rows will be silently skipped during search. Consider re-indexing with "
-                f"'kriya analyze --force'."
+                f"'kriya analyze' (it rebuilds an index of another identity)."
             )
 
     def _bump_generation(self) -> None:
