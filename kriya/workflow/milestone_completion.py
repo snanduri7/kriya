@@ -527,7 +527,16 @@ def acceptance_coverage(milestone: Any, result: Mapping[str, Any]) -> Tuple[List
 
     No production verifier emits this map yet: milestone acceptance
     criteria are free text, so today every criterion is UNCOVERED."""
-    criteria = [criterion.id for criterion in (getattr(milestone, "acceptance", None) or [])]
+    return criterion_coverage(
+        [criterion.id for criterion in (getattr(milestone, "acceptance", None) or [])], result)
+
+
+def criterion_coverage(
+    criteria: List[str], result: Mapping[str, Any],
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """``acceptance_coverage`` for an explicit list of criterion ids - the one
+    coverage rule a milestone and an enforce work unit
+    (kriya/workflow/verified_no_change.py) are both judged by."""
     gates = [item for item in (result.get("deterministic_gate_evidence") or []) if isinstance(item, dict)]
     final_attempt = max((item.get("attempt") for item in gates if isinstance(item.get("attempt"), int)), default=None)
     passing = {item.get("type") for item in gates if item.get("passed") is True and item.get("attempt") == final_attempt}
@@ -576,17 +585,9 @@ def no_change_verification(
     if not result.get("quality_gates_passed"):
         return None, _reason(QUALITY_GATES_NOT_PASSED, "the milestone's quality gates did not pass")
     covered, statuses = acceptance_coverage(milestone, result)
-    if not statuses:
-        return None, _reason(
-            ACCEPTANCE_COVERAGE_UNAVAILABLE,
-            "the milestone has no structured acceptance criteria; its free-text goal has no deterministic check",
-        )
-    if any(status not in (PASS_WITH_TESTS, PASSED) for status in statuses.values()):
-        return None, _reason(
-            ACCEPTANCE_COVERAGE_INCOMPLETE,
-            "not every acceptance criterion is covered by deterministic evidence",
-            criteria=dict(statuses),
-        )
+    refusal = coverage_refusal(statuses, unit="milestone")
+    if refusal is not None:
+        return None, refusal
     policy = verification_policy_fingerprint(config)
     if policy is None:
         return None, _reason(VERIFICATION_POLICY_UNAVAILABLE, "the verification policy fingerprint is unavailable")
@@ -622,6 +623,24 @@ def no_change_verification(
 
 
 # ---------------------------------------------------------------- assessment
+
+def coverage_refusal(statuses: Mapping[str, str], *, unit: str) -> Optional[Dict[str, Any]]:
+    """Why ``statuses`` (from criterion_coverage) do NOT prove a unit that
+    changed nothing is already satisfied, or None when they do: every
+    criterion PASS_WITH_TESTS / PASSED. No criterion at all is never proof."""
+    if not statuses:
+        return _reason(
+            ACCEPTANCE_COVERAGE_UNAVAILABLE,
+            f"the {unit} has no structured acceptance criteria; its free-text goal has no deterministic check",
+        )
+    if any(status not in (PASS_WITH_TESTS, PASSED) for status in statuses.values()):
+        return _reason(
+            ACCEPTANCE_COVERAGE_INCOMPLETE,
+            "not every acceptance criterion is covered by deterministic evidence",
+            criteria=dict(statuses),
+        )
+    return None
+
 
 def _reason(code: str, detail: str, **extra: Any) -> Dict[str, Any]:
     return {"code": code, "detail": detail, **{k: v for k, v in extra.items() if v is not None}}

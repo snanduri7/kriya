@@ -802,6 +802,18 @@ loop returning the identical plan for checks whose fix is fully determined by th
   attribution dispute.
 - The Planner output is one whole JSON object (`parse_planner_structured_output`); no heuristic field extraction,
   so no schema-constrained migration was needed.
+- **Verified no-change completion** (ENFORCE-VERIFIED-NO-CHANGE-001, `kriya/workflow/verified_no_change.py`). A
+  Developer NO CHANGE is never success, only a request to verify. When every result of an attempt is NO CHANGE for
+  exactly the expected, existing planned files of an enforce unit that has written nothing, the completeness check
+  records a proposal instead of INCOMPLETE GENERATION; the normal gates and the terminal regression run, and then
+  the unit completes as `VERIFIED_NO_CHANGE` only if every acceptance criterion of the unit (all of them, not the
+  "due now" projection) is covered by deterministic evidence of that attempt - the milestones' rule
+  (`milestone_completion.criterion_coverage` / `coverage_refusal`, one definition). A `method: tool` criterion is
+  covered by a gate of its tool's family that passed; a test gate needs a parsed non-zero executed-test count. A
+  judgment criterion, compile standing in for behaviour, or any model opinion is never evidence; a refusal is the
+  typed deterministic failure `VERIFIED_NO_CHANGE_REFUSED` through the ordinary repair path. Nothing is written or
+  authorized; `completion_kind` is in the result only when the whole attempt passed, and the controller records
+  reason code `VERIFIED_NO_CHANGE` on the SubtaskResult.
 
 ### 2.10 `kriya/workflow/` Module Layout
 
