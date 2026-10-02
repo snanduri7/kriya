@@ -25,7 +25,7 @@ from kriya.code_intel.model import (
 # Bump when the extraction rules below change what is produced for the same
 # bytes (a stored structure under an older version is then never reused).
 # /2: configuration structure (config_parsing.py: Spring XML, properties, YAML).
-STRUCTURAL_PARSER_VERSION = "ci-structural/2"
+STRUCTURAL_PARSER_VERSION = "ci-structural/3"
 
 _LANGUAGE_BY_EXTENSION = {".java": "java", ".py": "python"}
 
@@ -440,10 +440,17 @@ class _PythonExtractor(_Extractor):
         else:
             kind = "method" if scope == "class" else "function"
             modifiers = ("async",) if any(c.type == "async" for c in node.children) else ()
-        signature_end = body.start_byte if body is not None else node.end_byte
+        # The header ends at the definition's own ":" - never at the body's
+        # start, which would take in a trailing comment and the comments
+        # before the first statement (live: urlparse's rendered signature
+        # carried "# Initial basic checks on allowable URLs ...").
+        colon = next((c for c in reversed(node.children)
+                      if c.type == ":" and (body is None or c.end_byte <= body.start_byte)), None)
+        signature_end = colon.end_byte if colon is not None else (body.start_byte if body is not None else node.end_byte)
         symbol = self.add(
             kind=kind, name=name, lookup_key=qualified, node=node, declaration=self.span(outer),
-            signature=self.signature_span(node, node, body), body_node=body,
+            signature=Span(self.line_of(node.start_byte), self.line_of(max(signature_end - 1, node.start_byte)),
+                           node.start_byte, signature_end), body_node=body,
             parent_id=parent.symbol_id if parent else None, modifiers=modifiers, annotations=decorators, extends=bases,
             signature_text=_compact(self.data[node.start_byte:signature_end].decode("utf-8", "replace")).rstrip(":"),
             doc_summary=self.docstring(body),

@@ -242,3 +242,23 @@ def test_a_qualified_mention_names_the_type_when_its_simple_name_is_ambiguous(tm
         assert hits["pkg.till.close"]["constructs"] == pytest.approx(loc.CONSTRUCTION_SITE)
     finally:
         svc.close()
+
+
+def test_a_python_signature_ends_at_its_colon_never_at_the_bodys_comments():
+    """Live matrix (httpx InvalidURL candidate map): urlparse's signature read
+    'def urlparse(url: str = "", **kwargs: str | None) -> ParseResult: #
+    Initial basic checks on allowable URLs ...' - the header ran to the start
+    of the body block, taking in the comments before its first statement."""
+    from kriya.code_intel.parsing import parse_file
+
+    source = (b'def urlparse(url: str = "") -> str:  # trailing note\n'
+              b'    # Initial basic checks on allowable URLs.\n    return url\n\n'
+              b'class Parsed(tuple):\n    # Fields of a parse result.\n    scheme = ""\n\n'
+              b'async def fetch(\n    url,\n): return url\n')
+    symbols = {s.name: s for s in parse_file("p.py", source).symbols}
+    assert symbols["urlparse"].signature_text == 'def urlparse(url: str = "") -> str'
+    assert symbols["Parsed"].signature_text == "class Parsed(tuple)"
+    assert symbols["fetch"].signature_text == "async def fetch( url, )"
+    assert (symbols["urlparse"].signature.start_line, symbols["urlparse"].signature.end_line) == (1, 1)
+    assert symbols["fetch"].signature.end_line == 11
+    assert source[symbols["urlparse"].signature.end_byte - 1:symbols["urlparse"].signature.end_byte] == b":"
