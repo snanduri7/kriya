@@ -166,3 +166,23 @@ def test_the_vector_channel_credits_the_member_its_chunk_span_holds(indexed):
     assert {h.lookup_key for h in service.locate("", semantic=[whole])} == {
         "shop.OrderService.total", "shop.OrderService.discount"}
     service.close()
+
+
+def test_legacy_leg_evidence_takes_part_in_the_seed_rule():
+    """Measured with the real embedding model (PRD-027 certification,
+    junit-upgrade / requests-upgrade): the structural candidates of a
+    build-file goal are all vector-only, while the legacy leg finds the build
+    file on BOTH legs. Ignoring that leg declared the expansion
+    embedding-only and seeded every vector-only file (10 packaged files,
+    precision 0.47 < 0.5); with it, only the corroborated build file seeds."""
+    def cand(path, score):
+        return gr.LocalizationCandidate(f"id:{path}", path, "method", "k", "", score, (("vector", score),))
+
+    vector_only = [cand("Order.java", 9.0), cand("TaxTable.java", 8.3)]
+    pom = {"filepath": "pom.xml", "vector_rank": 2, "lexical_rank": 1}
+    assert gr.select_fused_expansion_seeds(vector_only, 5, [pom]) == (["pom.xml"], gr.EXPANSION_CORROBORATED)
+    lexical_only_pom = {"filepath": "pom.xml", "vector_rank": None, "lexical_rank": 1}
+    assert gr.select_fused_expansion_seeds(vector_only, 5, [lexical_only_pom]) == (
+        [], gr.EXPANSION_NO_CORROBORATED)
+    assert gr.select_fused_expansion_seeds(vector_only, 5) == (
+        ["Order.java", "TaxTable.java"], gr.EXPANSION_EMBEDDING_ONLY)

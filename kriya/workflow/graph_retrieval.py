@@ -259,35 +259,52 @@ async def semantic_query_embedding(
         return None, fingerprint
 
 
-def select_fused_expansion_seeds(candidates: Sequence[LocalizationCandidate], top_k: int) -> Tuple[List[str], str]:
-    """PRD027-PRECISION-001's rule over fused candidates. A candidate is
-    corroborated when it rests on exact deterministic evidence or on
-    agreement of the two similarity legs (identifier BM25 and vector);
-    corroborated top_k candidates seed. With none: when only one similarity
-    leg produced any candidate, that leg's top_k seed (its own standing);
-    otherwise nothing seeds. Same reason codes as the legacy rule."""
+def select_fused_expansion_seeds(candidates: Sequence[LocalizationCandidate], top_k: int,
+                                 legacy_hits: Sequence[Dict[str, Any]] = ()) -> Tuple[List[str], str]:
+    """PRD027-PRECISION-001's rule over fused candidates plus the legacy
+    leg's hits on files without structure (each carrying its own per-leg
+    ranks from ``query_hybrid``). A candidate is corroborated when it rests
+    on exact deterministic evidence or on agreement of the two similarity
+    legs (identifier BM25 and vector); a legacy hit when both of its legs
+    rank it within top_k. When both legs produced evidence anywhere, only
+    corroborated items seed (none: nothing seeds - disagreement never fans
+    out); when only one leg produced any, that leg's top_k seed (its own
+    standing). Same reason codes as the legacy rule."""
     from kriya.code_intel import locate as loc
 
     top = list(candidates[:top_k])
-    if not top:
+    legacy = [hit for hit in legacy_hits if hit.get("filepath")]
+    if not top and not legacy:
         return [], EXPANSION_NO_VALID_EVIDENCE
 
     def legs(candidate: LocalizationCandidate) -> set:
         names = {c for c, _ in candidate.channels}
         return {"vector"} & names | ({"lexical"} if names - {"vector"} else set())
 
-    corroborated = [c for c in top if c.score >= loc.EXACT_EVIDENCE or legs(c) == {"vector", "lexical"}]
+    def legacy_legs(hit: Dict[str, Any]) -> set:
+        found = set()
+        if hit.get("vector_rank") is not None and hit["vector_rank"] <= top_k:
+            found.add("vector")
+        if hit.get("lexical_rank") is not None and hit["lexical_rank"] <= top_k:
+            found.add("lexical")
+        return found
+
+    corroborated = [c.path for c in top if c.score >= loc.EXACT_EVIDENCE or legs(c) == {"vector", "lexical"}]
+    corroborated += [hit["filepath"] for hit in legacy if legacy_legs(hit) == {"vector", "lexical"}]
+    present = set().union(*(legs(c) for c in candidates), *(legacy_legs(hit) for hit in legacy))
     if corroborated:
         seeds, reason = corroborated, EXPANSION_CORROBORATED
+    elif present == {"vector"}:
+        seeds, reason = [c.path for c in top] + [h["filepath"] for h in legacy if "vector" in legacy_legs(h)], \
+            EXPANSION_EMBEDDING_ONLY
+    elif present == {"lexical"}:
+        seeds, reason = [c.path for c in top] + [h["filepath"] for h in legacy if "lexical" in legacy_legs(h)], \
+            EXPANSION_LEXICAL_ONLY
+    elif present:
+        seeds, reason = [], EXPANSION_NO_CORROBORATED
     else:
-        present = set().union(*(legs(c) for c in candidates))
-        if present == {"vector"}:
-            seeds, reason = top, EXPANSION_EMBEDDING_ONLY
-        elif present == {"lexical"}:
-            seeds, reason = top, EXPANSION_LEXICAL_ONLY
-        else:
-            seeds, reason = [], EXPANSION_NO_CORROBORATED
-    return list(dict.fromkeys(c.path for c in seeds)), reason
+        seeds, reason = [], EXPANSION_NO_VALID_EVIDENCE
+    return list(dict.fromkeys(seeds)), reason
 
 
 def separation(candidates: Sequence[LocalizationCandidate]) -> Optional[Dict[str, Any]]:
@@ -411,7 +428,8 @@ def _code_intelligence_candidates(
         if match.get("filepath") in legacy_only:
             result.retrieved_chunks.append({"filepath": match["filepath"], "score": match.get("score", 0.0),
                                             "text": match.get("text", "")[:300], "channels": ["legacy_hybrid"]})
-    seeds, result.expansion_seed_reason = select_fused_expansion_seeds(candidates, top_k)
+    seeds, result.expansion_seed_reason = select_fused_expansion_seeds(
+        candidates, top_k, [m for m in legacy_matches if m.get("filepath") in legacy_only])
     return direct, seeds
 
 
