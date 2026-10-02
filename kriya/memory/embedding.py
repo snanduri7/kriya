@@ -38,7 +38,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 ADAPTER_ID = "ollama-native-embed/1"
-PREPROCESSING_VERSION = "1"  # chunk header + model prefix policy, below
+PREPROCESSING_VERSION = "2"  # chunk text + model prefix policy, below; /2: structural Java + Spring XML chunks
 SEGMENTATION_VERSION = "1"  # line-boundary halving, below
 BATCH_SIZE = 32
 # A conservative local admission estimate (an optimization only; the provider
