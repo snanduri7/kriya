@@ -2568,6 +2568,7 @@ async def _run_developer_generation_as_developer(
                 skills_text if isinstance(skills_text, str) else "",
                 prompt_tokens_reported=(last_call_metrics or {}).get("prompt_tokens"),
                 provider_metadata=(completion.get("provider_metadata") if isinstance(completion, dict) else None),
+                prefix_reuse=(completion.get("prefix_reuse") if isinstance(completion, dict) else None),
             ),
         ))
         state.record_event(RunEvent(

@@ -227,8 +227,50 @@ def test_prompt_composition_counts_rendered_sections_and_provider_prefill():
                + "\n\n#### Linked tests (read-only)\n" + "t" * 40 + "\n\n#### Linked configuration (read-only)\n"
                + "c" * 20)
     details = prompt_composition(context, "s" * 100, prompt_tokens_reported=900,
-                                 provider_metadata={"prompt_eval_ms": 1500, "load_ms": 20})
+                                 provider_metadata={"prompt_eval_ms": 1500, "load_ms": 20},
+                                 prefix_reuse={"prefix_shared_chars": 4000, "prefix_break": "user"})
     assert (details["t0_member_tokens"], details["t0_header_tokens"], details["t2_tokens"],
             details["t3_tokens"], details["t1_tokens"]) == (100, 20, 10, 5, 0)
     assert (details["skills_tokens"], details["prompt_tokens_reported"], details["prefill_seconds"],
             details["load_seconds"]) == (25, 900, 1.5, 0.02)
+    assert (details["prefix_shared_tokens"], details["prefix_break"]) == (1000, "user")
+
+
+def test_common_prefix_length():
+    from kriya.core.llm import _common_prefix_length
+
+    assert _common_prefix_length("", "abc") == 0
+    assert _common_prefix_length("abcdef", "abcxyz") == 3
+    assert _common_prefix_length("abc", "abcdef") == 3
+    assert _common_prefix_length("x" * 5000 + "a", "x" * 5000 + "b") == 5000
+
+
+def test_each_request_reports_the_prefix_it_shares_with_the_previous_one_to_its_model():
+    """Measured through the real native transport: the first request shares
+    nothing; an identical one shares everything; a different system prompt
+    breaks the prefix in the system message, a different user tail in the
+    user message - counts only, never text."""
+    import asyncio
+
+    from test_provider_contract_native import _config as native_config
+    from test_provider_contract_native import _NativeServer
+
+    from kriya.core.llm import LLMClient
+
+    server = _NativeServer()
+    try:
+        llm = LLMClient(native_config(server.url))
+
+        async def run():
+            out = []
+            for system, user in (("sys", "shared context + tail A"), ("sys", "shared context + tail A"),
+                                 ("sys", "shared context + tail B"), ("SYS", "shared context + tail B")):
+                result = await llm.complete_result(system, user)
+                assert "prefix_shared_chars" not in result.provider_metadata  # Kriya's count, not the provider's
+                out.append((result.prefix_reuse["prefix_shared_chars"], result.prefix_reuse["prefix_break"]))
+            await llm.aclose()
+            return out
+
+        assert asyncio.run(run()) == [(0, "first_request"), (26, "none"), (25, "user"), (0, "system")]
+    finally:
+        server.close()

@@ -158,6 +158,19 @@ def dispatched_bytes(messages: List[Dict[str, Any]], tools: Optional[List[Dict[s
     return consumption_bytes(dispatch_text(messages, tools))
 
 
+def _common_prefix_length(a: str, b: str) -> int:
+    """Length of the longest common prefix (binary search over C-level slice
+    comparisons)."""
+    low, high = 0, min(len(a), len(b))
+    while low < high:
+        middle = (low + high + 1) // 2
+        if a[:middle] == b[:middle]:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
 class LLMClient:
     """Wrapper around OpenAI-compatible API client for local LLM generation."""
     
@@ -202,6 +215,10 @@ class LLMClient:
         # persist in the run trace (kriya/workflow/state.py
         # drain_budget_expansions); each is also logged.
         self.budget_expansions: List[Dict[str, Any]] = []
+        # Prompt-prefix reuse telemetry: the previous (system, user) request
+        # text sent to each model - an inference server reuses the KV cache
+        # of the longest prefix it shares with the request it last served.
+        self._previous_request: Dict[str, Tuple[str, str]] = {}
         # PRD-018: per-role, per-runtime counters of every call through this
         # client (the role comes from kriya.core.role_metrics.model_role).
         from kriya.core.role_metrics import RoleMetrics
@@ -1020,6 +1037,11 @@ class LLMClient:
         )
         result.finish_reason = raw["finish_reason"]
         result.provider_metadata = raw["provider_metadata"]
+        result.prefix_reuse = self._prefix_reuse(model, system_prompt, user_prompt)
+        logger.info("Prompt to %s: %d chars, %d shared with the previous request to it (first difference: %s); "
+                    "prefill %s ms.", model, len(system_prompt) + len(user_prompt),
+                    result.prefix_reuse["prefix_shared_chars"], result.prefix_reuse["prefix_break"],
+                    result.provider_metadata.get("prompt_eval_ms", "unreported"))
         prompt_tokens, completion_tokens = raw["prompt_tokens"], raw["completion_tokens"]
         result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
         result.prompt_tokens = prompt_tokens or int((len(system_prompt) + len(user_prompt)) / 4)
@@ -1035,6 +1057,21 @@ class LLMClient:
             identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)
         return result
+
+    def _prefix_reuse(self, model: str, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        """Content-free prefix telemetry: how many leading characters this
+        request shares with the previous one sent to ``model``, and in which
+        message they first differ ("system", "user" or "none")."""
+        previous = self._previous_request.get(model)
+        self._previous_request[model] = (system_prompt, user_prompt)
+        if previous is None:
+            return {"prefix_shared_chars": 0, "prefix_break": "first_request"}
+        shared = _common_prefix_length(previous[0], system_prompt)
+        if shared < len(system_prompt) or len(previous[0]) != len(system_prompt):
+            return {"prefix_shared_chars": shared, "prefix_break": "system"}
+        user_shared = _common_prefix_length(previous[1], user_prompt)
+        return {"prefix_shared_chars": shared + user_shared,
+                "prefix_break": "none" if user_shared == len(user_prompt) == len(previous[1]) else "user"}
 
     async def _request_once(
         self, client, model, system_prompt, user_prompt, temperature, max_tokens,

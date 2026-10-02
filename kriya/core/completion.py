@@ -82,6 +82,10 @@ class CompletionResult:
     # Response identifiers only (id, served model, system_fingerprint);
     # never headers, keys or message text.
     provider_metadata: Dict[str, Any] = field(default_factory=dict)
+    # Kriya's own count of the prompt prefix this request shared with the
+    # previous one to the same model (chars, and the message it first
+    # differed in) - never text.
+    prefix_reuse: Dict[str, Any] = field(default_factory=dict)
     # PRD-016: the pre-dispatch budget decision for this call, when made.
     budget: Optional[Dict[str, Any]] = None
     # The exception behind BACKEND_ERROR/TIMEOUT (not serialized) so the
@@ -122,6 +126,7 @@ class CompletionResult:
             "output_truncated": self.truncated,
             "content_chars": len(self.content),
             "provider_metadata": dict(self.provider_metadata),
+            "prefix_reuse": dict(self.prefix_reuse),
             "budget": dict(self.budget) if self.budget else None,
         }
 

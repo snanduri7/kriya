@@ -34,7 +34,8 @@ def _blocks(text: str, pattern: "re.Pattern[str]"):
 
 
 def prompt_composition(code_context: str, skills_prompt: str, *, prompt_tokens_reported: Optional[int],
-                       provider_metadata: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+                       provider_metadata: Optional[Mapping[str, Any]] = None,
+                       prefix_reuse: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     tiers = {"t0_member": 0, "t0_header": 0, "sibling_signatures": 0, "t1": 0, "t2": 0, "t3": 0}
     for match, body in _blocks(code_context or "", _OWNER_BLOCK_RE):
         if "tier=member_exact" in match.group("label"):
@@ -46,6 +47,7 @@ def prompt_composition(code_context: str, skills_prompt: str, *, prompt_tokens_r
             if tier is not None:
                 tiers[tier] += estimate_tokens(section_body)
     metadata = provider_metadata or {}
+    reuse = prefix_reuse or {}
     prefill_ms = metadata.get("prompt_eval_ms")
     return {
         **{f"{name}_tokens": count for name, count in tiers.items()},
@@ -55,5 +57,10 @@ def prompt_composition(code_context: str, skills_prompt: str, *, prompt_tokens_r
         "prefill_seconds": round(prefill_ms / 1000.0, 3) if isinstance(prefill_ms, (int, float)) else None,
         "load_seconds": (round(metadata["load_ms"] / 1000.0, 3)
                          if isinstance(metadata.get("load_ms"), (int, float)) else None),
+        # Shared with the previous request to the same model (what an
+        # inference server's KV cache can reuse) and where it first differed.
+        "prefix_shared_tokens": (reuse["prefix_shared_chars"] // 4  # estimate_tokens' ratio
+                                 if isinstance(reuse.get("prefix_shared_chars"), int) else None),
+        "prefix_break": reuse.get("prefix_break"),
         "token_counts": "estimated (len/4) per section; total as reported by the provider",
     }
