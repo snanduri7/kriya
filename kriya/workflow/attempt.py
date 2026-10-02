@@ -1020,8 +1020,12 @@ def _prepare_retry_context(
     # authorized target, verified against the CURRENT bytes exactly as on
     # attempt 1 (no new authority) - stays part of every retry's T0, after
     # the failure-grounded members: a failure that names no line (a protocol
-    # error, an invented anchor) must never evict the causal member.
-    for path, member_ids in _resolve_known_target_member_hints(ctx, list(target_files or ())).items():
+    # error, an invented anchor) must never evict the causal member. A
+    # failure with no locator leaves a full-set retry without failure targets:
+    # the grounding then covers the attempt's own planned file set (live:
+    # value_chain, the exact body vanished from every full-set retry).
+    grounded_paths = list(target_files or ()) or list(ctx.expected_files_upfront or ())
+    for path, member_ids in _resolve_known_target_member_hints(ctx, grounded_paths).items():
         hinted = retry_member_hints.setdefault(path, [])
         hinted.extend(member_id for member_id in member_ids if member_id not in hinted)
     retry_package = _retry_package_for_attempt(

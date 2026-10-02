@@ -80,7 +80,7 @@ def _git(repo, *args):
                    capture_output=True)
 
 
-def _run(tmp_path):
+def _run(tmp_path, *, failing_test_runs=0):
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
     cfg.llm.model = "dev-model"
@@ -129,14 +129,22 @@ def _run(tmp_path):
         events.append(event)
         return real_record(state, event)
 
+    test_runs = []
+
+    def tests(*args, **kwargs):
+        del args, kwargs
+        test_runs.append(1)
+        if len(test_runs) <= failing_test_runs:  # the live shape: a failing test, no locator into source
+            return {"success": False, "output": "FAILED LedgerTest::test_overflow - AssertionError: expected an exception"}
+        return {"success": True, "output": "ok"}
+
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
          patch("kriya.memory.embedding.configured_client", return_value=embedder), \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
                new=lambda *a, **k: {"success": True, "output": "ok"}), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
-               new=lambda *a, **k: {"success": True, "output": "ok"}):
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=tests):
         result = asyncio.run(engine.run_generation_workflow(
             goal=GOAL, workspace_path=str(workspace), predetermined_plan=f"Repair {TARGET}",
             predetermined_design="", predetermined_architect_files=[TARGET],
@@ -211,3 +219,29 @@ def test_a_member_unit_authorizes_only_when_its_bytes_are_in_this_request(tmp_pa
     assert spans(f"HEAD\n{add_body}") == {(1, 2)}  # sub is not in this request: it authorizes nothing
     optional = (budget.OptionalSection("planned_source", sub_body, lambda _b: ""),)
     assert spans(f"HEAD\n{add_body}\n{sub_body}", optional) == {(1, 2)}
+
+
+def test_a_retry_after_a_failure_without_a_locator_keeps_the_grounded_t0(tmp_path):
+    """Live (Planner R1 replay, more-itertools value_chain, run 07221b9b):
+    a test failure named no source line (failure likely_files []); the next
+    full-set attempt had no failure targets, and the run's own grounding was
+    added only for failure targets - so the exact value_chain body was absent
+    (t0_member_tokens 0, excerpts of unrelated lines) and the model invented
+    an anchor. Here: attempt 1's edit applies, the test gate fails without a
+    locator; every later attempt, the full-set ones included, must still be
+    shown the grounded members' exact current bodies."""
+    _, _, events, _ = _run(tmp_path, failing_test_runs=99)
+    modes = {e.attempt: e.details.get("mode") for e in events if e.kind == "attempt.started"}
+    full_set_retries = [n for n, mode in modes.items() if n > 1 and mode == "full_set"]
+    assert full_set_retries, modes
+    composition = {e.attempt: e.details for e in events if e.kind == "developer.prompt_composition"}
+    capability = {e.attempt: e.details for e in events if e.kind == "context.edit_capability"}
+    lines = SOURCE.splitlines()
+    called = [n for n in full_set_retries if n in composition]  # a no-progress stop sends no request
+    assert called, (modes, sorted(composition))
+    for attempt in called:
+        assert composition[attempt]["t0_member_tokens"] > 0, (attempt, composition[attempt])
+        spans = [(s["start_line"], s["end_line"]) for s in capability[attempt]["targets"][0]["spans"]
+                 if s["unit"] == "member_exact"]
+        covered = {lines[i - 1] for start, end in spans for i in range(start, end + 1)}
+        assert TWO_ARG in covered, (attempt, spans)  # the untouched overload: same lines as the base
