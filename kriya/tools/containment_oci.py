@@ -159,6 +159,34 @@ def _non_root_home_env(env: Dict[str, str]) -> Dict[str, str]:
     return {"HOME": _NON_ROOT_HOME, "MAVEN_CONFIG": f"{_NON_ROOT_HOME}/.m2", "JAVA_TOOL_OPTIONS": java_options}
 
 
+def dangling_gitfile_mask(workspace_host: str) -> List[str]:
+    """Docker args hiding a git *file* at the workspace root whose ``gitdir:``
+    resolves outside the workspace mount (a git worktree's pointer to its
+    repository - Kriya's candidate trees are worktrees). Inside the container
+    that pointer dangles, and tools that would build fine without git fail on
+    it instead: git-commit-id-maven-plugin aborted spring-petclinic ("Could
+    not get HEAD Ref") despite the project's own failOnNoGitDirectory=false.
+    Masking it with an empty read-only file makes the tree read as "no
+    repository" - it removes a broken path, it grants no access. A real
+    ``.git`` directory, or a gitfile pointing inside the mount, is left as is."""
+    gitfile = os.path.join(workspace_host, ".git")
+    if not os.path.isfile(gitfile) or os.path.islink(gitfile):
+        return []
+    try:
+        with open(gitfile, "r", encoding="utf-8", errors="replace") as handle:
+            first = handle.readline().strip()
+    except OSError:
+        return []
+    if not first.startswith("gitdir:"):
+        return []
+    target = first[len("gitdir:"):].strip()
+    resolved = os.path.realpath(os.path.join(workspace_host, target))
+    root = os.path.realpath(workspace_host)
+    if os.path.commonpath([resolved, root]) == root:
+        return []
+    return ["-v", f"/dev/null:{_CONTAINER_WORKSPACE}/.git:ro"]
+
+
 def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str]]:
     """Picks a base image (and, for the FIRST declared dependency-cache
     path only, the in-container location the tool actually expects its
@@ -1059,6 +1087,7 @@ class OCIContainmentBackend:
                 )
             mode = "rw" if profile.workspace_write else "ro"
             args += ["-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:{mode}", "-w", _CONTAINER_WORKSPACE]
+            args += dangling_gitfile_mask(workspace_host)
         else:
             args += ["-w", _CONTAINER_TEMP]
 
@@ -1401,6 +1430,7 @@ class OCIContainmentBackend:
             "--tmpfs", f"{_CONTAINER_TEMP}:rw,size={_TMPFS_SIZE}",
             "-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:rw",
             "-w", _CONTAINER_WORKSPACE,
+            *dangling_gitfile_mask(workspace_host),
         ]
 
         for i, cache_path in enumerate(profile.dependency_cache_paths):

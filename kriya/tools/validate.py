@@ -1024,8 +1024,9 @@ class PolymorphicValidator:
         """A persistent, per-workspace Maven local-repository cache
         (SEC-001-P6 Stage 2), OUTSIDE every source tree: under the Kriya state
         root (``KRIYA_STATE_DIR``, else ``~/.kriya/state``) at
-        ``dependency-cache/maven/<workspace key>``, keyed by the canonical
-        workspace so every run and worktree of one workspace reuses what its
+        ``dependency-cache/maven/<workspace key>``, keyed by the validator's
+        original workspace (the run's reused ``.kriya/worktree`` for gates, a
+        fixed path per workspace), so later runs reuse what the
         registry-scoped acquisition fetched. It used to live in the
         worktree's ``.kriya/m2_cache``, inside the tree the project's own
         build walks: Apache RAT failed commons-lang's compile on the 567
