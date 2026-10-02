@@ -22,7 +22,7 @@ import json
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
 from kriya.workflow.triage import ChangeKind
 
@@ -522,6 +522,19 @@ class IntegrationRelationship(BaseModel):
         return v
 
 
+class MutationTarget(BaseModel):
+    """Planner Reliability R1 (PR-3): a Code Intelligence candidate a
+    subtask states it will change - the candidate's symbol/config id as the
+    Planner was shown it, the file it lives in, the action and the
+    requirement ids it serves. Evidence the plan must stay consistent with
+    (plan_targets.validate_mutation_targets), never write authority."""
+
+    target_id: str
+    file: str
+    action: str = "modify"
+    requirement_ids: List[str] = Field(default_factory=list)
+
+
 class Subtask(BaseModel):
     """One execution unit within an EngineeringPlan - MA6 invariant 2: the
     Developer/tool receives exactly one of these at a time, never the
@@ -563,6 +576,17 @@ class Subtask(BaseModel):
     # its responsibility ({planned path: reason}). It acknowledges a
     # grounded ownership finding; it never satisfies one.
     ownership_justification: Dict[str, str] = Field(default_factory=dict)
+    # PR-3: the Code Intelligence candidates this subtask will change.
+    # Omitted from the dump when empty, so plans without targets keep their
+    # content hash and persisted shape.
+    mutation_targets: List[MutationTarget] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_mutation_targets(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and not data.get("mutation_targets"):
+            data.pop("mutation_targets", None)
+        return data
 
     @field_validator("id")
     @classmethod

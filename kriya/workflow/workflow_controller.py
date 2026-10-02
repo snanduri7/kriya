@@ -184,6 +184,7 @@ from kriya.workflow.ownership_findings import (
     settle_findings,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
+from kriya.workflow.plan_normalization import coalesce_same_file_owners, derive_verification_contracts
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -195,6 +196,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
     build_engineering_plan_from_planner_output,
 )
+from kriya.workflow.plan_targets import check_plan_targets
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
@@ -4311,6 +4313,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes.append("STRUCTURED_PLAN_EMPTY")
                 else:
                     plan, _ = canonicalize_planned_file_actions(raw_plan, workspace_path)
+                    # PR-1: one owning work unit per mutable file - unordered
+                    # same-file implementation units are merged when safe
+                    # (deterministic; an unsafe split still reaches the
+                    # validator's typed ownership conflict and bounded repair).
+                    plan, coalesced = coalesce_same_file_owners(plan)
+                    # A verification unit's contract is what its own
+                    # depends_on consumes (deterministic restatement).
+                    plan, derived_contracts = derive_verification_contracts(plan)
+                    if coalesced or derived_contracts:
+                        ledger.record_and_persist(
+                            workspace_path, "structured_plan_normalized", run_id=run_id,
+                            repair_attempt=repair_attempts, merges=coalesced,
+                            derived_contracts=derived_contracts,
+                        )
                     # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
                     # longer refused here - they now execute through the
                     # governed path in the per-subtask loop below (real
@@ -4338,6 +4354,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
                     validation_evidence.extend(validation.evidence)
+                    # PR-3: a subtask's stated Code Intelligence mutation
+                    # targets must exist in the current view and agree with
+                    # the files it owns (evidence, never authorization).
+                    target_errors, target_codes, target_evidence = check_plan_targets(
+                        plan, workspace_path, lambda: os.path.join(
+                            self.workflow_engine.kernel.config.paths.memory, "dependency_graph.db"))
+                    if target_evidence:
+                        ledger.record_and_persist(
+                            workspace_path, "structured_plan_targets", run_id=run_id,
+                            repair_attempt=repair_attempts, targets=target_evidence,
+                        )
+                    errors.extend(target_errors)
+                    reason_codes.extend(target_codes)
+                    validation_evidence.extend(t for t in target_evidence if t["verdict"] != "consistent")
                     unbounded_model_subtasks = [
                         st.id for st in plan.subtasks
                         if st.execution_method == ExecutionMethod.MODEL

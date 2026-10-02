@@ -131,6 +131,10 @@ def render_localization_candidates(candidates: Sequence[LocalizationCandidate]) 
         lines.append(f"{rank}. [{candidate.kind}] {candidate.lookup_key} - {candidate.path}"
                      f"{' - ' + signature if signature else ''} (via {', '.join(c for c, _ in candidate.channels)})"
                      f" id={candidate.symbol_id}")
+    lines.append("A subtask that changes one of these may name it in mutation_targets: "
+                 '[{"target_id": <id exactly as listed>, "file": <its path>, "action": "modify", '
+                 '"requirement_ids": [...]}]; that file must then be in the subtask\'s planned_files. '
+                 "Naming a target is optional; never name one the subtask does not change.")
     return "\n".join(lines) + "\n"
 
 

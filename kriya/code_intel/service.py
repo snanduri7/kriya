@@ -282,6 +282,11 @@ class CodeIntelligenceService:
 
         return build_package(self, symbol_id, budget_tokens, **options)
 
+    def symbol(self, symbol_id: str) -> Optional[Symbol]:
+        """The symbol ``symbol_id`` names in the CURRENT view (overlay, else
+        the index of the current parser identity), or None."""
+        return self._lookup_id(symbol_id)
+
     def _lookup_id(self, symbol_id: str) -> Optional[Symbol]:
         if self.overlay:
             hit = next((s for s in self.overlay.symbols() if s.symbol_id == symbol_id), None)

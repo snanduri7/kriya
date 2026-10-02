@@ -1020,8 +1020,12 @@ def _prepare_retry_context(
     # authorized target, verified against the CURRENT bytes exactly as on
     # attempt 1 (no new authority) - stays part of every retry's T0, after
     # the failure-grounded members: a failure that names no line (a protocol
-    # error, an invented anchor) must never evict the causal member.
-    for path, member_ids in _resolve_known_target_member_hints(ctx, list(target_files or ())).items():
+    # error, an invented anchor) must never evict the causal member. A
+    # failure with no locator leaves a full-set retry without failure targets:
+    # the grounding then covers the attempt's own planned file set (live:
+    # value_chain, the exact body vanished from every full-set retry).
+    grounded_paths = list(target_files or ()) or list(ctx.expected_files_upfront or ())
+    for path, member_ids in _resolve_known_target_member_hints(ctx, grounded_paths).items():
         hinted = retry_member_hints.setdefault(path, [])
         hinted.extend(member_id for member_id in member_ids if member_id not in hinted)
     retry_package = _retry_package_for_attempt(
@@ -2329,6 +2333,32 @@ def _declares_test_verification(required_verification: Iterable[Dict[str, Any]])
     """The stage's declared verification includes a test-suite verifier."""
     return any(item.get("type") == "tool" and item.get("tool_name") in _TEST_VERIFIERS
                for item in required_verification or ())
+
+
+# Failures that judge only the Developer's RESPONSE (its shape, its anchors,
+# its consistency) - never evidence that a file is the cause of anything.
+_RESPONSE_VALIDITY_FAILURES = frozenset({
+    "operation_contract", "anchored_edit", "structural_corruption", "no_op_edit", "diagnosis_mismatch",
+})
+
+
+def _only_response_validity_failures(state: GenerationState) -> bool:
+    """Positive evidence that every failure of this run so far only judged a
+    malformed or inconsistent Developer response (its shape, anchors,
+    consistency) - never a gate, locator or misdirection that is evidence
+    about a file. Then a targeted retry's targets are simply the stage's own
+    planned files, and a well-formed NO CHANGE NEEDED is answered by the
+    gates exactly as on a first attempt (live: spring-petclinic s3 - two
+    protocol failures, then NO CHANGE on its own test file, was turned into
+    an attribution dispute, re-attributed to another stage's file and
+    stranded). Unknown provenance (no recorded failure) is not that evidence."""
+    family = state.budgets.last_failure_signature  # the active family; repair feedback inherits it
+    failed = [outcome for outcome in state.gate_outcomes if outcome.get("success") is False]
+    if family is None and not failed:
+        return False
+    if family and family[0] not in _RESPONSE_VALIDITY_FAILURES:
+        return False
+    return all(outcome.get("type") in _RESPONSE_VALIDITY_FAILURES for outcome in failed)
 
 
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -7590,7 +7620,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # different known file, redirect there. Otherwise preserve a preceding
     # deterministic locator; only genuinely ungrounded scope widens.
     all_targets_rejected = all_results_are_no_change(files)
-    if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+    if (state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected
+            and not _only_response_validity_failures(state)):
         state.record_event(RunEvent(
             kind="operation.no_change",
             attempt=state.attempt_number,

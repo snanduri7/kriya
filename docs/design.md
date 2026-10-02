@@ -778,6 +778,31 @@ measured corrupting legitimate files (`handover/FILE_INTEGRITY_CONTRACT_001.md`)
   is the production protocol; the legacy markers (`strict_legacy_v1`) are compatibility-only. Qualification is bound
   to the protocol identity (policy `/7`).
 
+### 2.9j Planner Reliability R1 (`kriya/workflow/plan_normalization.py`, `plan_targets.py`)
+
+The enforce Planner's structured output passes through deterministic normalization before `validate_plan`, and
+through a Code Intelligence target check after it. Live evidence (2026-10-02 matrix) showed the bounded repair
+loop returning the identical plan for checks whose fix is fully determined by the plan itself.
+
+- **One owning unit per mutable file** (`coalesce_same_file_owners`). Unordered MODEL implementation units that
+  write the same file are merged into one owner (nothing dropped; dependents and integration relationships
+  re-pointed). Dependency-ordered ownership chains are kept. Decision `structured_plan_normalized` (`merges`).
+- **Verification contracts** (`derive_verification_contracts`). A verification unit with neither provides nor
+  requires gets `requires` = its `depends_on` units' provides - a restatement of its own edges. Nothing is derived
+  when its dependencies provide nothing (the validator still reports `SUBTASK_SEMANTIC_CONTRACT_MISSING`).
+  Decision field `derived_contracts`.
+- **Mutation targets** (`Subtask.mutation_targets`: target_id, file, action, requirement_ids; omitted from the
+  serialized plan when empty). Optional: Code Intelligence is evidence, never authorization. Each stated target is
+  checked against the CURRENT view: unknown or stale id -> `PLAN_TARGET_UNKNOWN` (policy rejection); stated file
+  not the symbol's file, or a file the subtask does not own -> `PLAN_TARGET_INCONSISTENT` (validation failure).
+  Both go through the existing bounded repair, which names the exact correction. Decision `structured_plan_targets`.
+- **Targeted NO CHANGE** (`attempt._only_response_validity_failures`). After only response-validity failures
+  (operation contract, anchored edit, structural corruption, no-op edit, diagnosis mismatch) a well-formed
+  NO CHANGE on a targeted retry is judged by the gates like a first-attempt NO CHANGE, never treated as an
+  attribution dispute.
+- The Planner output is one whole JSON object (`parse_planner_structured_output`); no heuristic field extraction,
+  so no schema-constrained migration was needed.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
