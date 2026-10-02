@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -75,16 +75,20 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
             
             # 1. Module Declarations
             module_decls = []
+            module_span = None
             for node in tree.body:
                 if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                     start_line = getattr(node, "lineno", 1)
                     end_line = getattr(node, "end_lineno", start_line)
                     module_decls.extend(lines[start_line - 1:end_line])
+                    module_span = (module_span[0] if module_span else start_line, end_line)
             if module_decls:
+                # E-17: the source lines the declarations actually span (the
+                # first to the last), never a line COUNT standing in for a range.
                 chunks.append({
                     "text": f"File: {rel_path}\nModule: {package}\n=== Module Declarations ===\n" + "\n".join(module_decls),
-                    "start": 1,
-                    "end": len(module_decls)
+                    "start": module_span[0],
+                    "end": module_span[1]
                 })
 
             # Map children to parents
@@ -400,6 +404,43 @@ def nested_gitignore_patterns_for(
 # immutable entry, so a failed build leaves the prior entry (still bound to
 # its own hash, so never served for other content) and a concurrent reader
 # sees either the old or the new (hash, model) pair, never a mix.
+# E-13: Kriya's own knowledge artifacts are never indexed as repository
+# source. A skill package is identified by its marker file (never by a
+# directory NAME: a real code package called "skills" stays indexed), and
+# the configured skills/memory roots and the workspace control directory
+# by their resolved paths.
+SKILL_PACKAGE_MARKER = "skill.yaml"
+
+
+def kriya_owned_index_roots(cfg: Any, root_path: str) -> Set[str]:
+    roots = {os.path.realpath(os.path.join(root_path, ".kriya"))}
+    paths = getattr(cfg, "paths", None)
+    for value in (getattr(paths, "skills", None), getattr(paths, "memory", None)):
+        if isinstance(value, str) and value:
+            roots.add(os.path.realpath(value if os.path.isabs(value) else os.path.join(root_path, value)))
+    return roots
+
+
+def is_knowledge_artifact_dir(dirpath: str, owned_roots: Set[str]) -> bool:
+    return os.path.realpath(dirpath) in owned_roots or os.path.isfile(os.path.join(dirpath, SKILL_PACKAGE_MARKER))
+
+
+def _repository_revision(root_path: str) -> str:
+    """``<HEAD sha>`` (``+dirty`` when the tracked tree differs), or "" outside
+    git: what an index pass actually saw, recorded in the manifest."""
+    import subprocess
+
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root_path, capture_output=True, text=True)
+        if head.returncode != 0:
+            return ""
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root_path,
+                               capture_output=True, text=True)
+        return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
+    except OSError:
+        return ""
+
+
 class _AnalyzeCacheEntry(NamedTuple):
     content_hash: str
     model: "RepositoryModel"
@@ -434,6 +475,12 @@ class IndexReport:
     failed: Dict[str, str] = field(default_factory=dict)
     segmented_chunks: int = 0
     admission_misses: int = 0
+    # Paths removed because the full repository walk no longer finds them.
+    removed: List[str] = field(default_factory=list)
+    # Files whose structure (graph) was re-parsed, and whether the whole
+    # structure was dropped for a parser/schema identity change.
+    restructured: int = 0
+    structure_rebuilt: bool = False
 
 
 class RepositoryAnalyzer:
@@ -845,8 +892,12 @@ class RepositoryAnalyzer:
         )
         
         from kriya.analyzer.graph import DependencyGraph
+        from kriya.code_intel.parsing import language_for_path, parse_file
+        from kriya.code_intel.store import StructuralStore
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
+        # The Code Intelligence BaselineIndex: the same parse feeds the graph.
+        structural = StructuralStore(db_path)
 
         # EMBEDDING-CONTRACT-001: the served model's identity is measured (a
         # real probe embedding, digest, served context) before anything is
@@ -870,8 +921,13 @@ class RepositoryAnalyzer:
         except Exception:
             store.close()
             graph.close()
+            structural.close()
             raise
         report = IndexReport(fingerprint=fingerprint.digest)
+        # Structure built by another parser/schema identity is never reused.
+        report.structure_rebuilt = graph.adopt_structural_identity(fingerprint.digest)
+        if report.structure_rebuilt:
+            logger.warning("The structural index was built by another parser/schema identity; every file is re-parsed.")
         
         # 2. Find target files (respecting nested gitignores and system ignore filters)
         # RepositoryAnalyzer.analyze() already detects far more languages via
@@ -892,6 +948,7 @@ class RepositoryAnalyzer:
         
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
+        owned_roots = kriya_owned_index_roots(cfg, self.root_path)
 
         for root, dirs, files in os.walk(self.root_path):
             # CTX-001 P1 WP8: the shared nested-.gitignore primitive
@@ -900,7 +957,11 @@ class RepositoryAnalyzer:
             # this method's own logic being the only real implementation.
             current_patterns = nested_gitignore_patterns_for(root, self.root_path, gitignore_cache)
 
-            dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)]
+            dirs[:] = [
+                d for d in dirs
+                if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)
+                and not is_knowledge_artifact_dir(os.path.join(root, d), owned_roots)
+            ]
             for file in files:
                 filepath = os.path.join(root, file)
                 if is_ignored(filepath, self.root_path, current_patterns):
@@ -909,6 +970,10 @@ class RepositoryAnalyzer:
                 if ext.lower() in target_extensions:
                     files_to_index.append(filepath)
                     
+        # E-01: what exists in the repository is decided by the FULL walk;
+        # --changed only narrows what is re-read, never what is deleted.
+        walked_rel_paths = {os.path.relpath(f, self.root_path) for f in files_to_index}
+
         if changed:
             import subprocess
             try:
@@ -950,10 +1015,8 @@ class RepositoryAnalyzer:
         logger.info(f"Discovered {total_files} files for semantic indexing.")
         
         # 3. Index files incrementally
-        current_rel_paths = set()
         for idx, filepath in enumerate(files_to_index, 1):
             rel_path = os.path.relpath(filepath, self.root_path)
-            current_rel_paths.add(rel_path)
             
             try:
                 mtime = os.path.getmtime(filepath)
@@ -974,8 +1037,12 @@ class RepositoryAnalyzer:
                 cached_hash = store.file_metadata.get(rel_path, {}).get("hash")
                 cached_graph_hash = graph.get_cached_hash(rel_path)
                 
-                # Resilient skip: hash check
-                if not force and cached_hash == file_hash and cached_graph_hash == file_hash:
+                # Resilient skip: hash check. The structure (graph) and the
+                # vectors are decided separately: a structural-identity change
+                # re-parses a file without re-embedding unchanged text.
+                vectors_current = not force and cached_hash == file_hash
+                graph_current = not force and cached_graph_hash == file_hash
+                if vectors_current and graph_current:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
                     if progress_callback:
                          progress_callback(f"{rel_path} [Up-to-date]", idx, total_files)
@@ -984,32 +1051,25 @@ class RepositoryAnalyzer:
                 if progress_callback:
                     progress_callback(rel_path, idx, total_files)
 
-                # NOT an atomic transaction, despite appearances - removed the
-                # `with store.conn, graph.conn:` wrapper that used to sit here
-                # (2026-08-12 SME review). store.remove_file()/add_document()
-                # and graph.index_file() each call their own conn.commit()
-                # internally (so they stay independently durable for every
-                # OTHER caller that invokes them standalone, e.g. `kriya
-                # learn`) - every write below commits immediately as it
-                # happens, regardless of any wrapping `with` block, so a
-                # failure partway through this file's re-index (e.g. the
-                # embeddings call raising) leaves store.remove_file()'s
-                # deletion and graph.index_file()'s write already permanently
-                # committed. Not fixed here: doing so would mean changing
-                # remove_file()/add_document()/index_file()'s own commit
-                # behavior, a broader change affecting every other call site
-                # that relies on their current standalone durability. The
-                # blast radius is bounded to this one file - the outer
-                # try/except below already isolates a per-file failure from
-                # the rest of the run, and file_metadata is deliberately left
-                # unset on any failure path (see below), so a later
-                # non-`--force` run naturally retries this exact file.
-                # Clear old chunks first to support re-indexing clean
-                graph.index_file(rel_path, content, mtime, file_hash)
+                with open(filepath, "rb") as raw:
+                    raw_bytes = raw.read()
+                source_digest = hashlib.sha256(raw_bytes).hexdigest()
+                # Each store commits its own writes: a failure partway leaves
+                # this file's graph refreshed and its vectors either fully
+                # published or not current (publish_file/mark_stale), and the
+                # file cache unset, so the next non-force run retries it.
+                if not graph_current:
+                    structure = parse_file(rel_path, raw_bytes) if language_for_path(rel_path) else None
+                    graph.index_file(rel_path, content, mtime, file_hash, source_digest=source_digest,
+                                     structure=structure)
+                    if structure is not None:
+                        structural.publish(structure, raw_bytes)
+                    report.restructured += 1
+                if vectors_current:
+                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                    continue
 
                 chunks = [c for c in chunk_file_with_metadata_headers(content, rel_path) if c["text"].strip()]
-                with open(filepath, "rb") as raw:
-                    source_digest = hashlib.sha256(raw.read()).hexdigest()
                 try:
                     segments = await embed_chunks(client, chunks, fingerprint.served_context)
                 except EmbeddingError as embedding_error:
@@ -1031,22 +1091,26 @@ class RepositoryAnalyzer:
                 logger.error(f"Failed to index file {rel_path}: {e}")
                 report.failed[rel_path] = type(e).__name__
                 
-        # Remove deleted files from cached index
-        cached_files = list(store.file_metadata.keys())
-        for cached_file in cached_files:
-            if cached_file not in current_rel_paths:
-                logger.info(f"Removing deleted file from index cache: {cached_file}")
-                with store.conn, graph.conn:
-                    store.remove_file(cached_file)
-                    graph.clear_file(cached_file)
+        # Remove files that no longer exist in the repository (E-01/E-17):
+        # every path any index layer still holds (vectors, lexical rows, the
+        # file cache, the graph) that the full walk did not find - a file
+        # whose embedding failed has no cache entry but still has rows.
+        for removed in sorted((store.indexed_paths() | graph.indexed_paths()) - walked_rel_paths):
+            logger.info(f"Removing deleted file from index: {removed}")
+            store.remove_file(removed)
+            graph.clear_file(removed)
+            structural.remove(removed)
+            report.removed.append(removed)
                 
         # 4. Save persistent cache index
+        graph.record_manifest(repository_revision=_repository_revision(self.root_path))
         report.admission_misses = getattr(client, "admission_misses", 0)
         store.save()
         logger.info("Semantic repository indexing completed: %d indexed, %d failed.",
                     report.indexed, len(report.failed))
         store.close()
         graph.close()
+        structural.close()
 
         # 5. Auto-Generate Codebase Conventions Skill
         if not generate_conventions_skill:

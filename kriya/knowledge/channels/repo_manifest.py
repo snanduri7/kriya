@@ -15,7 +15,7 @@ from typing import List, NamedTuple
 from kriya.analyzer.analyzer import RepositoryModel
 from kriya.knowledge.channels.base import KnowledgeChannel
 from kriya.knowledge.schema import KnowledgeFact
-from kriya.skills.skill import Skill, fact_match
+from kriya.skills.skill import Skill, fact_match, mentions_term
 
 
 class RepoManifestContext(NamedTuple):
@@ -39,9 +39,8 @@ class RepoManifestChannel(KnowledgeChannel):
         matched_deps = set()
 
         for tag in skill.tags:
-            tag_lower = tag.lower()
             for dep in repo_model.dependencies:
-                if tag_lower in dep.lower():
+                if mentions_term(dep, tag):
                     matched_deps.add(dep)
 
         for dep in sorted(matched_deps):
@@ -75,9 +74,8 @@ class RepoManifestChannel(KnowledgeChannel):
 
         matched_frameworks = set()
         for tag in skill.tags:
-            tag_lower = tag.lower()
             for framework in repo_model.frameworks:
-                if tag_lower in framework.lower():
+                if mentions_term(framework, tag):
                     matched_frameworks.add(framework)
 
         for framework in sorted(matched_frameworks):

@@ -1,11 +1,11 @@
 import ast
+import json
 import logging
 import os
 import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.core.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,28 @@ _RELATION_WEIGHTS: Dict[str, float] = {
     "injects": 0.4,
 }
 _DEFAULT_RELATION_WEIGHT = 0.5
+
+_JAVA_PRIMITIVE_FIELD_TYPES = frozenset({"String", "int", "long", "double", "float", "boolean", "char", "byte", "short"})
+_JAVA_INJECTION_ANNOTATIONS = frozenset({"Autowired", "Resource", "Inject", "Qualifier"})
+_JAVA_IGNORED_CALLS = frozenset({"println", "print", "equals", "toString", "split", "replace"})
+# Bump when the symbols/relations this graph stores change shape or meaning.
+STRUCTURAL_INDEX_SCHEMA_VERSION = "kriya-structural-index/2"  # /2: Code Intelligence tables
+
+
+def structural_identity() -> Dict[str, str]:
+    """Everything that decides what this graph stores for the same bytes."""
+    from kriya.code_intel.parsing import parser_identity
+
+    parser = parser_identity()
+    return {
+        "schema_version": STRUCTURAL_INDEX_SCHEMA_VERSION, "tree_sitter": parser.tree_sitter,
+        "java_grammar": parser.java_grammar, "python_grammar": parser.python_grammar,
+        "structural_parser": parser.structural_parser,
+    }
+
+
+# Top-level type declarations (a nested type is stored as nested_<kind>).
+_TOP_LEVEL_TYPE_SYMBOLS = ("class", "interface", "enum", "record", "annotation_type")
 
 # Used by find_java_main_class() below - covers both the classic array
 # parameter and the varargs shorthand ("String... args"), which is equally
@@ -135,8 +157,46 @@ class DependencyGraph:
         # clear_file()'s own OR-fallback clause for NULL rows is unaffected
         # by whether source_file is indexed.
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source_file ON relations(source_file)")
+        # Code Intelligence R1: the raw-byte sha256 each file's structure was
+        # parsed from, and the identity of the parser that produced it.
+        try:
+            cursor.execute("ALTER TABLE files ADD COLUMN source_digest TEXT")
+        except Exception:
+            pass
+        cursor.execute("CREATE TABLE IF NOT EXISTS index_manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
         self.conn.commit()
+
+    def manifest(self) -> Dict[str, str]:
+        return dict(self.conn.execute("SELECT key, value FROM index_manifest").fetchall())
+
+    def adopt_structural_identity(self, embedding_fingerprint: Optional[str] = None) -> bool:
+        """Bind this graph to the current structural identity (schema +
+        tree-sitter + grammar + structural parser versions). Structure built
+        under any other identity - including a pre-R1 graph with no manifest
+        at all - is never reused: every file's symbols/relations are dropped
+        so the next pass re-parses them. Returns True when that happened."""
+        identity = structural_identity()
+        stored = self.manifest().get("structural_identity")
+        with self.conn:
+            stale = stored != json.dumps(identity, sort_keys=True) and self.has_indexed_files()
+            if stale:
+                present = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                # the Code Intelligence structural tables live in this database too
+                for table in ("relations", "symbols", "files", "ci_fts", "ci_symbols", "ci_files"):
+                    if table in present:
+                        self.conn.execute(f"DELETE FROM {table}")
+            self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)",
+                              ("structural_identity", json.dumps(identity, sort_keys=True)))
+            if embedding_fingerprint is not None:
+                self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)",
+                                  ("embedding_fingerprint", embedding_fingerprint))
+        return stale
+
+    def record_manifest(self, **values: str) -> None:
+        with self.conn:
+            for key, value in values.items():
+                self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)", (key, value))
 
     def has_indexed_files(self) -> bool:
         """Cheap existence check (a single-row LIMIT 1, not a COUNT scan) - True
@@ -165,6 +225,13 @@ class DependencyGraph:
         cursor.execute("SELECT hash FROM files WHERE filepath = ?", (filepath,))
         row = cursor.fetchone()
         return row[0] if row and row[0] else None
+
+    def indexed_paths(self) -> set:
+        """Every file this graph holds symbols or file-sourced relations for."""
+        rows = self.conn.execute(
+            "SELECT filepath FROM files UNION SELECT filepath FROM symbols"
+            " UNION SELECT source_file FROM relations WHERE source_file IS NOT NULL").fetchall()
+        return {row[0] for row in rows}
 
     def clear_file(self, filepath: str) -> None:
         """Delete old symbols and relationships associated with a file.
@@ -195,7 +262,8 @@ class DependencyGraph:
         cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
         self.conn.commit()
 
-    def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None) -> None:
+    def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None,
+                   source_digest: Optional[str] = None, structure: Any = None) -> None:
         """Parse source code of a file and populate SQLite database indices."""
         if file_hash is None:
             import hashlib
@@ -212,7 +280,7 @@ class DependencyGraph:
             if ext == ".py":
                 symbols, relations = self._parse_python(rel_path, content)
             elif ext == ".java":
-                symbols, relations = self._parse_java(rel_path, content)
+                symbols, relations = self._parse_java(rel_path, content, structure)
             elif ext == ".xml":
                 symbols, relations = self._parse_xml(rel_path, content)
             elif ext == ".rb":
@@ -224,7 +292,8 @@ class DependencyGraph:
         # Write to SQLite
         cursor = self.conn.cursor()
         
-        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", (rel_path, mtime, file_hash))
+        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash, source_digest) VALUES (?, ?, ?, ?)",
+                       (rel_path, mtime, file_hash, source_digest))
         
         for sym in symbols:
             cursor.execute("""
@@ -353,7 +422,10 @@ class DependencyGraph:
         own docstring comment at its class_regex definition for the live
         incident this closes."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type IN ('class', 'interface')")
+        cursor.execute(
+            "SELECT DISTINCT name, filepath FROM symbols WHERE type IN (%s)" % ",".join("?" * len(_TOP_LEVEL_TYPE_SYMBOLS)),
+            _TOP_LEVEL_TYPE_SYMBOLS,
+        )
         index: Dict[str, List[str]] = {}
         for name, filepath in cursor.fetchall():
             if not name:
@@ -401,7 +473,7 @@ class DependencyGraph:
         names = {
             sym["name"].rsplit(".", 1)[-1]
             for sym in symbols
-            if sym.get("type") in ("class", "interface") and sym.get("name")
+            if sym.get("type") in _TOP_LEVEL_TYPE_SYMBOLS and sym.get("name")
         }
         return sorted(f"{ext}:{n}" for n in names if n)
 
@@ -632,7 +704,7 @@ class DependencyGraph:
                             "type": "inherits",
                         })
             # 2. Capture Functions
-            elif isinstance(node, ast.FunctionDef):
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 symbols.append({
                     "name": node.name,
                     "type": "function",
@@ -673,143 +745,57 @@ class DependencyGraph:
                     })
         return symbols, relations
 
-    def _parse_java(self, filepath: str, content: str) -> tuple:
+    def _parse_java(self, filepath: str, content: str, structure: Any = None) -> tuple:
+        """Symbols and relations from the Code Intelligence structural model
+        (tree-sitter; E-02): every type (class, interface, enum, record,
+        annotation type, nested types as ``pkg.Outer.Inner``), constructor and
+        method with its real declaration span. Relations keep their
+        established shapes: file-sourced ``imports``/``calls``/``injects``,
+        type-sourced ``inherits``/``implements``/``annotated_with``. A
+        supertype written as a simple name is resolved lexically (an exact
+        single-type import, else the file's own package), so the edge joins
+        the declaring type's qualified symbol; that is a structural guess
+        about a name, never a type-resolved fact."""
+        from kriya.code_intel.model import ParseState
+        from kriya.code_intel.parsing import parse_text
+
+        if structure is None:
+            structure = parse_text(filepath, content)
+        if structure.state is ParseState.PARSE_FAILED:
+            raise ValueError(structure.detail)
+        imports = [i for i in structure.imports if not i.startswith("static ")]
+        by_simple_import = {i.rsplit(".", 1)[-1]: i for i in imports if not i.endswith("*")}
+
+        def qualify(name: str) -> str:
+            if "." in name:
+                return name
+            if name in by_simple_import:
+                return by_simple_import[name]
+            return f"{structure.namespace}.{name}" if structure.namespace else name
+
         symbols = []
-        relations = []
-        lines = content.splitlines()
-        
-        # Package name
-        pkg_match = re.search(r"package\s+([\w\.]+);", content)
-        package_prefix = pkg_match.group(1) + "." if pkg_match else ""
-        
-        # Regex mappings for Java classes, methods and fields
-        # Java symbol indexing (2026-09-07, P7 preflight): interface
-        # declarations were previously invisible to this parser entirely -
-        # `class_regex` matched only the literal `class` keyword, so
-        # get_class_symbol_locations()/extract_class_names() (both filter
-        # on type == "class") never saw a hexagonal-architecture "port"
-        # (interface UserService {...}) as a resolvable symbol at all, even
-        # though a real `implements`/`import` relation to it was correctly
-        # recorded - confirmed live: build_planning_structural_evidence()
-        # resolved every OTHER cross-module edge in a real multi-module
-        # repo except the one that WAS the module boundary, because it was
-        # interface-based. The keyword itself is now captured (group 1:
-        # "class" or "interface") so both symbol types share the exact same
-        # extends/implements handling below - existing class behavior is
-        # completely unchanged (same groups, same order, same relation
-        # types), interfaces are simply no longer skipped.
-        class_regex = re.compile(
-            r"(?:public|protected|private|static|\s)*(class|interface)\s+(\w+)"
-            r"(?:\s+extends\s+(\w+))?"
-            r"(?:\s+implements\s+([\w\s,]+))?"
-        )
-        method_regex = re.compile(JAVA_METHOD_SIGNATURE_CORE + r"\s*\{?")
-        import_regex = re.compile(r"import\s+([\w\.\*]+);")
-        field_regex = re.compile(r"(?:public|protected|private|static|final|\s)*([\w<>\?]+)\s+(\w+)\s*;")
-        
-        pending_annotations = []
-        
-        for idx, line in enumerate(lines, 1):
-            line_strip = line.strip()
-            
-            # Skip comments
-            if line_strip.startswith("//") or line_strip.startswith("/*") or line_strip.startswith("*"):
-                continue
-                
-            # Capture annotations
-            anno_matches = re.findall(r"@(\w+)", line_strip)
-            if anno_matches:
-                pending_annotations.extend(anno_matches)
-            
-            # Capture imports
-            imp_match = import_regex.match(line_strip)
-            if imp_match:
-                relations.append({
-                    "source": filepath,
-                    "target": imp_match.group(1),
-                    "type": "imports"
-                })
-                continue
-                
-            # Class/interface definitions
-            class_match = class_regex.match(line_strip)
-            if class_match:
-                keyword = class_match.group(1)
-                class_name = package_prefix + class_match.group(2)
-                symbols.append({
-                    "name": class_name,
-                    "type": keyword,
-                    "start_line": idx,
-                    "end_line": idx + 5
-                })
-
-                # Add class annotation relations
-                for anno in pending_annotations:
-                    relations.append({
-                        "source": class_name,
-                        "target": anno,
-                        "type": "annotated_with"
-                    })
-                pending_annotations = []
-
-                # Handle extends
-                base_class = class_match.group(3)
-                if base_class:
-                    relations.append({
-                        "source": class_name,
-                        "target": base_class,
-                        "type": "inherits"
-                    })
-
-                # Handle implements
-                impl_interfaces = class_match.group(4)
-                if impl_interfaces:
-                    for interface in impl_interfaces.split(","):
-                        interface = interface.strip()
-                        if interface:
-                            relations.append({
-                                "source": class_name,
-                                "target": interface,
-                                "type": "implements"
-                            })
-                continue
-                
-            # Field DI injection matching
-            field_match = field_regex.match(line_strip)
-            if field_match:
-                field_type = field_match.group(1)
-                if field_type not in {"String", "int", "long", "double", "float", "boolean", "char", "byte", "short"}:
-                    if any(a in pending_annotations for a in {"Autowired", "Resource", "Inject", "Qualifier"}):
-                        relations.append({
-                            "source": filepath,
-                            "target": field_type,
-                            "type": "injects"
-                        })
-                pending_annotations = []
-                
-            # Method definitions
-            method_match = method_regex.match(line_strip)
-            if method_match:
-                method_name = method_match.group(1)
-                # Ignore java keywords
-                if method_name not in {"if", "for", "while", "switch", "catch"}:
-                    symbols.append({
-                        "name": method_name,
-                        "type": "method",
-                        "start_line": idx,
-                        "end_line": idx + 2
-                    })
-                    
-            # Capture method invocations
-            calls = re.findall(r"\.(\w+)\(", line_strip)
-            for call in calls:
-                if call not in {"println", "print", "equals", "toString", "split", "replace"}:
-                    relations.append({
-                        "source": filepath,
-                        "target": call,
-                        "type": "calls"
-                    })
-                    
+        relations = [{"source": filepath, "target": i, "type": "imports"} for i in imports]
+        for symbol in structure.symbols:
+            span = {"start_line": symbol.declaration.start_line, "end_line": symbol.declaration.end_line}
+            if symbol.is_type:
+                symbols.append({"name": symbol.lookup_key, "type": symbol.kind if symbol.parent_id is None
+                                else f"nested_{symbol.kind}", **span})
+                for base in symbol.extends:
+                    relations.append({"source": symbol.lookup_key, "target": qualify(base), "type": "inherits"})
+                for interface in symbol.implements:
+                    relations.append({"source": symbol.lookup_key, "target": qualify(interface),
+                                      "type": "implements"})
+                for annotation in symbol.annotations:
+                    relations.append({"source": symbol.lookup_key, "target": annotation.rsplit(".", 1)[-1],
+                                      "type": "annotated_with"})
+            elif symbol.kind in ("method", "constructor"):
+                symbols.append({"name": symbol.name, "type": symbol.kind, **span})
+            elif symbol.kind == "field" and symbol.return_type and symbol.return_type not in _JAVA_PRIMITIVE_FIELD_TYPES:
+                if any(a.rsplit(".", 1)[-1] in _JAVA_INJECTION_ANNOTATIONS for a in symbol.annotations):
+                    relations.append({"source": filepath, "target": symbol.return_type.replace(" ", ""),
+                                      "type": "injects"})
+        relations.extend({"source": filepath, "target": call, "type": "calls"}
+                         for call in structure.calls if call not in _JAVA_IGNORED_CALLS)
         return symbols, relations
 
     def _parse_xml(self, filepath: str, content: str) -> tuple:

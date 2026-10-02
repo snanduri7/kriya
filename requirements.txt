@@ -162,6 +162,12 @@ tomlkit==0.15.1
     # via pylint
 tqdm==4.70.0
     # via openai
+tree-sitter==0.25.2
+    # via kriya (pyproject.toml)
+tree-sitter-java==0.23.5
+    # via kriya (pyproject.toml)
+tree-sitter-python==0.25.0
+    # via kriya (pyproject.toml)
 truststore==0.10.4
     # via
     #   httpcore2
