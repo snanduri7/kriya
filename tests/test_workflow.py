@@ -15292,15 +15292,14 @@ async def test_self_diagnosis_attribution_no_longer_triggers_plan_scope_conflict
 
     await handle_attempt_failure(state, ctx, exc)
 
-    # Self-diagnosis still wins ATTRIBUTION itself...
-    assert state.last_attribution.tier == "self_diagnosis"
-    assert state.last_attribution.files == ["Customer.java"]
-    # ...but the ALREADY-EXISTING, unconditional out-of-scope filter
-    # (Correctness Continuity Part B, PRV-06) still correctly drops it as
-    # a retry TARGET regardless of this fix - that defense-in-depth layer
-    # was never the gap. What this fix changes is the NEXT line: it must
-    # no longer escalate to full plan surgery on that same unverified guess.
+    # Code Intelligence live closure (2026-10-02): a self-diagnosis naming only
+    # files outside the stage's write scope cannot direct its repair, so it no
+    # longer wins attribution at all - the deterministic tiers decide (here
+    # nothing narrows: a full-set retry of the stage's own files)...
+    assert state.last_attribution.tier != "self_diagnosis"
     assert state.last_implicated_files is None
+    # ...and, the point of this test, an unverified guess never escalates to
+    # full plan surgery.
     assert state.plan_scope_conflict is None
 
 
@@ -25940,3 +25939,44 @@ async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_p
         entry["member_id"] == "Owner.new_name" for entry in events[-1].details["tiers"]
     )
     assert not any(entry["member_id"] == "Owner.old_name" for entry in events[-1].details["tiers"])
+
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_scope_self_diagnosis_never_strands_an_in_scope_edit_failure(tmp_path):
+    """Live matrix, spring-petclinic s2 (run 3a58cf00): the stage may write only
+    OwnerController.java; its attempt-2 anchored edits there were correct but
+    rejected ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT (designed to be repaired by
+    showing that source next attempt). The model's analysis also mentioned
+    application.properties (another stage's file): self-diagnosis won
+    attribution, the out-of-scope file was dropped, nothing was left - the
+    run stopped NO_AUTHORIZED_REPAIR_TARGET. The failure's own in-scope file
+    must stay the repair target."""
+    from kriya.workflow.failure import FileLocation
+    from kriya.workflow.failure_grounding import build_failure_signature
+
+    controller = "src/main/java/petclinic/OwnerController.java"
+    raw_output = ("ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is "
+                  "real source, but not source this attempt was authorized to rely on")
+    state = GenerationState()
+    state.attempt_number = 2
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {controller}
+    # As live: an edit-protocol failure keeps the signature of the failure it is repairing (attempt 1's
+    # fabricated anchor), and the analysis the model wrote then matches it.
+    previous = build_failure_signature("anchored_edit", "ANCHOR_NOT_IN_FILE: the search block does not occur")
+    state.budgets.last_failure_signature = previous
+    state.last_self_diagnosis = (previous, ["src/main/resources/application.properties"], 2)
+    ctx = _minimal_attempt_ctx(tmp_path, allowed_write_relpaths=[controller],
+                               write_scope_mode=WriteScopeMode.ALLOWLIST)
+    exc = QualityGateFailure(Failure(
+        type="anchored_edit", message=f"ANCHORED EDIT FAILURE in {controller}: {raw_output}",
+        raw_output=raw_output, file_locations=[FileLocation(filepath=controller)], likely_files=[controller],
+        diagnostics={"reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"},
+    ))
+
+    await handle_attempt_failure(state, ctx, exc)
+
+    assert state.last_attribution.tier != "self_diagnosis"
+    assert state.last_implicated_files == [controller]
+    assert "src/main/resources/application.properties" not in state.rejected_generation_targets
