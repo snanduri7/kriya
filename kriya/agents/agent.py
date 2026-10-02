@@ -2965,8 +2965,14 @@ class SpecComplianceAgent(BaseAgent):
         file_contents: Dict[str, str],
         authoritative_context: Optional[str] = None,
         requirements: Optional[Any] = None,
+        baseline_contents: Optional[Dict[str, Optional[str]]] = None,
     ) -> Dict[str, Any]:
-        """requirements (PRD-020): the run's RequirementSet (kriya/workflow/
+        """baseline_contents: each file's version before this candidate
+        (None: a new file) - when the whole files do not fit the request, the
+        changed regions are shown instead (context_budget.
+        fit_spec_compliance_files).
+
+        requirements (PRD-020): the run's RequirementSet (kriya/workflow/
         requirements.py) when this check is the verifier of the user's
         original requirements. The model then also returns one verdict per
         REQ id ("requirement_verdicts", passed back raw for the caller to
@@ -2985,11 +2991,6 @@ class SpecComplianceAgent(BaseAgent):
         context was honored; do not treat a lower rate of contradictions as
         proof this alone is sufficient (per the spec's own "do not trust
         the prompt alone" instruction)."""
-        files_block = "\n\n".join(
-            f"=== {path} ===\n{file_contents[path]}"
-            for path in files_written
-            if path in file_contents
-        )
         context_block = f"{authoritative_context}\n\n" if authoritative_context else ""
         requirement_items = list(getattr(requirements, "requirements", None) or ())
         requirements_block = ""
@@ -3004,14 +3005,16 @@ class SpecComplianceAgent(BaseAgent):
                 "be confirmed from source text alone. Never report a requirement missing because "
                 "it is stated in general terms."
             )) + "\n"
-        prompt = (
-            f"{context_block}"
-            f"=== Goal ===\n{goal}\n\n"
-            f"{requirements_block}"
-            f"=== Files Generated ===\n{files_block}\n\n"
-            "Does this code satisfy every concrete, literally-named requirement in the "
-            "goal, per the rules above?"
-        )
+        head = f"{context_block}=== Goal ===\n{goal}\n\n{requirements_block}=== Files Generated ===\n"
+        tail = ("\n\nDoes this code satisfy every concrete, literally-named requirement in the "
+                "goal, per the rules above?")
+        from kriya.workflow.context_budget import agent_request_capacity, fit_spec_compliance_files
+
+        files_block = fit_spec_compliance_files(
+            agent_request_capacity(self.llm.config, self, "spec_compliance"), (self.system_prompt, head, tail),
+            files_written, file_contents, baseline_contents,
+        ).value
+        prompt = f"{head}{files_block}{tail}"
         # Return UNKNOWN while preserving compliant=True for compatibility.
         # Legacy/validated callers keep advisory fail-open behavior; the
         # authoritative caller treats status=unknown as NEEDS_REVIEW. This check runs

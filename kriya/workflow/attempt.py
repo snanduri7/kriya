@@ -9848,6 +9848,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             set(state.all_files_written) | set(ctx.established_files)
         )
         spec_file_contents: Dict[str, str] = {}
+        # Each file's version before this candidate (None: new), so a file too
+        # large to show whole is judged on its changed regions.
+        spec_baselines: Dict[str, Optional[str]] = {}
         for spec_path in spec_check_files:
             spec_full_path = os.path.join(ctx.worktree_path, spec_path)
             if not os.path.exists(spec_full_path):
@@ -9857,6 +9860,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             try:
                 with open(spec_full_path, "r", encoding="utf-8", errors="replace") as fh:
                     spec_file_contents[spec_path] = fh.read()
+                baseline_path = os.path.join(ctx.workspace_path, spec_path)
+                if os.path.isfile(baseline_path):
+                    with open(baseline_path, "r", encoding="utf-8", errors="replace") as fh:
+                        spec_baselines[spec_path] = fh.read()
+                else:
+                    spec_baselines[spec_path] = None
             except Exception as e:
                 logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
         authoritative_context = _spec_compliance_authoritative_context(ctx.obligation_ledger)
@@ -9878,7 +9887,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         requirement_kwargs = {"requirements": ctx.requirement_set} if ctx.requirement_set is not None else {}
         spec_result = await ctx.spec_compliance.check(
             goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-            authoritative_context=authoritative_context, **requirement_kwargs,
+            authoritative_context=authoritative_context, baseline_contents=spec_baselines, **requirement_kwargs,
         )
         if spec_result.get("status") == "indeterminate":
             # SpecComplianceAgent.check() returns this when the model's own
@@ -9894,7 +9903,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
                 goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-                authoritative_context=authoritative_context, **requirement_kwargs,
+                authoritative_context=authoritative_context, baseline_contents=spec_baselines, **requirement_kwargs,
             )
         if ctx.requirement_set is not None:
             _record_original_requirement_verdicts(

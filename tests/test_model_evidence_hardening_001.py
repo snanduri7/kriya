@@ -414,8 +414,8 @@ def test_a_two_element_verdict_still_gets_its_outcomes_default_reason():
 
 
 def _spec_agent():
-    agent = SpecComplianceAgent("spec_compliance", MagicMock())
-    agent.llm = SimpleNamespace(last_completion=SimpleNamespace(
+    agent = SpecComplianceAgent("spec_compliance", MagicMock(config=AppConfig()))
+    agent.llm = SimpleNamespace(config=AppConfig(), last_completion=SimpleNamespace(
         model="qwen3-coder:30b", runtime_fingerprint=DIGEST, runtime_fingerprint_exact=True))
     return agent
 

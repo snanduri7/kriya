@@ -768,6 +768,63 @@ def trim_reference_text(text: str, budget: int) -> str:
 _REFERENCE_ENTRY = re.compile(r"(?=\n\[Source: )")
 
 
+SPEC_CHANGED_REGIONS_NOTE = (
+    "Some files below are shown as their CHANGED REGIONS only (a unified diff against the version before this "
+    "change); code outside those regions is unchanged and not shown. A requirement about code that is not shown "
+    "is unverifiable from this view, never missing.\n\n")
+# Context lines tried around each change, widest first.
+_SPEC_DIFF_CONTEXT = (40, 15, 5, 0)
+
+
+def _spec_file_entry(path: str, content: str, baseline: Optional[str], context: Optional[int]) -> str:
+    if context is None or baseline is None:  # the whole file; a new file is always whole
+        return f"=== {path} ===\n{content}"
+    if baseline == content:
+        return f"=== {path} (unchanged by this candidate; not shown) ==="
+    import difflib
+
+    diff = "".join(difflib.unified_diff(baseline.splitlines(keepends=True), content.splitlines(keepends=True),
+                                        fromfile=f"{path} (before)", tofile=f"{path} (candidate)", n=context))
+    return f"=== {path} (changed regions only) ===\n{diff}"
+
+
+def fit_spec_compliance_files(capacity: RequestCapacity, fixed_texts: Sequence[str], files: Sequence[str],
+                              contents: Dict[str, str], baselines: Optional[Dict[str, Optional[str]]] = None,
+                              ) -> SectionFit:
+    """The files section of a spec-compliance request, fitted to the room its
+    fixed text leaves (fit_variable_section): every file whole when that fits
+    (the unfitted text, unchanged); else, for files whose pre-change version
+    is known, the changed regions (a unified diff with the widest context that
+    fits; unchanged files named, not shown; new files whole), introduced by
+    SPEC_CHANGED_REGIONS_NOTE. A file too large for any request used to make
+    the verifier's request unsatisfiable - an unavailable judgment the
+    authoritative path must count as a failure, whatever the candidate."""
+    baselines = baselines or {}
+    shown = [path for path in files if path in contents]
+
+    def render(context: Optional[int]) -> str:
+        block = "\n\n".join(_spec_file_entry(path, contents[path], baselines.get(path), context) for path in shown)
+        return block if context is None else SPEC_CHANGED_REGIONS_NOTE + block
+
+    def build(budget: int) -> str:
+        whole = render(None)
+        if estimate_tokens(whole) <= budget or not baselines:
+            return whole
+        for context in _SPEC_DIFF_CONTEXT:
+            text = render(context)
+            if estimate_tokens(text) <= budget:
+                return text
+        return render(_SPEC_DIFF_CONTEXT[-1])
+
+    fit = fit_variable_section(capacity, fixed_texts, build)
+    if fit.omitted and shown:
+        # No view fits: the request stays the whole files, which the dispatch
+        # check refuses typed (an unavailable judgment) - never a verdict over
+        # files the verifier was not shown.
+        return replace(fit, value=render(None))
+    return fit
+
+
 def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str], reference: str) -> SectionFit:
     """Fenced untrusted reference text fitted into the room its request has
     left (fit_variable_section): the fence and warning always come whole,

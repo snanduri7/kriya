@@ -207,8 +207,9 @@ def test_the_verifier_path_closes_by_evidence_and_reports_findings(tmp_path, mon
     autonomy.spec_compliance_enabled = True
     calls = {}
 
-    async def verify(spec, requirements, goal, candidate_root, paths, ledger):
+    async def verify(spec, requirements, goal, candidate_root, paths, ledger, baseline_root=None):
         del spec, requirements, goal, ledger
+        assert baseline_root == request.workspace_path  # the changed-regions view's baseline
         calls["verify"] = (candidate_root, paths)
         return ["REQ-9 is not a requirement id"]
 
