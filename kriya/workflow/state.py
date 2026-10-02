@@ -701,6 +701,14 @@ class GenerationState:
     # (kriya/workflow/verification_binding.py). The terminal commit refuses
     # a batch that no longer matches it; None until the gates pass.
     verified_candidate_binding: Optional[Any] = None
+    # ENFORCE-VERIFIED-NO-CHANGE-001: the planned paths this attempt's
+    # Developer answered NO CHANGE for, in an enforce unit that wrote
+    # nothing - a REQUEST for Kriya to verify the current candidate, settled
+    # after the terminal regression (kriya/workflow/verified_no_change.py).
+    # Reset at every attempt start.
+    no_change_proposal: List[str] = field(default_factory=list)
+    # "VERIFIED_NO_CHANGE" once that verification succeeded; None otherwise.
+    completion_kind: Optional[str] = None
     # Set when grounded failure attribution identifies a required repair
     # file outside an authoritative caller-provided write allowlist. This
     # is a plan/scope conflict, not another code-generation retry target.

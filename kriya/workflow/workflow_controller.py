@@ -6329,6 +6329,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     ("PLAN_SCOPE_REVISION_REQUIRED",)
                     if call_result.get("plan_scope_conflict")
                     else (review_refusal.get("reason_code"),) if review_refusal
+                    # ENFORCE-VERIFIED-NO-CHANGE-001: the unit completed with
+                    # no mutation, on deterministic evidence - recorded, never
+                    # implied by an empty file list.
+                    else tuple(verification_reason_codes) + ("VERIFIED_NO_CHANGE",)
+                    if passed and call_result.get("completion_kind") == "VERIFIED_NO_CHANGE"
                     else verification_reason_codes
                 ),
             )

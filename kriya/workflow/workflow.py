@@ -561,6 +561,58 @@ def deterministic_gate_evidence(
     return evidence
 
 
+def _settle_no_change_proposal(
+    state: GenerationState, structured_plan: Any, subtask_id: Optional[str], worktree_path: str,
+) -> None:
+    """ENFORCE-VERIFIED-NO-CHANGE-001: decide a unit's NO CHANGE proposal
+    from the final attempt's deterministic evidence, after every normal gate
+    and the terminal regression ran on the current candidate. Accepted: the
+    unit completes as VERIFIED_NO_CHANGE (nothing written, nothing
+    authorized). Refused: a typed deterministic gate failure through the
+    ordinary repair path - never success."""
+    from kriya.workflow.milestone_completion import workspace_evidence_hash
+    from kriya.workflow.verified_no_change import (
+        VERIFIED_NO_CHANGE,
+        VERIFIED_NO_CHANGE_REFUSED,
+        unit_coverage_items,
+        verify_no_change_unit,
+    )
+
+    attempt = state.attempt_number
+    result = {
+        "deterministic_gate_evidence": deterministic_gate_evidence(state.gate_outcomes, attempt),
+        "acceptance_coverage": unit_coverage_items(structured_plan, subtask_id, state.gate_outcomes, attempt),
+    }
+    binding, refusal = verify_no_change_unit(structured_plan, subtask_id, result)
+    if refusal is not None:
+        failure = Failure(
+            type="verified_no_change_refused",
+            message=(f"{VERIFIED_NO_CHANGE_REFUSED}: the Developer proposed NO CHANGE for "
+                     f"{', '.join(state.no_change_proposal)}, but {refusal['detail']} ({refusal['code']}). "
+                     "A unit completes without a change only when every acceptance criterion is "
+                     "verified by deterministic evidence; otherwise make the change the unit requires."),
+            raw_output=str(refusal), source="verified_no_change", authority="deterministic",
+            file_locations=[FileLocation(filepath=path) for path in state.no_change_proposal],
+            likely_files=list(state.no_change_proposal),
+            diagnostics={"reason_code": VERIFIED_NO_CHANGE_REFUSED, "verified_no_change": refusal},
+            attempt=attempt,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_event(RunEvent(
+            kind="unit.verified_no_change_refused", attempt=attempt, source="workflow",
+            authority=EventAuthority.AUTHORITATIVE,
+            details={"subtask": subtask_id, "paths": list(state.no_change_proposal), "refusal": refusal},
+        ))
+        raise QualityGateFailure(failure)
+    state.completion_kind = VERIFIED_NO_CHANGE
+    state.record_event(RunEvent(
+        kind="unit.verified_no_change", attempt=attempt, source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        details={**binding, "subtask": subtask_id, "paths": list(state.no_change_proposal),
+                 "workspace_content_hash": workspace_evidence_hash(worktree_path)},
+    ))
+
+
 def _build_required_verification_evidence(
     requirements: Optional[List[Dict[str, Any]]], quality_gates_passed: bool,
     gate_outcomes: Optional[List[Dict[str, Any]]] = None,
@@ -5156,6 +5208,8 @@ class WorkflowEngine:
                     "output": full_test_res.get("output", ""),
                     **execution_evidence(full_test_res),
                 })
+                if state.no_change_proposal:
+                    _settle_no_change_proposal(state, structured_plan, current_subtask_id, worktree_path)
                 state.terminal_regression_succeeded = True
                 if obligation_ledger is not None and current_subtask_id:
                     # This subtask's own full regression genuinely passed
@@ -5850,6 +5904,9 @@ class WorkflowEngine:
             "deterministic_gate_evidence": deterministic_gate_evidence(
                 state.gate_outcomes, state.attempt_number,
             ),
+            # ENFORCE-VERIFIED-NO-CHANGE-001: "VERIFIED_NO_CHANGE" when the
+            # unit completed without a mutation on deterministic evidence.
+            "completion_kind": state.completion_kind if quality_passed else None,
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "retry_progress": state.retry_progress_summary(),

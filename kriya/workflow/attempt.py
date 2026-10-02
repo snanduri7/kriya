@@ -6226,6 +6226,25 @@ def _restore_api_contract_owners_deterministically(
     return files
 
 
+def _verified_no_change_proposal(
+    state: GenerationState, ctx: "AttemptContext", files: List[Dict[str, Any]], missing_files: List[str],
+) -> List[str]:
+    """ENFORCE-VERIFIED-NO-CHANGE-001: the planned paths of an enforce unit
+    whose Developer answered NO CHANGE for every result, when those are
+    exactly the expected files never written - else []. Only an existing
+    file can be a no-change (a planned file still missing is a missing
+    artifact), and only a unit that has written nothing in any attempt."""
+    if (not missing_files or ctx.structured_plan is None or not ctx.current_subtask_id
+            or state.all_files_written or not all_results_are_no_change(files)):
+        return []
+    paths = sorted({f.get("filepath", "") for f in files if f.get("filepath")})
+    if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in paths):
+        return []
+    if not set(missing_files) <= {os.path.basename(path) for path in paths}:
+        return []
+    return paths
+
+
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
@@ -6253,6 +6272,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     state.candidate_gates_succeeded = False
     state.terminal_regression_succeeded = False
     state.overall_attempt_succeeded = False
+    state.no_change_proposal = []
+    state.completion_kind = None
     # PLAT-039: a planned target that is repository metadata or Kriya control
     # state is refused before any Developer request - the same DENY the
     # writer gives, which the retry loop stops on at once.
@@ -8416,7 +8437,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                      - _structured_plan_paths(ctx))
         expected_files = {os.path.basename(f) for f in ctx.architect_files if f not in abandoned}
         missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=ctx.goal)
-        if missing_files:
+        no_change_proposal = _verified_no_change_proposal(state, ctx, files, missing_files)
+        if no_change_proposal:
+            # ENFORCE-VERIFIED-NO-CHANGE-001: not success - the gates below
+            # and the terminal regression run as always, then the workflow
+            # decides from deterministic evidence (verified_no_change.py).
+            state.no_change_proposal = no_change_proposal
+            state.record_event(RunEvent(
+                kind="unit.no_change_proposed",
+                attempt=state.attempt_number,
+                source="developer",
+                authority=EventAuthority.ADVISORY,
+                details={"subtask": ctx.current_subtask_id, "paths": no_change_proposal},
+            ))
+        elif missing_files:
             raise IncompleteGenerationError(
                 missing_files,
                 "INCOMPLETE GENERATION: The design called for the following files, but "
