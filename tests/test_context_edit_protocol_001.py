@@ -370,3 +370,46 @@ def test_the_whole_target_is_never_reinjected(tmp_path, monkeypatch):
     for _system, user in run.developer:
         assert TARGET_SOURCE not in user
         assert FAR_HELPER_LINE not in _code_context(user)
+
+
+# --- live: an annotated Java member (Planner R1 / no-change replay, 2026-10-02) ------
+def test_a_rejected_search_quoting_repeated_annotations_widens_to_cover_them():
+    """Live (spring-framework-petclinic, run bda481d9): the member_exact unit
+    of findPetTypes() spans its signature and body (56-58), not its
+    annotations (54-55). The model's SEARCH quoted the whole declaration and
+    was rightly refused (ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT). The loci were
+    located line by line: "@Override" is too short and
+    "@Transactional(readOnly = true)" occurs on five methods, so only 56-57
+    were remembered - already inside the shown span - and every retry was
+    stopped as ANCHOR_CONTEXT_NOT_ESCALATED: a deadlock. The quoted block
+    matches exactly one contiguous run of the real file, so every line of
+    that run is a locus."""
+    import os
+
+    path = "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java"
+    with open(os.path.join(os.path.dirname(__file__), "fixtures", "edit_protocol_live", "ClinicServiceImpl.java")) as f:
+        source = f.read()
+    lines = source.splitlines()
+    search = ("    @Override\n    @Transactional(readOnly = true)\n    public Collection<PetType> findPetTypes() {\n"
+              "        return petRepository.findPetTypes();\n    }\n")
+    start = lines.index("    public Collection<PetType> findPetTypes() {") + 1
+    shown_member = [("member_exact", "\n".join(lines[start - 1:start + 2]) + "\n")]
+    first = build_edit_capability(path, source, full_file=False, loci=(), budget_chars=4000, shown=shown_member)
+    assert first.anchor_status(search, source) == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT  # the live refusal
+    loci = locate_search_text(lines, search)
+    assert set(range(start - 2, start + 3)) <= set(loci), loci  # annotations, signature, body, closing brace
+    escalated = build_edit_capability(path, source, full_file=False, loci=loci, budget_chars=4000, level=1,
+                                      shown=shown_member)
+    assert escalated.digest != first.digest
+    assert escalated.anchor_status(search, source) is None  # the same anchor is now authorized
+
+
+def test_a_block_quoted_more_than_once_still_localizes_line_by_line():
+    lines = ["a = f(x, y)", "b = g(x, y)", "a = f(x, y)", "b = g(x, y)", "unique_line(value)"]
+    assert locate_search_text(lines, "a = f(x, y)\nb = g(x, y)") == [1, 3, 2, 4]  # unchanged per-line rule
+
+
+def test_a_single_line_keeps_the_per_line_rule():
+    # Below the fragment minimum: a lone short line localizes nothing, even when unique.
+    assert locate_search_text(["    x = 1", "    y = compute(a, b)"], "    x = 1") == []
+    assert locate_search_text(["    @Override", "    y = compute(a, b)"], "    @Override") == [1]

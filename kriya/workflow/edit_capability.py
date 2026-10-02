@@ -175,10 +175,24 @@ def locate_fragments(lines: Sequence[str], fragments: Iterable[str]) -> List[int
 
 
 def locate_search_text(lines: Sequence[str], search: str) -> List[int]:
-    """Where a SEARCH block that did not apply points in the real source:
-    every line it quotes verbatim, else, per quoted line, the unique real
-    line sharing most of its identifiers."""
+    """Where a SEARCH block that did not apply points in the real source.
+    A block of two or more lines that matches exactly one contiguous run of
+    the file is located whole - every line of the run, including lines that
+    alone are too short or too common to place (live: a Java method's
+    repeated annotations were never located, so the window never grew to
+    show them). Otherwise: every line it quotes verbatim, else, per quoted
+    line, the unique real line sharing most of its identifiers."""
     normalized_lines = [_normalize_line(line) for line in lines]
+    block = [_normalize_line(raw) for raw in (search or "").splitlines()]
+    while block and not block[-1]:
+        block.pop()
+    while block and not block[0]:
+        block.pop(0)
+    if len(block) >= 2:
+        runs = [start for start in range(len(normalized_lines) - len(block) + 1)
+                if normalized_lines[start:start + len(block)] == block]
+        if len(runs) == 1:
+            return list(range(runs[0] + 1, runs[0] + len(block) + 1))
     token_sets = [set(_IDENTIFIER.findall(line)) for line in lines]
     loci: List[int] = []
     for raw in (search or "").splitlines():
