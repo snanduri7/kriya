@@ -1266,6 +1266,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         if chunk.get("done"):
             out.prompt_tokens = _int(chunk.get("prompt_eval_count"))
             out.completion_tokens = _int(chunk.get("eval_count"))
+            # Measured local cost (nanoseconds on the wire): prefill and
+            # model load, reported for prompt-cost telemetry only.
+            for wire, name in (("prompt_eval_duration", "prompt_eval_ms"), ("load_duration", "load_ms")):
+                if isinstance(chunk.get(wire), int):
+                    out.provider_metadata[name] = chunk[wire] // 1_000_000
             reason = chunk.get("done_reason")
             out.finish_reason = reason if isinstance(reason, str) and reason else None
         model = chunk.get("model")

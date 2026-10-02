@@ -34,25 +34,34 @@ class ContextPackage:
     source_digest: str
     member_text: str
     header: List[str] = field(default_factory=list)
+    members: List[str] = field(default_factory=list)  # other members of the enclosing type (signatures)
     collaborators: List[Tuple[str, List[str]]] = field(default_factory=list)  # (type key, member signatures)
     tests: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, signature)
     config: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, "path:line  declaration")
     over_budget: bool = False
     dropped: List[str] = field(default_factory=list)
+    include_target: bool = True
 
-    def render(self) -> str:
+    def render(self, include_target: bool = True) -> str:
+        """The package, stable material first. ``include_target=False``
+        leaves the target body out (a caller that already shows the exact
+        member as its own authoritative item)."""
         span = f"{self.target_span[0]}-{self.target_span[1]}"
         parts = [f"### Context for {self.target.lookup_key} ({self.path})"]
         if self.header:
             parts.append("#### Enclosing declarations (read-only)\n" + "\n".join(self.header))
+        if self.members:
+            parts.append("#### Other members of the enclosing type (signatures, read-only)\n"
+                         + "\n".join(self.members))
         for key, signatures in self.collaborators:
             parts.append(f"#### Collaborator {key} (signatures, read-only)\n" + "\n".join(signatures))
         if self.tests:
             parts.append("#### Linked tests (read-only)\n" + "\n".join(sig for _, sig in self.tests))
         if self.config:
             parts.append("#### Linked configuration (read-only)\n" + "\n".join(line for _, line in self.config))
-        parts.append(f"#### Target member (authoritative source) {self.path}:{span} sha256={self.source_digest}"
-                     f" id={self.target.symbol_id}\n{self.member_text}")
+        if include_target:
+            parts.append(f"#### Target member (authoritative source) {self.path}:{span} sha256={self.source_digest}"
+                         f" id={self.target.symbol_id}\n{self.member_text}")
         return "\n\n".join(parts)
 
     @property
@@ -86,7 +95,11 @@ def _import_names(statement: str, language: str) -> set:
 
 def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
                   count_tokens: Callable[[str], int] = default_token_count,
-                  max_collaborators: int = 4, max_tests: int = 6, max_config: int = 8) -> Optional[ContextPackage]:
+                  max_collaborators: int = 4, max_tests: int = 6, max_config: int = 8,
+                  include_target: bool = True, member_signatures: bool = False) -> Optional[ContextPackage]:
+    """``include_target`` decides whether budgets count the target body
+    (False when a caller shows it separately); ``member_signatures`` adds
+    the enclosing type's other members as an optional tier."""
     member = service.get_member(symbol_id)
     if member is None:
         return None
@@ -120,11 +133,18 @@ def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
             annotations = " ".join(f"@{a}" for a in sibling.annotations if sibling.language == "java")
             header.append(f"    {annotations + ' ' if annotations else ''}{sibling.signature_text}")
     package = ContextPackage(target, member.path, member.source_digest, member.text, header)
-    if budget_tokens is not None and count_tokens(package.render()) > budget_tokens:
+    package.include_target = include_target
+    if budget_tokens is not None and count_tokens(package.render(include_target)) > budget_tokens:
         package.over_budget = True  # T0 stays whole; nothing optional is added
         return package
     owner_names = {o.name for o in owner_chain}
     owner_ids = {o.symbol_id for o in owner_chain}
+    if member_signatures and owner_chain:
+        for sibling in symbols:
+            if sibling.parent_id == owner_chain[-1].symbol_id and sibling.is_callable and \
+                    sibling.kind != "constructor" and sibling.symbol_id != target.symbol_id:
+                _add_within_budget(package, package.members, f"    {sibling.signature_text}", budget_tokens,
+                                   count_tokens, f"member:{sibling.symbol_id}")
     # Collaborators: the declared types of the fields the member uses, then
     # the types it names itself.
     field_types = [_TYPE_REFERENCE_RE.findall(s.return_type or "")[:1] for s in symbols
@@ -183,7 +203,7 @@ def _add_within_budget(package: ContextPackage, tier: list, item, budget: Option
     """Add ``item`` to an optional tier only if the whole rendered package
     still fits (measured on the real rendering, headings included)."""
     tier.append(item)
-    if budget is not None and count_tokens(package.render()) > budget:
+    if budget is not None and count_tokens(package.render(package.include_target)) > budget:
         tier.pop()
         package.dropped.append(label)
 

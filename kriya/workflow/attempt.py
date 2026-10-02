@@ -182,6 +182,7 @@ from kriya.workflow.operations import (
     validate_operation_result,
 )
 from kriya.workflow.plan_schema import EngineeringPlan, RequirementOwnershipRelation
+from kriya.workflow.prompt_composition import prompt_composition
 from kriya.workflow.repair_contract import (
     RepairContractStatus,
     build_repair_contract,
@@ -2235,16 +2236,42 @@ def _target_package_with_window_reserve(
     shown whole and exact there, exact windows may be added to the request
     (CONTEXT-EDIT-PROTOCOL-001), so it is rebuilt with their reserve held
     back and the windows never push the request past its capacity."""
-    rendered, package = build_known_target_context(
-        paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
-    )
-    shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
-    if set(paths) <= shown_whole:
-        return rendered, package
-    return build_known_target_context(
-        paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
-        member_hints=member_hints, cache=ctx.source_cache,
-    )
+    # Code Intelligence R1 slice 2: T0 (a grounded member's exact current
+    # body) has its own room, computed without skills, learned reference or
+    # optional context - none of them can evict it.
+    exact_member_budget = _reserve_graph_context_budget(prompt_window, ctx.design, ctx.plan)
+    service = _code_intelligence_for(ctx) if member_hints else None
+    try:
+        rendered, package = build_known_target_context(
+            paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
+            exact_member_budget=exact_member_budget, code_intelligence=service,
+        )
+        shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
+        if set(paths) <= shown_whole:
+            return rendered, package
+        return build_known_target_context(
+            paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
+            member_hints=member_hints, cache=ctx.source_cache, exact_member_budget=exact_member_budget,
+            code_intelligence=service,
+        )
+    finally:
+        if service is not None:
+            service.close()
+
+
+def _code_intelligence_for(ctx: "AttemptContext") -> Any:
+    """The repository's Code Intelligence index (read-only T1-T3 context),
+    or None when there is none of the current parser identity."""
+    from kriya.workflow.graph_retrieval import open_code_intelligence
+
+    memory = getattr(getattr(getattr(ctx.kernel, "config", None), "paths", None), "memory", None)
+    if not isinstance(memory, str):
+        return None
+    try:
+        return open_code_intelligence(ctx.workspace_path, os.path.join(memory, "dependency_graph.db"))
+    except Exception as error:  # read-only enrichment; T0 never depends on it
+        logger.warning("Code Intelligence index unavailable for known-target context: %s", error)
+        return None
 
 
 def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str]) -> List[int]:
@@ -2524,6 +2551,25 @@ async def _run_developer_generation_as_developer(
             "runtime_fingerprint": (last_call_metrics or {}).get("runtime_fingerprint"),
             "protocol_status": (last_call_metrics or {}).get("protocol_status"),
         })
+        # Code Intelligence R1 slice 2: what this request spent its prompt on
+        # (T0 member/header, sibling signatures, T1-T3, skills) and the
+        # provider's measured prefill time - observational only.
+        # Inside this finally block it must never raise over the call's own
+        # outcome: it reads only plain strings and mappings.
+        completion = (last_call_metrics or {}).get("completion")
+        code_context = kwargs.get("existing_code_context")
+        skills_text = getattr(ctx, "skills_prompt", "")
+        state.record_event(RunEvent(
+            kind="developer.prompt_composition", attempt=state.attempt_number, source="developer",
+            authority=EventAuthority.ADVISORY,
+            message="Developer prompt composition (estimated per section; provider-reported total).",
+            details=prompt_composition(
+                code_context if isinstance(code_context, str) else "",
+                skills_text if isinstance(skills_text, str) else "",
+                prompt_tokens_reported=(last_call_metrics or {}).get("prompt_tokens"),
+                provider_metadata=(completion.get("provider_metadata") if isinstance(completion, dict) else None),
+            ),
+        ))
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",
             attempt=state.attempt_number,
