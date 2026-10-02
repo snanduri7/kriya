@@ -811,6 +811,20 @@ async def _record_attempt_failure(
             and state.last_self_diagnosis[2] == state.attempt_number
         ):
             self_diagnosed_files = state.last_self_diagnosis[1]
+            if (
+                self_diagnosed_files
+                and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST
+                and ctx.allowed_write_relpaths
+            ):
+                # A self-diagnosis can only redirect this stage's repair to a
+                # file the stage may write. Naming only files outside its
+                # authorized scope it cannot direct anything here, and must not
+                # outrank the deterministic locator (live: an anchored-edit
+                # failure in the stage's own file was re-attributed to another
+                # stage's file the model's analysis mentioned, then dropped as
+                # out of scope - leaving no target, stopping a correct repair).
+                in_scope = [f for f in self_diagnosed_files if f in set(ctx.allowed_write_relpaths)]
+                self_diagnosed_files = in_scope or None
 
         # Unioned with ctx.established_files (kriya/workflow/attempt.py's
         # AttemptContext field - see its own docstring) so the locator/judge

@@ -23,6 +23,20 @@ STRING_LITERAL = 30.0
 OWNER_NAMED = 15.0
 PATH_MENTIONED = 12.0
 FTS_MAX = 10.0
+# The vector channel (semantic similarity of the indexed chunk holding a
+# member) shares the similarity tier with FTS: together they stay below a
+# unique exact symbol, so agreement of the two weak legs can promote a member
+# but never outvote exact evidence.
+VECTOR_MAX = 10.0
+# The whole similarity tier (BM25 + vector agreement); evidence from outside
+# the structural index (the legacy hybrid leg) is scaled into it.
+SIMILARITY_MAX = FTS_MAX + VECTOR_MAX
+# Vector rank decay: rank r (0-based) of the query's chunk hits weighs
+# VECTOR_MAX * VECTOR_RANK_K / (VECTOR_RANK_K + r) - cosines of one model are
+# comparable only within one query, so the rank, not the raw cosine, counts.
+VECTOR_RANK_K = 10.0
+# Chunks the vector channel reads per query.
+SEMANTIC_CHUNKS = 40
 # An identifier matching more symbols than this is not specific evidence.
 MAX_SIMPLE_MATCHES = 25
 # A plain prose word matching a callable name counts this fraction of a
@@ -33,6 +47,14 @@ PROSE_FACTOR = 0.5
 TEST_CODE_FACTOR = 0.5
 _TEST_PATH_RE = re.compile(r"(^|/)(src/test|tests?)/|(^|/)test_[^/]*\.py$|Tests?\.java$")
 _TEST_WORD_RE = re.compile(r"(?i)\btests?\b|\btest[A-Z_]|Test\b|assert")
+# A type the query names scopes its own members (OWNER_NAMED); the members
+# that construct it (``new T(``, ``T(``/``raise T``) decide what its instances
+# carry - an exception's message, a value object's fields - and share that
+# scope tier, divided among the construction sites (specificity).
+CONSTRUCTION_SITE = OWNER_NAMED
+# Members whose bodies mention a named type that are read to find its
+# construction sites; a type mentioned more widely is not specific evidence.
+MAX_TYPE_MENTIONS = 200
 # A top hit at or above this score rests on exact evidence.
 EXACT_EVIDENCE = QUALIFIED_SUFFIX
 
@@ -129,6 +151,28 @@ def mentions_tests(text: str) -> bool:
 def is_prose_word(word: str) -> bool:
     """All lower-case letters: an English word as much as an identifier."""
     return word.isalpha() and word.islower()
+
+
+def constructs(language: str, type_name: str, body: str) -> bool:
+    """``body`` constructs ``type_name``: Java ``new [pkg.]T(`` / ``new T<``;
+    Python a call ``[mod.]T(`` or ``raise [mod.]T`` (never its ``class``/``def``
+    line, an ``isinstance``/``except`` reference or an annotation)."""
+    name = re.escape(type_name)
+    if language == "java":
+        return re.search(r"\bnew\s+(?:[\w$]+\.)*" + name + r"\s*[(<]", body) is not None
+    if language == "python":
+        for match in re.finditer(r"(?<![\w])(?:raise\s+)?(?:\w+\.)*" + name + r"\b(\s*\()?", body):
+            line_start = body.rfind("\n", 0, match.start()) + 1
+            before = body[line_start:match.start()]
+            if re.search(r"\b(?:class|def)\s+$", before):
+                continue
+            if match.group(1) or match.group(0).startswith("raise"):
+                return True
+    return False
+
+
+def semantic_weight(rank: int) -> float:
+    return VECTOR_MAX * VECTOR_RANK_K / (VECTOR_RANK_K + rank)
 
 
 def specificity(count: int) -> Optional[float]:

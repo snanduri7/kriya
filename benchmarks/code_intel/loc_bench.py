@@ -1,7 +1,13 @@
-"""loc-N: deterministic localization benchmark (no chat-model or embedding calls).
+"""loc-N: the cheap localization benchmark (no chat-model calls).
 
     python benchmarks/code_intel/loc_bench.py <repo> [--commits 4000] [--cases 200] [--synthetic 30]
-        [--out results.json]
+        [--index MEMORY_DIR --embed-cache FILE] [--out results.json]
+
+With ``--index`` (a ``paths.memory`` directory that ``kriya analyze`` built for
+this repository at HEAD) the vector channel runs too: each goal is embedded
+once by the configured local embedding model (cached in ``--embed-cache``,
+keyed by text) and the full fused retrieval is measured, together with the
+pre-R1 full hybrid path. Without it, no embedding call is made.
 
 Case generation (cheap, automatic; nothing is hand-curated):
 - mined: a non-merge commit whose non-test source change touches one or two
@@ -15,10 +21,21 @@ Case generation (cheap, automatic; nothing is hand-curated):
 
 Categories: ``symbol`` (the subject names a gold member or its owner type),
 ``error_test`` (failure/test vocabulary, and every synthetic case),
+``hygiene`` (a code-hygiene subject - "Add final modifier", "Remove
+unnecessary else", "Use enhanced for loop" - that describes HOW code was
+tidied, never which behavior: it carries no localization signal for any
+system, so it is counted and reported, never scored as a behavior goal;
+deterministic phrase list ``_HYGIENE``, reviewed on a 30-case sample),
 ``behavior`` (everything else).
 
 Systems compared at HEAD, member level (hit = a gold member in the top k):
 - ``code_intel``: CodeIntelligenceService.locate (deterministic channels).
+- ``fused`` (with --index): locate with the vector channel - the vector
+  store's current chunks for the query embedding (exactly what retrieval
+  passes it).
+- ``baseline_hybrid`` (with --index): the pre-R1 full retrieval leg,
+  ``query_hybrid`` with the real query embedding (vector + BM25 RRF), chunk
+  -> member by its controlled header.
 - ``baseline_lexical``: the pre-R1 retrieval lexical leg - chunks from
   ``chunk_file_with_metadata_headers`` in a LocalVectorStore, ranked by
   ``query_hybrid`` with no query embedding (the vector leg needs a live
@@ -50,6 +67,13 @@ from kriya.code_intel.service import CodeIntelligenceService, discover_source_fi
 _MEMBER_KINDS = ("method", "constructor", "function", "field", "attribute", "enum_constant")
 _ERROR_WORDS = re.compile(r"(?i)\b(npe|null ?pointer\w*|exception\w*|errors?|fail\w*|crash\w*|bugs?|overflow\w*"
                           r"|throws?|tests?|broken|incorrect\w*|wrong)\b")
+_HYGIENE = re.compile(
+    r"(?i)(\bfinal\b|unnecessar\w*|redundant|suppress\w* warnings?|compiler warnings?|avoid (?:\w+ )?warnings?|"
+    r"lambda|ternary|\bpmd\b|checkstyle|findbugs|spotbugs|sonar|\btypos?\b|enhanced for|for-each|"
+    r"string(?:builder|buffer)s?\b.*instead|instead of string(?:builder|buffer)|in-?line single|single use|"
+    r"@override|diamond|\b(?:un)?boxing\b|nested within|else clause|\bunused\b|dead code|reformat|whitespace|"
+    r"one per line|camel-?case|javadoc|easy to read|merge if|default case|clean ?up|sort members|"
+    r"use java 8 api|java 8 api|use interface in)")
 _TRIVIAL = re.compile(r"(?i)^(javadoc|typo|format|checkstyle|sort members|use final|whitespace|spelling|"
                       r"better (param|local|variable)|inline|reuse|refactor|camel-case|normalize)\b")
 
@@ -100,6 +124,8 @@ def _category(subject: str, gold_names: List[str]) -> str:
         return "symbol"
     if _ERROR_WORDS.search(subject):
         return "error_test"
+    if _HYGIENE.search(subject):
+        return "hygiene"
     return "behavior"
 
 
@@ -213,6 +239,104 @@ def evaluate_code_intel(service: CodeIntelligenceService, cases: List[dict]) -> 
     return results
 
 
+def _rank_of(ids: List[str], gold: set) -> Optional[int]:
+    return next((i + 1 for i, s in enumerate(ids) if s in gold), None)
+
+
+def evaluate_fused(service: CodeIntelligenceService, store, fingerprint: str, embeddings: Dict[str, List[float]],
+                   cases: List[dict]) -> List[dict]:
+    """locate + vector channel, plus a per-channel diagnosis per case: the
+    gold member's rank in the deterministic channels alone, FTS alone, the
+    vector channel alone and the fusion, and the channels that credited it."""
+    from kriya.code_intel import locate as loc
+
+    results = []
+    for case in cases:
+        gold = set(case["gold_ids"])
+        start = time.perf_counter()
+        chunks = store.query(embeddings[case["goal"]], top_k=loc.SEMANTIC_CHUNKS, fingerprint=fingerprint)
+        hits = service.locate(case["goal"], limit=10, semantic=chunks)
+        elapsed = time.perf_counter() - start
+        wide = service.locate(case["goal"], limit=200, semantic=chunks)
+        deterministic = service.locate(case["goal"], limit=200)
+        vector_only = service.locate("", limit=200, semantic=chunks)
+        fts_only = service.search(case["goal"], limit=200)
+        gold_hit = next((h for h in wide if h.symbol_id in gold), None)
+        gold_files = {i.split(":", 1)[1].split("#", 1)[0] for i in gold}
+        results.append({
+            "id": case["id"], "rank": _rank_of([h.symbol_id for h in hits], gold),
+            "seconds": elapsed, "top_exact": bool(hits and hits[0].exact),
+            "top": [(h.lookup_key, h.score, [c for c, _ in h.channels]) for h in hits[:3]],
+            "scores": [h.score for h in hits[:2]],
+            "top_channels": [c for c, _ in hits[0].channels] if hits else [],
+            "diag": {
+                "fused": _rank_of([h.symbol_id for h in wide], gold),
+                "deterministic": _rank_of([h.symbol_id for h in deterministic], gold),
+                "fts": _rank_of([h.symbol_id for h in fts_only], gold),
+                "vector": _rank_of([h.symbol_id for h in vector_only], gold),
+                "vector_chunk_file": next((i + 1 for i, c in enumerate(chunks) if c["filepath"] in gold_files), None),
+                "gold_channels": dict(gold_hit.channels) if gold_hit else {},
+            },
+        })
+    return results
+
+
+def evaluate_baseline_hybrid(store, fingerprint: str, embeddings: Dict[str, List[float]],
+                             cases: List[dict]) -> List[dict]:
+    from kriya.workflow.context_source import parse_controlled_chunk_header_name
+
+    results = []
+    for case in cases:
+        start = time.perf_counter()
+        hits = store.query_hybrid(case["goal"], embeddings[case["goal"]], top_k=10, fingerprint=fingerprint)[:10]
+        elapsed = time.perf_counter() - start
+        results.append({"id": case["id"], "seconds": elapsed, **_member_rank(hits, case,
+                                                                            parse_controlled_chunk_header_name)})
+    return results
+
+
+def _member_rank(hits, case, header_name) -> dict:
+    gold = {(k.rsplit(".", 1)[-1]) for k in case["gold_keys"]}
+    gold_files = {i.split(":", 1)[1].split("#", 1)[0] for i in case["gold_ids"]}
+    member_rank = file_rank = None
+    for rank, hit in enumerate(hits, 1):
+        name = header_name(hit["text"])
+        if file_rank is None and hit["filepath"] in gold_files:
+            file_rank = rank
+        if member_rank is None and hit["filepath"] in gold_files and name in gold:
+            member_rank = rank
+    return {"rank": member_rank, "file_rank": file_rank}
+
+
+def query_embeddings(cases: List[dict], cache_path: Optional[str]) -> Tuple[Dict[str, List[float]], str]:
+    """The configured local embedding model's query vector for every goal
+    (cached by text), and its fingerprint digest."""
+    import asyncio
+
+    from kriya.config.config import load_config
+    from kriya.memory.embedding import configured_client
+
+    cache: Dict[str, List[float]] = {}
+    if cache_path and os.path.exists(cache_path):
+        with open(cache_path) as handle:
+            cache = json.load(handle)
+
+    async def run() -> str:
+        client = configured_client(load_config(None))
+        digest = (await client.fingerprint()).digest
+        for case in cases:
+            key = case["goal"]
+            if key not in cache:
+                cache[key] = await client.get_embedding(key, is_query=True)
+        return digest
+
+    digest = asyncio.run(run())
+    if cache_path:
+        with open(cache_path, "w") as handle:
+            json.dump(cache, handle)
+    return cache, digest
+
+
 def evaluate_baseline_lexical(repo: str, files: List[str], cases: List[dict]) -> List[dict]:
     from kriya.memory.embedding import (
         PREPROCESSING_VERSION,
@@ -240,16 +364,8 @@ def evaluate_baseline_lexical(repo: str, files: List[str], cases: List[dict]) ->
             start = time.perf_counter()
             hits = store.query_hybrid(case["goal"], None, top_k=10, fingerprint=fingerprint.digest)[:10]
             elapsed = time.perf_counter() - start
-            gold = {(k.rsplit(".", 1)[-1]) for k in case["gold_keys"]}
-            gold_files = {i.split(":", 1)[1].split("#", 1)[0] for i in case["gold_ids"]}
-            member_rank = file_rank = None
-            for rank, hit in enumerate(hits, 1):
-                name = parse_controlled_chunk_header_name(hit["text"])
-                if file_rank is None and hit["filepath"] in gold_files:
-                    file_rank = rank
-                if member_rank is None and hit["filepath"] in gold_files and name in gold:
-                    member_rank = rank
-            results.append({"id": case["id"], "rank": member_rank, "file_rank": file_rank, "seconds": elapsed})
+            results.append({"id": case["id"], "seconds": elapsed,
+                            **_member_rank(hits, case, parse_controlled_chunk_header_name)})
         store.close()
     return results
 
@@ -292,6 +408,7 @@ def summarize(cases: List[dict], results: List[dict], label: str) -> dict:
             entry["file_recall@5"] = round(sum(1 for r in rows if r["file_rank"] and r["file_rank"] <= 5) / n, 3)
         if "key_rank" in rows[0]:
             entry["member_name_recall@5"] = round(sum(1 for r in rows if r["key_rank"] and r["key_rank"] <= 5) / n, 3)
+        if "top_exact" in rows[0]:
             entry["false_confident@1"] = round(sum(1 for r in rows if r["top_exact"] and r["rank"] != 1) / n, 3)
         if "seconds" in rows[0]:
             seconds = sorted(r["seconds"] for r in rows)
@@ -309,6 +426,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--synthetic", type=int, default=30)
     parser.add_argument("--out")
     parser.add_argument("--no-baseline", action="store_true")
+    parser.add_argument("--index", help="paths.memory directory kriya analyze built for this repo at HEAD")
+    parser.add_argument("--embed-cache", help="JSON cache of query embeddings (text -> vector)")
     args = parser.parse_args(argv)
     repo = os.path.abspath(args.repo)
     files = discover_source_files(repo)
@@ -319,23 +438,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     cases = mine(repo, head, args.commits, args.cases) + synthesize(head, args.synthetic)
     report = {"repo": repo, "head": git(repo, "rev-parse", "HEAD").strip(), "cases": len(cases),
               "mined_unlocatable_skipped": len(getattr(mine, "unlocatable", [])),
-              "categories": {c: sum(1 for x in cases if x["category"] == c) for c in ("symbol", "behavior",
-                                                                                        "error_test")}}
+              "categories": {c: sum(1 for x in cases if x["category"] == c)
+                             for c in ("symbol", "behavior", "error_test", "hygiene")}}
     with tempfile.TemporaryDirectory() as tmp:
         service = CodeIntelligenceService(repo, os.path.join(tmp, "ci.db"))
         start = time.perf_counter()
         service.refresh(files)
         report["refresh_seconds"] = round(time.perf_counter() - start, 2)
         ci = evaluate_code_intel(service, cases)
+        fused = hybrid = None
+        if args.index:
+            from kriya.memory.vector import LocalVectorStore
+
+            embeddings, digest = query_embeddings(cases, args.embed_cache)
+            store = LocalVectorStore(os.path.join(args.index, "vector_index.db"))
+            if store.active_fingerprint() != digest:
+                raise SystemExit("the index was built under another embedding identity than the served model")
+            fused = evaluate_fused(service, store, digest, embeddings, cases)
+            hybrid = evaluate_baseline_hybrid(store, digest, embeddings, cases)
+            store.close()
         service.close()
     report.update(summarize(cases, ci, "code_intel"))
+    if fused is not None:
+        report.update(summarize(cases, fused, "fused"))
+        report.update(summarize(cases, hybrid, "baseline_hybrid"))
     if not args.no_baseline:
         report.update(summarize(cases, evaluate_baseline_lexical(repo, files, cases), "baseline_lexical"))
         report.update(summarize(cases, evaluate_baseline_failure_line(repo, cases), "baseline_failure_line"))
     print(json.dumps({k: v for k, v in report.items()}, indent=1))
     if args.out:
         with open(args.out, "w") as handle:
-            json.dump({"report": report, "cases": cases, "code_intel": ci}, handle, indent=1)
+            json.dump({"report": report, "cases": cases, "code_intel": ci, "fused": fused}, handle, indent=1)
     return 0
 
 

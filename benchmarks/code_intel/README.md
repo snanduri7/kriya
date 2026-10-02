@@ -24,7 +24,12 @@ git clone https://github.com/encode/httpx.git && git -C httpx checkout b5addb64f
 ## Tools
 
 - `coverage.py <repo>...` — structural coverage of the tree-sitter model vs the pre-R1 regex extractors; no model calls.
-- `loc_bench.py` — the loc-N localization benchmark (generator + evaluator); see its docstring.
+- `loc_bench.py` — loc-N, the cheap localization benchmark (generator + evaluator; `--index` adds the vector
+  channel with the configured local embedding model); see its docstring. ci-20 is the separate, expensive
+  end-to-end benchmark.
+- `pack_bench.py` — member packing vs the old per-file packer.
+- `vector_bench.py` — E-06 vector query cost at 10k/30k/45k chunks.
+- `ci6_bench.py` — the CI-6 ambiguity-only model call, live (production config and model).
 
 ## Structural coverage (MEASURED, 2026-10-01)
 
@@ -76,6 +81,183 @@ scored (commons-lang 51 of 251).
 Not met yet: the ≥90 % recall@5 target holds for error/stack goals and the Petclinics, not for free-text
 goals on large repos (commons-lang 0.64, Kriya 0.52). Behavior goals ("fix week-year formatting") are the gap;
 they are where the vector leg and a structured LLM ambiguity step (CI-6, deferred) would add evidence.
+
+## Slice 2 (MEASURED 2026-10-02, branch `feature/code-intelligence-r1-integration`)
+
+### loc-N corpus
+
+724 cases, generated automatically (mined one/two-member commits, subject = goal, gold re-found at HEAD;
+plus 30 seeded synthetic compiler-error / stack-trace / traceback cases per repo); nothing hand-curated.
+Categories: symbol-named, behavior (free text), error/test, and `hygiene` - code-tidying subjects ("Add final
+modifier", "Remove unnecessary else") that name no behavior and so carry no localization signal for any
+system (deterministic phrase list; a 30-case review of commons-lang "behavior" found ~25 such). Hygiene is
+counted, not scored as behavior. Unlocatable subjects (no shared word with the gold files) are skipped and
+counted: commons-lang 105.
+
+| Repo | cases | symbol | behavior | error/test | hygiene |
+|---|---|---|---|---|---|
+| commons-lang (dev set) | 430 | 233 | 78 | 54 (30 synthetic) | 65 |
+| spring-petclinic | 42 | 1 | 5 | 32 (30) | 4 |
+| spring-framework-petclinic | 38 | 1 | 4 | 33 (30) | 0 |
+| httpx | 95 | 17 | 38 | 39 (30) | 1 |
+| Kriya (at `dbada33`) | 119 | 25 | 40 | 53 (30) | 1 |
+
+### Localization before → after (member level; after = production fused retrieval with the vector channel)
+
+Before = the pre-batch production retrieval leg: `query_hybrid` (vector + BM25 RRF) over the regex-chunked
+index, chunk → member by header. After = `retrieve_graph_context`'s fused Code Intelligence query
+(deterministic channels + vector channel over the structurally-chunked index). Same cases, same query
+embeddings (nomic-embed-text, served locally). Latency is per query, warm (E-06 matrix cache).
+
+| Repo | category | n | recall@1 after / before | recall@5 after / before | p50 / p95 ms (after) |
+|---|---|---|---|---|---|
+| commons-lang | all | 430 | 0.384 / 0.181 | **0.558** / 0.267 | 21.7 / 40.5 |
+| commons-lang | symbol | 233 | 0.549 / 0.318 | **0.815** / 0.446 |  |
+| commons-lang | behavior | 78 | 0.026 / 0.0 | **0.141** / 0.051 |  |
+| commons-lang | error/test | 54 | 0.611 / 0.056 | **0.667** / 0.111 |  |
+| commons-lang | hygiene | 65 | 0.031 / 0.015 | 0.046 / 0.015 |  |
+| spring-petclinic | all | 42 | 0.786 / 0.381 | **0.833** / 0.643 | 6.8 / 7.7 |
+| spring-petclinic | behavior | 5 | 0.2 / 0.2 | 0.2 / 0.2 |  |
+| spring-petclinic | error/test | 32 | 0.938 / 0.438 | **0.969** / 0.719 |  |
+| spring-framework-petclinic | all | 38 | 0.842 / 0.316 | **0.895** / 0.553 | 6.9 / 7.8 |
+| spring-framework-petclinic | behavior | 4 | 0.25 / 0.25 | 0.75 / 0.75 |  |
+| spring-framework-petclinic | error/test | 33 | 0.909 / 0.333 | **0.909** / 0.545 |  |
+| httpx | all | 95 | 0.474 / 0.211 | **0.695** / 0.432 | 12.2 / 17.4 |
+| httpx | symbol | 17 | 0.588 / 0.176 | **0.765** / 0.471 |  |
+| httpx | behavior | 38 | 0.105 / 0.053 | **0.421** / 0.316 |  |
+| httpx | error/test | 39 | 0.795 / 0.385 | **0.949** / 0.538 |  |
+| Kriya | all | 119 | 0.454 / 0.252 | **0.664** / 0.420 | 41.8 / 60.3 |
+| Kriya | symbol | 25 | 0.56 / 0.16 | **0.88** / 0.40 |  |
+| Kriya | behavior | 40 | 0.25 / 0.15 | **0.625** / 0.275 |  |
+| Kriya | error/test | 53 | 0.566 / 0.358 | **0.585** / 0.528 |  |
+
+Petclinic symbol (n=1) rows omitted from the table (1.0 after on both). Synthetic error cases: recall@1 = 1.0
+on every repo. Per-channel diagnosis (gold rank by deterministic / BM25 / vector / fused, every case) is in the
+`--out` JSON. The weakest layer found and fixed: Java vector chunks came from the one-line method regex (only
+57 % of commons-lang behavior-gold members had a chunk of their own, none carried Javadoc); structural chunks
+(`5ac5913`) raised the old leg's commons-lang symbol recall@5 0.446 → 0.803 on its own. Fusion variants
+(vector weight 0/10/20/30, rank decay 3/10) were compared on the dev set and confirmed on the held-out repos;
+none dominates, the principled default (10 / 10) is kept. Remaining gap: commons-lang behavior (0.141) - most
+of its commit subjects describe the change, not the behavior (sample in the loc-N output).
+
+### E-06 vector query cost (`vector_bench.py`, dim 768, fingerprinted query)
+
+| chunks | before: first / steady query, traced peak | after: first / steady, peak |
+|---|---|---|
+| 10,000 | 2,265 / 2,200 ms, 337 MB | 128 / 1.1 ms, 32 MB |
+| 30,000 | 6,536 / 6,551 ms, 1,011 MB | 464 / 3.7 ms, 95 MB |
+| 45,000 | 10,212 / 9,932 ms, 1,517 MB | 609 / 5.1 ms, 143 MB |
+
+Real indexes in this benchmark: commons-lang 12,575 chunks, Kriya 17,981. No vector service, no new dependency.
+
+### Spring XML / configuration (E-08, pinned spring-framework-petclinic)
+
+Old graph parser: 12 beans (single-line `<bean id>` only), 0 bean references, failures on 2 of 5 Spring XML
+files. New: 7 Spring XML files PARSED (incl. test config), 20 beans with exact spans, 6 bean references
+(`ref`, `p:x-ref`, nested `<ref>`), 5 component scans (incl. `jpa:repositories`), 4 imports/placeholders, 24
+properties/constructor args, 8 property keys; spring-petclinic application*.properties: 22 keys with profiles.
+
+### CI-6: deterministic ambiguity threshold and the ambiguity-only call
+
+Calibration on all 724 loc-N cases (fused): "clear" = top-1 rests on exact evidence and leads top-2 by ≥ 10
+→ 233 cases (32 %), 4.7 % false-confident (11; 10 = a goal naming a public method whose fix is in a helper it
+calls). Every synthetic error case is clear (150/150, none wrong). Flat for margins 10-40.
+
+Live (`ci6_bench.py`, production config, pinned qwen3-coder 30B, ollama_native schema-constrained output):
+
+| Repo | ambiguous (needs the model) | calls measured | top-1 before → after the decision | median prompt tokens | median s |
+|---|---|---|---|---|---|
+| commons-lang | 74.7 % | 60 | 0.367 → 0.483 | 986 | 3.6 |
+| Kriya | 73.9 % | 40 | 0.25 → 0.25 | 954 | 4.5 |
+| httpx | 65.3 % | 30 | 0.267 → 0.300 | 756 | 3.8 |
+| spring-petclinic | 28.6 % | 10 | 0.3 → 0.3 | 1,017 | 4.0 |
+| spring-framework-petclinic | 21.1 % | 8 | 0.25 → 0.375 | 1,024 | 5.8 |
+
+Pooled: 148 calls, top-1 0.304 → 0.365. Explicit/error-driven goals (synthetic) never call the model.
+
+### Context certification with the real embedding model (PRD-027, not saved to operator state)
+
+| Revision | precision (target 0.5) | class recall | certified |
+|---|---|---|---|
+| before the batch (`26ecc51`) | 0.5814 | 1.0 in all 9 classes | yes |
+| `f76d137` (fused retrieval, own defect) | 0.4717 | 1.0 | **no** |
+| `7cdd87e` (fix: legacy-leg evidence in the seed rule) | 0.5581 | 1.0 | yes |
+
+The operator production memory has no vector index, so `doctor --production` reports this row NOT_APPLICABLE
+(unchanged by the batch); an operator who indexes must re-run `kriya context certify`, since the retrieval
+implementation digest changed.
+
+### Prompt cost (MEASURED, native /api/chat, pinned qwen3-coder 30B, M1 Max)
+
+| prompt tokens | cold prefill | throughput | identical prefix repeated |
+|---|---|---|---|
+| 894 | 1.0 s | 857 tok/s | 0.02 s |
+| 3,524 | 7.1 s | 497 tok/s | 0.02 s |
+| 6,983 | 15.3 s | 455 tok/s | 0.03 s |
+| 13,813 | 39.3 s | 352 tok/s | 0.03 s |
+
+Live Developer requests were 7.1-8.8k prompt tokens (T0 member 400-600 tokens, skills ~560): prefill dominates
+local cost, and a reused prefix makes it nearly free - the measured case for stable-prefix-first ordering
+(`packing.ContextPackage.render` already puts the volatile member last; the Developer prompt as a whole is not
+reordered in this batch).
+
+### Live ci-20 subset (MEASURED 2026-10-02)
+
+Tasks derived objectively from loc-N mined commits: workspace = parent commit + that commit's tests, goal =
+the commit subject verbatim, judge = that commit's tests run independently afterwards (pass/fail sets compared
+with the gold fix's own). Repository-safe workspace config with the production-pinned Developer model (no
+SEC-009 approval created), so the `/v1` adapter: CI-6 is skipped typed (no schema output) in these runs.
+
+| Task | target found (gold rank) | gold body in Developer prompt | model calls | Developer prompt tokens | attempts | wall | result | false success |
+|---|---|---|---|---|---|---|---|---|
+| httpx `7c0cda15` "Improve InvalidURL error message." (error/test) | no (10; top = `InvalidURL.__init__`) | no (exact T0 of the 4 top members) | 13 | 7.2k-8.8k | 11 (global bound) | 401 s | failed (`quality_gates_exhausted`) | no |
+| httpx `9fd6f0ca` "Ensure JSON representation is compact." (behavior) | yes (2) | yes (`encode_json` exact, 600 tokens) | 12 | 7.1k-7.6k | 2 | 409 s | stopped: `VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE` | no |
+
+Task 2's stop is FILE-INTEGRITY-CONTRACT-001B working as designed: httpx's own `tests/test_config.py` sets
+`SSLKEYLOGFILE=test`, so the test run writes `./test`, untracked and not ignored. Not a Kriya defect; treating
+test-created untracked files like the runtime gate's ephemeral artifacts (D6) is an owner decision.
+Not run: the 4 Java tasks (2 symbol, 2 behavior), Spring Boot and Spring XML tasks - every Java benchmark
+repository needs Maven artifacts not in the local cache (e.g. `native-maven-plugin:1.1.1`, newer
+`commons-parent`), and Maven Central is not authorized network. Pre-2024 httpx commits cannot import on
+CPython 3.14, so the Python tasks are the two most recent qualifying commits; their `requirements.txt` was
+narrowed to installable test dependencies (doc/lint tooling had no 3.14 wheels) in the task base, disclosed.
+
+### Live closure matrix (MEASURED 2026-10-02, production config)
+
+The frozen production configuration (`provider-contract-v4-production.yaml`: native runtime, enforce
+controller, OCI containment, registry-scoped Maven/PyPI acquisition, static analysis) with only `paths.*`
+pointed at per-task stores (`~/kriya-bench-live/matrix/store/<task>.yaml`, owner-approved SEC-009 per
+workspace). Mined tasks: workspace = parent commit + the commit's tests, goal = subject verbatim, judge = the
+commit's tests (base fails, gold passes - verified). Authored Spring tasks: held-out judge tests, verified on
+base (fails) and a reference solution (passes). A task is re-run only after a product change that affects it.
+
+| Task (goal) | Runs (Kriya rev) | Gold rank / CI-6 / exact T0 | Outcome | Classification |
+|---|---|---|---|---|
+| commons-lang `62f6edfd` "Keep chop from splitting a trailing surrogate pair" (Java symbol) | 1 `71542e6` REQ unknown; 2 `891649e` | 1 / chose `chop(String)` / every attempt (845 tok) | **SUCCESS**: full regression 21,868 tests 0 failures; judge `StringUtilsTest` base 1 fail, gold 0, Kriya 0 | SUCCESS |
+| commons-lang `851de661` 'strip accents "đ" and "Đ"' (Java behavior) | 1 T0 lost + RAT; 2 spec request 189k tok; 3 REQ unknown; 4 `891649e` | 1 (clear, margin 105) / not needed / every attempt | **SUCCESS**: judge `StringUtilsTrimStripTest` base 1 fail, gold 0, Kriya 0 | SUCCESS (after 4 Kriya fixes) |
+| commons-lang `a0ffef03` "fix silent int overflow in Fraction.getFraction(double)" | 1 T0 lost on retry; 2 `2f08d3e` | 1 / chose `getFraction(double)` / every attempt (1,136 tok) | failed: analysis/edit mismatch, no-op edit, indentation-inconsistent SEARCH | MODEL_CAPABILITY |
+| spring-petclinic "configurable owners page size" (Spring Boot, held-out judge) | 1 NoHttp on cache; 2 git pointer; 3 Surefire baseline; 4 misattribution; 5 harness interference; 6 `891649e` | s2: 2 / chose it / every attempt | s1 + s2 (the change) passed every gate incl. full regression; stopped at Planner-added test stage s3 (protocol violations, then NO CHANGE) - nothing applied | MODEL_CAPABILITY (s3) |
+| spring-framework-petclinic "cache pet types like vets" (Spring XML, held-out judge) | 1 `1a1aef8` | planning map: `cacheManager.cacheNames` 4, `findPetTypes` 8 | Planner never planned the XML, contradicted its own prerequisite; repair did not converge | MODEL_CAPABILITY (Planner) |
+| more-itertools `f89d7a3` ichunked (Python symbol) | 1 required test unresolved; 2 `a39ed51` | 1 / chose `ichunked` / most attempts | tests failed on the model's implementations | MODEL_CAPABILITY |
+| more-itertools `e426d25` zip_broadcast (Python symbol) | 1 `891649e` | - / chose `zip_broadcast` / every attempt | tests failed on the model's implementations | MODEL_CAPABILITY |
+| more-itertools `ce676d2` maxsplit (Python behavior) | 1 | - | Planner split per function, same file; repair never converged | MODEL_CAPABILITY (Planner) |
+| more-itertools `def2dab` one()/only() | 1 | - | as above; replay with an explicit merge instruction: same plan 2/2 | MODEL_CAPABILITY (Planner) |
+| httpx `7c0cda15` "Improve InvalidURL error message." | 1 `1a1aef8` | planning map 4 (was 10) / subtask: Planner chose `InvalidURL` | wrong file by plan; full regression would also write `./test` | TASK_AMBIGUITY (+ PROJECT_TEST_BEHAVIOR) |
+
+Kriya defects found by the matrix and fixed (each with a deterministic reproduction, regression and mutation):
+construction sites (InvalidURL rank 10 -> 4), T0 lost on retry / last member as the file's T0, Maven cache in the
+candidate tree (RAT/NoHttp), dangling worktree git pointer in containers, Surefire baseline fingerprint,
+spec-compliance request size, requirement-verdict schema (0/4 -> 4/4 verdicts), declared test verification never
+executed, out-of-scope self-diagnosis stranding an in-scope failure, Python signatures carrying body comments.
+False successes: none (every success is judge-verified; every failure was typed and applied nothing).
+
+Prompt prefix (41 + later requests): 12 % of characters shared with the previous request to the model; breaks are
+role switches and per-attempt evidence changes, Developer retries share ~600 tokens (skills). Cold prefill ~2.2 ms
+per token (6,856 tokens: 15.6 s); identical re-sent prompts 0.03-1.3 s. Reordering would save ~1-2 s per retry
+and move the qualified protocol contract: not done.
+
+Legacy fallback (13 retrievals): added `pom.xml` x5, `messages.properties` x1, a site doc x2; never causal. Kept
+(handover/CURRENT_STATE_MATRIX.md removal criterion).
 
 ## Member packing (MEASURED, `pack_bench.py`, budget 2,000 tokens, mined loc-N gold members at HEAD)
 

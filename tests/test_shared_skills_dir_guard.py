@@ -55,6 +55,9 @@ def test_analyze_warns_when_skills_dir_resolves_to_shared_install(tmp_path):
 
     cfg = AppConfig()
     cfg.paths.skills = str(fake_install_skills_dir)
+    # Never the repository's own ./memory (the packaged default resolves
+    # there): this test indexes a temporary project.
+    cfg.paths.memory = str(tmp_path / "memory")
 
     async def mock_extract(*args, **kwargs):
         return {"description": "test", "instructions": "# test", "rules": ["rule"]}

@@ -4,7 +4,7 @@ import os
 import re
 import sqlite3
 import struct
-from typing import Any, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import click
 import numpy as np
@@ -142,6 +142,26 @@ _VECTOR_COLUMNS = (
 )
 
 
+class VectorMatrix(NamedTuple):
+    """The current vectors of one embedding identity as one contiguous
+    float32 matrix (row i = ``keys[i]``), with each row's indexed line span
+    (E-06). Built once per index generation; ``key`` names exactly what it
+    holds."""
+
+    key: Tuple[str, str, int, int]  # (db path, fingerprint, dimension, index generation)
+    keys: List[Tuple[str, int]]  # (filepath, chunk_index)
+    spans: List[Tuple[Optional[int], Optional[int]]]
+    matrix: Any  # np.ndarray, shape (rows, dimension)
+    norms: Any  # np.ndarray, shape (rows,)
+
+
+# E-06: the most recently queried index's matrix, per process. Every write
+# bumps the index generation in the same transaction, so a cached matrix is
+# reused only while the database still holds exactly those rows; a query of
+# another index or generation replaces it (one matrix: rows x dim x 4 bytes).
+_MATRIX_CACHE: Dict[str, VectorMatrix] = {}
+
+
 class LocalVectorStore:
     """SQLite-backed local vector store."""
 
@@ -172,6 +192,11 @@ class LocalVectorStore:
         for column, decl in _VECTOR_COLUMNS:
             if column not in existing:
                 cursor.execute(f"ALTER TABLE vector_chunks ADD COLUMN {column} {decl}")
+        # E-06: a counter every vector write bumps in its own transaction.
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS vector_index_state (id INTEGER PRIMARY KEY CHECK (id = 1),"
+            " generation INTEGER NOT NULL)")
+        cursor.execute("INSERT OR IGNORE INTO vector_index_state (id, generation) VALUES (1, 0)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS embedding_identity (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -249,8 +274,16 @@ class LocalVectorStore:
                 f"Vector index at '{self.db_path}' contains rows from {len(mismatched)} other "
                 f"model/dimension combination(s) besides the configured '{model_name}' (dim: {dimensions}) "
                 f"- those rows will be silently skipped during search. Consider re-indexing with "
-                f"'kriya analyze --force'."
+                f"'kriya analyze' (it rebuilds an index of another identity)."
             )
+
+    def _bump_generation(self) -> None:
+        """Called inside every vector write's own transaction (E-06)."""
+        self.conn.execute("UPDATE vector_index_state SET generation = generation + 1 WHERE id = 1")
+
+    def index_generation(self) -> int:
+        row = self.conn.execute("SELECT generation FROM vector_index_state WHERE id = 1").fetchone()
+        return row[0] if row else 0
 
     def active_fingerprint(self) -> Optional[str]:
         """The embedding fingerprint digest the index's current vectors carry."""
@@ -270,6 +303,7 @@ class LocalVectorStore:
                 "INSERT OR REPLACE INTO embedding_identity (id, fingerprint, details) VALUES (1, ?, ?)",
                 (fingerprint.digest, json.dumps(fingerprint.to_dict(), sort_keys=True)),
             )
+            self._bump_generation()
 
     def publish_file(self, filepath: str, segments: List["EmbeddedSegment"], *, source_digest: str,
                      fingerprint: str) -> None:
@@ -281,6 +315,7 @@ class LocalVectorStore:
             generation = (self.conn.execute(
                 "SELECT COALESCE(MAX(generation), 0) FROM vector_chunks WHERE filepath = ?", (filepath,),
             ).fetchone()[0] or 0) + 1
+            self._bump_generation()
             self.conn.execute("DELETE FROM vector_chunks WHERE filepath = ?", (filepath,))
             self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
             for row, segment in enumerate(segments):
@@ -304,6 +339,7 @@ class LocalVectorStore:
         current revision)."""
         lexical = "fts_chunks" if self.use_fts else "fts_chunks_fallback"
         with self.conn:
+            self._bump_generation()
             self.conn.execute("UPDATE vector_chunks SET is_current = 0 WHERE filepath = ?", (filepath,))
             self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
 
@@ -341,6 +377,7 @@ class LocalVectorStore:
         cache entry (E-17) - in one transaction."""
         lexical = "fts_chunks" if self.use_fts else "fts_chunks_fallback"
         with self.conn:
+            self._bump_generation()
             self.conn.execute("DELETE FROM vector_chunks WHERE filepath = ?", (filepath,))
             self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
             self.conn.execute("DELETE FROM file_metadata WHERE filepath = ?", (filepath,))
@@ -357,6 +394,7 @@ class LocalVectorStore:
 
         cursor = self.conn.cursor()
         blob = serialize_embedding(embedding)
+        self._bump_generation()
         cursor.execute("""
             INSERT OR REPLACE INTO vector_chunks (filepath, chunk_index, text, embedding, model_name, dimensions)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -385,21 +423,20 @@ class LocalVectorStore:
         if not query_embedding:
             return []
 
-        cursor = self.conn.cursor()
         if fingerprint is not None:
             # Every row carries the fingerprint it was embedded under, so a
             # different identity selects nothing.
-            cursor.execute(
-                "SELECT filepath, chunk_index, text, embedding FROM vector_chunks"
-                " WHERE is_current = 1 AND fingerprint = ?", (fingerprint,))
-        else:
-            try:
-                self.verify_model(model_name, dimensions)
-            except ValueError as e:
-                click.secho(f"Warning: {e}. Degrading query to lexical-only FTS matching.", fg="yellow", bold=True,
-                            err=True)
-                return []
-            cursor.execute("SELECT filepath, chunk_index, text, embedding FROM vector_chunks WHERE is_current = 1")
+            return self._query_matrix(query_embedding, top_k, fingerprint)
+
+        # Legacy (pre-EMBEDDING-CONTRACT-001) callers: model/dimension check.
+        try:
+            self.verify_model(model_name, dimensions)
+        except ValueError as e:
+            click.secho(f"Warning: {e}. Degrading query to lexical-only FTS matching.", fg="yellow", bold=True,
+                        err=True)
+            return []
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT filepath, chunk_index, text, embedding FROM vector_chunks WHERE is_current = 1")
         rows = cursor.fetchall()
 
         if not rows:
@@ -440,6 +477,70 @@ class LocalVectorStore:
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
+
+    def current_matrix(self, fingerprint: str, dimension: int) -> VectorMatrix:
+        """The current vectors of ``fingerprint`` at ``dimension`` as one
+        float32 matrix (E-06). The generation and the rows are read in one
+        read transaction, so the cache key always names the rows it holds;
+        an unchanged index is never re-read."""
+        began = not self.conn.in_transaction
+        if began:
+            self.conn.execute("BEGIN")
+        try:
+            key = (self.db_path, fingerprint, dimension, self.index_generation())
+            cached = _MATRIX_CACHE.get(self.db_path)
+            if cached is not None and cached.key == key:
+                return cached
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM vector_chunks WHERE is_current = 1 AND fingerprint = ?", (fingerprint,),
+            ).fetchone()[0]
+            # Rows stream into one preallocated matrix: peak memory is the
+            # matrix itself, never a second copy of every blob.
+            matrix = np.empty((count, dimension), dtype=np.float32)
+            keys: List[Tuple[str, int]] = []
+            spans: List[Tuple[Optional[int], Optional[int]]] = []
+            width = dimension * 4
+            for filepath, chunk_index, span_start, span_end, blob in self.conn.execute(
+                    "SELECT filepath, chunk_index, span_start, span_end, embedding FROM vector_chunks"
+                    " WHERE is_current = 1 AND fingerprint = ? ORDER BY filepath, chunk_index", (fingerprint,)):
+                if blob is None or len(blob) != width or len(keys) >= count:
+                    continue
+                matrix[len(keys)] = np.frombuffer(blob, dtype=np.float32)
+                keys.append((filepath, chunk_index))
+                spans.append((span_start, span_end))
+        finally:
+            if began:
+                self.conn.execute("COMMIT")
+        matrix = matrix[:len(keys)]
+        # Row norms without a squared temporary copy of the matrix.
+        built = VectorMatrix(key, keys, spans, matrix, np.sqrt(np.einsum("ij,ij->i", matrix, matrix)))
+        _MATRIX_CACHE.clear()
+        _MATRIX_CACHE[self.db_path] = built
+        return built
+
+    def _query_matrix(self, query_embedding: List[float], top_k: int, fingerprint: str) -> List[Dict[str, Any]]:
+        """Cosine top-k over the matrix; only the top-k rows' text is read."""
+        q_vec = np.asarray(query_embedding, dtype=np.float32)
+        current = self.current_matrix(fingerprint, len(q_vec))
+        if not current.keys or top_k <= 0:
+            return []
+        norms = current.norms * float(np.linalg.norm(q_vec))
+        dots = current.matrix @ q_vec
+        scores = np.divide(dots, norms, out=np.zeros_like(dots), where=norms > 0)
+        count = min(top_k, len(scores))
+        best = np.argpartition(-scores, count - 1)[:count]
+        # Deterministic order: score, then (filepath, chunk_index).
+        best = sorted(best.tolist(), key=lambda i: (-float(scores[i]), current.keys[i]))
+        results = []
+        for index in best:
+            filepath, chunk_index = current.keys[index]
+            row = self.conn.execute(
+                "SELECT text FROM vector_chunks WHERE filepath = ? AND chunk_index = ?", (filepath, chunk_index),
+            ).fetchone()
+            span_start, span_end = current.spans[index]
+            results.append({"filepath": filepath, "chunk_index": chunk_index, "text": row[0] if row else "",
+                            "span_start": span_start, "span_end": span_end, "score": float(scores[index])})
+        return results
 
     def add_learned_knowledge(self, text: str, embedding: List[float], model_name: str = "default", dimensions: int = 768, provenance_url: str = "", fetch_date: str = "") -> None:
         cursor = self.conn.cursor()

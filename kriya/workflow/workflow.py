@@ -24,6 +24,7 @@ from kriya.agents.agent import (
 )
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
+from kriya.code_intel.model import CALLABLE_KINDS
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
@@ -97,7 +98,6 @@ from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     agent_request_capacity,
     allocation_window,
-    build_code_context_package,
     candidate_model,
     fit_planner_request,
     retrieval_limits_for,
@@ -210,6 +210,7 @@ from kriya.workflow.live_lookup import (
     _extract_first_usable,
     _resolve_via_web_lookup,
 )
+from kriya.workflow.localization_decision import decide as decide_localization
 from kriya.workflow.lsp_integration import (
     _build_lsp_diagnostics_context as _build_lsp_diagnostics_context,
 )
@@ -2583,6 +2584,42 @@ class WorkflowEngine:
                                 "lexical and graph retrieval only",
                         details={"reason_code": retrieval.semantic_unavailable},
                     ))
+                # CI-6: at most one schema-constrained model call, and only
+                # when deterministic localization is ambiguous (calibrated
+                # separation); its choice can only reorder current candidates.
+                if retrieval.localization_source == "code_intelligence" and retrieval.localization:
+                    decision = await decide_localization(
+                        self.llm, goal, retrieval.localization, retrieval.separation,
+                        current=lambda symbol_id: symbol_id in retrieval.current_member_ids or any(
+                            c.symbol_id == symbol_id and c.kind not in CALLABLE_KINDS
+                            for c in retrieval.localization),
+                    )
+                    if decision.decision is not None:
+                        retrieval.adopt_decision(decision.decision.target_symbol_ids)
+                    state.record_event(RunEvent(
+                        kind="localization.decision", attempt=0, source="graph_retrieval",
+                        authority=EventAuthority.ADVISORY,
+                        message=f"localization {decision.reason_code}"
+                                f"{' (model consulted)' if decision.called else ''}",
+                        details={**decision.to_dict(), "separation": retrieval.separation},
+                    ))
+                # Code Intelligence R1 slice 2: which candidate generation
+                # answered, its ranked candidates (with channels) and what
+                # only the legacy leg contributed - the evidence the legacy
+                # path's removal criterion reads.
+                state.record_event(RunEvent(
+                    kind="retrieval.code_intelligence", attempt=0, source="graph_retrieval",
+                    authority=EventAuthority.ADVISORY,
+                    message=f"localization by {retrieval.localization_source}: "
+                            f"{len(retrieval.localization)} candidate(s), "
+                            f"{len(retrieval.legacy_only_files)} legacy-only file(s)",
+                    details={
+                        "source": retrieval.localization_source,
+                        "candidates": [candidate.to_dict() for candidate in retrieval.localization],
+                        "legacy_only_files": list(retrieval.legacy_only_files),
+                        "separation": retrieval.separation,
+                    },
+                ))
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints
                 verified_grounding = retrieval.verified_grounding
@@ -2837,10 +2874,7 @@ class WorkflowEngine:
                     capacity, system_prompt=self.planner.system_prompt, head=plan_head,
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=plan_suffix,
-                    rebuild_graph=lambda budget: build_code_context_package(
-                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
-                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
-                    ),
+                    rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
                 )
                 if plan_fit:
                     state.record_event(RunEvent(
@@ -3118,10 +3152,7 @@ class WorkflowEngine:
                     capacity, system_prompt=self.architect.system_prompt, head=design_head,
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=design_suffix, request="architect",
-                    rebuild_graph=lambda budget: build_code_context_package(
-                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
-                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
-                    ),
+                    rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
                 )
                 if design_fit:
                     state.record_event(RunEvent(

@@ -85,7 +85,7 @@ def _terminal_candidate_paths(plan: EngineeringPlan) -> List[str]:
 
 async def _verify_original_requirements(
     spec_compliance: Any, requirements: RequirementSet, goal: str, candidate_root: str,
-    paths: List[str], ledger: ObligationLedger,
+    paths: List[str], ledger: ObligationLedger, baseline_root: Optional[str] = None,
 ) -> List[str]:
     """PRD-020: one verifier pass over the whole candidate, recording each
     original requirement's outcome (UNKNOWN when the verifier gave none)
@@ -93,16 +93,24 @@ async def _verify_original_requirements(
     the verifier findings (an unavailable verdict, e.g. a call PRD-016
     refused for size, invented ids) for the gate's message."""
     contents: Dict[str, str] = {}
+    baselines: Dict[str, Optional[str]] = {}
     for path in paths:
         full = os.path.join(candidate_root, path)
         if os.path.isfile(full):
             with open(full, "r", encoding="utf-8", errors="replace") as handle:
                 contents[path] = handle.read()
+            before = os.path.join(baseline_root, path) if baseline_root else None
+            if before and os.path.isfile(before):
+                with open(before, "r", encoding="utf-8", errors="replace") as handle:
+                    baselines[path] = handle.read()
+            else:
+                baselines[path] = None
     files = sorted(contents)
     fingerprint = content_revision(
         goal + "\x00" + "\x00".join(f"{path}\x01{contents[path]}" for path in files))
     result = await spec_compliance.check(
         goal=goal, files_written=files, file_contents=contents, requirements=requirements,
+        **({"baseline_contents": baselines} if baseline_root else {}),
     )
     # MODEL-EVIDENCE-HARDENING-001: every verdict with its reason code and
     # the verifier's identity; an id without one says why there is none.
@@ -424,6 +432,7 @@ class TerminalGateService:
                 verifier_findings = await self._validators.verify_original_requirements(
                     request.spec_compliance, requirement_set, request.goal,
                     request.candidate_root, _terminal_candidate_paths(request.plan), ledger,
+                    baseline_root=request.workspace_path,
                 )
                 # "Do not modify any other file": decided from what this
                 # final candidate (and the run's committed history)

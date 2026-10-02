@@ -1165,7 +1165,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
     call, streamed as NDJSON when asked."""
 
     name = NATIVE_RUNTIME_NAME
-    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True)
+    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True,
+                                       json_schema_output=True)
     provider_capabilities = OLLAMA_NATIVE_CAPABILITIES
 
     def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
@@ -1232,6 +1233,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         payload["truncate"] = False
         if request.response_format and request.response_format.get("type") == "json_object":
             payload["format"] = "json"
+        elif request.response_format and request.response_format.get("type") == "json_schema":
+            payload["format"] = request.response_format["schema"]  # grammar-constrained (measured)
         if request.tools:
             payload["tools"] = request.tools
         return payload
@@ -1266,6 +1269,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         if chunk.get("done"):
             out.prompt_tokens = _int(chunk.get("prompt_eval_count"))
             out.completion_tokens = _int(chunk.get("eval_count"))
+            # Measured local cost (nanoseconds on the wire): prefill and
+            # model load, reported for prompt-cost telemetry only.
+            for wire, name in (("prompt_eval_duration", "prompt_eval_ms"), ("load_duration", "load_ms")):
+                if isinstance(chunk.get(wire), int):
+                    out.provider_metadata[name] = chunk[wire] // 1_000_000
             reason = chunk.get("done_reason")
             out.finish_reason = reason if isinstance(reason, str) and reason else None
         model = chunk.get("model")

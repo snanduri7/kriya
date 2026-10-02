@@ -1111,7 +1111,8 @@ def _check_embedding(ctx: _Context) -> DoctorCheck:
         return _check(
             "embedding.contract", CheckStatus.FAIL, evidence={"error": str(violation)},
             remediation="Use an embedding endpoint that refuses over-context input instead of truncating it, "
-                        "and re-index with `kriya analyze --force` after any embedding model change.",
+                        "and run `kriya analyze` (an index of another identity is rebuilt) after any embedding "
+                        "model change.",
         )
     except Exception as error:
         return _check(

@@ -84,6 +84,10 @@ class Symbol:
 
 TYPE_KINDS = frozenset({"class", "interface", "enum", "record", "annotation_type"})
 CALLABLE_KINDS = frozenset({"method", "constructor", "function", "annotation_element"})
+# Configuration structure (config_parsing.py): localization and read-only
+# context evidence, never mutation authority.
+CONFIG_KINDS = frozenset({"bean", "bean_property", "bean_constructor_arg", "component_scan", "config_import",
+                          "config_key"})
 
 
 @dataclass(frozen=True)
@@ -96,10 +100,11 @@ class ParserIdentity:
     java_grammar: str
     python_grammar: str
     structural_parser: str
+    pyyaml: str = "unavailable"
 
     @property
     def digest(self) -> str:
-        text = f"{self.tree_sitter}|{self.java_grammar}|{self.python_grammar}|{self.structural_parser}"
+        text = f"{self.tree_sitter}|{self.java_grammar}|{self.python_grammar}|{self.structural_parser}|{self.pyyaml}"
         return hashlib.sha256(text.encode()).hexdigest()
 
 

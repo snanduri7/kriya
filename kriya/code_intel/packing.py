@@ -3,8 +3,10 @@
 T0 is the only mutation-authoritative part: the target member's exact
 current bytes (path, raw sha256, span, symbol id) plus its enclosing header
 (package/imports, enclosing type signatures, fields, constructor
-signatures). T1 (collaborator signatures) and T2 (linked tests) are read
-context. T0 is never dropped: a budget that cannot hold it is reported as
+signatures). T1 (collaborator signatures), T2 (linked tests) and T3 (linked
+configuration: Spring beans of the enclosing type, component scans covering
+its package, properties/YAML keys the member or its type references) are read
+context; configuration is never mutation authority. T0 is never dropped: a budget that cannot hold it is reported as
 ``over_budget``, never satisfied by trimming the target. Rendering puts the
 stable material first and the volatile member body last, so a provider's
 prefix cache survives retries on the same file.
@@ -17,7 +19,8 @@ from typing import Callable, List, Optional, Tuple
 
 from kriya.code_intel.model import Symbol
 
-T3_UNAVAILABLE = "config/XML linkage is not indexed yet"
+_PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z0-9_.\-\[\]]+)(?::[^}]*)?\}")
+_CONFIG_PROPERTIES_PREFIX_RE = re.compile(r'ConfigurationProperties\(\s*(?:(?:prefix|value)\s*=\s*)?"([^"]+)"')
 
 
 def default_token_count(text: str) -> int:
@@ -31,23 +34,34 @@ class ContextPackage:
     source_digest: str
     member_text: str
     header: List[str] = field(default_factory=list)
+    members: List[str] = field(default_factory=list)  # other members of the enclosing type (signatures)
     collaborators: List[Tuple[str, List[str]]] = field(default_factory=list)  # (type key, member signatures)
     tests: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, signature)
+    config: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, "path:line  declaration")
     over_budget: bool = False
     dropped: List[str] = field(default_factory=list)
-    t3: str = T3_UNAVAILABLE
+    include_target: bool = True
 
-    def render(self) -> str:
+    def render(self, include_target: bool = True) -> str:
+        """The package, stable material first. ``include_target=False``
+        leaves the target body out (a caller that already shows the exact
+        member as its own authoritative item)."""
         span = f"{self.target_span[0]}-{self.target_span[1]}"
         parts = [f"### Context for {self.target.lookup_key} ({self.path})"]
         if self.header:
             parts.append("#### Enclosing declarations (read-only)\n" + "\n".join(self.header))
+        if self.members:
+            parts.append("#### Other members of the enclosing type (signatures, read-only)\n"
+                         + "\n".join(self.members))
         for key, signatures in self.collaborators:
             parts.append(f"#### Collaborator {key} (signatures, read-only)\n" + "\n".join(signatures))
         if self.tests:
             parts.append("#### Linked tests (read-only)\n" + "\n".join(sig for _, sig in self.tests))
-        parts.append(f"#### Target member (authoritative source) {self.path}:{span} sha256={self.source_digest}"
-                     f" id={self.target.symbol_id}\n{self.member_text}")
+        if self.config:
+            parts.append("#### Linked configuration (read-only)\n" + "\n".join(line for _, line in self.config))
+        if include_target:
+            parts.append(f"#### Target member (authoritative source) {self.path}:{span} sha256={self.source_digest}"
+                         f" id={self.target.symbol_id}\n{self.member_text}")
         return "\n\n".join(parts)
 
     @property
@@ -81,7 +95,11 @@ def _import_names(statement: str, language: str) -> set:
 
 def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
                   count_tokens: Callable[[str], int] = default_token_count,
-                  max_collaborators: int = 4, max_tests: int = 6) -> Optional[ContextPackage]:
+                  max_collaborators: int = 4, max_tests: int = 6, max_config: int = 8,
+                  include_target: bool = True, member_signatures: bool = False) -> Optional[ContextPackage]:
+    """``include_target`` decides whether budgets count the target body
+    (False when a caller shows it separately); ``member_signatures`` adds
+    the enclosing type's other members as an optional tier."""
     member = service.get_member(symbol_id)
     if member is None:
         return None
@@ -115,11 +133,18 @@ def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
             annotations = " ".join(f"@{a}" for a in sibling.annotations if sibling.language == "java")
             header.append(f"    {annotations + ' ' if annotations else ''}{sibling.signature_text}")
     package = ContextPackage(target, member.path, member.source_digest, member.text, header)
-    if budget_tokens is not None and count_tokens(package.render()) > budget_tokens:
+    package.include_target = include_target
+    if budget_tokens is not None and count_tokens(package.render(include_target)) > budget_tokens:
         package.over_budget = True  # T0 stays whole; nothing optional is added
         return package
     owner_names = {o.name for o in owner_chain}
     owner_ids = {o.symbol_id for o in owner_chain}
+    if member_signatures and owner_chain:
+        for sibling in symbols:
+            if sibling.parent_id == owner_chain[-1].symbol_id and sibling.is_callable and \
+                    sibling.kind != "constructor" and sibling.symbol_id != target.symbol_id:
+                _add_within_budget(package, package.members, f"    {sibling.signature_text}", budget_tokens,
+                                   count_tokens, f"member:{sibling.symbol_id}")
     # Collaborators: the declared types of the fields the member uses, then
     # the types it names itself.
     field_types = [_TYPE_REFERENCE_RE.findall(s.return_type or "")[:1] for s in symbols
@@ -139,7 +164,38 @@ def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
     for test in _linked_tests(service, target, owner_chain)[:max_tests]:
         _add_within_budget(package, package.tests, (test.symbol_id, test.signature_text), budget_tokens,
                            count_tokens, f"test:{test.symbol_id}")
+    data = service.current_bytes(member.path) or b""
+    referencing = [member.text] + [
+        s.signature_text for s in symbols if s.parent_id in owner_ids and s.kind in ("field", "attribute")] + [
+        data[o.declaration.start_byte:o.signature.start_byte].decode("utf-8", "replace") for o in owner_chain]
+    namespace = structure.namespace if structure is not None else ""
+    for entry in linked_configuration(service, owner_chain, namespace, referencing)[:max_config]:
+        line = f"{entry.path}:{entry.declaration.start_line}  {entry.signature_text}"
+        _add_within_budget(package, package.config, (entry.symbol_id, line), budget_tokens, count_tokens,
+                           f"config:{entry.symbol_id}")
     return package
+
+
+def linked_configuration(service, owners: List[Symbol], namespace: str, referencing: List[str]) -> List[Symbol]:
+    """Deterministic configuration linkage (structural, never resolved):
+    Spring beans whose ``class`` is the enclosing type's qualified name;
+    ``component-scan`` packages containing ``namespace``; property keys that
+    ``referencing`` (the member, the enclosing types' field signatures and
+    annotations) names as ``${key}``; and keys under a
+    ``@ConfigurationProperties`` prefix found there. Beans, scans, then keys;
+    each symbol once."""
+    found: List[Symbol] = []
+    owner = owners[-1] if owners else None
+    if owner is not None and owner.language == "java":
+        found.extend(service.store.by_return_type(owner.lookup_key, kind="bean"))
+        if namespace:
+            found.extend(scan for scan in service.store.by_kind("component_scan")
+                         if namespace == scan.lookup_key or namespace.startswith(scan.lookup_key + "."))
+    for key in dict.fromkeys(key for text in referencing for key in _PLACEHOLDER_RE.findall(text)):
+        found.extend(s for s in service.find_symbol(key) if s.kind == "config_key" and s.lookup_key == key)
+    for prefix in dict.fromkeys(m for text in referencing for m in _CONFIG_PROPERTIES_PREFIX_RE.findall(text)):
+        found.extend(service.store.by_lookup_prefix(prefix + ".", kind="config_key"))
+    return list({s.symbol_id: s for s in found}.values())
 
 
 def _add_within_budget(package: ContextPackage, tier: list, item, budget: Optional[int], count_tokens,
@@ -147,7 +203,7 @@ def _add_within_budget(package: ContextPackage, tier: list, item, budget: Option
     """Add ``item`` to an optional tier only if the whole rendered package
     still fits (measured on the real rendering, headings included)."""
     tier.append(item)
-    if budget is not None and count_tokens(package.render()) > budget:
+    if budget is not None and count_tokens(package.render(package.include_target)) > budget:
         tier.pop()
         package.dropped.append(label)
 

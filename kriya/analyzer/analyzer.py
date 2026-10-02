@@ -143,100 +143,9 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
                     })
             
     elif ext == ".java":
-        pkg_match = re.search(r"package\s+([\w\.]+);", content)
-        package = pkg_match.group(1) if pkg_match else "default"
-        
-        # Local import: kriya.workflow's package __init__ pulls in
-        # workflow.py, which itself imports RepositoryAnalyzer from this
-        # module - a module-level import here would be a circular import
-        # (analyzer.py -> kriya.workflow -> workflow.py -> analyzer.py,
-        # mid-initialization). Deferred to first actual use instead, by
-        # which point both modules are fully loaded.
-        from kriya.workflow.edit_safety import _strip_java_comments_and_strings
-
-        lines = content.splitlines()
-        # Comment/string-stripped mirror (same line count, same length per
-        # line - _strip_java_comments_and_strings() blanks comment/string
-        # spans to whitespace rather than deleting them) used ONLY for the
-        # brace-counting below, so a '{'/'}' inside a Java string literal or
-        # // or /* */ comment doesn't miscount and truncate or merge method
-        # body chunks - the exact bug class edit_safety.py's own
-        # _strip_java_comments_and_strings() was built to avoid, not
-        # previously extended to this call site (2026-08-12 SME review).
-        brace_count_lines = _strip_java_comments_and_strings(content).splitlines()
-        current_class = ""
-        current_class_javadoc = ""
-
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            line_strip = line.strip()
-            
-            class_match = re.search(r"\bclass\s+(\w+)", line_strip)
-            if class_match:
-                current_class = class_match.group(1)
-                javadoc_lines = []
-                j = i - 1
-                if j >= 0 and "*/" in lines[j]:
-                    while j >= 0:
-                        javadoc_lines.insert(0, lines[j])
-                        if "/**" in lines[j]:
-                            break
-                        j -= 1
-                current_class_javadoc = "\n".join(javadoc_lines).strip()
-                
-                header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\n=== Class Declaration ===\n"
-                chunks.append({
-                    "text": header + line,
-                    "start": i + 1,
-                    "end": i + 1
-                })
-                i += 1
-                continue
-                
-            method_match = re.search(JAVA_METHOD_SIGNATURE_CORE + r'(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip)
-            if method_match and current_class:
-                method_name = method_match.group(1)
-                if method_name not in {"class", "interface", "enum", "if", "for", "while", "switch", "catch"}:
-                    method_lines = [line]
-                    start_idx = i
-                    
-                    brace_count = 1
-                    i += 1
-                    while i < len(lines) and brace_count > 0:
-                        line = lines[i]
-                        method_lines.append(line)
-                        brace_count += brace_count_lines[i].count("{") - brace_count_lines[i].count("}")
-                        i += 1
-                        
-                    header = f"File: {rel_path}\nPackage: {package}\nClass: {current_class}\nClass Javadoc: {current_class_javadoc}\nMethod: {method_name}\n=== Method Body ===\n"
-                    chunks.append({
-                        "text": header + "\n".join(method_lines),
-                        "start": start_idx + 1,
-                        "end": i
-                    })
-                    continue
-            i += 1
-            
+        chunks = _structural_java_chunks(content, rel_path)
     elif ext == ".xml":
-        import xml.etree.ElementTree as ET
-        try:
-            cleaned_content = re.sub(r'\sxmlns="[^"]+"', '', content)
-            cleaned_content = re.sub(r'\sxmlns:[^=]+="[^"]+"', '', cleaned_content)
-            cleaned_content = re.sub(r'<beans[^>]*>', '<beans>', cleaned_content)
-            
-            root = ET.fromstring(cleaned_content)
-            for idx, bean in enumerate(root.findall(".//bean"), 1):
-                bean_id = bean.get("id") or bean.get("name") or f"bean_{idx}"
-                bean_xml = ET.tostring(bean, encoding="utf-8").decode("utf-8")
-                header = f"File: {rel_path}\nSpring Bean: {bean_id}\n=== Bean Configuration ===\n"
-                chunks.append({
-                    "text": header + bean_xml,
-                    "start": 1,
-                    "end": 1
-                })
-        except Exception as e:
-            logger.debug(f"Failed to parse Spring XML bean config for '{rel_path}', falling back to generic chunking: {e}")
+        chunks = _structural_spring_xml_chunks(content, rel_path)
 
     if not chunks:
         chunks = chunk_file_syntactically(content)
@@ -244,6 +153,93 @@ def chunk_file_with_metadata_headers(content: str, rel_path: str) -> List[Dict[s
             c["text"] = f"File: {rel_path}\n=== Code Content ===\n" + c["text"]
             
     return chunks
+
+def _javadoc_above(lines: List[str], line: int) -> Tuple[int, List[str]]:
+    """The /** ... */ block ending on the line just above 1-indexed ``line``
+    (annotations and blank lines between are skipped), as (its first line,
+    its lines); (line, []) when there is none."""
+    index = line - 2
+    while index >= 0 and (not lines[index].strip() or lines[index].strip().startswith("@")):
+        index -= 1
+    if index < 0 or not lines[index].rstrip().endswith("*/"):
+        return line, []
+    end = index
+    while index >= 0 and "/**" not in lines[index]:
+        if "/*" in lines[index] and "/**" not in lines[index]:
+            return line, []  # a plain block comment, not Javadoc
+        index -= 1
+    if index < 0:
+        return line, []
+    return index + 1, lines[index:end + 1]
+
+
+def _structural_java_chunks(content: str, rel_path: str) -> List[Dict[str, Any]]:
+    """One chunk per type declaration (its Javadoc, signature and field
+    declarations) and one per method/constructor (its Javadoc and exact
+    source), from the Code Intelligence structural model - every member
+    the parser sees, never a declaration regex (Code Intelligence R1 slice
+    2: the regex chunker embedded 57 % of commons-lang's behavior-changed
+    members and no Javadoc). Headers keep the controlled ``Class:``/
+    ``Method:`` lines. A file the parser cannot read gets the generic
+    chunking."""
+    from kriya.code_intel.model import ParseState
+    from kriya.code_intel.parsing import parse_text
+
+    structure = parse_text(rel_path, content)
+    if structure.state is ParseState.PARSE_FAILED or not structure.symbols:
+        return []
+    lines = content.splitlines()
+    package = structure.namespace or "default"
+    by_id = {symbol.symbol_id: symbol for symbol in structure.symbols}
+    chunks: List[Dict[str, Any]] = []
+    for symbol in structure.symbols:
+        if symbol.is_type:
+            doc_start, doc = _javadoc_above(lines, symbol.declaration.start_line)
+            fields = [f"    {s.signature_text};" for s in structure.symbols
+                      if s.parent_id == symbol.symbol_id and s.kind in ("field", "enum_constant")]
+            header = (f"File: {rel_path}\nPackage: {package}\nClass: {symbol.name}\n"
+                      f"Class Javadoc: {symbol.doc_summary}\n=== Class Declaration ===\n")
+            chunks.append({"text": header + "\n".join(doc + [symbol.signature_text] + fields),
+                           "start": doc_start, "end": symbol.signature.end_line})
+        elif symbol.kind in ("method", "constructor"):
+            owner = by_id.get(symbol.parent_id) if symbol.parent_id else None
+            doc_start, _ = _javadoc_above(lines, symbol.declaration.start_line)
+            header = (f"File: {rel_path}\nPackage: {package}\nClass: {owner.name if owner else ''}\n"
+                      f"Class Javadoc: {owner.doc_summary if owner else ''}\nMethod: {symbol.name}\n"
+                      "=== Method Body ===\n")
+            chunks.append({"text": header + "\n".join(lines[doc_start - 1:symbol.declaration.end_line]),
+                           "start": doc_start, "end": symbol.declaration.end_line})
+    return chunks
+
+
+def _structural_spring_xml_chunks(content: str, rel_path: str) -> List[Dict[str, Any]]:
+    """One chunk per top-level Spring bean (exact source, nested beans
+    included) and one for the document's scans/imports, from the
+    namespace-aware configuration model (E-08: the previous chunker stripped
+    xmlns declarations and failed on every prefixed element). Non-Spring XML
+    gets the generic chunking."""
+    from kriya.code_intel.config_parsing import parse_config_file
+    from kriya.code_intel.model import ParseState
+
+    structure = parse_config_file(rel_path, content.encode("utf-8"))
+    if structure.state is not ParseState.PARSED:
+        return []
+    data = content.encode("utf-8")
+    beans = [s for s in structure.symbols if s.kind == "bean"]
+    top = [b for b in beans if not any(o is not b and o.declaration.start_byte <= b.declaration.start_byte
+                                       and b.declaration.end_byte <= o.declaration.end_byte for o in beans)]
+    chunks = []
+    for bean in top:
+        text = data[bean.declaration.start_byte:bean.declaration.end_byte].decode("utf-8", "replace")
+        chunks.append({"text": f"File: {rel_path}\nSpring Bean: {bean.name}\n=== Bean Configuration ===\n{text}",
+                       "start": bean.declaration.start_line, "end": bean.declaration.end_line})
+    wiring = [s for s in structure.symbols if s.kind in ("component_scan", "config_import")]
+    if wiring:
+        chunks.append({"text": f"File: {rel_path}\n=== Spring Configuration ===\n"
+                       + "\n".join(s.signature_text for s in wiring),
+                       "start": wiring[0].declaration.start_line, "end": wiring[-1].declaration.end_line})
+    return chunks
+
 
 def chunk_file_syntactically(content: str, max_lines: int = 100, overlap: int = 15) -> List[Dict[str, Any]]:
     """Chunks a code file into blocks of max_lines with overlap, aligning boundaries with classes/methods."""
@@ -481,6 +477,10 @@ class IndexReport:
     # structure was dropped for a parser/schema identity change.
     restructured: int = 0
     structure_rebuilt: bool = False
+    # The vector index was built under another embedding identity (another
+    # model, dimension, served context or preprocessing version): it was
+    # dropped and every file re-embedded under the served one. Its digest.
+    embedding_rebuilt_from: Optional[str] = None
 
 
 class RepositoryAnalyzer:
@@ -892,7 +892,8 @@ class RepositoryAnalyzer:
         )
         
         from kriya.analyzer.graph import DependencyGraph
-        from kriya.code_intel.parsing import language_for_path, parse_file
+        from kriya.code_intel.model import ParseState
+        from kriya.code_intel.parsing import is_structural_path, parse_file
         from kriya.code_intel.store import StructuralStore
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
@@ -903,27 +904,30 @@ class RepositoryAnalyzer:
         # real probe embedding, digest, served context) before anything is
         # indexed - a failed probe stops indexing; the dimension is never
         # assumed. Vectors of another identity are never mixed with these.
-        from kriya.memory.embedding import EmbeddingError, EmbeddingIdentityChangedError, embed_chunks
+        from kriya.memory.embedding import EmbeddingError, embed_chunks
 
         try:
             fingerprint = await client.fingerprint()
             active = store.active_fingerprint()
-            if active is None or force:
+            if active is None or force or active != fingerprint.digest:
                 # A first index, a pre-contract index (rows without any
-                # identity: re-embedded in full), or an explicit --force.
+                # identity), an explicit --force, or an index of another
+                # identity: dropped and adopted in ONE transaction, then every
+                # file is re-embedded through the normal path. Vectors of two
+                # identities never coexist, and queries only ever read rows
+                # of the served identity.
                 store.reset_index(fingerprint)
-            elif active != fingerprint.digest:
-                raise EmbeddingIdentityChangedError(
-                    f"the vector index was built under embedding identity {active[:12]}, the served model is "
-                    f"{fingerprint.digest[:12]} ({fingerprint.model}); re-index with 'kriya analyze --force'",
-                    details={"index": active, "served": fingerprint.to_dict()},
-                )
         except Exception:
             store.close()
             graph.close()
             structural.close()
             raise
         report = IndexReport(fingerprint=fingerprint.digest)
+        if active is not None and not force and active != fingerprint.digest:
+            report.embedding_rebuilt_from = active
+            logger.warning(
+                "The vector index was built under embedding identity %s; the served model is %s (%s). "
+                "Rebuilding it under the served identity.", active[:12], fingerprint.digest[:12], fingerprint.model)
         # Structure built by another parser/schema identity is never reused.
         report.structure_rebuilt = graph.adopt_structural_identity(fingerprint.digest)
         if report.structure_rebuilt:
@@ -1059,11 +1063,15 @@ class RepositoryAnalyzer:
                 # published or not current (publish_file/mark_stale), and the
                 # file cache unset, so the next non-force run retries it.
                 if not graph_current:
-                    structure = parse_file(rel_path, raw_bytes) if language_for_path(rel_path) else None
+                    # Code (tree-sitter) and configuration (Spring XML,
+                    # application properties/YAML, E-08) share the store.
+                    structure = parse_file(rel_path, raw_bytes) if is_structural_path(rel_path) else None
                     graph.index_file(rel_path, content, mtime, file_hash, source_digest=source_digest,
                                      structure=structure)
-                    if structure is not None:
+                    if structure is not None and structure.state is not ParseState.UNSUPPORTED:
                         structural.publish(structure, raw_bytes)
+                    else:
+                        structural.remove(rel_path)
                     report.restructured += 1
                 if vectors_current:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}

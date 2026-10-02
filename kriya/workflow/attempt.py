@@ -182,6 +182,7 @@ from kriya.workflow.operations import (
     validate_operation_result,
 )
 from kriya.workflow.plan_schema import EngineeringPlan, RequirementOwnershipRelation
+from kriya.workflow.prompt_composition import prompt_composition
 from kriya.workflow.repair_contract import (
     RepairContractStatus,
     build_repair_contract,
@@ -766,6 +767,26 @@ def _preserve_member_exact_precision(
     return new_item
 
 
+def _record_known_target_package(state: GenerationState, items: Iterable[ContextItem]) -> None:
+    """Record a known-target or retry-member package per path. A package
+    can render several member_exact units for one file (every member
+    localization grounded, every overload of an ambiguous name), listed in
+    rank order: the path's record is its highest-ranked member - never
+    whichever unit happened to be listed last - and every member unit is kept
+    in ``known_target_member_items`` for edit authority. A path without
+    member units records its last (broadest) item, as before."""
+    by_path: Dict[str, List[ContextItem]] = {}
+    for item in items:
+        by_path.setdefault(item.path, []).append(item)
+    for path, path_items in by_path.items():
+        members = [item for item in path_items if item.tier == "member_exact" and item.member_id is not None]
+        state.known_target_context_items[path] = members[0] if members else path_items[-1]
+        if members:
+            state.known_target_member_items[path] = members
+        else:
+            state.known_target_member_items.pop(path, None)
+
+
 def _classify_retry_target_source_origin(
     state: GenerationState, ctx: "AttemptContext", path: str,
 ) -> str:
@@ -995,6 +1016,14 @@ def _prepare_retry_context(
         },
     )
     _record_authority_expansions(state, expansions)
+    # The run's own grounding - the members localization found for each
+    # authorized target, verified against the CURRENT bytes exactly as on
+    # attempt 1 (no new authority) - stays part of every retry's T0, after
+    # the failure-grounded members: a failure that names no line (a protocol
+    # error, an invented anchor) must never evict the causal member.
+    for path, member_ids in _resolve_known_target_member_hints(ctx, list(target_files or ())).items():
+        hinted = retry_member_hints.setdefault(path, [])
+        hinted.extend(member_id for member_id in member_ids if member_id not in hinted)
     retry_package = _retry_package_for_attempt(
         state, ctx, target_files=target_files, prompt_window=prompt_window,
         exclude=retry_member_hints.keys(),
@@ -1030,13 +1059,7 @@ def _prepare_retry_context(
         # exists to produce. Apply member-scoped (more precise) entries
         # LAST so they are never overwritten by a broader same-path
         # overview - never the reverse.
-        state.known_target_context_items.update({
-            item.path: item
-            for item in sorted(
-                retry_member_package.relevant_files,
-                key=lambda item: item.member_id is not None,
-            )
-        })
+        _record_known_target_package(state, retry_member_package.relevant_files)
         state.record_event(RunEvent(
             kind="context.retry_member_hint_package",
             attempt=state.attempt_number,
@@ -2235,16 +2258,42 @@ def _target_package_with_window_reserve(
     shown whole and exact there, exact windows may be added to the request
     (CONTEXT-EDIT-PROTOCOL-001), so it is rebuilt with their reserve held
     back and the windows never push the request past its capacity."""
-    rendered, package = build_known_target_context(
-        paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
-    )
-    shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
-    if set(paths) <= shown_whole:
-        return rendered, package
-    return build_known_target_context(
-        paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
-        member_hints=member_hints, cache=ctx.source_cache,
-    )
+    # Code Intelligence R1 slice 2: T0 (a grounded member's exact current
+    # body) has its own room, computed without skills, learned reference or
+    # optional context - none of them can evict it.
+    exact_member_budget = _reserve_graph_context_budget(prompt_window, ctx.design, ctx.plan)
+    service = _code_intelligence_for(ctx) if member_hints else None
+    try:
+        rendered, package = build_known_target_context(
+            paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
+            exact_member_budget=exact_member_budget, code_intelligence=service,
+        )
+        shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
+        if set(paths) <= shown_whole:
+            return rendered, package
+        return build_known_target_context(
+            paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
+            member_hints=member_hints, cache=ctx.source_cache, exact_member_budget=exact_member_budget,
+            code_intelligence=service,
+        )
+    finally:
+        if service is not None:
+            service.close()
+
+
+def _code_intelligence_for(ctx: "AttemptContext") -> Any:
+    """The repository's Code Intelligence index (read-only T1-T3 context),
+    or None when there is none of the current parser identity."""
+    from kriya.workflow.graph_retrieval import open_code_intelligence
+
+    memory = getattr(getattr(getattr(ctx.kernel, "config", None), "paths", None), "memory", None)
+    if not isinstance(memory, str):
+        return None
+    try:
+        return open_code_intelligence(ctx.workspace_path, os.path.join(memory, "dependency_graph.db"))
+    except Exception as error:  # read-only enrichment; T0 never depends on it
+        logger.warning("Code Intelligence index unavailable for known-target context: %s", error)
+        return None
 
 
 def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str]) -> List[int]:
@@ -2271,6 +2320,15 @@ def _remember_anchor_loci(state: GenerationState, path: str, edits: List[Dict[st
     located = {locus for edit in edits for locus in locate_search_text(lines, edit.get("search", ""))}
     if located:
         state.edit_anchor_loci[path] = sorted(set(state.edit_anchor_loci.get(path, [])) | located)
+
+
+_TEST_VERIFIERS = frozenset({"test", "tests", "regression"})
+
+
+def _declares_test_verification(required_verification: Iterable[Dict[str, Any]]) -> bool:
+    """The stage's declared verification includes a test-suite verifier."""
+    return any(item.get("type") == "tool" and item.get("tool_name") in _TEST_VERIFIERS
+               for item in required_verification or ())
 
 
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -2326,6 +2384,15 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         # the whole current file present verbatim in this request's mandatory
         # text is exact anchor source - checked on the bytes, not on a label.
         # Whole-file replacement authority stays D1's alone.
+        # Every other member unit rendered for the path (all members
+        # localization grounded, every overload of an ambiguous name) counts
+        # when it is of the current revision and its bytes are in this
+        # request's mandatory text.
+        for member in state.known_target_member_items.get(path, ()):
+            if (member is not item and member.is_exact and member.content
+                    and (not member.revision or member.revision == content_shown_revision)
+                    and member.content in mandatory_context):
+                shown.extend(shown_exact_texts(member.tier, member.content))
         if content.strip() and content in mandatory_context:
             shown = [("shown_full", content)]
         capabilities[path] = build_edit_capability(
@@ -2524,6 +2591,26 @@ async def _run_developer_generation_as_developer(
             "runtime_fingerprint": (last_call_metrics or {}).get("runtime_fingerprint"),
             "protocol_status": (last_call_metrics or {}).get("protocol_status"),
         })
+        # Code Intelligence R1 slice 2: what this request spent its prompt on
+        # (T0 member/header, sibling signatures, T1-T3, skills) and the
+        # provider's measured prefill time - observational only.
+        # Inside this finally block it must never raise over the call's own
+        # outcome: it reads only plain strings and mappings.
+        completion = (last_call_metrics or {}).get("completion")
+        code_context = kwargs.get("existing_code_context")
+        skills_text = getattr(ctx, "skills_prompt", "")
+        state.record_event(RunEvent(
+            kind="developer.prompt_composition", attempt=state.attempt_number, source="developer",
+            authority=EventAuthority.ADVISORY,
+            message="Developer prompt composition (estimated per section; provider-reported total).",
+            details=prompt_composition(
+                code_context if isinstance(code_context, str) else "",
+                skills_text if isinstance(skills_text, str) else "",
+                prompt_tokens_reported=(last_call_metrics or {}).get("prompt_tokens"),
+                provider_metadata=(completion.get("provider_metadata") if isinstance(completion, dict) else None),
+                prefix_reuse=(completion.get("prefix_reuse") if isinstance(completion, dict) else None),
+            ),
+        ))
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",
             attempt=state.attempt_number,
@@ -6850,13 +6937,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # context's own identical update() - a grounded member_id entry
             # must never be silently overwritten by a broader, less precise
             # same-path overview merely because it happens to sort later.
-            state.known_target_context_items.update({
-                item.path: item
-                for item in sorted(
-                    known_target_package.relevant_files,
-                    key=lambda item: item.member_id is not None,
-                )
-            })
+            _record_known_target_package(state, known_target_package.relevant_files)
             # Internal evidence (WP6/observability) - never the full source,
             # just enough to answer "what tier/omission did each known
             # target actually get" from the run trace alone.
@@ -8799,7 +8880,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if target_test:
                 accepted_test_output = test_res.get("output", "")
         else:
-            if runnable_test_files:
+            # The repository's own suite also runs when the plan declares a
+            # test verification for this stage: an edit of existing source
+            # writes no test file, and without this run the declared test
+            # evidence could never exist (REQUIRED VERIFICATION UNRESOLVED
+            # after every other gate passed - live, more-itertools).
+            if runnable_test_files or _declares_test_verification(ctx.required_verification):
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 if not test_res["success"]:
@@ -9776,6 +9862,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             set(state.all_files_written) | set(ctx.established_files)
         )
         spec_file_contents: Dict[str, str] = {}
+        # Each file's version before this candidate (None: new), so a file too
+        # large to show whole is judged on its changed regions.
+        spec_baselines: Dict[str, Optional[str]] = {}
         for spec_path in spec_check_files:
             spec_full_path = os.path.join(ctx.worktree_path, spec_path)
             if not os.path.exists(spec_full_path):
@@ -9785,6 +9874,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             try:
                 with open(spec_full_path, "r", encoding="utf-8", errors="replace") as fh:
                     spec_file_contents[spec_path] = fh.read()
+                baseline_path = os.path.join(ctx.workspace_path, spec_path)
+                if os.path.isfile(baseline_path):
+                    with open(baseline_path, "r", encoding="utf-8", errors="replace") as fh:
+                        spec_baselines[spec_path] = fh.read()
+                else:
+                    spec_baselines[spec_path] = None
             except Exception as e:
                 logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
         authoritative_context = _spec_compliance_authoritative_context(ctx.obligation_ledger)
@@ -9806,7 +9901,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         requirement_kwargs = {"requirements": ctx.requirement_set} if ctx.requirement_set is not None else {}
         spec_result = await ctx.spec_compliance.check(
             goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-            authoritative_context=authoritative_context, **requirement_kwargs,
+            authoritative_context=authoritative_context, baseline_contents=spec_baselines, **requirement_kwargs,
         )
         if spec_result.get("status") == "indeterminate":
             # SpecComplianceAgent.check() returns this when the model's own
@@ -9822,7 +9917,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
                 goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-                authoritative_context=authoritative_context, **requirement_kwargs,
+                authoritative_context=authoritative_context, baseline_contents=spec_baselines, **requirement_kwargs,
             )
         if ctx.requirement_set is not None:
             _record_original_requirement_verdicts(

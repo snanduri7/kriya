@@ -1022,13 +1022,35 @@ class PolymorphicValidator:
 
     def _maven_cache_dir(self) -> str:
         """A persistent, per-workspace Maven local-repository cache
-        (SEC-001-P6 Stage 2) - lives under the same already-git-untracked,
-        worktree-scoped `.kriya/` directory `_ensure_project_venv` already
-        uses for the Python venv, reused across retries/gate calls within
-        the same run the same way. Created on demand - `OCIContainmentBackend`
-        refuses to mount a `dependency_cache_paths` entry that does not
-        already exist as a real directory."""
-        cache_dir = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        (SEC-001-P6 Stage 2), OUTSIDE every source tree: under the Kriya state
+        root (``KRIYA_STATE_DIR``, else ``~/.kriya/state``) at
+        ``dependency-cache/maven/<workspace key>``, keyed by the validator's
+        original workspace (the run's reused ``.kriya/worktree`` for gates, a
+        fixed path per workspace), so later runs reuse what the
+        registry-scoped acquisition fetched. It used to live in the
+        worktree's ``.kriya/m2_cache``, inside the tree the project's own
+        build walks: Apache RAT failed commons-lang's compile on the 567
+        cached artifact files it found there. Created on demand -
+        ``OCIContainmentBackend`` refuses to mount a ``dependency_cache_paths``
+        entry that does not already exist as a real directory."""
+        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+
+        root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+        workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
+        key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
+        cache_dir = os.path.join(root, "dependency-cache", "maven", key)
+        # The cache Kriya kept in the tree before must not stay where the
+        # build walks it (a reused worktree keeps untracked .kriya/ content):
+        # it becomes the new cache when there is none yet, else it is dropped.
+        legacy = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        if os.path.isdir(legacy) and not os.path.islink(legacy):
+            if not os.path.isdir(cache_dir) or not os.listdir(cache_dir):
+                os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+                if os.path.isdir(cache_dir):
+                    os.rmdir(cache_dir)
+                shutil.move(legacy, cache_dir)
+            else:
+                shutil.rmtree(legacy)
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
 

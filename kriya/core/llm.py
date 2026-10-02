@@ -96,6 +96,16 @@ DEADLINE_SOURCE_LOCAL_CAP = "local_cap"
 _T = TypeVar("_T")
 
 
+STRUCTURED_OUTPUT_UNSUPPORTED = "STRUCTURED_OUTPUT_UNSUPPORTED"
+
+
+class StructuredOutputUnsupportedError(Exception):
+    """A schema-constrained request to a runtime that cannot constrain its
+    output (RuntimeCapabilities.json_schema_output is not declared)."""
+
+    reason_code = STRUCTURED_OUTPUT_UNSUPPORTED
+
+
 class InferenceDeadlineError(Exception):
     """A model call refused before dispatch (EXHAUSTED) or stopped
     mid-request (EXCEEDED) by Kriya's own deadline: a typed stop, never a
@@ -148,6 +158,19 @@ def dispatched_bytes(messages: List[Dict[str, Any]], tools: Optional[List[Dict[s
     return consumption_bytes(dispatch_text(messages, tools))
 
 
+def _common_prefix_length(a: str, b: str) -> int:
+    """Length of the longest common prefix (binary search over C-level slice
+    comparisons)."""
+    low, high = 0, min(len(a), len(b))
+    while low < high:
+        middle = (low + high + 1) // 2
+        if a[:middle] == b[:middle]:
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
 class LLMClient:
     """Wrapper around OpenAI-compatible API client for local LLM generation."""
     
@@ -192,6 +215,10 @@ class LLMClient:
         # persist in the run trace (kriya/workflow/state.py
         # drain_budget_expansions); each is also logged.
         self.budget_expansions: List[Dict[str, Any]] = []
+        # Prompt-prefix reuse telemetry: the previous (system, user) request
+        # text sent to each model - an inference server reuses the KV cache
+        # of the longest prefix it shares with the request it last served.
+        self._previous_request: Dict[str, Tuple[str, str]] = {}
         # PRD-018: per-role, per-runtime counters of every call through this
         # client (the role comes from kriya.core.role_metrics.model_role).
         from kriya.core.role_metrics import RoleMetrics
@@ -790,8 +817,15 @@ class LLMClient:
         reasoning_override: Optional[bool] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
         expected_output=None,
+        response_schema: Optional[Dict[str, Any]] = None,
     ):
         """PRD-015: one completion as a normalized ``CompletionResult``.
+
+        ``response_schema`` (Code Intelligence R1 slice 2): a JSON schema the
+        provider must constrain the response to. Only a runtime declaring
+        ``json_schema_output`` is sent one; any other refuses with
+        StructuredOutputUnsupportedError before the provider is contacted, and
+        the schema is never dropped on a retry.
 
         Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE,
         OUTPUT_BUDGET_UNSATISFIABLE), a Kriya deadline stop
@@ -861,6 +895,12 @@ class LLMClient:
         # plain prose explaining its reasoning instead, which no amount of downstream
         # JSON-extraction fallback can recover since there's no JSON substring in it.
         response_format = {"type": "json_object"} if json_mode else None
+        if response_schema is not None:
+            if not self._runtime(model).capabilities.json_schema_output:
+                raise StructuredOutputUnsupportedError(
+                    f"the runtime of '{model}' ({self._runtime(model).name}) does not constrain output to a JSON "
+                    "schema; a schema request is never approximated")
+            response_format = {"type": "json_schema", "schema": response_schema}
 
         self.last_call_metrics = None
         self.last_completion = None
@@ -899,7 +939,8 @@ class LLMClient:
             status=CompletionStatus.OK, model=model,
             runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
             inference_settings_digest=settings.digest,
-            protocol={"json_mode": json_mode, "streaming": stream_callback is not None, "tools": False,
+            protocol={"json_mode": json_mode, "json_schema": response_schema is not None,
+                      "streaming": stream_callback is not None, "tools": False,
                       "reasoning_model": is_reasoning, "response_format_dropped": False,
                       "empty_content_floor_retry": False,
                       "provider_contract": self._contract_record(runtime, plan, budget)},
@@ -919,7 +960,8 @@ class LLMClient:
                 # excludes failures that are clearly unrelated to response_format
                 # (connection/timeout/auth/rate-limit/server errors, as the
                 # runtime adapter classifies them - INF-001).
-                if (response_format is not None and is_reasoning and not isinstance(e, InferenceDeadlineError)
+                if (response_format is not None and response_schema is None and is_reasoning
+                        and not isinstance(e, InferenceDeadlineError)
                         and self._runtime(model).classify_error(e) is RuntimeErrorKind.REQUEST):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "
@@ -995,6 +1037,11 @@ class LLMClient:
         )
         result.finish_reason = raw["finish_reason"]
         result.provider_metadata = raw["provider_metadata"]
+        result.prefix_reuse = self._prefix_reuse(model, system_prompt, user_prompt)
+        logger.info("Prompt to %s: %d chars, %d shared with the previous request to it (first difference: %s); "
+                    "prefill %s ms.", model, len(system_prompt) + len(user_prompt),
+                    result.prefix_reuse["prefix_shared_chars"], result.prefix_reuse["prefix_break"],
+                    result.provider_metadata.get("prompt_eval_ms", "unreported"))
         prompt_tokens, completion_tokens = raw["prompt_tokens"], raw["completion_tokens"]
         result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
         result.prompt_tokens = prompt_tokens or int((len(system_prompt) + len(user_prompt)) / 4)
@@ -1010,6 +1057,21 @@ class LLMClient:
             identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)
         return result
+
+    def _prefix_reuse(self, model: str, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+        """Content-free prefix telemetry: how many leading characters this
+        request shares with the previous one sent to ``model``, and in which
+        message they first differ ("system", "user" or "none")."""
+        previous = self._previous_request.get(model)
+        self._previous_request[model] = (system_prompt, user_prompt)
+        if previous is None:
+            return {"prefix_shared_chars": 0, "prefix_break": "first_request"}
+        shared = _common_prefix_length(previous[0], system_prompt)
+        if shared < len(system_prompt) or len(previous[0]) != len(system_prompt):
+            return {"prefix_shared_chars": shared, "prefix_break": "system"}
+        user_shared = _common_prefix_length(previous[1], user_prompt)
+        return {"prefix_shared_chars": shared + user_shared,
+                "prefix_break": "none" if user_shared == len(user_prompt) == len(previous[1]) else "user"}
 
     async def _request_once(
         self, client, model, system_prompt, user_prompt, temperature, max_tokens,

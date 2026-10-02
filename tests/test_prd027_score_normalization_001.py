@@ -18,7 +18,12 @@ from kriya.memory.vector import LocalVectorStore
 from kriya.workflow import graph_retrieval
 from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package, estimate_tokens, skeletonize_code
 from kriya.workflow.context_recall_fixtures import JAVA_SHOP
-from kriya.workflow.graph_retrieval import DIRECT_EVIDENCE_TIER, evidence_scores, retrieve_graph_context
+from kriya.workflow.graph_retrieval import (
+    DIRECT_EVIDENCE_TIER,
+    evidence_scores,
+    render_localization_candidates,
+    retrieve_graph_context,
+)
 
 # --- the ranking --------------------------------------------------------------
 
@@ -130,10 +135,27 @@ def _retrieve(tmp_path, goal, budget):
 
 
 JUNIT_GOAL = next(case.goal for case in JAVA_SHOP.cases if case.name == "junit-upgrade")
+# A goal whose direct hits also expand through the graph (Code Intelligence R1
+# slice 2: the junit goal's direct hit, pom.xml, is now the only corroborated
+# seed and has no graph relations, so it no longer expands - asserted below).
+EXPANDING_GOAL = next(case.goal for case in JAVA_SHOP.cases if case.name == "discount-cap")
+
+
+def test_a_build_file_goal_is_a_direct_hit_that_seeds_alone_and_stays_full_under_a_binding_budget(tmp_path):
+    result = _retrieve(tmp_path / "whole", JUNIT_GOAL, 10**6)
+    assert "pom.xml" in result.matched_files and result.legacy_only_files == ["pom.xml"]
+    assert (result.expansion_seed_files, result.expansion_seed_reason) == (["pom.xml"], "CORROBORATED_EXPANSION_SEED")
+    assert result.related_files == []
+    matched_cost = sum(estimate_tokens(item.content) for item in result.context_package.relevant_files
+                       if item.path in result.matched_files)
+    map_cost = estimate_tokens(render_localization_candidates(result.localization))
+    constrained = _retrieve(tmp_path / "tight", JUNIT_GOAL, matched_cost + map_cost + 5)
+    tiers = {item.path: item.tier for item in constrained.context_package.relevant_files}
+    assert tiers["pom.xml"] == "full"
 
 
 def test_retrieval_ranks_the_querys_own_hits_above_the_graph_walk(tmp_path):
-    result = _retrieve(tmp_path, JUNIT_GOAL, 10**6)
+    result = _retrieve(tmp_path, EXPANDING_GOAL, 10**6)
     assert result.matched_files and result.related_files
     assert min(result.file_scores[f] for f in result.matched_files) > \
         max(result.file_scores[f] for f in result.related_files)
@@ -143,6 +165,62 @@ _TIER_RANK = {"full": 3, "skeleton": 2, "signatures": 1, "omitted": 0}
 
 
 def test_retrieval_under_a_binding_budget_keeps_direct_hits_ahead_of_the_graph_walk(tmp_path):
+    """Direct hits (here discount-cap's OrderService.java) scored ~0.03 against
+    the graph walk's 0.5-1.0 before the fix, so a binding budget shrank the
+    query's own hits before the files the walk added."""
+    whole = _retrieve(tmp_path / "whole", EXPANDING_GOAL, 10**6)
+    golden = "src/main/java/com/shop/order/OrderService.java"
+    assert golden in whole.matched_files and whole.related_files
+    matched_cost = sum(estimate_tokens(item.content) for item in whole.context_package.relevant_files
+                       if item.path in whole.matched_files)
+    # Code Intelligence R1 slice 2: the localization candidate map is part of
+    # the same graph-context budget, ahead of the files; a budget that
+    # exactly fits the direct evidence includes it.
+    map_cost = estimate_tokens(render_localization_candidates(whole.localization))
+    constrained = _retrieve(tmp_path / "tight", EXPANDING_GOAL, matched_cost + map_cost + 5)
+    # Tiers as shown (a degraded file is shown at its tier; only an
+    # omission for budget is "omitted"). The packer degrades lowest score
+    # first, then omits: the direct hit is never shown below any graph-walk
+    # file, and the walk gives way.
+    tiers = {item.path: item.tier for item in constrained.context_package.relevant_files}
+    tiers.update({entry["path"]: "omitted" for entry in constrained.context_package.omitted
+                  if entry["path"] not in tiers})
+    assert tiers[golden] != "omitted"
+    assert min(_TIER_RANK[tiers[f]] for f in constrained.matched_files) >= \
+        max(_TIER_RANK[tiers[f]] for f in constrained.related_files)
+    assert any(tiers[f] != "full" for f in constrained.related_files)
+
+
+def test_the_ranking_is_part_of_the_certification_identity(monkeypatch):
+    from kriya.workflow import context_certification as cc
+
+    before = cc.index_implementation_digest()
+    real = cc.inspect.getsource
+    monkeypatch.setattr(cc.inspect, "getsource", lambda o: "changed" if o is graph_retrieval else real(o))
+    assert cc.index_implementation_digest() != before
+    assert "def evidence_scores" in real(graph_retrieval)
+
+
+# --- the legacy hybrid leg (no structural index): the original scenario -------
+# Code Intelligence R1 slice 2 keeps query_hybrid as the candidate generator
+# whenever a workspace has no structural index; its raw RRF scores are exactly
+# what this normalization exists for, so the original junit-upgrade scenario
+# stays proven on that path.
+
+@pytest.fixture
+def legacy_leg(monkeypatch):
+    monkeypatch.setattr(graph_retrieval, "open_code_intelligence", lambda *_args: None)
+
+
+def test_legacy_leg_ranks_the_querys_own_hits_above_the_graph_walk(tmp_path, legacy_leg):
+    result = _retrieve(tmp_path, JUNIT_GOAL, 10**6)
+    assert result.localization_source == "hybrid"
+    assert result.matched_files and result.related_files
+    assert min(result.file_scores[f] for f in result.matched_files) > \
+        max(result.file_scores[f] for f in result.related_files)
+
+
+def test_legacy_leg_under_a_binding_budget_keeps_direct_hits_ahead_of_the_graph_walk(tmp_path, legacy_leg):
     """junit-upgrade: the golden pom.xml is a direct hit; before the fix it
     scored ~0.03 against the graph walk's 0.5-1.0, so a binding budget shrank
     the query's own hits before the files the walk added."""
@@ -157,13 +235,3 @@ def test_retrieval_under_a_binding_budget_keeps_direct_hits_ahead_of_the_graph_w
     assert min(_TIER_RANK[tiers[f]] for f in constrained.matched_files) >= \
         max(_TIER_RANK[tiers[f]] for f in constrained.related_files)
     assert any(tiers[f] != "full" for f in constrained.related_files)
-
-
-def test_the_ranking_is_part_of_the_certification_identity(monkeypatch):
-    from kriya.workflow import context_certification as cc
-
-    before = cc.index_implementation_digest()
-    real = cc.inspect.getsource
-    monkeypatch.setattr(cc.inspect, "getsource", lambda o: "changed" if o is graph_retrieval else real(o))
-    assert cc.index_implementation_digest() != before
-    assert "def evidence_scores" in real(graph_retrieval)

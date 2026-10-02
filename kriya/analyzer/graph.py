@@ -43,7 +43,7 @@ def structural_identity() -> Dict[str, str]:
     return {
         "schema_version": STRUCTURAL_INDEX_SCHEMA_VERSION, "tree_sitter": parser.tree_sitter,
         "java_grammar": parser.java_grammar, "python_grammar": parser.python_grammar,
-        "structural_parser": parser.structural_parser,
+        "structural_parser": parser.structural_parser, "pyyaml": parser.pyyaml,
     }
 
 
@@ -282,7 +282,7 @@ class DependencyGraph:
             elif ext == ".java":
                 symbols, relations = self._parse_java(rel_path, content, structure)
             elif ext == ".xml":
-                symbols, relations = self._parse_xml(rel_path, content)
+                symbols, relations = self._parse_xml(rel_path, content, structure)
             elif ext == ".rb":
                 symbols, relations = self._parse_ruby(rel_path, content)
         except Exception as e:
@@ -798,78 +798,29 @@ class DependencyGraph:
                          for call in structure.calls if call not in _JAVA_IGNORED_CALLS)
         return symbols, relations
 
-    def _parse_xml(self, filepath: str, content: str) -> tuple:
-        symbols = []
-        relations = []
-        
-        import xml.etree.ElementTree as ET
-        try:
-            # Strip XML namespace tags to make XPath lookup robust and uniform
-            cleaned_content = re.sub(r'\sxmlns="[^"]+"', '', content)
-            cleaned_content = re.sub(r'\sxmlns:[^=]+="[^"]+"', '', cleaned_content)
-            cleaned_content = re.sub(r'<beans[^>]*>', '<beans>', cleaned_content)
-            
-            root = ET.fromstring(cleaned_content)
-            for bean in root.findall(".//bean"):
-                bean_id = bean.get("id") or bean.get("name")
-                bean_class = bean.get("class")
-                if not bean_id:
-                    continue
-                    
-                symbols.append({
-                    "name": bean_id,
-                    "type": "spring_bean",
-                    "start_line": 1,
-                    "end_line": 1
-                })
-                
-                if bean_class:
-                    relations.append({
-                        "source": bean_id,
-                        "target": bean_class,
-                        "type": "declares_bean"
-                    })
-                    
-                # Property references
-                for prop in bean.findall(".//property"):
-                    prop_ref = prop.get("ref")
-                    if prop_ref:
-                        relations.append({
-                            "source": bean_id,
-                            "target": prop_ref,
-                            "type": "references_bean"
-                        })
-                        
-                # Constructor arguments
-                for carg in bean.findall(".//constructor-arg"):
-                    carg_ref = carg.get("ref")
-                    if carg_ref:
-                        relations.append({
-                            "source": bean_id,
-                            "target": carg_ref,
-                            "type": "references_bean"
-                        })
-        except Exception as e:
-            logger.warning(f"ElementTree XML parse failed for {filepath}: {e}, falling back to regex")
-            bean_regex = re.compile(r'<bean\s+(?:id|name)="([^"]+)"(?:\s+class="([^"]+)")?')
-            for idx, line in enumerate(content.splitlines(), 1):
-                match = bean_regex.search(line)
-                if match:
-                    bean_id = match.group(1)
-                    bean_class = match.group(2) or ""
-                    symbols.append({
-                        "name": bean_id,
-                        "type": "spring_bean",
-                        "start_line": idx,
-                        "end_line": idx
-                    })
-                    if bean_class:
-                        relations.append({
-                            "source": bean_id,
-                            "target": bean_class,
-                            "type": "declares_bean"
-                        })
-                        
+    def _parse_xml(self, filepath: str, content: str, structure: Any = None) -> tuple:
+        """Spring beans from the structural configuration model (E-08):
+        namespace-aware (local names, any prefix), real line spans, refs from
+        ``ref``/``p:x-ref``/``c:x-ref``/nested ``<ref>``. A non-Spring XML
+        file has no beans."""
+        from kriya.code_intel.model import ParseState
+
+        if structure is None or structure.language != "spring-xml":
+            from kriya.code_intel.config_parsing import parse_config_file
+
+            structure = parse_config_file(filepath, content.encode("utf-8"))
+        if structure.state is not ParseState.PARSED:
+            return [], []
+        symbols, relations = [], []
+        for symbol in structure.symbols:
+            if symbol.kind != "bean":
+                continue
+            symbols.append({"name": symbol.name, "type": "spring_bean",
+                            "start_line": symbol.declaration.start_line, "end_line": symbol.declaration.end_line})
+            if symbol.return_type:
+                relations.append({"source": symbol.name, "target": symbol.return_type, "type": "declares_bean"})
+            relations.extend({"source": symbol.name, "target": ref, "type": "references_bean"}
+                             for ref in symbol.implements)
         return symbols, relations
 
     def _parse_ruby(self, filepath: str, content: str) -> tuple:

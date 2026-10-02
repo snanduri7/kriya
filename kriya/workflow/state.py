@@ -421,6 +421,10 @@ class GenerationState:
     # goes, so a prior attempt's now-stale item for the same path is always
     # replaced before it could be re-read for a later attempt on that file).
     known_target_context_items: Dict[str, "ContextItem"] = field(default_factory=dict)
+    # Every member_exact unit the latest known-target/retry package rendered
+    # for a path, in rank order (known_target_context_items keeps one record
+    # per path - the highest-ranked member). Edit authority reads them all.
+    known_target_member_items: Dict[str, List["ContextItem"]] = field(default_factory=dict)
     # DEV-INV-001 (2026-09-19): attempt_number -> investigation turns already
     # consumed THIS attempt, across every _run_developer_generation call
     # within it - a coordinated-repair attempt calls that function once per

@@ -161,6 +161,20 @@ class StructuralStore:
         return [s for s in self._select("s.name = ?", (last,), exclude_paths)
                 if s.lookup_key == suffix or s.lookup_key.endswith("." + suffix)]
 
+    def by_return_type(self, value: str, kind: Optional[str] = None) -> List[Symbol]:
+        """Symbols whose recorded type text is ``value`` (a bean's class)."""
+        if kind is None:
+            return self._select("s.return_type = ?", (value,))
+        return self._select("s.return_type = ? AND s.kind = ?", (value, kind))
+
+    def by_kind(self, kind: str) -> List[Symbol]:
+        return self._select("s.kind = ?", (kind,))
+
+    def by_lookup_prefix(self, prefix: str, kind: Optional[str] = None) -> List[Symbol]:
+        escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where = "s.lookup_key LIKE ? ESCAPE '\\'" + (" AND s.kind = ?" if kind else "")
+        return self._select(where, (escaped + "%", kind) if kind else (escaped + "%",))
+
     def by_path(self, path: str) -> List[Symbol]:
         return self._select("s.path = ?", (path,))
 
@@ -186,6 +200,18 @@ class StructuralStore:
 
     def containing(self, path: str, line: int) -> List[Symbol]:
         return self._select("s.path = ? AND s.decl_start_line <= ? AND s.decl_end_line >= ?", (path, line, line))
+
+    def body_mentions(self, term: str, limit: int, exclude_paths: Iterable[str] = ()) -> Optional[List[str]]:
+        """Ids of the symbols whose body terms contain the identifier term
+        ``term`` (lower-cased); None when more than ``limit`` do (not
+        specific) or FTS5 is unavailable."""
+        if not self.fts_available or not term:
+            return None
+        excluded = set(exclude_paths)
+        rows = self.conn.execute("SELECT symbol_id, path FROM ci_fts WHERE ci_fts MATCH ? LIMIT ?",
+                                 (f'body_terms:"{term}"', limit + 1 + len(excluded) * 50)).fetchall()
+        ids = [r[0] for r in rows if r[1] not in excluded]
+        return None if len(ids) > limit else ids
 
     def search(self, terms: Sequence[str], limit: int, exclude_paths: Iterable[str] = ()) -> List[Tuple[str, float]]:
         """BM25 over identifier terms (name terms weighted above body terms);

@@ -209,7 +209,7 @@ def test_a_missing_claim_counts_only_for_a_requirement_naming_something_concrete
 @pytest.mark.asyncio
 async def test_the_verifier_cannot_fail_the_gate_on_general_prose():
     reqs = derive_requirements("Add a DEFAULT_NAME constant.\n- Make the module more robust\n")
-    agent = SpecComplianceAgent("spec_compliance", MagicMock())
+    agent = SpecComplianceAgent("spec_compliance", MagicMock(config=AppConfig()))
 
     async def escalation(*args, **kwargs):
         return json.dumps({"compliant": True, "reasoning": "ok", "missing_requirements": [],
@@ -224,7 +224,7 @@ async def test_the_verifier_cannot_fail_the_gate_on_general_prose():
 @pytest.mark.asyncio
 async def test_the_verifier_names_a_missing_requirement_by_id_and_original_text():
     reqs = derive_requirements(GOAL)
-    agent = SpecComplianceAgent("spec_compliance", MagicMock())
+    agent = SpecComplianceAgent("spec_compliance", MagicMock(config=AppConfig()))
     prompts = []
 
     async def escalation(llm, system, prompt, *args, **kwargs):

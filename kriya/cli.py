@@ -1904,6 +1904,13 @@ def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
                     "current vectors and will be retried on the next run.", fg="red", err=True,
                 )
                 sys.exit(1)
+            if report is not None and report.embedding_rebuilt_from:
+                click.secho(f"The index was built under another embedding identity "
+                            f"({report.embedding_rebuilt_from[:12]}); it was rebuilt under the served one "
+                            f"({report.fingerprint[:12]}).", fg="yellow", err=True)
+            if report is not None and report.structure_rebuilt:
+                click.secho("The structural index was built by another parser identity; it was rebuilt.",
+                            fg="yellow", err=True)
             click.secho("Success: Semantic index compiled and cached to disk.", fg="green", err=True)
     except Exception as e:
         click.secho(f"Analysis failed: {e}", fg="red", err=True)

@@ -1,7 +1,20 @@
 """Graph RAG retrieval for the generation pipeline (extracted for PRD-027).
 
 This is the exact retrieval ``WorkflowEngine.run_generation_workflow`` runs:
-1. a hybrid vector + lexical query over the code index (``LocalVectorStore.query_hybrid``);
+1. candidate localization. With a Code Intelligence structural index of the
+   current parser identity (Code Intelligence R1 slice 2), one fused query
+   (``fused_localization``): ``CodeIntelligenceService.locate`` over the
+   workspace's CURRENT structure (index + in-memory overlay of drifted files)
+   with every deterministic channel (qualified/simple symbol, path,
+   file:line, stack frame, traceback, string literal, identifier BM25) plus
+   the vector channel (the current-identity vector hits for the query
+   embedding), fused by fixed tiers - exact evidence outranks similarity, and
+   every hit carries its channels. The pre-R1 hybrid leg
+   (``LocalVectorStore.query_hybrid``) remains a bounded fallback: whole when
+   no structural index exists, and otherwise only for files the structural
+   index does not cover (ranked below every structural hit, reported as
+   ``legacy_only_files``). Without a structural index, step 1 is the hybrid
+   query alone, exactly as before;
 2. pre-plan member grounding of each hit's controlled chunk header;
 3. dependency-graph neighbourhood expansion from the expansion seeds'
    own symbols (``select_expansion_seeds``: corroborated hits only when
@@ -24,9 +37,9 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package
+from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package, estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +94,46 @@ def select_expansion_seeds(hits: Sequence[Dict[str, Any]], top_k: int) -> Tuple[
     return files, reason
 
 
+LOCALIZATION_CODE_INTELLIGENCE = "code_intelligence"
+LOCALIZATION_LEGACY = "hybrid"
+# Member-level candidates kept per query (the Planner map and member hints).
+LOCALIZATION_LIMIT = 12
+
+
+@dataclass(frozen=True)
+class LocalizationCandidate:
+    """One ranked localization candidate: WHERE, never what may be written
+    (Developer context re-reads exact current bytes for any target)."""
+
+    symbol_id: str
+    path: str
+    kind: str
+    lookup_key: str
+    signature: str
+    score: float
+    channels: Tuple[Tuple[str, float], ...]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"symbol_id": self.symbol_id, "path": self.path, "kind": self.kind, "lookup_key": self.lookup_key,
+                "score": self.score, "channels": [c for c, _ in self.channels]}
+
+
+def render_localization_candidates(candidates: Sequence[LocalizationCandidate]) -> str:
+    """The compact candidate map for the Planner: ranked symbol ids, path,
+    kind, compact signature and the channels that found each - never a
+    source body."""
+    if not candidates:
+        return ""
+    lines = ["", "=== CODE INTELLIGENCE LOCALIZATION CANDIDATES (ranked; where the goal points, read-only, "
+             "never write authority) ==="]
+    for rank, candidate in enumerate(candidates, 1):
+        signature = " ".join(candidate.signature.split())[:160]
+        lines.append(f"{rank}. [{candidate.kind}] {candidate.lookup_key} - {candidate.path}"
+                     f"{' - ' + signature if signature else ''} (via {', '.join(c for c, _ in candidate.channels)})"
+                     f" id={candidate.symbol_id}")
+    return "\n".join(lines) + "\n"
+
+
 @dataclass
 class GraphRetrievalResult:
     matched: bool = False
@@ -100,6 +153,50 @@ class GraphRetrievalResult:
     # EMBEDDING-CONTRACT-001: why the semantic leg did not run (a typed
     # embedding reason code); only the lexical leg then contributed.
     semantic_unavailable: Optional[str] = None
+    # Code Intelligence R1 slice 2: which candidate generation answered
+    # ("code_intelligence" or the legacy "hybrid"), the ranked member-level
+    # candidates (localization context, never write authority), the files
+    # only the legacy leg contributed, and the deterministic separation of
+    # the top candidates.
+    localization_source: str = LOCALIZATION_LEGACY
+    localization: List["LocalizationCandidate"] = field(default_factory=list)
+    legacy_only_files: List[str] = field(default_factory=list)
+    separation: Optional[Dict[str, Any]] = None
+    # symbol id -> member id in its file's CURRENT bytes (callable
+    # candidates whose member resolved; the CI-6 decision's id check).
+    current_member_ids: Dict[str, str] = field(default_factory=dict)
+
+    def adopt_decision(self, target_symbol_ids: Sequence[str]) -> None:
+        """CI-6: the chosen targets lead the candidates, their files lead the
+        direct evidence and their members lead the member hints. Nothing is
+        dropped or invented; only already-current candidates are moved."""
+        chosen = [c for i in target_symbol_ids for c in self.localization if c.symbol_id == i]
+        self.localization = chosen + [c for c in self.localization if c.symbol_id not in target_symbol_ids]
+        top = max(self.file_scores.values(), default=0.0)
+        for candidate in reversed(chosen):
+            self.matched_files = [candidate.path] + [p for p in self.matched_files if p != candidate.path]
+            self.file_scores[candidate.path] = max(self.file_scores.get(candidate.path, 0.0), top)
+            member_id = self.current_member_ids.get(candidate.symbol_id)
+            if member_id is None:
+                continue
+            for bucket in (self.retrieval_member_hints, self.verified_grounding):
+                members = bucket.setdefault(candidate.path, [])
+                bucket[candidate.path] = [member_id] + [m for m in members if m != member_id]
+            self.related_files = [p for p in self.related_files if p != candidate.path]
+
+    def rebuild_context(self, workspace_path: str, budget: int) -> Tuple[str, Any]:
+        """The Graph RAG context within ``budget`` (allocator tokens): the
+        compact localization candidate map (symbol ids, kinds, signatures,
+        channels; never bodies) ahead of the file context, both inside the
+        budget. The Planner/Architect request fit rebuilds through this too,
+        so a rebuild never drops the map. Localization context only - every
+        Developer target re-reads exact current bytes."""
+        candidate_map = render_localization_candidates(self.localization)
+        file_context, package = build_code_context_package(
+            self.matched_files, self.related_files, workspace_path,
+            max(0, budget - estimate_tokens(candidate_map)), file_scores=self.file_scores,
+        )
+        return candidate_map + file_context, package
 
 
 # PRD027-SCORE-NORMALIZATION-001: the tier of direct query evidence. Each
@@ -152,7 +249,7 @@ async def semantic_query_embedding(
     if vector_store.active_fingerprint() != fingerprint:
         result.semantic_unavailable = EMBEDDING_IDENTITY_CHANGED
         logger.warning("Vector index identity differs from the served embedding model; lexical retrieval only "
-                       "until 'kriya analyze --force' re-indexes it.")
+                       "until 'kriya analyze' rebuilds it under the served identity.")
         return None, fingerprint
     try:
         return await embed_client.get_embedding(query, is_query=True, deadline=deadline), fingerprint
@@ -160,6 +257,214 @@ async def semantic_query_embedding(
         result.semantic_unavailable = error.reason_code
         logger.warning("Semantic retrieval unavailable (%s); lexical retrieval only.", error)
         return None, fingerprint
+
+
+def select_fused_expansion_seeds(candidates: Sequence[LocalizationCandidate], top_k: int,
+                                 legacy_hits: Sequence[Dict[str, Any]] = ()) -> Tuple[List[str], str]:
+    """PRD027-PRECISION-001's rule over fused candidates plus the legacy
+    leg's hits on files without structure (each carrying its own per-leg
+    ranks from ``query_hybrid``). A candidate is corroborated when it rests
+    on exact deterministic evidence or on agreement of the two similarity
+    legs (identifier BM25 and vector); a legacy hit when both of its legs
+    rank it within top_k. When both legs produced evidence anywhere, only
+    corroborated items seed (none: nothing seeds - disagreement never fans
+    out); when only one leg produced any, that leg's top_k seed (its own
+    standing). Same reason codes as the legacy rule."""
+    from kriya.code_intel import locate as loc
+
+    top = list(candidates[:top_k])
+    legacy = [hit for hit in legacy_hits if hit.get("filepath")]
+    if not top and not legacy:
+        return [], EXPANSION_NO_VALID_EVIDENCE
+
+    def legs(candidate: LocalizationCandidate) -> set:
+        names = {c for c, _ in candidate.channels}
+        return {"vector"} & names | ({"lexical"} if names - {"vector"} else set())
+
+    def legacy_legs(hit: Dict[str, Any]) -> set:
+        found = set()
+        if hit.get("vector_rank") is not None and hit["vector_rank"] <= top_k:
+            found.add("vector")
+        if hit.get("lexical_rank") is not None and hit["lexical_rank"] <= top_k:
+            found.add("lexical")
+        return found
+
+    corroborated = [c.path for c in top if c.score >= loc.EXACT_EVIDENCE or legs(c) == {"vector", "lexical"}]
+    corroborated += [hit["filepath"] for hit in legacy if legacy_legs(hit) == {"vector", "lexical"}]
+    present = set().union(*(legs(c) for c in candidates), *(legacy_legs(hit) for hit in legacy))
+    if corroborated:
+        seeds, reason = corroborated, EXPANSION_CORROBORATED
+    elif present == {"vector"}:
+        seeds, reason = [c.path for c in top] + [h["filepath"] for h in legacy if "vector" in legacy_legs(h)], \
+            EXPANSION_EMBEDDING_ONLY
+    elif present == {"lexical"}:
+        seeds, reason = [c.path for c in top] + [h["filepath"] for h in legacy if "lexical" in legacy_legs(h)], \
+            EXPANSION_LEXICAL_ONLY
+    elif present:
+        seeds, reason = [], EXPANSION_NO_CORROBORATED
+    else:
+        seeds, reason = [], EXPANSION_NO_VALID_EVIDENCE
+    return list(dict.fromkeys(seeds)), reason
+
+
+def separation(candidates: Sequence[LocalizationCandidate]) -> Optional[Dict[str, Any]]:
+    """Deterministic separation of the top candidate (no model): top1/top2
+    scores, their margin, whether top1 rests on exact evidence, and how many
+    channels agree on it. The CI-6 ambiguity decision reads only this."""
+    from kriya.code_intel import locate as loc
+
+    if not candidates:
+        return None
+    top1 = candidates[0]
+    top2 = candidates[1].score if len(candidates) > 1 else 0.0
+    return {"top1": top1.score, "top2": top2, "margin": round(top1.score - top2, 4),
+            "exact": top1.score >= loc.EXACT_EVIDENCE, "channels": len(top1.channels),
+            "top1_symbol_id": top1.symbol_id}
+
+
+def open_code_intelligence(workspace_path: str, dependency_graph_path: Optional[str]) -> Optional[Any]:
+    """The structural index's current view of ``workspace_path``, or None
+    when there is no structural index of the current parser identity (the
+    legacy hybrid leg then answers alone)."""
+    if not dependency_graph_path or not os.path.exists(dependency_graph_path):
+        return None
+    from kriya.code_intel.service import CodeIntelligenceService
+
+    service = CodeIntelligenceService(workspace_path, dependency_graph_path)
+    if not service.has_baseline():
+        service.close()
+        return None
+    return service
+
+
+def fused_localization(service: Any, text: str, semantic_hits: Iterable[Dict[str, Any]],
+                       limit: int = LOCALIZATION_LIMIT) -> List[LocalizationCandidate]:
+    """One fused Code Intelligence query (deterministic channels + the
+    vector channel), as ranked candidates with their signatures."""
+    hits = service.locate(text, limit=limit, semantic=list(semantic_hits))
+    symbols = {s.symbol_id: s for s in service._symbols_by_id([h.symbol_id for h in hits])}
+    return [LocalizationCandidate(h.symbol_id, h.path, h.kind, h.lookup_key,
+                                  symbols[h.symbol_id].signature_text if h.symbol_id in symbols else "",
+                                  h.score, h.channels) for h in hits]
+
+
+def member_id_for(candidate: LocalizationCandidate, namespace: str) -> str:
+    """The member_hints/member_boundaries id of a structural candidate: its
+    qualified key relative to the file's package/module."""
+    prefix = f"{namespace}." if namespace else ""
+    return candidate.lookup_key[len(prefix):] if prefix and candidate.lookup_key.startswith(prefix) else \
+        candidate.lookup_key
+
+
+def _code_intelligence_candidates(
+    result: GraphRetrievalResult, service: Any, goal: str, legacy_matches: List[Dict[str, Any]], vector_store: Any,
+    query_emb: Optional[List[float]], fingerprint: Optional[str], top_k: int,
+) -> Tuple[Dict[str, float], List[str]]:
+    """Fills ``result`` from one fused Code Intelligence query over the
+    workspace's current structure; returns (direct file scores in rank
+    order, expansion seed files). Member hints are the candidates' member
+    ids, verified against the CURRENT bytes' member boundaries (verified vs
+    hypothesis exactly as for the legacy header names)."""
+    from kriya.code_intel import locate as loc
+    from kriya.code_intel.model import CALLABLE_KINDS
+    from kriya.workflow.context_source import boundaries_matching_member_id, member_boundaries_for
+
+    view = service.current_view()
+    semantic = (vector_store.query(query_emb, top_k=loc.SEMANTIC_CHUNKS, fingerprint=fingerprint)
+                if query_emb and fingerprint else [])
+    candidates = fused_localization(view, goal, semantic)
+    result.localization_source = LOCALIZATION_CODE_INTELLIGENCE
+    result.localization = candidates
+    result.separation = separation(candidates)
+    direct: Dict[str, float] = {}
+    boundaries_by_path: Dict[str, Any] = {}
+    for rank, candidate in enumerate(candidates):
+        verified, data, structure, member_id = False, None, None, ""
+        if candidate.kind in CALLABLE_KINDS:
+            data = view.current_bytes(candidate.path)
+            structure = view.current_structure(candidate.path)
+            if data is not None and structure is not None:
+                member_id = member_id_for(candidate, structure.namespace)
+                if candidate.path not in boundaries_by_path:
+                    boundaries_by_path[candidate.path] = member_boundaries_for(
+                        candidate.path, data.decode("utf-8", "replace")) or []
+                verified = bool(boundaries_matching_member_id(boundaries_by_path[candidate.path], member_id))
+                if verified:
+                    result.current_member_ids[candidate.symbol_id] = member_id
+        # Like the legacy leg: the top_k hits (not top_k distinct files) are
+        # the direct evidence; the rest stay localization candidates only.
+        if rank >= top_k:
+            continue
+        direct.setdefault(candidate.path, candidate.score)
+        result.retrieved_chunks.append({"filepath": candidate.path, "score": candidate.score,
+                                        "text": f"{candidate.kind} {candidate.lookup_key}: {candidate.signature}"[:300],
+                                        "channels": [c for c, _ in candidate.channels]})
+        if candidate.kind not in CALLABLE_KINDS or data is None or structure is None:
+            continue
+        names = result.retrieval_member_hints.setdefault(candidate.path, [])
+        if member_id not in names:
+            names.append(member_id)
+        bucket = result.verified_grounding if verified else result.hypothesis_candidates
+        if member_id not in bucket.setdefault(candidate.path, []):
+            bucket[candidate.path].append(member_id)
+    # The legacy leg, bounded: only files the structural index does not
+    # cover (build files, docs, other languages). Its hits are similarity
+    # evidence (vector + BM25 RRF), so they rank in the similarity tier -
+    # below any exact structural evidence, competing with BM25/vector hits.
+    structural = view.structured_paths()
+    legacy_scores: Dict[str, float] = {}
+    for match in legacy_matches:
+        path = match.get("filepath")
+        if path and path not in structural:
+            legacy_scores[path] = max(legacy_scores.get(path, 0.0), match.get("score", 0.0))
+    legacy_only = list(legacy_scores)[:top_k]
+    best_legacy = max(legacy_scores.values(), default=0.0)
+    for path in legacy_only:
+        score = loc.SIMILARITY_MAX * legacy_scores[path] / best_legacy if best_legacy > 0 else 0.0
+        direct[path] = max(direct.get(path, 0.0), score)
+    direct = dict(sorted(direct.items(), key=lambda item: -item[1]))
+    result.legacy_only_files = legacy_only
+    for match in legacy_matches:
+        if match.get("filepath") in legacy_only:
+            result.retrieved_chunks.append({"filepath": match["filepath"], "score": match.get("score", 0.0),
+                                            "text": match.get("text", "")[:300], "channels": ["legacy_hybrid"]})
+    seeds, result.expansion_seed_reason = select_fused_expansion_seeds(
+        candidates, top_k, [m for m in legacy_matches if m.get("filepath") in legacy_only])
+    return direct, seeds
+
+
+async def localization_candidates(cfg: Any, workspace_path: str, text: str,
+                                  limit: int = LOCALIZATION_LIMIT) -> List[LocalizationCandidate]:
+    """The fused Code Intelligence candidates for ``text`` over the
+    configured index (``paths.memory``) - the same query retrieval runs, for
+    a caller that needs only localization (the enforce Planner's grounding).
+    Empty without a structural index; the vector channel joins only when the
+    vector index has the served embedding identity (EMBEDDING-CONTRACT-001).
+    Localization context only, never write authority."""
+    from kriya.code_intel import locate as loc
+
+    memory = cfg.paths.memory
+    service = open_code_intelligence(workspace_path, os.path.join(memory, "dependency_graph.db"))
+    if service is None:
+        return []
+    try:
+        semantic: List[Dict[str, Any]] = []
+        vector_path = os.path.join(memory, "vector_index.db")
+        if os.path.exists(vector_path):
+            from kriya.memory.embedding import configured_client, run_deadline
+            from kriya.memory.vector import LocalVectorStore
+
+            store = LocalVectorStore(vector_path)
+            try:
+                query_emb, fingerprint = await semantic_query_embedding(
+                    configured_client(cfg), store, text, GraphRetrievalResult(), run_deadline(cfg))
+                if query_emb and fingerprint:
+                    semantic = store.query(query_emb, top_k=loc.SEMANTIC_CHUNKS, fingerprint=fingerprint)
+            finally:
+                store.close()
+        return fused_localization(service.current_view(), text, semantic, limit)
+    finally:
+        service.close()
 
 
 async def retrieve_graph_context(
@@ -190,54 +495,64 @@ async def retrieve_graph_context(
         dimensions=len(query_emb) if query_emb else 0, fingerprint=fingerprint,
     )
     good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
-    grounding_resolver = CurrentSourceResolver(workspace_path, None)
-    for m in good_matches:
-        result.retrieved_chunks.append({
-            "filepath": m.get("filepath", "unknown"),
-            "score": m.get("score", 0.0),
-            "text": m.get("text", "")[:300] + "..." if len(m.get("text", "")) > 300 else m.get("text", "")
-        })
-        # CTX-001 P1 C2: parse (never trust) a candidate member/class name
-        # from the hit's controlled "Method: X"/"Class: X" chunk header.
-        fp = m.get("filepath")
-        if fp:
-            candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
-            if candidate_name:
-                names = result.retrieval_member_hints.setdefault(fp, [])
-                if candidate_name not in names:
-                    names.append(candidate_name)
+    service = open_code_intelligence(workspace_path, dependency_graph_path)
+    if service is not None:
+        try:
+            direct_scores, seed_files = _code_intelligence_candidates(
+                result, service, goal, good_matches, vector_store, query_emb, fingerprint, limits.top_k)
+        finally:
+            service.close()
+        if not direct_scores:
+            return result
+        matched_files_list = list(direct_scores)
+    else:
+        grounding_resolver = CurrentSourceResolver(workspace_path, None)
+        for m in good_matches:
+            result.retrieved_chunks.append({
+                "filepath": m.get("filepath", "unknown"),
+                "score": m.get("score", 0.0),
+                "text": m.get("text", "")[:300] + "..." if len(m.get("text", "")) > 300 else m.get("text", "")
+            })
+            # CTX-001 P1 C2: parse (never trust) a candidate member/class name
+            # from the hit's controlled "Method: X"/"Class: X" chunk header.
+            fp = m.get("filepath")
+            if fp:
+                candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
+                if candidate_name:
+                    names = result.retrieval_member_hints.setdefault(fp, [])
+                    if candidate_name not in names:
+                        names.append(candidate_name)
 
-                resolved = grounding_resolver.resolve(fp)
-                verified_member_id = (
-                    resolve_verified_grounding_member_id(fp, resolved.content, candidate_name)
-                    if resolved.exists else None
-                )
-                if verified_member_id is not None:
-                    verified_list = result.verified_grounding.setdefault(fp, [])
-                    if verified_member_id not in verified_list:
-                        verified_list.append(verified_member_id)
-                else:
-                    hyp_list = result.hypothesis_candidates.setdefault(fp, [])
-                    if candidate_name not in hyp_list:
-                        hyp_list.append(candidate_name)
+                    resolved = grounding_resolver.resolve(fp)
+                    verified_member_id = (
+                        resolve_verified_grounding_member_id(fp, resolved.content, candidate_name)
+                        if resolved.exists else None
+                    )
+                    if verified_member_id is not None:
+                        verified_list = result.verified_grounding.setdefault(fp, [])
+                        if verified_member_id not in verified_list:
+                            verified_list.append(verified_member_id)
+                    else:
+                        hyp_list = result.hypothesis_candidates.setdefault(fp, [])
+                        if candidate_name not in hyp_list:
+                            hyp_list.append(candidate_name)
 
-    if not good_matches:
-        return result
-    matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
+        if not good_matches:
+            return result
+        matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
+        # Matched-file relevance: the best (max) hybrid RRF score across that
+        # file's own matched chunks.
+        direct_scores = {}
+        for m in good_matches:
+            fp = m.get("filepath")
+            if fp:
+                direct_scores[fp] = max(direct_scores.get(fp, 0.0), m.get("score", 0.0))
+        # PRD027-PRECISION-001: only corroborated hits (or a single leg's own
+        # hits when the other leg found nothing) seed the walk; every matched
+        # file is still packaged below.
+        seed_files, result.expansion_seed_reason = select_expansion_seeds(good_matches, limits.top_k)
     related_files_set = set()
-    # Matched-file relevance: the best (max) hybrid RRF score across that
-    # file's own matched chunks.
-    direct_scores: Dict[str, float] = {}
     expanded_scores: Dict[str, float] = {}
-    for m in good_matches:
-        fp = m.get("filepath")
-        if fp:
-            direct_scores[fp] = max(direct_scores.get(fp, 0.0), m.get("score", 0.0))
-
-    # PRD027-PRECISION-001: only corroborated hits (or a single leg's own
-    # hits when the other leg found nothing) seed the walk; every matched
-    # file is still packaged below.
-    seed_files, result.expansion_seed_reason = select_expansion_seeds(good_matches, limits.top_k)
     result.expansion_seed_files = seed_files
     if seed_files and dependency_graph_path and os.path.exists(dependency_graph_path):
         from kriya.analyzer.graph import DependencyGraph
@@ -269,8 +584,6 @@ async def retrieve_graph_context(
     result.matched = True
     result.matched_files = matched_files_list
     result.related_files = list(related_files_set)
-    result.file_scores = file_scores = evidence_scores(direct_scores, expanded_scores)
-    result.graph_rag_context, result.context_package = build_code_context_package(
-        result.matched_files, result.related_files, workspace_path, budget_limit(), file_scores=file_scores,
-    )
+    result.file_scores = evidence_scores(direct_scores, expanded_scores)
+    result.graph_rag_context, result.context_package = result.rebuild_context(workspace_path, budget_limit())
     return result

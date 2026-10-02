@@ -768,6 +768,63 @@ def trim_reference_text(text: str, budget: int) -> str:
 _REFERENCE_ENTRY = re.compile(r"(?=\n\[Source: )")
 
 
+SPEC_CHANGED_REGIONS_NOTE = (
+    "Some files below are shown as their CHANGED REGIONS only (a unified diff against the version before this "
+    "change); code outside those regions is unchanged and not shown. A requirement about code that is not shown "
+    "is unverifiable from this view, never missing.\n\n")
+# Context lines tried around each change, widest first.
+_SPEC_DIFF_CONTEXT = (40, 15, 5, 0)
+
+
+def _spec_file_entry(path: str, content: str, baseline: Optional[str], context: Optional[int]) -> str:
+    if context is None or baseline is None:  # the whole file; a new file is always whole
+        return f"=== {path} ===\n{content}"
+    if baseline == content:
+        return f"=== {path} (unchanged by this candidate; not shown) ==="
+    import difflib
+
+    diff = "".join(difflib.unified_diff(baseline.splitlines(keepends=True), content.splitlines(keepends=True),
+                                        fromfile=f"{path} (before)", tofile=f"{path} (candidate)", n=context))
+    return f"=== {path} (changed regions only) ===\n{diff}"
+
+
+def fit_spec_compliance_files(capacity: RequestCapacity, fixed_texts: Sequence[str], files: Sequence[str],
+                              contents: Dict[str, str], baselines: Optional[Dict[str, Optional[str]]] = None,
+                              ) -> SectionFit:
+    """The files section of a spec-compliance request, fitted to the room its
+    fixed text leaves (fit_variable_section): every file whole when that fits
+    (the unfitted text, unchanged); else, for files whose pre-change version
+    is known, the changed regions (a unified diff with the widest context that
+    fits; unchanged files named, not shown; new files whole), introduced by
+    SPEC_CHANGED_REGIONS_NOTE. A file too large for any request used to make
+    the verifier's request unsatisfiable - an unavailable judgment the
+    authoritative path must count as a failure, whatever the candidate."""
+    baselines = baselines or {}
+    shown = [path for path in files if path in contents]
+
+    def render(context: Optional[int]) -> str:
+        block = "\n\n".join(_spec_file_entry(path, contents[path], baselines.get(path), context) for path in shown)
+        return block if context is None else SPEC_CHANGED_REGIONS_NOTE + block
+
+    def build(budget: int) -> str:
+        whole = render(None)
+        if estimate_tokens(whole) <= budget or not baselines:
+            return whole
+        for context in _SPEC_DIFF_CONTEXT:
+            text = render(context)
+            if estimate_tokens(text) <= budget:
+                return text
+        return render(_SPEC_DIFF_CONTEXT[-1])
+
+    fit = fit_variable_section(capacity, fixed_texts, build)
+    if fit.omitted and shown:
+        # No view fits: the request stays the whole files, which the dispatch
+        # check refuses typed (an unavailable judgment) - never a verdict over
+        # files the verifier was not shown.
+        return replace(fit, value=render(None))
+    return fit
+
+
 def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str], reference: str) -> SectionFit:
     """Fenced untrusted reference text fitted into the room its request has
     left (fit_variable_section): the fence and warning always come whole,
@@ -1620,6 +1677,9 @@ def _render_known_target_block(items: List[Any], omitted: List[Dict[str, Any]]) 
     blocks = []
     for item in items:
         label = f"member {item.member_id}" if item.member_id else "full source"
+        if item.member_id and item.tier == "member_exact":
+            # Code Intelligence T0 binding: exact span and raw revision.
+            label += f", lines {item.start_line}-{item.end_line}, revision {str(item.revision)[:16]}"
         blocks.append(f"=== EXISTING OWNER ({label}, tier={item.tier}): {item.path} ===\n{item.content}")
     if omitted:
         omitted_paths = sorted({str(o["path"]) for o in omitted})
@@ -1634,6 +1694,39 @@ def _render_known_target_block(items: List[Any], omitted: List[Dict[str, Any]]) 
     )
 
 
+def _known_target_member_package(service: Any, workspace_path: str, path: str, content: str, boundary: Any,
+                                 budget: int) -> Optional[str]:
+    """The Code Intelligence package beside an exact member (everything but
+    the member body, which the caller shows as its own authoritative item),
+    built from ``content`` - the current resolved bytes - as an overlay, so
+    the index never supplies the target's own structure. None when the file
+    has no structural parser, the member is not found, or even the header
+    exceeds ``budget`` (the caller then falls back to plain signatures)."""
+    from kriya.code_intel.parsing import language_for_path
+    from kriya.code_intel.service import CodeIntelligenceService
+
+    if language_for_path(path) is None:
+        return None
+    owned = service is None
+    base = service or CodeIntelligenceService(workspace_path, ":memory:")
+    try:
+        view = base.with_overlay({path: content.encode("utf-8")})
+        symbol = view.member_at(path, boundary.start_line)
+        if symbol is None or not symbol.is_callable:
+            return None
+        package = view.build_context(symbol.symbol_id, budget, count_tokens=estimate_tokens, include_target=False,
+                                     member_signatures=True)
+        if package is None or package.over_budget:
+            return None
+        return package.render(include_target=False)
+    except Exception as error:  # read-only enrichment: the exact member item stands without it
+        logger.warning("Code Intelligence member package unavailable for %s: %s", path, error)
+        return None
+    finally:
+        if owned:
+            base.close()
+
+
 def build_known_target_context(
     known_target_files: List[str],
     workspace_path: str,
@@ -1645,8 +1738,23 @@ def build_known_target_context(
     known_revisions: Optional[Dict[str, str]] = None,
     exclude: Optional[Iterable[str]] = None,
     cache: "Optional[SourceDerivationCache]" = None,
+    exact_member_budget: Optional[int] = None,
+    code_intelligence: Any = None,
 ) -> Tuple[str, Any]:
-    """CTX-001 P1 WP7 (A3+A5): replaces attempt.py's own
+    """Code Intelligence R1 slice 2: ``exact_member_budget`` is T0's own
+    room - a grounded member's exact current body (``member_exact``) is
+    admitted against it whatever skills, learned reference or optional
+    context took from ``budget_limit``, so they can never evict T0; a
+    request that then cannot fit is refused typed downstream, never sent
+    without its target. Beside an exact member, the enclosing declarations
+    (used imports, owner signature/annotations, fields, constructors), the
+    type's other member signatures, collaborator signatures (T1), linked
+    tests (T2) and linked configuration (T3) come from the Code Intelligence
+    package built from the SAME current resolved bytes (``code_intelligence``
+    supplies the repository index for T1-T3; without one, T0's header
+    alone). Read-only; never mutation authority.
+
+    CTX-001 P1 WP7 (A3+A5): replaces attempt.py's own
     _brownfield_owner_contract_block()'s SOURCE-CONTENT responsibility (its
     instruction-text responsibility is unchanged, stays in task_desc - see
     that function's own updated docstring). Retires the naive 24,000-char
@@ -1706,6 +1814,7 @@ def build_known_target_context(
     items: List[Any] = []
     omitted: List[Dict[str, Any]] = []
     consumed = 0
+    consumed_exact = 0
 
     for rank, path in enumerate(ordered_paths, start=1):
         resolved = resolver.resolve(path)
@@ -1720,7 +1829,8 @@ def build_known_target_context(
             omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_STALE_REVISION_REJECTED, estimated_tokens=0))
 
         remaining = budget_limit - consumed
-        if remaining <= 0:
+        hinted = bool((member_hints or {}).get(path))
+        if remaining <= 0 and not (hinted and exact_member_budget is not None):
             omitted.append(make_omitted_entry(
                 path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
                 estimated_tokens=estimate_tokens(resolved.content),
@@ -1744,6 +1854,7 @@ def build_known_target_context(
             member_id_candidates = []
 
         member_produced = False
+        produced_boundaries: List[Any] = []
         if member_id_candidates:
             boundaries = member_boundaries_for(path, resolved.content)
             if boundaries is None:
@@ -1767,6 +1878,8 @@ def build_known_target_context(
                         continue
                     for boundary in matching_boundaries:
                         member_remaining = budget_limit - consumed
+                        if exact_member_budget is not None:
+                            member_remaining = max(member_remaining, exact_member_budget - consumed_exact)
                         if member_remaining <= 0:
                             omitted.append(make_omitted_entry(
                                 path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
@@ -1802,7 +1915,9 @@ def build_known_target_context(
                                 omitted_regions=False,
                             ))
                             consumed += member_cost
+                            consumed_exact += member_cost
                             member_produced = True
+                            produced_boundaries.append(boundary)
                         else:
                             omitted.append(make_omitted_entry(
                                 path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
@@ -1811,7 +1926,18 @@ def build_known_target_context(
 
             if member_produced:
                 sibling_remaining = budget_limit - consumed
-                if sibling_remaining > 0:
+                package_text = _known_target_member_package(
+                    code_intelligence, workspace_path, path, resolved.content, produced_boundaries[0],
+                    sibling_remaining) if sibling_remaining > 0 else None
+                if package_text:
+                    items.append(make_context_item(
+                        path=path, content=package_text, reason="known_target_member_package",
+                        source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                        score=effective_score(path), tier="signatures", is_exact=False,
+                        revision=resolved.revision, omitted_regions=True,
+                    ))
+                    consumed += estimate_tokens(package_text)
+                elif sibling_remaining > 0:
                     if cache is not None:
                         sibling_text, sib_cost = cache.get_or_compute_derivation(
                             path, None, "signatures", resolved.revision,
