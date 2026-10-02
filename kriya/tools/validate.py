@@ -1038,6 +1038,18 @@ class PolymorphicValidator:
         workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
         key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
         cache_dir = os.path.join(root, "dependency-cache", "maven", key)
+        # The cache Kriya kept in the tree before must not stay where the
+        # build walks it (a reused worktree keeps untracked .kriya/ content):
+        # it becomes the new cache when there is none yet, else it is dropped.
+        legacy = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        if os.path.isdir(legacy) and not os.path.islink(legacy):
+            if not os.path.isdir(cache_dir) or not os.listdir(cache_dir):
+                os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+                if os.path.isdir(cache_dir):
+                    os.rmdir(cache_dir)
+                shutil.move(legacy, cache_dir)
+            else:
+                shutil.rmtree(legacy)
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
 

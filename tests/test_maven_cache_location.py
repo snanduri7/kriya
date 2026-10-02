@@ -38,3 +38,23 @@ def test_the_maven_cache_is_outside_every_source_tree_and_shared_per_workspace(t
         assert not _within(caches[0], tree)  # never inside what a project build tool walks
     other_cache = PolymorphicValidator(str(other), autonomy_cfg=cfg)._maven_cache_dir()  # pylint: disable=protected-access
     assert other_cache != caches[0] and not _within(other_cache, other)
+
+
+def test_a_cache_left_in_the_tree_by_an_earlier_kriya_moves_out_once(tmp_path, monkeypatch):
+    """A reused worktree keeps its untracked .kriya/ content: the in-tree
+    cache an earlier Kriya filled becomes the new cache (no re-download), and
+    a second stale copy is dropped - nothing stays where the build walks."""
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+    cfg = AutonomyConfig(contained_execution_required=True, containment_backend="oci")
+    first, second = tmp_path / "ws1", tmp_path / "ws2"
+    for tree, marker in ((first, "a.jar"), (second, "b.jar")):
+        legacy = tree / ".kriya" / "m2_cache" / "org" / "x"
+        legacy.mkdir(parents=True)
+        (legacy / marker).write_text(marker)
+    cache = PolymorphicValidator(str(first), autonomy_cfg=cfg)._maven_cache_dir()  # pylint: disable=protected-access
+    assert not (first / ".kriya" / "m2_cache").exists()
+    assert (open(os.path.join(cache, "org", "x", "a.jar")).read()) == "a.jar"
+    # Another worktree of the same workspace, whose cache already exists: its stale copy is dropped.
+    again = PolymorphicValidator(str(second), original_workspace_path=str(first), autonomy_cfg=cfg)._maven_cache_dir()  # pylint: disable=protected-access
+    assert again == cache and not (second / ".kriya" / "m2_cache").exists()
+    assert not os.path.exists(os.path.join(cache, "org", "x", "b.jar"))
