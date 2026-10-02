@@ -175,6 +175,53 @@ Live (`ci6_bench.py`, production config, pinned qwen3-coder 30B, ollama_native s
 
 Pooled: 148 calls, top-1 0.304 → 0.365. Explicit/error-driven goals (synthetic) never call the model.
 
+### Context certification with the real embedding model (PRD-027, not saved to operator state)
+
+| Revision | precision (target 0.5) | class recall | certified |
+|---|---|---|---|
+| before the batch (`26ecc51`) | 0.5814 | 1.0 in all 9 classes | yes |
+| `f76d137` (fused retrieval, own defect) | 0.4717 | 1.0 | **no** |
+| `7cdd87e` (fix: legacy-leg evidence in the seed rule) | 0.5581 | 1.0 | yes |
+
+The operator production memory has no vector index, so `doctor --production` reports this row NOT_APPLICABLE
+(unchanged by the batch); an operator who indexes must re-run `kriya context certify`, since the retrieval
+implementation digest changed.
+
+### Prompt cost (MEASURED, native /api/chat, pinned qwen3-coder 30B, M1 Max)
+
+| prompt tokens | cold prefill | throughput | identical prefix repeated |
+|---|---|---|---|
+| 894 | 1.0 s | 857 tok/s | 0.02 s |
+| 3,524 | 7.1 s | 497 tok/s | 0.02 s |
+| 6,983 | 15.3 s | 455 tok/s | 0.03 s |
+| 13,813 | 39.3 s | 352 tok/s | 0.03 s |
+
+Live Developer requests were 7.1-8.8k prompt tokens (T0 member 400-600 tokens, skills ~560): prefill dominates
+local cost, and a reused prefix makes it nearly free - the measured case for stable-prefix-first ordering
+(`packing.ContextPackage.render` already puts the volatile member last; the Developer prompt as a whole is not
+reordered in this batch).
+
+### Live ci-20 subset (MEASURED 2026-10-02)
+
+Tasks derived objectively from loc-N mined commits: workspace = parent commit + that commit's tests, goal =
+the commit subject verbatim, judge = that commit's tests run independently afterwards (pass/fail sets compared
+with the gold fix's own). Repository-safe workspace config with the production-pinned Developer model (no
+SEC-009 approval created), so the `/v1` adapter: CI-6 is skipped typed (no schema output) in these runs.
+
+| Task | target found (gold rank) | gold body in Developer prompt | model calls | Developer prompt tokens | attempts | wall | result | false success |
+|---|---|---|---|---|---|---|---|---|
+| httpx `7c0cda15` "Improve InvalidURL error message." (error/test) | no (10; top = `InvalidURL.__init__`) | no (exact T0 of the 4 top members) | 13 | 7.2k-8.8k | 11 (global bound) | 401 s | failed (`quality_gates_exhausted`) | no |
+| httpx `9fd6f0ca` "Ensure JSON representation is compact." (behavior) | yes (2) | yes (`encode_json` exact, 600 tokens) | 12 | 7.1k-7.6k | 2 | 409 s | stopped: `VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE` | no |
+
+Task 2's stop is FILE-INTEGRITY-CONTRACT-001B working as designed: httpx's own `tests/test_config.py` sets
+`SSLKEYLOGFILE=test`, so the test run writes `./test`, untracked and not ignored. Not a Kriya defect; treating
+test-created untracked files like the runtime gate's ephemeral artifacts (D6) is an owner decision.
+Not run: the 4 Java tasks (2 symbol, 2 behavior), Spring Boot and Spring XML tasks - every Java benchmark
+repository needs Maven artifacts not in the local cache (e.g. `native-maven-plugin:1.1.1`, newer
+`commons-parent`), and Maven Central is not authorized network. Pre-2024 httpx commits cannot import on
+CPython 3.14, so the Python tasks are the two most recent qualifying commits; their `requirements.txt` was
+narrowed to installable test dependencies (doc/lint tooling had no 3.14 wheels) in the task base, disclosed.
+
 ## Member packing (MEASURED, `pack_bench.py`, budget 2,000 tokens, mined loc-N gold members at HEAD)
 
 | Repo | cases (file > budget) | gold body present: old per-file packer | member packing (T0) | median tokens old / T0 | T0 over budget |
