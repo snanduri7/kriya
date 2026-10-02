@@ -222,6 +222,43 @@ repository needs Maven artifacts not in the local cache (e.g. `native-maven-plug
 CPython 3.14, so the Python tasks are the two most recent qualifying commits; their `requirements.txt` was
 narrowed to installable test dependencies (doc/lint tooling had no 3.14 wheels) in the task base, disclosed.
 
+### Live closure matrix (MEASURED 2026-10-02, production config)
+
+The frozen production configuration (`provider-contract-v4-production.yaml`: native runtime, enforce
+controller, OCI containment, registry-scoped Maven/PyPI acquisition, static analysis) with only `paths.*`
+pointed at per-task stores (`~/kriya-bench-live/matrix/store/<task>.yaml`, owner-approved SEC-009 per
+workspace). Mined tasks: workspace = parent commit + the commit's tests, goal = subject verbatim, judge = the
+commit's tests (base fails, gold passes - verified). Authored Spring tasks: held-out judge tests, verified on
+base (fails) and a reference solution (passes). A task is re-run only after a product change that affects it.
+
+| Task (goal) | Runs (Kriya rev) | Gold rank / CI-6 / exact T0 | Outcome | Classification |
+|---|---|---|---|---|
+| commons-lang `62f6edfd` "Keep chop from splitting a trailing surrogate pair" (Java symbol) | 1 `71542e6` REQ unknown; 2 `891649e` | 1 / chose `chop(String)` / every attempt (845 tok) | **SUCCESS**: full regression 21,868 tests 0 failures; judge `StringUtilsTest` base 1 fail, gold 0, Kriya 0 | SUCCESS |
+| commons-lang `851de661` 'strip accents "đ" and "Đ"' (Java behavior) | 1 T0 lost + RAT; 2 spec request 189k tok; 3 REQ unknown; 4 `891649e` | 1 (clear, margin 105) / not needed / every attempt | **SUCCESS**: judge `StringUtilsTrimStripTest` base 1 fail, gold 0, Kriya 0 | SUCCESS (after 4 Kriya fixes) |
+| commons-lang `a0ffef03` "fix silent int overflow in Fraction.getFraction(double)" | 1 T0 lost on retry; 2 `2f08d3e` | 1 / chose `getFraction(double)` / every attempt (1,136 tok) | failed: analysis/edit mismatch, no-op edit, indentation-inconsistent SEARCH | MODEL_CAPABILITY |
+| spring-petclinic "configurable owners page size" (Spring Boot, held-out judge) | 1 NoHttp on cache; 2 git pointer; 3 Surefire baseline; 4 misattribution; 5 harness interference; 6 `891649e` | s2: 2 / chose it / every attempt | s1 + s2 (the change) passed every gate incl. full regression; stopped at Planner-added test stage s3 (protocol violations, then NO CHANGE) - nothing applied | MODEL_CAPABILITY (s3) |
+| spring-framework-petclinic "cache pet types like vets" (Spring XML, held-out judge) | 1 `1a1aef8` | planning map: `cacheManager.cacheNames` 4, `findPetTypes` 8 | Planner never planned the XML, contradicted its own prerequisite; repair did not converge | MODEL_CAPABILITY (Planner) |
+| more-itertools `f89d7a3` ichunked (Python symbol) | 1 required test unresolved; 2 `a39ed51` | 1 / chose `ichunked` / most attempts | tests failed on the model's implementations | MODEL_CAPABILITY |
+| more-itertools `e426d25` zip_broadcast (Python symbol) | 1 `891649e` | - / chose `zip_broadcast` / every attempt | tests failed on the model's implementations | MODEL_CAPABILITY |
+| more-itertools `ce676d2` maxsplit (Python behavior) | 1 | - | Planner split per function, same file; repair never converged | MODEL_CAPABILITY (Planner) |
+| more-itertools `def2dab` one()/only() | 1 | - | as above; replay with an explicit merge instruction: same plan 2/2 | MODEL_CAPABILITY (Planner) |
+| httpx `7c0cda15` "Improve InvalidURL error message." | 1 `1a1aef8` | planning map 4 (was 10) / subtask: Planner chose `InvalidURL` | wrong file by plan; full regression would also write `./test` | TASK_AMBIGUITY (+ PROJECT_TEST_BEHAVIOR) |
+
+Kriya defects found by the matrix and fixed (each with a deterministic reproduction, regression and mutation):
+construction sites (InvalidURL rank 10 -> 4), T0 lost on retry / last member as the file's T0, Maven cache in the
+candidate tree (RAT/NoHttp), dangling worktree git pointer in containers, Surefire baseline fingerprint,
+spec-compliance request size, requirement-verdict schema (0/4 -> 4/4 verdicts), declared test verification never
+executed, out-of-scope self-diagnosis stranding an in-scope failure, Python signatures carrying body comments.
+False successes: none (every success is judge-verified; every failure was typed and applied nothing).
+
+Prompt prefix (41 + later requests): 12 % of characters shared with the previous request to the model; breaks are
+role switches and per-attempt evidence changes, Developer retries share ~600 tokens (skills). Cold prefill ~2.2 ms
+per token (6,856 tokens: 15.6 s); identical re-sent prompts 0.03-1.3 s. Reordering would save ~1-2 s per retry
+and move the qualified protocol contract: not done.
+
+Legacy fallback (13 retrievals): added `pom.xml` x5, `messages.properties` x1, a site doc x2; never causal. Kept
+(handover/CURRENT_STATE_MATRIX.md removal criterion).
+
 ## Member packing (MEASURED, `pack_bench.py`, budget 2,000 tokens, mined loc-N gold members at HEAD)
 
 | Repo | cases (file > budget) | gold body present: old per-file packer | member packing (T0) | median tokens old / T0 | T0 over budget |
