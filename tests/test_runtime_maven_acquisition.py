@@ -303,7 +303,9 @@ def test_the_candidate_never_runs_with_registry_authority_real_containers(tmp_pa
     validator = PolymorphicValidator(str(ws), autonomy_cfg=AutonomyConfig(
         contained_execution_required=True, containment_backend="oci"))
     assert validator.run_compile_check(["src/main/java/demo/App.java"])["success"]
-    assert not (ws / ".kriya/m2_cache/org/codehaus/mojo/exec-maven-plugin").exists()
+    cache = validator._maven_cache_dir()  # pylint: disable=protected-access
+    assert not os.path.exists(os.path.join(cache, "org/codehaus/mojo/exec-maven-plugin"))
+    assert not os.path.commonpath([cache, str(ws)]) == str(ws)  # outside the tree the project's build walks
     result = validator._run_runtime_step(["mvn", "-q", "exec:java", "-Dexec.mainClass=demo.App"], 120)  # pylint: disable=protected-access
     assert result["returncode"] == 0, result["stdout"] + result["stderr"]
     assert (ws / "ran.log").read_text().splitlines() == ["proxy=null registry=no network"]

@@ -736,7 +736,9 @@ SEC-001):
 
 - **Maven two-phase wired into the real validation path (Stage 2):
   DONE.** `PolymorphicValidator._run_maven_cmd` (`kriya/tools/validate.py`)
-  - a persistent per-workspace `.kriya/m2_cache`, warmed once via
+  - a persistent per-workspace Maven cache (originally `.kriya/m2_cache` in the worktree; since the Code
+  Intelligence live closure under the Kriya state root, `dependency-cache/maven/<workspace key>`, outside
+  every source tree - a project's own build tools walk the tree), warmed once via
   `dependency:go-offline` (network=UNRESTRICTED, still fully contained),
   every real goal (pom validate, compile, test) then runs offline
   (`-o`, network=DENIED); a genuine `MISSING_DEPENDENCY` offline failure
