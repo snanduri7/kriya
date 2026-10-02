@@ -388,6 +388,40 @@ def _code_intelligence_candidates(
     return direct, seeds
 
 
+async def localization_candidates(cfg: Any, workspace_path: str, text: str,
+                                  limit: int = LOCALIZATION_LIMIT) -> List[LocalizationCandidate]:
+    """The fused Code Intelligence candidates for ``text`` over the
+    configured index (``paths.memory``) - the same query retrieval runs, for
+    a caller that needs only localization (the enforce Planner's grounding).
+    Empty without a structural index; the vector channel joins only when the
+    vector index has the served embedding identity (EMBEDDING-CONTRACT-001).
+    Localization context only, never write authority."""
+    from kriya.code_intel import locate as loc
+
+    memory = cfg.paths.memory
+    service = open_code_intelligence(workspace_path, os.path.join(memory, "dependency_graph.db"))
+    if service is None:
+        return []
+    try:
+        semantic: List[Dict[str, Any]] = []
+        vector_path = os.path.join(memory, "vector_index.db")
+        if os.path.exists(vector_path):
+            from kriya.memory.embedding import configured_client, run_deadline
+            from kriya.memory.vector import LocalVectorStore
+
+            store = LocalVectorStore(vector_path)
+            try:
+                query_emb, fingerprint = await semantic_query_embedding(
+                    configured_client(cfg), store, text, GraphRetrievalResult(), run_deadline(cfg))
+                if query_emb and fingerprint:
+                    semantic = store.query(query_emb, top_k=loc.SEMANTIC_CHUNKS, fingerprint=fingerprint)
+            finally:
+                store.close()
+        return fused_localization(service.current_view(), text, semantic, limit)
+    finally:
+        service.close()
+
+
 async def retrieve_graph_context(
     goal: str,
     workspace_path: str,

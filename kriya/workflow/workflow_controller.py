@@ -121,6 +121,7 @@ from kriya.control.run_coordinator import (
 from kriya.control.run_record import RunLifecycle
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import json_document_is_ownerless
+from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.static_analysis.service import (
     StaticAnalysisCandidate,
@@ -160,6 +161,7 @@ from kriya.workflow.edit_safety import (
 from kriya.workflow.execution_plan import PlanSourceKind
 from kriya.workflow.file_resolution import is_runnable_test_file
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
+from kriya.workflow.graph_retrieval import localization_candidates, render_localization_candidates
 from kriya.workflow.migration import (
     MigrationResolution,
     MigrationResolutionStatus,
@@ -4153,6 +4155,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             owner_candidates, where="set on the subtask that creates the file")
         if owner_block:
             authoritative_planner_request += "\n\n" + owner_block
+        # Code Intelligence R1 slice 2: the ranked member/config candidates the
+        # goal points at (symbol ids, kinds, signatures, channels; never a
+        # body) - localization context for planning, never write authority:
+        # every subtask's Developer context re-localizes from the subtask's own
+        # goal and re-reads exact current bytes.
+        try:
+            localization = await localization_candidates(
+                self.workflow_engine.kernel.config, workspace_path, goal)
+        except InferenceDeadlineError:
+            raise
+        except Exception as error:
+            logger.warning("Code Intelligence localization unavailable for planning: %s", error)
+            localization = []
+        localization_block = render_localization_candidates(localization)
+        if localization_block:
+            authoritative_planner_request += "\n" + localization_block
         requirement_set = derive_requirements(goal)
         authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
