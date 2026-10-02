@@ -100,6 +100,8 @@ def _merge(keep: Subtask, absorb: Subtask) -> Subtask:
                                                 absorb.relevant_global_invariant_ids),
         "requirement_ids": _union(keep.requirement_ids, absorb.requirement_ids),
         "ownership_justification": {**absorb.ownership_justification, **keep.ownership_justification},
+        "mutation_targets": keep.mutation_targets + [t for t in absorb.mutation_targets
+                                                     if t.target_id not in {k.target_id for k in keep.mutation_targets}],
     })
 
 

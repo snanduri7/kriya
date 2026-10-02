@@ -196,6 +196,7 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
     build_engineering_plan_from_planner_output,
 )
+from kriya.workflow.plan_targets import check_plan_targets
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
@@ -4349,6 +4350,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
                     validation_evidence.extend(validation.evidence)
+                    # PR-3: a subtask's stated Code Intelligence mutation
+                    # targets must exist in the current view and agree with
+                    # the files it owns (evidence, never authorization).
+                    target_errors, target_codes, target_evidence = check_plan_targets(
+                        plan, workspace_path, lambda: os.path.join(
+                            self.workflow_engine.kernel.config.paths.memory, "dependency_graph.db"))
+                    if target_evidence:
+                        ledger.record_and_persist(
+                            workspace_path, "structured_plan_targets", run_id=run_id,
+                            repair_attempt=repair_attempts, targets=target_evidence,
+                        )
+                    errors.extend(target_errors)
+                    reason_codes.extend(target_codes)
+                    validation_evidence.extend(t for t in target_evidence if t["verdict"] != "consistent")
                     unbounded_model_subtasks = [
                         st.id for st in plan.subtasks
                         if st.execution_method == ExecutionMethod.MODEL

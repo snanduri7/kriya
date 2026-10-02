@@ -130,6 +130,9 @@ def test_every_planner_rejection_code_is_classified():
     # Per-response codes only (the loop's own ``reason_codes``); the
     # run-level terminal codes go on ``final_reason_codes``.
     emitted |= set(re.findall(r'\breason_codes\.append\("([A-Z_]+)"\)', loop))
+    # Codes added with reason_codes.extend from a helper module's constants.
+    emitted |= set(re.findall(r'^PLAN_TARGET_[A-Z_]+ = "([A-Z_]+)"$',
+                              (REPO / "kriya/workflow/plan_targets.py").read_text(), re.M))
     emitted |= {code for issue in ("x", "failed schema validation", "execution_method=tool but no tool_name")
                 for code in pr.classify_structured_plan_parse_issue(issue)}
     assert emitted and emitted <= classified, sorted(emitted - classified)

@@ -114,6 +114,7 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
     "VERIFICATION_EVIDENCE_PATH_MISSING", "PLAN_REQUIREMENT_ID_UNKNOWN",
     "SEMANTIC_CONTRACT_REGRESSION_REJECTED", "PRESERVED_REFERENCE_REGRESSION_REJECTED",
+    "PLAN_TARGET_INCONSISTENT",
     # Milestone plans (kriya/workflow/milestone_validation.py): decided from
     # the milestone list alone.
     "DUPLICATE_MILESTONE_ID", "SELF_DEPENDENCY", "UNKNOWN_DEPENDENCY", "MILESTONE_DAG_CYCLE",
@@ -127,7 +128,7 @@ PLANNER_POLICY_REJECTION_CODES = frozenset({
     "PLANNED_FILE_ACTION_MISMATCH", "VERIFICATION_PREREQUISITE_MANIFEST_MISSING", "EXTENSION_POINT_REQUIRED",
     "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
-    "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+    "GROUNDED_SEMANTIC_PROVIDER_MISMATCH", "PLAN_TARGET_UNKNOWN",
     # Milestone plans (kriya/workflow/milestone_validation.py): judged
     # against the repository's topology.
     "UNJUSTIFIED_ENTRYPOINT", "UNJUSTIFIED_BUILD_BOUNDARY",
@@ -291,6 +292,20 @@ def build_structured_plan_repair_prompt(
                     f"{item['consumer_subtask']}.depends_on\n"
                 )
             targeted_correction += "  Preserve unrelated valid plan edges.\n"
+    target_evidence = [item for item in (validation_evidence or []) if item.get("target_id")]
+    if target_evidence:
+        # PR-3: the plan contradicts its own Code Intelligence targets.
+        targeted_correction += "- Make each subtask consistent with the mutation_targets it states:\n"
+        for item in target_evidence:
+            if item.get("resolved_path") is None:
+                targeted_correction += (
+                    f"  subtask={item['subtask']} target_id={item['target_id']} is not a listed Code "
+                    "Intelligence id: use an id exactly as listed, or remove the target\n")
+            else:
+                targeted_correction += (
+                    f"  subtask={item['subtask']} target_id={item['target_id']} lives in "
+                    f"{item['resolved_path']}: set the target's file to it and list that file in this "
+                    "subtask's planned_files (or remove the target if the subtask does not change it)\n")
     if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes or "UNREGISTERED_TOOL_NAME" in reason_codes:
         # TOOL-001 (2026-09-13): TOOL-execution-method subtasks are now
         # supported in enforce mode (governed execution via the existing
