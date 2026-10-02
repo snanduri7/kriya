@@ -201,6 +201,18 @@ class StructuralStore:
     def containing(self, path: str, line: int) -> List[Symbol]:
         return self._select("s.path = ? AND s.decl_start_line <= ? AND s.decl_end_line >= ?", (path, line, line))
 
+    def body_mentions(self, term: str, limit: int, exclude_paths: Iterable[str] = ()) -> Optional[List[str]]:
+        """Ids of the symbols whose body terms contain the identifier term
+        ``term`` (lower-cased); None when more than ``limit`` do (not
+        specific) or FTS5 is unavailable."""
+        if not self.fts_available or not term:
+            return None
+        excluded = set(exclude_paths)
+        rows = self.conn.execute("SELECT symbol_id, path FROM ci_fts WHERE ci_fts MATCH ? LIMIT ?",
+                                 (f'body_terms:"{term}"', limit + 1 + len(excluded) * 50)).fetchall()
+        ids = [r[0] for r in rows if r[1] not in excluded]
+        return None if len(ids) > limit else ids
+
     def search(self, terms: Sequence[str], limit: int, exclude_paths: Iterable[str] = ()) -> List[Tuple[str, float]]:
         """BM25 over identifier terms (name terms weighted above body terms);
         (symbol_id, score>0) best first. Empty when FTS5 is unavailable."""

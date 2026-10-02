@@ -47,6 +47,14 @@ PROSE_FACTOR = 0.5
 TEST_CODE_FACTOR = 0.5
 _TEST_PATH_RE = re.compile(r"(^|/)(src/test|tests?)/|(^|/)test_[^/]*\.py$|Tests?\.java$")
 _TEST_WORD_RE = re.compile(r"(?i)\btests?\b|\btest[A-Z_]|Test\b|assert")
+# A type the query names scopes its own members (OWNER_NAMED); the members
+# that construct it (``new T(``, ``T(``/``raise T``) decide what its instances
+# carry - an exception's message, a value object's fields - and share that
+# scope tier, divided among the construction sites (specificity).
+CONSTRUCTION_SITE = OWNER_NAMED
+# Members whose bodies mention a named type that are read to find its
+# construction sites; a type mentioned more widely is not specific evidence.
+MAX_TYPE_MENTIONS = 200
 # A top hit at or above this score rests on exact evidence.
 EXACT_EVIDENCE = QUALIFIED_SUFFIX
 
@@ -143,6 +151,24 @@ def mentions_tests(text: str) -> bool:
 def is_prose_word(word: str) -> bool:
     """All lower-case letters: an English word as much as an identifier."""
     return word.isalpha() and word.islower()
+
+
+def constructs(language: str, type_name: str, body: str) -> bool:
+    """``body`` constructs ``type_name``: Java ``new [pkg.]T(`` / ``new T<``;
+    Python a call ``[mod.]T(`` or ``raise [mod.]T`` (never its ``class``/``def``
+    line, an ``isinstance``/``except`` reference or an annotation)."""
+    name = re.escape(type_name)
+    if language == "java":
+        return re.search(r"\bnew\s+(?:[\w$]+\.)*" + name + r"\s*[(<]", body) is not None
+    if language == "python":
+        for match in re.finditer(r"(?<![\w])(?:raise\s+)?(?:\w+\.)*" + name + r"\b(\s*\()?", body):
+            line_start = body.rfind("\n", 0, match.start()) + 1
+            before = body[line_start:match.start()]
+            if re.search(r"\b(?:class|def)\s+$", before):
+                continue
+            if match.group(1) or match.group(0).startswith("raise"):
+                return True
+    return False
 
 
 def semantic_weight(rank: int) -> float:

@@ -359,6 +359,9 @@ class CodeIntelligenceService:
         # Qualified keys of the types the query names: they scope every member
         # of their body, nested types' members included.
         owners: set = set()
+        # The types the query names (by name, not by a mentioned path): their
+        # construction sites are evidence too.
+        named_types: Dict[str, Symbol] = {}
 
         for mentioned, line in signals.file_lines:
             for path in self._resolve_path(mentioned):
@@ -384,6 +387,8 @@ class CodeIntelligenceService:
                     if self._names_scope(symbol):
                         self._credit(evidence, meta, symbol, "qualified_symbol", loc.OWNER_NAMED)
                         owners.add(self._scope_key(symbol))
+                        if symbol.is_type:
+                            named_types[symbol.symbol_id] = symbol
                         continue
                     self._credit(evidence, meta, symbol, "qualified_symbol", weight)
                     if symbol.parent_id:
@@ -412,6 +417,8 @@ class CodeIntelligenceService:
                     # its target: it boosts the type's members instead.
                     self._credit(evidence, meta, symbol, "simple_symbol", loc.OWNER_NAMED * weight)
                     owners.add(self._scope_key(symbol))
+                    if symbol.is_type:
+                        named_types[symbol.symbol_id] = symbol
                     continue
                 self._credit(evidence, meta, symbol, "simple_symbol", loc.SIMPLE_SYMBOL * weight)
         for literal in signals.strings:
@@ -421,14 +428,53 @@ class CodeIntelligenceService:
             if weight is not None:
                 for symbol in self._symbols_by_id([h[0] for h in hits]):
                     self._credit(evidence, meta, symbol, "string_literal", loc.STRING_LITERAL * weight)
+        about_tests = loc.mentions_tests(text)
+        for type_symbol in named_types.values():
+            self._credit_construction_sites(type_symbol, about_tests, evidence, meta)
         self._credit_fts(text, evidence, meta, limit=50)
         if semantic:
-            self._credit_semantic(semantic, loc.mentions_tests(text), evidence, meta)
+            self._credit_semantic(semantic, about_tests, evidence, meta)
         if owners:
             for symbol in self._symbols_by_id(list(evidence)):
                 if not self._names_scope(symbol) and any(symbol.lookup_key.startswith(key + ".") for key in owners):
                     evidence[symbol.symbol_id].add("owner_named", loc.OWNER_NAMED)
         return loc.rank(evidence, meta, limit)
+
+    def _credit_construction_sites(self, type_symbol: Symbol, about_tests: bool, evidence, meta) -> None:
+        """The construction-site channel: the innermost callables (outside
+        the type itself) whose CURRENT body constructs ``type_symbol``, each
+        crediting ``CONSTRUCTION_SITE`` divided by the number of sites; test
+        code discounted unless the query is about tests."""
+        term = type_symbol.name.lower()
+        ids = self.store.body_mentions(term, loc.MAX_TYPE_MENTIONS, self._shadowed())
+        if ids is None:
+            return
+        ids += [i for i, _ in self._overlay_term_hits([term])]
+        scope = self._scope_key(type_symbol) + "."
+        bodies: Dict[str, Optional[bytes]] = {}
+        sites: List[Symbol] = []
+        for symbol in self._symbols_by_id(list(dict.fromkeys(ids))):
+            if (not symbol.is_callable or self._names_scope(symbol) or symbol.lookup_key.startswith(scope)
+                    or symbol.language != type_symbol.language):
+                continue
+            if symbol.path not in bodies:
+                bodies[symbol.path] = self._current(symbol.path)
+            data = bodies[symbol.path]
+            if data is None:
+                continue
+            body = data[symbol.declaration.start_byte:symbol.declaration.end_byte].decode("utf-8", "replace")
+            if loc.constructs(symbol.language, type_symbol.name, body):
+                sites.append(symbol)
+        # A nested callable that constructs it is the site, not its encloser.
+        innermost = [s for s in sites if not any(
+            o is not s and o.path == s.path and s.declaration.start_byte <= o.declaration.start_byte
+            and o.declaration.end_byte <= s.declaration.end_byte for o in sites)]
+        weight = loc.specificity(len(innermost))
+        if weight is None:
+            return
+        for symbol in innermost:
+            factor = loc.TEST_CODE_FACTOR if not about_tests and loc.is_test_path(symbol.path) else 1.0
+            self._credit(evidence, meta, symbol, "constructs", loc.CONSTRUCTION_SITE * weight * factor)
 
     def _credit_semantic(self, chunks, about_tests: bool, evidence, meta) -> None:
         """The vector channel. Each chunk hit (best first) credits the
