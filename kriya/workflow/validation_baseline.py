@@ -121,7 +121,7 @@ class TestStatus(str, Enum):
 
 # The PRE/POST comparison's own identity: a stored full-suite result is only
 # reused under the same comparison rules (part of the environment identity).
-BASELINE_COMPARISON_VERSION = 1
+BASELINE_COMPARISON_VERSION = 2  # 2: Maven Surefire summary fingerprint + per-test outcomes
 
 
 @dataclass(frozen=True)
@@ -370,6 +370,65 @@ def parse_pytest_structured_outcomes(raw: str) -> Optional[Tuple[Tuple[TestOutco
     return tuple(outcomes), counts
 
 
+# --- Level 2 structured adapter: Maven Surefire ------------------------------
+#
+# Surefire ends every module's test run with a stable "Results:" block: the
+# failing tests under "Failures:"/"Errors:" (one "[ERROR]   Class.method:line
+# message" line each) and the module totals. The rest of a Maven test log is
+# volatile across two identical runs of the same tree - Spring Boot startup
+# logs with wall-clock times, the container's random hostname, log
+# interleaving (measured on spring-petclinic: two runs of the unchanged tree,
+# different whole-output fingerprints) - so the whole-output fingerprint
+# could never match and every brownfield change with any pre-existing
+# failure was a CHANGED_FAILURE. The Results blocks are what both the level
+# 1 fingerprint and the per-test outcomes are taken from.
+
+_SUREFIRE_RESULTS_RE = re.compile(
+    r"^\[(?:INFO|ERROR|WARNING)\] Results:[ \t]*\n(?P<body>.*?)"
+    r"^\[(?:INFO|ERROR|WARNING)\] Tests run: (?P<run>\d+), Failures: (?P<failures>\d+), "
+    r"Errors: (?P<errors>\d+), Skipped: (?P<skipped>\d+)[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
+_SUREFIRE_SECTION_RE = re.compile(r"^\[(?:ERROR|WARNING)\] (Failures|Errors|Flakes):[ \t]*$")
+_SUREFIRE_ENTRY_RE = re.compile(r"^\[(?:ERROR|WARNING)\]   (?P<id>\S+?)(?::\d+)?(?:\s+(?P<reason>.*))?$")
+
+
+def surefire_results_summary(raw: str) -> Optional[str]:
+    """Every Surefire "Results:" block of ``raw``, or None when there is none
+    (not a Maven test run, or the build failed before tests ran)."""
+    blocks = [match.group(0) for match in _SUREFIRE_RESULTS_RE.finditer(raw or "")]
+    return "\n".join(blocks) if blocks else None
+
+
+def parse_surefire_structured_outcomes(raw: str) -> Optional[Tuple[Tuple[TestOutcome, ...], Dict[str, int]]]:
+    """(failing/erroring test outcomes, aggregate counts) from the Results
+    blocks - or None when there are none (level 1 only, never a guess)."""
+    matches = list(_SUREFIRE_RESULTS_RE.finditer(raw or ""))
+    if not matches:
+        return None
+    outcomes: Dict[str, TestOutcome] = {}
+    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+    for match in matches:
+        section = None
+        for line in match.group("body").splitlines():
+            header = _SUREFIRE_SECTION_RE.match(line)
+            if header:
+                section = header.group(1)
+                continue
+            entry = _SUREFIRE_ENTRY_RE.match(line)
+            if entry and section in ("Failures", "Errors") and entry.group("id") not in outcomes:
+                outcomes[entry.group("id")] = TestOutcome(
+                    test_id=entry.group("id"),
+                    status=TestStatus.FAIL if section == "Failures" else TestStatus.ERROR,
+                    failure_fingerprint=compute_failure_fingerprint(entry.group("reason") or ""))
+        run, failures, errors, skipped = (int(match.group(k)) for k in ("run", "failures", "errors", "skipped"))
+        counts["failed"] += failures
+        counts["error"] += errors
+        counts["skipped"] += skipped
+        counts["passed"] += max(0, run - failures - errors - skipped)
+    return tuple(outcomes.values()), counts
+
+
 # --- Building a ValidationOutcome from an existing validator result ---------
 
 def build_validation_outcome(
@@ -383,10 +442,14 @@ def build_validation_outcome(
     validator invocation, never replacing it)."""
     success = bool(raw_result.get("success"))
     output = raw_result.get("output") or ""
-    fingerprint = None if success else compute_failure_fingerprint(output)
+    # A Maven test run is identified by its Surefire Results blocks, never by
+    # the volatile log around them; any other output by its whole text.
+    surefire_summary = surefire_results_summary(output)
+    fingerprint = None if success else compute_failure_fingerprint(surefire_summary or output)
     test_outcomes = None
     aggregate_counts = None
-    parsed = parse_pytest_structured_outcomes(output)
+    parsed = (parse_surefire_structured_outcomes(output) if surefire_summary is not None
+              else parse_pytest_structured_outcomes(output))
     if parsed is not None:
         # Deliberately NOT collapsed to None when the tuple is empty - an
         # empty-but-successfully-parsed tuple means "pytest output was
