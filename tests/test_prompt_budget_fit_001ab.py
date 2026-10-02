@@ -329,14 +329,45 @@ def test_at_8k_the_planner_leaves_its_optional_context_out_and_is_sent(tmp_path,
     assert UNTRUSTED_REFERENCE_BEGIN not in user and "Ledger.java" not in user.split("Workspace Context:")[0]
 
 
-def test_at_16k_the_planner_graph_context_is_rebuilt_to_its_room(tmp_path, monkeypatch):
+def test_at_16k_the_planner_request_is_sent_with_its_graph_context_within_capacity(tmp_path, monkeypatch):
+    """End to end at 16K: the Planner request carries its graph context and
+    fits its capacity; any fit stays within its room. (Before Code
+    Intelligence R1 slice 2 the legacy retrieval leg built a context that
+    measured over this room, so the run also exercised the rebuild; fused
+    localization now builds one that fits - measured 6272 of 7904 tokens -
+    and the rebuild is proven directly below.)"""
     run = _run(tmp_path, monkeypatch, 16384, ledger_methods=160)
     assert run.refused("Planner Agent") == []
-    [fit] = run.fits("planner")
-    assert not fit["graph"]["omitted"] and fit["graph"]["used_tokens"] <= fit["graph"]["room_tokens"]
+    for fit in run.fits("planner"):
+        assert not fit["graph"]["omitted"] and fit["graph"]["used_tokens"] <= fit["graph"]["room_tokens"]
     [(system, user)] = run.transport.by("Planner Agent")
+    assert "Ledger" in user
     capacity = budget.agent_request_capacity(run.cfg, _planner(run.cfg), "planner")
     assert capacity.count(system + user) <= capacity.tokens
+
+
+def test_at_16k_an_oversized_planner_graph_context_is_rebuilt_to_its_room(tmp_path):
+    """The Planner's real 16K capacity, a graph context far over its room:
+    fit_planner_request rebuilds it at the room (never forces it in, never
+    omits it while a rebuilt one fits) and the whole request then fits."""
+    cfg = _config(tmp_path, 16384)
+    planner = _planner(cfg)
+    capacity = budget.agent_request_capacity(cfg, planner, "planner")
+    graph = "class Ledger { long entry(long a) { return a; } }\n" * 2000
+    budgets = []
+
+    def rebuild(units):
+        budgets.append(units)
+        return graph[:units * 4], None
+
+    prompt, details = budget.fit_planner_request(
+        capacity, system_prompt=planner.system_prompt, head="Goal: cap the discount.\n", skills_prompt="",
+        graph_context=graph, reference="", suffix="", rebuild_graph=rebuild)
+    assert budgets, "the oversized graph context was never rebuilt"
+    fit = details["graph"]
+    assert not fit["omitted"] and fit["used_tokens"] <= fit["room_tokens"]
+    assert "class Ledger" in prompt
+    assert capacity.count(planner.system_prompt + prompt) <= capacity.tokens
 
 
 def test_at_32k_the_planner_request_is_unchanged(tmp_path, monkeypatch):

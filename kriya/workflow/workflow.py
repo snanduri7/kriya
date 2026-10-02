@@ -97,7 +97,6 @@ from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     agent_request_capacity,
     allocation_window,
-    build_code_context_package,
     candidate_model,
     fit_planner_request,
     retrieval_limits_for,
@@ -2583,6 +2582,23 @@ class WorkflowEngine:
                                 "lexical and graph retrieval only",
                         details={"reason_code": retrieval.semantic_unavailable},
                     ))
+                # Code Intelligence R1 slice 2: which candidate generation
+                # answered, its ranked candidates (with channels) and what
+                # only the legacy leg contributed - the evidence the legacy
+                # path's removal criterion reads.
+                state.record_event(RunEvent(
+                    kind="retrieval.code_intelligence", attempt=0, source="graph_retrieval",
+                    authority=EventAuthority.ADVISORY,
+                    message=f"localization by {retrieval.localization_source}: "
+                            f"{len(retrieval.localization)} candidate(s), "
+                            f"{len(retrieval.legacy_only_files)} legacy-only file(s)",
+                    details={
+                        "source": retrieval.localization_source,
+                        "candidates": [candidate.to_dict() for candidate in retrieval.localization],
+                        "legacy_only_files": list(retrieval.legacy_only_files),
+                        "separation": retrieval.separation,
+                    },
+                ))
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints
                 verified_grounding = retrieval.verified_grounding
@@ -2837,10 +2853,7 @@ class WorkflowEngine:
                     capacity, system_prompt=self.planner.system_prompt, head=plan_head,
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=plan_suffix,
-                    rebuild_graph=lambda budget: build_code_context_package(
-                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
-                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
-                    ),
+                    rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
                 )
                 if plan_fit:
                     state.record_event(RunEvent(
@@ -3118,10 +3131,7 @@ class WorkflowEngine:
                     capacity, system_prompt=self.architect.system_prompt, head=design_head,
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=design_suffix, request="architect",
-                    rebuild_graph=lambda budget: build_code_context_package(
-                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
-                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
-                    ),
+                    rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
                 )
                 if design_fit:
                     state.record_event(RunEvent(

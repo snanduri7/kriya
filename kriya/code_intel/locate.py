@@ -23,6 +23,20 @@ STRING_LITERAL = 30.0
 OWNER_NAMED = 15.0
 PATH_MENTIONED = 12.0
 FTS_MAX = 10.0
+# The vector channel (semantic similarity of the indexed chunk holding a
+# member) shares the similarity tier with FTS: together they stay below a
+# unique exact symbol, so agreement of the two weak legs can promote a member
+# but never outvote exact evidence.
+VECTOR_MAX = 10.0
+# The whole similarity tier (BM25 + vector agreement); evidence from outside
+# the structural index (the legacy hybrid leg) is scaled into it.
+SIMILARITY_MAX = FTS_MAX + VECTOR_MAX
+# Vector rank decay: rank r (0-based) of the query's chunk hits weighs
+# VECTOR_MAX * VECTOR_RANK_K / (VECTOR_RANK_K + r) - cosines of one model are
+# comparable only within one query, so the rank, not the raw cosine, counts.
+VECTOR_RANK_K = 10.0
+# Chunks the vector channel reads per query.
+SEMANTIC_CHUNKS = 40
 # An identifier matching more symbols than this is not specific evidence.
 MAX_SIMPLE_MATCHES = 25
 # A plain prose word matching a callable name counts this fraction of a
@@ -129,6 +143,10 @@ def mentions_tests(text: str) -> bool:
 def is_prose_word(word: str) -> bool:
     """All lower-case letters: an English word as much as an identifier."""
     return word.isalpha() and word.islower()
+
+
+def semantic_weight(rank: int) -> float:
+    return VECTOR_MAX * VECTOR_RANK_K / (VECTOR_RANK_K + rank)
 
 
 def specificity(count: int) -> Optional[float]:

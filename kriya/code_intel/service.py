@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.code_intel import locate as loc
 from kriya.code_intel.model import CONFIG_KINDS, FileStructure, ParseState, Span, Symbol, source_digest
@@ -105,6 +105,35 @@ class CodeIntelligenceService:
     def with_overlay(self, files: Mapping[str, Optional[bytes]]) -> "CodeIntelligenceService":
         """A view of the baseline shadowed by a candidate (shares the store)."""
         return CodeIntelligenceService(self.workspace_root, self.db_path, CandidateOverlay(files), _store=self.store)
+
+    def current_view(self) -> "CodeIntelligenceService":
+        """A view whose every answer reflects the workspace's CURRENT bytes:
+        files changed, added or deleted since indexing are parsed in memory as
+        an overlay (nothing is written); unchanged files answer from the
+        baseline. Never mutates the persisted index."""
+        known = self.store.file_states()
+        present = discover_source_files(self.workspace_root)
+        drift: Dict[str, Optional[bytes]] = {}
+        for path in present:
+            with open(os.path.join(self.workspace_root, path), "rb") as handle:
+                data = handle.read()
+            if known.get(path, ("",))[0] != source_digest(data):
+                drift[path] = data
+        drift.update({path: None for path in set(known) - set(present)})
+        return self.with_overlay(drift) if drift else self
+
+    def structured_paths(self) -> frozenset:
+        """Every path this view holds structure for (a file the parser
+        found UNSUPPORTED, or a deleted one, is not covered)."""
+        stored = set(self.store.file_states())
+        if self.overlay:
+            stored -= self.overlay.shadowed
+            stored |= {p for p, st in self.overlay.structures.items() if st.state is not ParseState.UNSUPPORTED}
+        return frozenset(stored)
+
+    def has_baseline(self) -> bool:
+        """True when the store holds structure of the current parser identity."""
+        return bool(self.store.file_states())
 
     def without_overlay(self) -> "CodeIntelligenceService":
         return CodeIntelligenceService(self.workspace_root, self.db_path, None, _store=self.store)
@@ -317,12 +346,18 @@ class CodeIntelligenceService:
         stored = self.store.by_ids([i for i in ids if i not in overlay])
         return [overlay.get(i) or stored[i] for i in ids if i in overlay or i in stored]
 
-    def locate(self, text: str, limit: int = 10) -> List[loc.LocateHit]:
+    def locate(self, text: str, limit: int = 10,
+               semantic: Optional[Sequence[Mapping[str, object]]] = None) -> List[loc.LocateHit]:
         """Deterministic localization of ``text`` (goal, compiler output,
-        stack trace) to members, best first, each with its channels."""
+        stack trace) to members, best first, each with its channels.
+        ``semantic``: the query's vector hits (best first, each with its
+        indexed ``filepath``/``span_start``/``span_end``) - the vector
+        channel; None or empty leaves it out."""
         signals = loc.extract_signals(text)
         evidence: Dict[str, loc.Evidence] = {}
         meta: Dict[str, tuple] = {}
+        # Qualified keys of the types the query names: they scope every member
+        # of their body, nested types' members included.
         owners: set = set()
 
         for mentioned, line in signals.file_lines:
@@ -348,16 +383,16 @@ class CodeIntelligenceService:
                 for symbol in matches:
                     if self._names_scope(symbol):
                         self._credit(evidence, meta, symbol, "qualified_symbol", loc.OWNER_NAMED)
-                        owners.add(symbol.parent_id if symbol.kind == "constructor" else symbol.symbol_id)
+                        owners.add(self._scope_key(symbol))
                         continue
                     self._credit(evidence, meta, symbol, "qualified_symbol", weight)
                     if symbol.parent_id:
-                        owners.add(symbol.parent_id)
+                        owners.add(symbol.lookup_key.rsplit(".", 1)[0])
         for mentioned in signals.paths:
             for path in self._resolve_path(mentioned):
                 for symbol in self._file_types(path):
                     self._credit(evidence, meta, symbol, "path", loc.PATH_MENTIONED)
-                    owners.add(symbol.symbol_id)
+                    owners.add(symbol.lookup_key)
         for word in signals.words:
             matches = self._by_name(word)
             prose = loc.is_prose_word(word)
@@ -376,7 +411,7 @@ class CodeIntelligenceService:
                     # A type name in a goal is the scope of the change, not
                     # its target: it boosts the type's members instead.
                     self._credit(evidence, meta, symbol, "simple_symbol", loc.OWNER_NAMED * weight)
-                    owners.add(symbol.parent_id if symbol.kind == "constructor" else symbol.symbol_id)
+                    owners.add(self._scope_key(symbol))
                     continue
                 self._credit(evidence, meta, symbol, "simple_symbol", loc.SIMPLE_SYMBOL * weight)
         for literal in signals.strings:
@@ -387,11 +422,47 @@ class CodeIntelligenceService:
                 for symbol in self._symbols_by_id([h[0] for h in hits]):
                     self._credit(evidence, meta, symbol, "string_literal", loc.STRING_LITERAL * weight)
         self._credit_fts(text, evidence, meta, limit=50)
+        if semantic:
+            self._credit_semantic(semantic, loc.mentions_tests(text), evidence, meta)
         if owners:
             for symbol in self._symbols_by_id(list(evidence)):
-                if symbol.parent_id in owners and not self._names_scope(symbol):
+                if not self._names_scope(symbol) and any(symbol.lookup_key.startswith(key + ".") for key in owners):
                     evidence[symbol.symbol_id].add("owner_named", loc.OWNER_NAMED)
         return loc.rank(evidence, meta, limit)
+
+    def _credit_semantic(self, chunks, about_tests: bool, evidence, meta) -> None:
+        """The vector channel. Each chunk hit (best first) credits the
+        members its indexed span holds: the declarations inside the span, or
+        else the smallest declaration containing it. Rank-weighted within
+        the query; test code is discounted unless the query is about tests,
+        exactly as for FTS; types and constructors only scope."""
+        by_path: Dict[str, List[Symbol]] = {}
+        shadowed = self._shadowed()
+        rank = 0
+        for chunk in chunks:
+            path, start, end = chunk.get("filepath"), chunk.get("span_start"), chunk.get("span_end")
+            if not path or start is None or end is None or path in shadowed:
+                continue
+            if path not in by_path:
+                by_path[path] = [s for s in self.store.by_path(path)
+                                 if s.kind in _LOCATABLE and not self._names_scope(s)]
+            symbols = by_path[path]
+            inside = [s for s in symbols if start <= s.declaration.start_line and s.declaration.end_line <= end]
+            if not inside:
+                containing = [s for s in symbols if s.declaration.start_line <= start <= s.declaration.end_line]
+                inside = [min(containing, key=lambda s: (s.declaration.line_count, s.symbol_id))] if containing else []
+            weight = loc.semantic_weight(rank)
+            rank += 1
+            if not about_tests and loc.is_test_path(path):
+                weight *= loc.TEST_CODE_FACTOR
+            for symbol in inside:
+                self._credit(evidence, meta, symbol, "vector", weight)
+
+    @staticmethod
+    def _scope_key(symbol: Symbol) -> str:
+        """The qualified key a scope symbol names: a type's own, a
+        constructor's enclosing type's."""
+        return symbol.lookup_key.rsplit(".", 1)[0] if symbol.kind == "constructor" else symbol.lookup_key
 
     @staticmethod
     def _names_scope(symbol: Symbol) -> bool:

@@ -18,7 +18,12 @@ from kriya.memory.vector import LocalVectorStore
 from kriya.workflow import graph_retrieval
 from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package, estimate_tokens, skeletonize_code
 from kriya.workflow.context_recall_fixtures import JAVA_SHOP
-from kriya.workflow.graph_retrieval import DIRECT_EVIDENCE_TIER, evidence_scores, retrieve_graph_context
+from kriya.workflow.graph_retrieval import (
+    DIRECT_EVIDENCE_TIER,
+    evidence_scores,
+    render_localization_candidates,
+    retrieve_graph_context,
+)
 
 # --- the ranking --------------------------------------------------------------
 
@@ -150,7 +155,11 @@ def test_retrieval_under_a_binding_budget_keeps_direct_hits_ahead_of_the_graph_w
     assert "pom.xml" in whole.matched_files and whole.related_files
     matched_cost = sum(estimate_tokens(item.content) for item in whole.context_package.relevant_files
                        if item.path in whole.matched_files)
-    constrained = _retrieve(tmp_path / "tight", JUNIT_GOAL, matched_cost + 5)
+    # Code Intelligence R1 slice 2: the localization candidate map is part of
+    # the same graph-context budget, ahead of the files; a budget that
+    # exactly fits the direct evidence includes it.
+    map_cost = estimate_tokens(render_localization_candidates(whole.localization))
+    constrained = _retrieve(tmp_path / "tight", JUNIT_GOAL, matched_cost + map_cost + 5)
     tiers = {item.path: item.tier for item in constrained.context_package.relevant_files}
     tiers.update({entry["path"]: "omitted" for entry in constrained.context_package.omitted})
     assert tiers["pom.xml"] == "full"
