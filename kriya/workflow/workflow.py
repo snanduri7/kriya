@@ -24,6 +24,7 @@ from kriya.agents.agent import (
 )
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
+from kriya.code_intel.model import CALLABLE_KINDS
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
@@ -209,6 +210,7 @@ from kriya.workflow.live_lookup import (
     _extract_first_usable,
     _resolve_via_web_lookup,
 )
+from kriya.workflow.localization_decision import decide as decide_localization
 from kriya.workflow.lsp_integration import (
     _build_lsp_diagnostics_context as _build_lsp_diagnostics_context,
 )
@@ -2581,6 +2583,25 @@ class WorkflowEngine:
                         message=f"semantic retrieval unavailable ({retrieval.semantic_unavailable}); "
                                 "lexical and graph retrieval only",
                         details={"reason_code": retrieval.semantic_unavailable},
+                    ))
+                # CI-6: at most one schema-constrained model call, and only
+                # when deterministic localization is ambiguous (calibrated
+                # separation); its choice can only reorder current candidates.
+                if retrieval.localization_source == "code_intelligence" and retrieval.localization:
+                    decision = await decide_localization(
+                        self.llm, goal, retrieval.localization, retrieval.separation,
+                        current=lambda symbol_id: symbol_id in retrieval.current_member_ids or any(
+                            c.symbol_id == symbol_id and c.kind not in CALLABLE_KINDS
+                            for c in retrieval.localization),
+                    )
+                    if decision.decision is not None:
+                        retrieval.adopt_decision(decision.decision.target_symbol_ids)
+                    state.record_event(RunEvent(
+                        kind="localization.decision", attempt=0, source="graph_retrieval",
+                        authority=EventAuthority.ADVISORY,
+                        message=f"localization {decision.reason_code}"
+                                f"{' (model consulted)' if decision.called else ''}",
+                        details={**decision.to_dict(), "separation": retrieval.separation},
                     ))
                 # Code Intelligence R1 slice 2: which candidate generation
                 # answered, its ranked candidates (with channels) and what

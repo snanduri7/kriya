@@ -1165,7 +1165,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
     call, streamed as NDJSON when asked."""
 
     name = NATIVE_RUNTIME_NAME
-    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True)
+    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True,
+                                       json_schema_output=True)
     provider_capabilities = OLLAMA_NATIVE_CAPABILITIES
 
     def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
@@ -1232,6 +1233,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         payload["truncate"] = False
         if request.response_format and request.response_format.get("type") == "json_object":
             payload["format"] = "json"
+        elif request.response_format and request.response_format.get("type") == "json_schema":
+            payload["format"] = request.response_format["schema"]  # grammar-constrained (measured)
         if request.tools:
             payload["tools"] = request.tools
         return payload

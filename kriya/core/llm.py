@@ -96,6 +96,16 @@ DEADLINE_SOURCE_LOCAL_CAP = "local_cap"
 _T = TypeVar("_T")
 
 
+STRUCTURED_OUTPUT_UNSUPPORTED = "STRUCTURED_OUTPUT_UNSUPPORTED"
+
+
+class StructuredOutputUnsupportedError(Exception):
+    """A schema-constrained request to a runtime that cannot constrain its
+    output (RuntimeCapabilities.json_schema_output is not declared)."""
+
+    reason_code = STRUCTURED_OUTPUT_UNSUPPORTED
+
+
 class InferenceDeadlineError(Exception):
     """A model call refused before dispatch (EXHAUSTED) or stopped
     mid-request (EXCEEDED) by Kriya's own deadline: a typed stop, never a
@@ -790,8 +800,15 @@ class LLMClient:
         reasoning_override: Optional[bool] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
         expected_output=None,
+        response_schema: Optional[Dict[str, Any]] = None,
     ):
         """PRD-015: one completion as a normalized ``CompletionResult``.
+
+        ``response_schema`` (Code Intelligence R1 slice 2): a JSON schema the
+        provider must constrain the response to. Only a runtime declaring
+        ``json_schema_output`` is sent one; any other refuses with
+        StructuredOutputUnsupportedError before the provider is contacted, and
+        the schema is never dropped on a retry.
 
         Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE,
         OUTPUT_BUDGET_UNSATISFIABLE), a Kriya deadline stop
@@ -861,6 +878,12 @@ class LLMClient:
         # plain prose explaining its reasoning instead, which no amount of downstream
         # JSON-extraction fallback can recover since there's no JSON substring in it.
         response_format = {"type": "json_object"} if json_mode else None
+        if response_schema is not None:
+            if not self._runtime(model).capabilities.json_schema_output:
+                raise StructuredOutputUnsupportedError(
+                    f"the runtime of '{model}' ({self._runtime(model).name}) does not constrain output to a JSON "
+                    "schema; a schema request is never approximated")
+            response_format = {"type": "json_schema", "schema": response_schema}
 
         self.last_call_metrics = None
         self.last_completion = None
@@ -899,7 +922,8 @@ class LLMClient:
             status=CompletionStatus.OK, model=model,
             runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
             inference_settings_digest=settings.digest,
-            protocol={"json_mode": json_mode, "streaming": stream_callback is not None, "tools": False,
+            protocol={"json_mode": json_mode, "json_schema": response_schema is not None,
+                      "streaming": stream_callback is not None, "tools": False,
                       "reasoning_model": is_reasoning, "response_format_dropped": False,
                       "empty_content_floor_retry": False,
                       "provider_contract": self._contract_record(runtime, plan, budget)},
@@ -919,7 +943,8 @@ class LLMClient:
                 # excludes failures that are clearly unrelated to response_format
                 # (connection/timeout/auth/rate-limit/server errors, as the
                 # runtime adapter classifies them - INF-001).
-                if (response_format is not None and is_reasoning and not isinstance(e, InferenceDeadlineError)
+                if (response_format is not None and response_schema is None and is_reasoning
+                        and not isinstance(e, InferenceDeadlineError)
                         and self._runtime(model).classify_error(e) is RuntimeErrorKind.REQUEST):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "

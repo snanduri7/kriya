@@ -162,6 +162,27 @@ class GraphRetrievalResult:
     localization: List["LocalizationCandidate"] = field(default_factory=list)
     legacy_only_files: List[str] = field(default_factory=list)
     separation: Optional[Dict[str, Any]] = None
+    # symbol id -> member id in its file's CURRENT bytes (callable
+    # candidates whose member resolved; the CI-6 decision's id check).
+    current_member_ids: Dict[str, str] = field(default_factory=dict)
+
+    def adopt_decision(self, target_symbol_ids: Sequence[str]) -> None:
+        """CI-6: the chosen targets lead the candidates, their files lead the
+        direct evidence and their members lead the member hints. Nothing is
+        dropped or invented; only already-current candidates are moved."""
+        chosen = [c for i in target_symbol_ids for c in self.localization if c.symbol_id == i]
+        self.localization = chosen + [c for c in self.localization if c.symbol_id not in target_symbol_ids]
+        top = max(self.file_scores.values(), default=0.0)
+        for candidate in reversed(chosen):
+            self.matched_files = [candidate.path] + [p for p in self.matched_files if p != candidate.path]
+            self.file_scores[candidate.path] = max(self.file_scores.get(candidate.path, 0.0), top)
+            member_id = self.current_member_ids.get(candidate.symbol_id)
+            if member_id is None:
+                continue
+            for bucket in (self.retrieval_member_hints, self.verified_grounding):
+                members = bucket.setdefault(candidate.path, [])
+                bucket[candidate.path] = [member_id] + [m for m in members if m != member_id]
+            self.related_files = [p for p in self.related_files if p != candidate.path]
 
     def rebuild_context(self, workspace_path: str, budget: int) -> Tuple[str, Any]:
         """The Graph RAG context within ``budget`` (allocator tokens): the
@@ -339,28 +360,34 @@ def _code_intelligence_candidates(
     result.localization = candidates
     result.separation = separation(candidates)
     direct: Dict[str, float] = {}
-    # Like the legacy leg: the top_k hits (not top_k distinct files) are the
-    # direct evidence; the rest stay localization candidates only.
+    boundaries_by_path: Dict[str, Any] = {}
     for rank, candidate in enumerate(candidates):
+        verified, data, structure, member_id = False, None, None, ""
+        if candidate.kind in CALLABLE_KINDS:
+            data = view.current_bytes(candidate.path)
+            structure = view.current_structure(candidate.path)
+            if data is not None and structure is not None:
+                member_id = member_id_for(candidate, structure.namespace)
+                if candidate.path not in boundaries_by_path:
+                    boundaries_by_path[candidate.path] = member_boundaries_for(
+                        candidate.path, data.decode("utf-8", "replace")) or []
+                verified = bool(boundaries_matching_member_id(boundaries_by_path[candidate.path], member_id))
+                if verified:
+                    result.current_member_ids[candidate.symbol_id] = member_id
+        # Like the legacy leg: the top_k hits (not top_k distinct files) are
+        # the direct evidence; the rest stay localization candidates only.
         if rank >= top_k:
-            break
+            continue
         direct.setdefault(candidate.path, candidate.score)
         result.retrieved_chunks.append({"filepath": candidate.path, "score": candidate.score,
                                         "text": f"{candidate.kind} {candidate.lookup_key}: {candidate.signature}"[:300],
                                         "channels": [c for c, _ in candidate.channels]})
-        if candidate.kind not in CALLABLE_KINDS:
+        if candidate.kind not in CALLABLE_KINDS or data is None or structure is None:
             continue
-        data = view.current_bytes(candidate.path)
-        structure = view.current_structure(candidate.path)
-        if data is None or structure is None:
-            continue
-        member_id = member_id_for(candidate, structure.namespace)
         names = result.retrieval_member_hints.setdefault(candidate.path, [])
         if member_id not in names:
             names.append(member_id)
-        boundaries = member_boundaries_for(candidate.path, data.decode("utf-8", "replace")) or []
-        bucket = result.verified_grounding if boundaries_matching_member_id(boundaries, member_id) else \
-            result.hypothesis_candidates
+        bucket = result.verified_grounding if verified else result.hypothesis_candidates
         if member_id not in bucket.setdefault(candidate.path, []):
             bucket[candidate.path].append(member_id)
     # The legacy leg, bounded: only files the structural index does not

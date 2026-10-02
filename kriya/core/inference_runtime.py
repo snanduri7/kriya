@@ -71,6 +71,12 @@ class RuntimeCapabilities:
     # (OpenAI stream_options.include_usage). Declared, never discovered by
     # sending a request and resending it differently when that one fails.
     stream_usage: bool = False
+    # Code Intelligence R1 slice 2: the runtime constrains a response to a
+    # caller's JSON schema (grammar-enforced, measured for Ollama /api/chat
+    # 0.34.4: a forbidden enum value and an undeclared field could not be
+    # produced). Undeclared = never offered; a schema request is refused
+    # before any provider contact, never approximated by json_object.
+    json_schema_output: bool = False
 
 
 @dataclass(frozen=True)

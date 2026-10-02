@@ -160,6 +160,10 @@ def test_developer_receives_exact_current_t0_with_its_package_never_the_indexed_
     assert composition["t0_member_tokens"] > 0 and composition["t0_header_tokens"] > 0
     assert composition["t3_tokens"] > 0 and composition["sibling_signatures_tokens"] > 0
     assert composition["prompt_tokens_reported"] > composition["t0_member_tokens"]
+    # The goal names the member exactly: deterministic localization is
+    # clear, so no model is consulted (CI-6 is ambiguity-only).
+    [decision] = [e.details for e in events if e.kind == "localization.decision"]
+    assert (decision["reason_code"], decision["called"]) == ("LOCALIZATION_CLEAR", False)
     retrieval = [e for e in events if e.kind == "retrieval.code_intelligence"]
     assert retrieval and retrieval[0].details["source"] == "code_intelligence"
     assert retrieval[0].details["candidates"][0]["lookup_key"] == "shop.OrderService.total"
