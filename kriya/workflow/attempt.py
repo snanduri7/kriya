@@ -2322,6 +2322,15 @@ def _remember_anchor_loci(state: GenerationState, path: str, edits: List[Dict[st
         state.edit_anchor_loci[path] = sorted(set(state.edit_anchor_loci.get(path, [])) | located)
 
 
+_TEST_VERIFIERS = frozenset({"test", "tests", "regression"})
+
+
+def _declares_test_verification(required_verification: Iterable[Dict[str, Any]]) -> bool:
+    """The stage's declared verification includes a test-suite verifier."""
+    return any(item.get("type") == "tool" and item.get("tool_name") in _TEST_VERIFIERS
+               for item in required_verification or ())
+
+
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
     this Developer invocation (kriya/workflow/edit_capability.py), decided
@@ -8871,7 +8880,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if target_test:
                 accepted_test_output = test_res.get("output", "")
         else:
-            if runnable_test_files:
+            # The repository's own suite also runs when the plan declares a
+            # test verification for this stage: an edit of existing source
+            # writes no test file, and without this run the declared test
+            # evidence could never exist (REQUIRED VERIFICATION UNRESOLVED
+            # after every other gate passed - live, more-itertools).
+            if runnable_test_files or _declares_test_verification(ctx.required_verification):
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 if not test_res["success"]:
