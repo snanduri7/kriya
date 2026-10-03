@@ -814,6 +814,17 @@ loop returning the identical plan for checks whose fix is fully determined by th
   typed deterministic failure `VERIFIED_NO_CHANGE_REFUSED` through the ordinary repair path. Nothing is written or
   authorized; `completion_kind` is in the result only when the whole attempt passed, and the controller records
   reason code `VERIFIED_NO_CHANGE` on the SubtaskResult.
+- **Plan executability** (PLAN-EXECUTABILITY-001, `plan_validation._cites_deterministic_criterion`). Under
+  authoritative validation, a MODEL unit that changes files must declare a deterministic verifier or cite an
+  acceptance criterion a builtin quality-gate tool runs (the set PRV-11's `has_evidence_producer` accepts);
+  otherwise `MUTATION_UNIT_ACCEPTANCE_PATH_MISSING` (validation failure) goes through the existing bounded repair,
+  which offers four corrections: add a verifier, merge into a unit that has one, become a verification unit, or
+  remove the unit. A declared verifier without a producer stays PRV-11's `VERIFICATION_EVIDENCE_PATH_MISSING`
+  alone. Judgment acceptance criteria beside a compile/test verifier remain valid: every one of the 26 enforce
+  plans the 2026-10-02 live matrix persisted (the five judge-verified successes included) uses judgment criteria
+  with such a verifier, and no rule relabels judgment as compile. The failing Spring XML plan already had a
+  compile verifier on every unit; its failure (the configuration file omitted, units for files needing no change)
+  is classified PLANNER_MODEL_CAPABILITY, not a structural defect.
 
 ### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 first slice
 

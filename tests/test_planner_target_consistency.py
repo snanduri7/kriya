@@ -64,7 +64,7 @@ def _plan(*subtasks):
         "acceptance_criteria": [{"id": "ac1", "description": "x", "method": "judgment"}],
         "subtasks": [{"execution_method": "model", "execution_role": "implementation", "depends_on": [],
                       "acceptance_criteria_ids": ["ac1"], "relevant_global_invariant_ids": ["gi1"],
-                      "verification": [], **st} for st in subtasks]})
+                      "verification": [{"type": "tool", "description": "compiles", "tool_name": "compile"}], **st} for st in subtasks]})
 
 
 def _owning(sid, files, targets):
@@ -167,7 +167,9 @@ def test_the_enforce_controller_rejects_an_inconsistent_plan_and_accepts_the_cor
 
     async def generation(*args, **kwargs):
         calls.append(sorted(kwargs.get("allowed_write_relpaths") or []))
-        return {"status": "success", "quality_gates_passed": True, "files": []}
+        return {"status": "success", "quality_gates_passed": True, "files": [],
+                "verification_results": [{"type": "tool", "tool_name": "compile", "description": "compiles",
+                                          "passed": True}]}
 
     engine.run_generation_workflow = AsyncMock(side_effect=generation)
     target = {"target_id": ids["cacheManager"], "file": TOOLS_XML}

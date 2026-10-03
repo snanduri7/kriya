@@ -57,6 +57,7 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.plan_schema import (
+    BUILTIN_QUALITY_GATE_VERIFIERS,
     EngineeringPlan,
     ExecutionMethod,
     ExecutionRole,
@@ -359,6 +360,18 @@ def canonicalize_planned_file_actions(
                 )
                 pf.action = correct_action
     return corrected_plan, corrections
+
+
+def _cites_deterministic_criterion(subtask: Subtask, criteria_by_id: Dict[str, Any]) -> bool:
+    """PLAN-EXECUTABILITY-001: whether ``subtask`` cites an acceptance
+    criterion a builtin quality-gate tool runs (the set PRV-11's
+    VerificationMethod.has_evidence_producer accepts for a tool verifier).
+    A judgment criterion is never one: the plan schema forbids its tool_name."""
+    return any(
+        (criterion := criteria_by_id.get(criterion_id)) is not None
+        and criterion.tool_name in BUILTIN_QUALITY_GATE_VERIFIERS
+        for criterion_id in subtask.acceptance_criteria_ids
+    )
 
 
 PLAN_VALIDATION_SOURCE = "plan_validation.validate_plan"
@@ -924,6 +937,7 @@ async def validate_plan(
                 terminal_required=True,
             ))
 
+    criteria_by_id = {ac.id: ac for ac in plan.acceptance_criteria}
     for st in plan.subtasks:
         # execution_role=verification is EXEMPT here, not weakened: Subtask's
         # own model_validator (plan_schema.py) already requires a
@@ -995,6 +1009,20 @@ async def validate_plan(
                         "when only running the application can prove it)."
                     )
                     reason_codes.append("VERIFICATION_EVIDENCE_PATH_MISSING")
+            # PLAN-EXECUTABILITY-001: a mutation unit that declares no
+            # verifier at all (and cites no builtin quality-gate criterion)
+            # can only ever be judged by a model - reject it before any
+            # Developer attempt. A declared verifier without an evidence
+            # producer is PRV-11's defect just above, reported once there.
+            # Judgment criteria beside a real verifier stay valid (every
+            # measured live plan, the judge-verified successes included).
+            if st.planned_files and not st.verification and not _cites_deterministic_criterion(st, criteria_by_id):
+                errors.append(
+                    f"subtask {st.id!r} changes files {[pf.path for pf in st.planned_files]!r} but "
+                    "has no deterministic verifier - no compile, test or runtime check Kriya can run "
+                    "would ever show this work unit is complete"
+                )
+                reason_codes.append("MUTATION_UNIT_ACCEPTANCE_PATH_MISSING")
 
         for pf in st.planned_files:
             full_path = os.path.join(workspace_path, pf.path)
