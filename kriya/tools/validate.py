@@ -11,7 +11,7 @@ import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
-from kriya.capabilities import JAVA, MAVEN, build_adapter_for_tool
+from kriya.capabilities import BUILD_ADAPTERS, JAVA, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -239,10 +239,6 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     adapter = build_adapter_for_tool(tool)
     if adapter is not None:
         return adapter.output_roots(cmd, cwd)
-    if tool in ("gradle", "gradlew", "gradle.bat"):
-        return ([os.path.join(d, "build") for d in _project_dirs(
-            cwd, lambda files: "build.gradle" in files or "build.gradle.kts" in files)]
-                + [os.path.join(cwd, ".gradle")])
     if tool == "javac" and "-d" in cmd[:-1]:
         return [cmd[cmd.index("-d") + 1]]
     if tool.startswith("python") or tool in ("pytest", "py.test"):
@@ -678,9 +674,8 @@ class PolymorphicValidator:
         # different ecosystem; that residue must not override the build system
         # the workspace explicitly declares.
         # 1. Check for Java project markers
-        if (MAVEN.detects(self.workspace_path) or
-            os.path.exists(os.path.join(self.workspace_path, "build.gradle")) or
-            os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
+        if (any(adapter.detects(self.workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "java")
+                or os.path.exists(os.path.join(self.workspace_path, "src", "main", "java"))):
             return "java"
 
         # 2. Check for Ruby
@@ -1484,32 +1479,14 @@ class PolymorphicValidator:
             return {"success": True, "output": "Python files compiled successfully."}
 
         elif self.stack == "java":
-            # Maven (dependency regression, then mvn clean compile) - the Maven
-            # build adapter; None: not decided, continue with Gradle / javac.
-            decided = MAVEN.compile(self, files, deadline=deadline)
-            if decided is not None:
-                return decided
-
-            # 2. Run Gradle compile if build.gradle exists
-            if os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
-                try:
-                    gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
-                    res = self._run_cmd_with_timeout([gradle_cmd, "compileJava"], cwd=self.workspace_path)
-                    if res["returncode"] == 0:
-                        return self._validation_result(True, "Gradle compilation succeeded.", res)
-                    return self._validation_result(False, f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}", res)
-                except FileNotFoundError as e:
-                    # Same reasoning as the mvn case above - don't silently fall
-                    # through to the misleading raw javac fallback.
-                    return {"success": False, "output": f"Failed to invoke {gradle_cmd} compileJava: {e}"}
-                except ContainmentSetupError:
-                    # SEC-002 (2026-09-12): same reasoning as the mvn case
-                    # above - must not silently fall through to the javac
-                    # fallback, which can report success:True for a real
-                    # containment/setup failure.
-                    raise
-                except Exception as e:
-                    logger.warning(f"Failed to invoke gradle compileJava: {e}")
+            # The build adapters in precedence order (Maven: dependency
+            # regression, then mvn clean compile; Gradle: compileJava); None:
+            # not decided, continue with the next one, then javac.
+            for adapter in BUILD_ADAPTERS:
+                if adapter.language == "java":
+                    decided = adapter.compile(self, files, deadline=deadline)
+                    if decided is not None:
+                        return decided
 
             # 3. Fallback to raw javac syntax check (for simple single-class projects)
             # `files` can include controller-provided established-file context
@@ -1712,17 +1689,9 @@ class PolymorphicValidator:
                 java_test_class = (
                     os.path.splitext(os.path.basename(target_test_list[0]))[0] if target_test_list else None
                 )
-                if MAVEN.detects(self.workspace_path):
-                    return MAVEN.run_tests(self, java_test_class)
-                elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
-                    gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
-                    cmd = [gradle_cmd, "test"]
-                    if java_test_class:
-                        cmd.extend(["--tests", java_test_class])
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                    return self._validation_result(
-                        res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
-                    )
+                for adapter in BUILD_ADAPTERS:
+                    if adapter.language == "java" and adapter.detects(self.workspace_path):
+                        return adapter.run_tests(self, java_test_class)
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":
