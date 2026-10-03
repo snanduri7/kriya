@@ -4160,7 +4160,8 @@ async def test_enforce_recovery_plan_runtime_verification_multi_owner(tmp_path):
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
-            "goal", str(tmp_path), migration_mode="enforce",
+            "Run the application and check its output.",  # a runtime-verified run (PLAN-VERIFICATION-SCOPE-001)
+            str(tmp_path), migration_mode="enforce",
         )
 
     assert result.legacy_result["status"] == "success"
@@ -7798,6 +7799,7 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "VERIFICATION_EVIDENCE_PATH_MISSING",
     # PLAN-EXECUTABILITY-001: a mutation unit with no deterministic verifier.
     "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING",
+    "PLAN_VERIFICATION_SCOPE_UNJUSTIFIED",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
     "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
@@ -9183,7 +9185,8 @@ async def test_enforce_deny_all_runtime_verification_failure_routes_through_owne
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         result = await WorkflowController(we).execute(
-            "goal", str(tmp_path), migration_mode="enforce",
+            "Run the application and check its output.",  # a runtime-verified run (PLAN-VERIFICATION-SCOPE-001)
+            str(tmp_path), migration_mode="enforce",
         )
 
     # (5)

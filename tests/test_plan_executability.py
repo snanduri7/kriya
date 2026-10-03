@@ -92,7 +92,9 @@ async def test_a_mutation_unit_with_a_deterministic_verifier_and_judgment_criter
 async def test_a_runtime_verifier_is_a_deterministic_acceptance_path(workspace):
     runtime = VerificationMethod(type=VerificationMethodType.JUDGMENT, description="run it",
                                  verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True)
-    result = await _validate(_plan(_unit(verification=[runtime])), workspace)
+    # a request that requires runtime evidence (PLAN-VERIFICATION-SCOPE-001)
+    result = await validate_plan(_plan(_unit(verification=[runtime])), workspace_path=workspace,
+                                 require_model_planned_files=True, runtime_verification_required=True)
     assert result.valid, result.errors
 
 

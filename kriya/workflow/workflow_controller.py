@@ -144,7 +144,12 @@ from kriya.workflow.checkpoint import (
     validate_resume_against_reality,
 )
 from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified_candidate, plan_terminal_writes
-from kriya.workflow.context_budget import CandidatePrompts, candidate_model, fit_reference_section
+from kriya.workflow.context_budget import (
+    CandidatePrompts,
+    candidate_model,
+    fit_reference_section,
+    fit_structural_evidence,
+)
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
     ContextPackage,
@@ -184,7 +189,11 @@ from kriya.workflow.ownership_findings import (
     settle_findings,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
-from kriya.workflow.plan_normalization import coalesce_same_file_owners, derive_verification_contracts
+from kriya.workflow.plan_normalization import (
+    coalesce_same_file_owners,
+    derive_verification_contracts,
+    scope_verification_to_requirements,
+)
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -4189,24 +4198,59 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # first one and every repair round) leaves after its system prompt
         # and every goal-derived section, trimmed at whole entries.
         raw_reference = legacy_kwargs.get("reference_context", "")
+        # PLANNER-CONTEXT-FIT-001: what the request is built around ranks the
+        # structural relationships when they do not all fit - grounded owners
+        # first, then Code Intelligence candidates in rank order.
+        structural_focus: Dict[str, int] = {candidate.path: 0 for candidate in owner_candidates}
+        for candidate in localization:
+            structural_focus.setdefault(candidate.path, len(structural_focus) + 1)
+        structural_lines = structural_evidence_text.split("\n") if structural_evidence_text else []
 
         def planner_prompts(request: str) -> Optional[CandidatePrompts]:
-            """``request`` plus the fenced reference, fitted for each Planner
-            candidate's own request (PROMPT-FIT-ROLE-CHAIN-001); None when
-            there is no reference to fit (the request goes out unchanged)."""
-            if not raw_reference.strip():
-                return None
+            """``request`` fitted for each Planner candidate's own request
+            (PROMPT-FIT-ROLE-CHAIN-001): its structural relationships first
+            (PLANNER-CONTEXT-FIT-001; the goal, protocol, requirements, owner
+            and Code Intelligence candidates are never trimmed), then the
+            fenced reference into what is left - the untrusted reference gives
+            way first. None when there is nothing to fit (the request goes out
+            unchanged)."""
+            fits_structure = bool(structural_lines) and request.count(structural_evidence_text) == 1
+            if kernel is None or (not raw_reference.strip() and not fits_structure):
+                return None  # no configuration to size against, or nothing to fit
 
             def build(capacity: Any, candidate: Any) -> str:
-                fit = fit_reference_section(capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, request), raw_reference)
-                if fit.omitted or fit.builds > 1 or \
-                        fit.value.count("\n[Source: ") < raw_reference.count("\n[Source: "):
+                text, structural = request, None
+                if fits_structure:
+                    before, after = request.split(structural_evidence_text)
+                    fit, structural = fit_structural_evidence(
+                        capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, before, after), structural_lines,
+                        structural_focus)
+                    text = before + fit.value + after
+                    if fit.value != structural_evidence_text:
+                        structural.update(
+                            capacity_tokens=capacity.tokens,
+                            estimated_tokens_before=capacity.count(AUTHORITATIVE_PLANNER_SYSTEM_PROMPT)
+                            + capacity.count(request),
+                            estimated_tokens_after=capacity.count(AUTHORITATIVE_PLANNER_SYSTEM_PROMPT)
+                            + capacity.count(text))
+                    else:
+                        structural = None
+                reference = None
+                if raw_reference.strip():
+                    reference = fit_reference_section(capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, text),
+                                                      raw_reference)
+                    text += reference.value
+                    if not (reference.omitted or reference.builds > 1
+                            or reference.value.count("\n[Source: ") < raw_reference.count("\n[Source: ")):
+                        reference = None
+                if structural is not None or reference is not None:
                     ledger.record_and_persist(
                         workspace_path, "context.request_fit", run_id=run_id,
                         request="structured_planner", model=candidate_model(kernel.config, candidate),
-                        reference=fit.to_dict(),
+                        reference=reference.to_dict() if reference is not None else None,
+                        structural_evidence=structural,
                     )
-                return request + fit.value
+                return text
 
             return CandidatePrompts(kernel.config, self.workflow_engine.planner, "planner", build,
                                     max_tokens_override=planner_token_cap if isinstance(planner_token_cap, int)
@@ -4324,11 +4368,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # A verification unit's contract is what its own
                     # depends_on consumes (deterministic restatement).
                     plan, derived_contracts = derive_verification_contracts(plan)
-                    if coalesced or derived_contracts:
+                    # PLAN-VERIFICATION-SCOPE-001: runtime verification the
+                    # request does not require is removed when that is safe;
+                    # what remains is refused by validate_plan below.
+                    plan, verification_scope = scope_verification_to_requirements(
+                        plan, goal_requires_runtime_behavior(goal),
+                    )
+                    if coalesced or derived_contracts or verification_scope:
                         ledger.record_and_persist(
                             workspace_path, "structured_plan_normalized", run_id=run_id,
                             repair_attempt=repair_attempts, merges=coalesced,
-                            derived_contracts=derived_contracts,
+                            derived_contracts=derived_contracts, verification_scope=verification_scope,
                         )
                     # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
                     # longer refused here - they now execute through the

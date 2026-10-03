@@ -842,6 +842,56 @@ def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str],
     return replace(fit, omitted=True) if reference.strip() and not fit.value else fit
 
 
+STRUCTURAL_EVIDENCE_ELISION = (
+    "({omitted} of {total} structural relationships not shown to fit this request; every relationship of the "
+    "ranked candidate and owner files is shown before any other)"
+)
+
+
+def fit_structural_evidence(
+    capacity: RequestCapacity, fixed_texts: Sequence[str], lines: Sequence[str], focus: Dict[str, int],
+) -> Tuple[SectionFit, Dict[str, Any]]:
+    """The enforce Planner's structural relationships fitted into the room
+    the rest of the request leaves (PLANNER-CONTEXT-FIT-001), through
+    fit_variable_section. Each line is one whole ``source references ->
+    target`` relationship; ``focus`` ranks the files the goal points at (0 =
+    most direct: owner candidates, then Code Intelligence candidates in rank
+    order). When everything fits the text is unchanged. Otherwise lines are
+    kept by priority - the best focus rank of either endpoint, lines touching
+    no focus file last, ties in their original order - shown in their
+    original order, whole, followed by one explicit elision line counting
+    what was left out (the elision line alone when none fits). Returns the
+    fit and its accounting."""
+    full = "\n".join(lines)
+    total = len(lines)
+    unranked = len(focus) + 1
+    ranks = [min(focus.get(path.strip(), unranked) for path in line.split(" references -> ")) for line in lines]
+    order = sorted(range(total), key=lambda index: (ranks[index], index))
+
+    def elided(keep: Iterable[int]) -> str:
+        kept = set(keep)
+        shown = [lines[index] for index in range(total) if index in kept]
+        return "\n".join(shown + [STRUCTURAL_EVIDENCE_ELISION.format(omitted=total - len(kept), total=total)])
+
+    def build(budget: int) -> str:
+        if estimate_tokens(full) <= budget:
+            return full
+        room = budget - estimate_tokens(elided(())) - 1
+        keep, used = [], 0
+        for index in order:
+            cost = estimate_tokens(lines[index]) + 1
+            if used + cost > room:
+                break  # priority order: a later line never displaces an earlier one
+            keep.append(index)
+            used += cost
+        return elided(keep)
+
+    fit = fit_variable_section(capacity, fixed_texts, build, empty=elided(()))
+    kept = total if fit.value == full else sum(1 for line in fit.value.split("\n")[:-1] if line)
+    return fit, {"lines_total": total, "lines_kept": kept, "lines_omitted": total - kept,
+                 "focus_lines": sum(1 for rank in ranks if rank < unranked), **fit.to_dict()}
+
+
 def fit_planner_request(
     capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
     reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]], request: str = "planner",

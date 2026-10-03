@@ -791,6 +791,30 @@ loop returning the identical plan for checks whose fix is fully determined by th
   requires gets `requires` = its `depends_on` units' provides - a restatement of its own edges. Nothing is derived
   when its dependencies provide nothing (the validator still reports `SUBTASK_SEMANTIC_CONTRACT_MISSING`).
   Decision field `derived_contracts`.
+- **Planner context fit** (PLANNER-CONTEXT-FIT-001, `context_budget.fit_structural_evidence`). The enforce Planner
+  request is fitted per role candidate (`CandidatePrompts`) by priority: goal, protocol, requirements, grounded
+  owners and the Code Intelligence candidate map (annotations, configuration values) are never trimmed; the
+  `source references -> target` relationships get the room they leave, then the fenced reference gets what is
+  left (it gives way first). When the relationships do not all fit, whole lines are kept by the best focus rank of
+  either endpoint (grounded owners, then candidates in rank order; lines touching neither last; ties in order),
+  shown in their original order with one explicit elision line counting the rest. A request that fits is
+  byte-identical; one whose mandatory text cannot fit is still refused by the unchanged dispatch check. Decision
+  `context.request_fit` field `structural_evidence` (line counts, room, estimated tokens before/after). Measured:
+  the commons-lang `chop` request for qwen3.6 was refused before inference (estimated 33,567 tokens > 32,768 at
+  its qualified 1.6852 bytes/token; the same-size request to qwen3-coder used 12,273 real tokens); fitted, it is
+  24,162 estimated tokens with all 47 relationships of the target file kept and 111 of 236 elided. The estimator's
+  conservatism is a residual (ADMISSION-ESTIMATOR-CONSERVATISM-001), never bypassed with post-call counts.
+- **Verification scope** (PLAN-VERIFICATION-SCOPE-001, `scope_verification_to_requirements`). A Planner may not add
+  application-runtime verification the request does not require. The one source is Kriya's own reading of the
+  request, `acceptance.goal_requires_runtime_behavior` (the value enforce already validates and runs with); there is
+  no second policy and no model is asked. When it is False: a unit that keeps another verifier with an evidence
+  producer loses only the runtime verifier; a verification-only unit whose verifiers all lack a basis is removed
+  when nothing rests on it (no dependent, no consumer of its provides, no integration relationship, no requirement
+  id only it cites, and only judgment criteria only it cites - removed with it). Compile/test verification is never
+  touched. Anything else is refused as `PLAN_VERIFICATION_SCOPE_UNJUSTIFIED` (validation failure, bounded repair).
+  Decision field `verification_scope`. Live trigger: the Spring XML run with a correct plan and a passing suite
+  that then failed closed on an invented "the application starts" unit (REQUIRED_RUNTIME_VERIFICATION_MISSING);
+  of the 28 approved live plans it is the only one with a runtime verifier.
 - **Mutation targets** (`Subtask.mutation_targets`: target_id, file, action, requirement_ids; omitted from the
   serialized plan when empty). Optional: Code Intelligence is evidence, never authorization. Each stated target is
   checked against the CURRENT view: unknown or stale id -> `PLAN_TARGET_UNKNOWN` (policy rejection); stated file
@@ -825,6 +849,19 @@ loop returning the identical plan for checks whose fix is fully determined by th
   with such a verifier, and no rule relabels judgment as compile. The failing Spring XML plan already had a
   compile verifier on every unit; its failure (the configuration file omitted, units for files needing no change)
   is classified PLANNER_MODEL_CAPABILITY, not a structural defect.
+
+- **Candidate evidence** (SPRING-XML-PLANNER-EVIDENCE-001, `graph_retrieval.candidate_signature`). A Planner
+  localization candidate line shows the structural facts Code Intelligence already holds, never a body: a code
+  member's annotation names before its signature, a configuration entry's (`CONFIG_KINDS`) own declaration text
+  from the current bytes, whitespace-collapsed (the indexed signature when the bytes changed), bounded at
+  `CANDIDATE_SIGNATURE_CHARS` (240). Measured on the reconstructed exact Spring XML Planner request (2026-10-03):
+  with bare signatures the request ranked the cache-name property 4th and the cache-manager bean 6th, yet neither
+  model included the configuration file (production model 0/3; fallback 1/3; naming the targets outright 1/3 each);
+  with these facts both included it 3/3, and the fallback model produced a fully correct plan 3/3. The production
+  model still gave mutation ownership to unneeded callers in every response (a model-specific limit, not fixed
+  here). Live, both full runs then planned the configuration file and the Developer's candidates pass the held-out
+  judge; the runs still failed closed on planning beyond the goal (SPRING-XML-PLANNER-OVERSCOPE-001). Changing this
+  module stales context-certification records (`index_implementation_digest`).
 
 ### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 (Maven, Java, Gradle)
 
