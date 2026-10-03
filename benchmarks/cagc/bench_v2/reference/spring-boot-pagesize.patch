@@ -1,0 +1,47 @@
+diff --git a/src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java b/src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java
+index e5edf5b..bfeb84a 100644
+--- a/src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java
++++ b/src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java
+@@ -19,6 +19,7 @@ import java.util.List;
+ import java.util.Objects;
+ import java.util.Optional;
+ 
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.data.domain.Page;
+ import org.springframework.data.domain.PageRequest;
+ import org.springframework.data.domain.Pageable;
+@@ -52,8 +53,11 @@ class OwnerController {
+ 
+ 	private final OwnerRepository owners;
+ 
+-	public OwnerController(OwnerRepository owners) {
++	private final int pageSize;
++
++	public OwnerController(OwnerRepository owners, @Value("${petclinic.owners.page-size:5}") int pageSize) {
+ 		this.owners = owners;
++		this.pageSize = pageSize;
+ 	}
+ 
+ 	@InitBinder
+@@ -139,7 +143,6 @@ class OwnerController {
+ 	}
+ 
+ 	private Page<Owner> findPaginatedForOwnersLastName(int page, String lastname) {
+-		int pageSize = 5;
+ 		int validatedPage = Math.max(page, 1);
+ 		Pageable pageable = PageRequest.of(validatedPage - 1, pageSize);
+ 		return owners.findByLastNameStartingWith(lastname, pageable);
+diff --git a/src/main/resources/application.properties b/src/main/resources/application.properties
+index d000edb..c936bf2 100644
+--- a/src/main/resources/application.properties
++++ b/src/main/resources/application.properties
+@@ -6,6 +6,9 @@ spring.sql.init.data-locations=classpath*:db/${database}/data.sql
+ # Web
+ spring.thymeleaf.mode=HTML
+ 
++# Owners per page in owner search results
++petclinic.owners.page-size=5
++
+ # JPA
+ spring.jpa.hibernate.ddl-auto=none
+ spring.jpa.open-in-view=false

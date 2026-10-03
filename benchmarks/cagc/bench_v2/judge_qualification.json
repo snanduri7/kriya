@@ -1,0 +1,65 @@
+{
+ "rule": "DISCRIMINATING = judge(untouched base) FAIL and judge(base + reference) PASS, both on fresh trees",
+ "tasks": {
+  "java-behavior-accents": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "java-symbol-chop": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "java-symbol-fraction": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "v2_new_results.txt (re-mined a0ffef035)",
+   "classification": "DISCRIMINATING"
+  },
+  "spring-boot-pagesize": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "base: matrix40_step1_results.txt; reference patch: v2_new_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "spring-xml-pettypes-cache": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "base: matrix40_step1_results.txt; reference patch: v2_new_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "python-behavior-maxsplit": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "python-symbol-valuechain": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt (row python-symbol-one: the same workspace, fix 7847d43)",
+   "classification": "DISCRIMINATING"
+  },
+  "python-symbol-ichunked": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "python-symbol-zipb": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  },
+  "python-error-invalidurl": {
+   "base": "FAIL",
+   "reference": "PASS",
+   "source": "matrix40_step1_results.txt",
+   "classification": "DISCRIMINATING"
+  }
+ }
+}
