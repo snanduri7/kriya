@@ -118,6 +118,12 @@ def _keep_mocked_controller_tests_on_their_explicit_workspace(monkeypatch):
     )
 
 
+# PLAN-EXECUTABILITY-001: a mutation unit needs a deterministic verifier; the
+# measured live plans all declare compile or test on every mutation unit.
+_COMPILE = VerificationMethod(type=VerificationMethodType.TOOL, description="compiles", tool_name="compile")
+_COMPILE_EVIDENCE = {"type": "tool", "tool_name": "compile", "description": "compiles", "passed": True}
+
+
 def _route(kind=ChangeKind.TASK):
     return EngineeringRoute(
         kind=kind, impact=ImpactVector(),
@@ -405,21 +411,21 @@ async def test_grounded_controller_revises_and_revalidates_service_only_scope(tm
         subtasks=[
             Subtask(
                 id="s2", description="update service behavior",
-                execution_method=ExecutionMethod.MODEL,
+                execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
                 provides=["customer behavior"],
                 relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s3", description="compose endpoint response",
-                execution_method=ExecutionMethod.MODEL, depends_on=["s2"],
+                execution_method=ExecutionMethod.MODEL, verification=[_COMPILE], depends_on=["s2"],
                 planned_files=[PlannedFile(path=controller, action=FileAction.MODIFY)],
                 requires=["customer behavior"], provides=["endpoint response"],
                 relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
                 id="s4", description="extend response coverage",
-                execution_method=ExecutionMethod.MODEL, depends_on=["s3"],
+                execution_method=ExecutionMethod.MODEL, verification=[_COMPILE], depends_on=["s3"],
                 planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
                 requires=["endpoint response"],
                 relevant_global_invariant_ids=["gi1"],
@@ -5507,12 +5513,12 @@ async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_r
         global_invariants=[GlobalInvariant(id="gi1", statement="only the raise cap changes")],
         subtasks=[
             Subtask(
-                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
                 provides=["raise_capped"], relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
-                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 depends_on=["s1"], requires=["raise_capped"],
                 planned_files=[PlannedFile(
                     path=test_file, action=FileAction.MODIFY,
@@ -5549,6 +5555,7 @@ async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_r
             (tmp_path / path).write_text("modified\n")
         return {
             "status": "success", "quality_gates_passed": True,
+            "verification_results": [_COMPILE_EVIDENCE],
             "files": kwargs["allowed_write_relpaths"],
         }
 
@@ -5600,12 +5607,12 @@ async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gat
         global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
         subtasks=[
             Subtask(
-                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
                 provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
-                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 depends_on=["s1"], requires=["service_updated"],
                 planned_files=[PlannedFile(
                     path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
@@ -5627,6 +5634,7 @@ async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gat
             (tmp_path / path).write_text("modified\n")
         return {
             "status": "success", "quality_gates_passed": True,
+            "verification_results": [_COMPILE_EVIDENCE],
             "files": kwargs["allowed_write_relpaths"],
         }
 
@@ -5665,12 +5673,12 @@ async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_o
         global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
         subtasks=[
             Subtask(
-                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
                 provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
             ),
             Subtask(
-                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
                 depends_on=["s1"], requires=["service_updated"],
                 planned_files=[PlannedFile(
                     path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
@@ -5696,6 +5704,7 @@ async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_o
             (tmp_path / _CUSTOMER_CONTROLLER_PATH).write_text("silently mutated\n")
         return {
             "status": "success", "quality_gates_passed": True,
+            "verification_results": [_COMPILE_EVIDENCE],
             "files": kwargs["allowed_write_relpaths"],
         }
 
@@ -7787,6 +7796,8 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "REFACTOR_BASELINE_MISSING",
     "PLANNED_FILE_ACTION_MISMATCH",
     "VERIFICATION_EVIDENCE_PATH_MISSING",
+    # PLAN-EXECUTABILITY-001: a mutation unit with no deterministic verifier.
+    "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
     "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
@@ -10024,7 +10035,7 @@ def _repair_probe_plan():
     return EngineeringPlan(
         plan_id="repair-probe-run", kind=ChangeKind.TASK,
         subtasks=[Subtask(
-            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL, verification=[_COMPILE],
             planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
         )],
     )
@@ -10033,7 +10044,8 @@ def _repair_probe_plan():
 async def _successful_generation(**kwargs):
     with open(os.path.join(kwargs["workspace_path"], "a.py"), "w", encoding="utf-8") as f:
         f.write("# generated\n")
-    return {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+    return {"status": "success", "quality_gates_passed": True, "files": ["a.py"],
+            "verification_results": [_COMPILE_EVIDENCE]}
 
 
 @pytest.mark.asyncio

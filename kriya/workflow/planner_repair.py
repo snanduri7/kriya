@@ -112,7 +112,7 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "PLANNED_ARTIFACT_PREREQUISITE_INVALID", "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
     "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP", "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
     "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
-    "VERIFICATION_EVIDENCE_PATH_MISSING", "PLAN_REQUIREMENT_ID_UNKNOWN",
+    "VERIFICATION_EVIDENCE_PATH_MISSING", "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING", "PLAN_REQUIREMENT_ID_UNKNOWN",
     "SEMANTIC_CONTRACT_REGRESSION_REJECTED", "PRESERVED_REFERENCE_REGRESSION_REJECTED",
     "PLAN_TARGET_INCONSISTENT",
     # Milestone plans (kriya/workflow/milestone_validation.py): decided from
@@ -415,6 +415,19 @@ def build_structured_plan_repair_prompt(
             "confirmed by compiling or running the test suite instead, set type=tool with "
             "tool_name=compile/verifier_kind=compile or tool_name=test/verifier_kind=test instead. "
             "Do not just restate the same judgment-only shape.\n"
+        )
+    if "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING" in reason_codes:
+        targeted_correction += (
+            "- Each subtask the errors name changes files but has no deterministic verifier, so "
+            "nothing Kriya can run would ever show it complete. For each one, do exactly one of: "
+            "add a deterministic verifier to its own verification list (type=tool with "
+            "tool_name=compile/verifier_kind=compile, or tool_name=test/verifier_kind=test, or "
+            "verifier_kind=application_runtime with requires_runtime_execution=true when only "
+            "running the application can show it); merge its planned files into the subtask that "
+            "already verifies that work; turn it into a verification-only subtask (execution_role="
+            "verification, no planned_files) if it changes nothing; or remove it if the goal does "
+            "not need it. Keep judgment acceptance criteria as they are - do not relabel them as "
+            "compile or test.\n"
         )
     if "MISSING_GROUNDED_PRODUCTION_ARTIFACT" in reason_codes:
         targeted_correction += (

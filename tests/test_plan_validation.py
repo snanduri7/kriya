@@ -726,6 +726,11 @@ async def test_acceptance_criterion_judgment_entry_is_not_a_terminal_verificatio
     subtask = _model_subtask(
         planned_files=[PlannedFile(path="a.txt", action=FileAction.CREATE)],
         acceptance_criteria_ids=["ac1"],
+        # The measured live shape: a judgment criterion beside a real
+        # compile verifier (PLAN-EXECUTABILITY-001 refuses a mutation unit
+        # with no verifier at all).
+        verification=[VerificationMethod(type=VerificationMethodType.TOOL, description="compiles",
+                                         tool_name="compile")],
     )
     plan = _plan(
         [subtask],
