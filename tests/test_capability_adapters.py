@@ -13,7 +13,16 @@ from unittest.mock import patch
 
 import pytest
 
-from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, LANGUAGE_ADAPTERS, MAVEN, build_adapter_for_tool
+from kriya.capabilities import (
+    BUILD_ADAPTERS,
+    GRADLE,
+    JAVA,
+    LANGUAGE_ADAPTERS,
+    MAVEN,
+    PIP,
+    PYTHON,
+    build_adapter_for_tool,
+)
 from kriya.capabilities.ports import BuildAdapter, LanguageAdapter
 from kriya.config import AppConfig
 from kriya.tools import validate
@@ -37,7 +46,7 @@ def _validator(workspace, original=None):
 
 
 def test_the_registry_is_closed_and_typed():
-    assert BUILD_ADAPTERS == (MAVEN, GRADLE) and LANGUAGE_ADAPTERS == (JAVA,)  # order = precedence
+    assert BUILD_ADAPTERS == (MAVEN, GRADLE, PIP) and LANGUAGE_ADAPTERS == (JAVA, PYTHON)  # order = precedence
     assert all(isinstance(adapter, BuildAdapter) for adapter in BUILD_ADAPTERS)
     assert isinstance(JAVA, LanguageAdapter)
     assert (MAVEN.build_system, MAVEN.language, JAVA.language) == ("maven", "java", "java")
@@ -119,13 +128,14 @@ def test_the_maven_test_gate_names_the_bare_test_class(tmp_path):
 
 # --- ownership --------------------------------------------------------------------
 
-_MOVED_SEAMS = ("run_compile_check", "run_tests", "_detect_stack", "_has_any_java_file", "_java_sources")
+_MOVED_SEAMS = ("run_compile_check", "run_tests", "_detect_stack", "_has_any_java_file", "_java_sources",
+                "_has_any_py_file")
 
 
 def test_the_moved_validator_seams_name_no_build_system_detail():
-    """The Maven and Gradle pieces of these seams are the adapters' now; a
-    returning pom.xml / mvn / build.gradle / gradlew literal means a second,
-    divergent copy."""
+    """The Maven, Gradle and pip pieces of these seams are the adapters' now; a
+    returning pom.xml / mvn / build.gradle / gradlew / requirements.txt /
+    pytest literal means a second, divergent copy."""
     import textwrap
 
     def constants(function):
@@ -134,7 +144,9 @@ def test_the_moved_validator_seams_name_no_build_system_detail():
 
     build_literals = {"pom.xml", "mvn", "mvnw", "mvn.cmd",
                       "build.gradle", "build.gradle.kts", "gradle", "gradlew", "./gradlew", "gradle.bat",
-                      "compileJava", "--tests"}
+                      "compileJava", "--tests",
+                      "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile",
+                      "py_compile", "pytest", "py.test", "__pycache__", ".pytest_cache", ".py"}
     for name in _MOVED_SEAMS:
         found = constants(getattr(PolymorphicValidator, name))
         assert not found & build_literals, (name, found & build_literals)
@@ -284,3 +296,89 @@ def test_the_toolchain_fact_gate_reads_the_build_adapters(tmp_path):
     with patch.object(GRADLE, "detects", return_value=False):
         assert _goal_or_repo_targets_java("add a feature", str(tmp_path)) is False
     assert _goal_or_repo_targets_java("a gradle build", str(tmp_path / "none")) is True
+
+
+# --- Python / pip (third slice) ---------------------------------------------------------
+
+@pytest.mark.parametrize("marker", ["requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"])
+def test_every_python_marker_is_the_pip_adapters(tmp_path, marker):
+    _write(tmp_path, marker)
+    assert PIP.detects(str(tmp_path)) and _validator(tmp_path).stack == "python"
+    with patch.object(PIP, "detects", return_value=False):
+        # nothing else names the marker (setup.py is itself a source the language adapter finds)
+        assert _validator(tmp_path).stack == ("python" if marker.endswith(".py") else "unknown")
+
+
+def test_a_marker_free_python_source_is_found_by_the_language_adapter(tmp_path):
+    _write(tmp_path, "venv/lib/site.py")
+    _write(tmp_path, "build/gen.py")
+    assert PYTHON.has_sources(str(tmp_path)) is False  # skipped directories only
+    assert _validator(tmp_path).stack == "unknown"
+    _write(tmp_path, "app/main.py")
+    assert PYTHON.has_sources(str(tmp_path)) is True and _validator(tmp_path).stack == "python"
+    assert PYTHON.source_files(str(tmp_path)) == ["app/main.py"]
+
+
+def test_a_python_marker_never_outranks_a_java_build(tmp_path):
+    _write(tmp_path, "pom.xml", POM.format(deps=""))
+    _write(tmp_path, "requirements.txt")
+    assert _validator(tmp_path).stack == "java"
+
+
+def test_pip_output_roots_are_every_source_dirs_pycache_and_the_pytest_cache(tmp_path):
+    _write(tmp_path, "pkg/mod.py")
+    _write(tmp_path, "docs/readme.md")
+    expected = sorted([os.path.join(str(tmp_path), "pkg", "__pycache__"), os.path.join(str(tmp_path), ".pytest_cache")])
+    for tool in ("python3", "python3.12", "python", "pytest", "py.test"):
+        assert build_adapter_for_tool(tool) is PIP
+        assert sorted(gate_output_roots([tool, "-m", "pytest"], str(tmp_path))) == expected
+    assert build_adapter_for_tool("pythonista") is PIP  # the inline prefix rule, unchanged
+    assert build_adapter_for_tool("pip") is None and gate_output_roots(["pip", "install"], str(tmp_path)) == []
+
+
+def test_the_pip_compile_gate_reports_a_syntax_error_and_passes_valid_source(tmp_path):
+    _write(tmp_path, "requirements.txt")
+    _write(tmp_path, "ok.py", "x = 1\n")
+    _write(tmp_path, "bad.py", "def f(:\n")
+    v = _validator(tmp_path)
+    assert v.run_compile_check(["ok.py"]) == {"success": True, "output": "Python files compiled successfully."}
+    bad = v.run_compile_check(["ok.py", "bad.py", "missing.py"])
+    assert bad["success"] is False and bad["output"].startswith("Syntax error in bad.py line 1")
+
+
+def test_the_contained_compile_gate_runs_py_compile_through_the_validator(tmp_path):
+    _write(tmp_path, "requirements.txt")
+    _write(tmp_path, "pkg/a.py", "x = 1\n")
+    v = _validator(tmp_path)
+    v.autonomy_cfg.contained_execution_required = True
+    seen = []
+
+    def fake(self, cmd, cwd, **_):
+        seen.append(cmd)
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=fake):
+        assert v.run_compile_check(["pkg/a.py", "notes.txt", "gone.py"])["success"] is True
+        assert v.run_compile_check(["notes.txt"]) == {"success": True, "output": "No Python files to compile."}
+    assert seen == [["python3", "-m", "py_compile", "pkg/a.py"]]
+
+
+def test_the_pytest_gate_passes_each_target_as_its_own_argument(tmp_path):
+    _write(tmp_path, "requirements.txt")
+    _write(tmp_path, "src/x.py")
+    v = _validator(tmp_path)
+    seen = []
+
+    def fake(self, cmd, cwd, **_):
+        seen.append(cmd)
+        return {"returncode": 5, "stdout": "no tests ran", "stderr": ""}
+
+    with patch.object(PolymorphicValidator, "_resolve_python_interpreter", return_value=("py-under-test", None)), \
+         patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=fake):
+        result = v.run_tests(["tests/test_a.py", "tests/test b.py"])
+    assert result["success"] is True  # pytest exit 5 (no tests) passes, as before
+    cmd = seen[0]
+    assert cmd[0] == "py-under-test" and cmd[-3:] == ["--", "tests/test_a.py", "tests/test b.py"]
+    assert repr([str(tmp_path), os.path.join(str(tmp_path), "src")]) in cmd[2]
+    with patch.object(PolymorphicValidator, "_resolve_python_interpreter", return_value=("x", "pip install failed")):
+        assert v.run_tests(None) == {"success": False, "output": "pip install failed"}

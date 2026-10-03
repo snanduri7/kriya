@@ -863,7 +863,7 @@ loop returning the identical plan for checks whose fix is fully determined by th
   judge; the runs still failed closed on planning beyond the goal (SPRING-XML-PLANNER-OVERSCOPE-001). Changing this
   module stales context-certification records (`index_implementation_digest`).
 
-### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 (Maven, Java, Gradle)
+### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 (Maven, Java, Gradle, Python, pip)
 
 Ecosystem knowledge sits behind two narrow ports (`ports.py`), traced from the verification core's call sites:
 `LanguageAdapter` (`language`, `has_sources`, `source_files`) and `BuildAdapter` (`build_system`, `language`,
@@ -886,7 +886,16 @@ copy of the pom.xml / build.gradle marker rule. R1 Gradle support is what the va
 build runs `compileJava` / `test` for every included subproject; a Kotlin-DSL-only root and per-project build
 roots for changed files are recorded capability gaps (GRADLE-KOTLIN-DSL-001, GRADLE-PROJECT-ROOT-001). Maven POM
 artifact records (`kriya/control/artifacts.py`) are a Maven domain model, not a marker rule, and stay there.
-javac, Python and Ruby remain inline for later slices.
+Third slice, moved unchanged: `PythonLanguageAdapter` owns the marker-free `.py` detection walk (VCS, Kriya state,
+virtualenv, dependency and build directories skipped); `PipBuildAdapter` owns the Python project markers
+(requirements.txt, pyproject.toml, setup.py, setup.cfg, Pipfile), the syntax compile gate (`python3 -m py_compile`
+through the validator under containment, else an in-process `compile()`), the pytest gate (the workspace root,
+`src/` and Maven-style Python roots appended to `sys.path`, each target its own argv entry, pytest exit 5 = no
+tests = pass) and its output roots (`__pycache__/` of every source directory plus `.pytest_cache/`; `invokes` keeps
+the inline rule: any `python*` interpreter or pytest). Interpreter and virtualenv resolution stays on the validator
+(`_resolve_python_interpreter`, also used by runtime verification). Dependencies still install only from
+requirements.txt / pyproject.toml; Poetry and Pipenv dependency installation is a recorded later slice
+(PYTHON-POETRY-PIPENV-001). Java markers still outrank Python ones. javac and Ruby remain inline.
 
 ### 2.10 `kriya/workflow/` Module Layout
 
