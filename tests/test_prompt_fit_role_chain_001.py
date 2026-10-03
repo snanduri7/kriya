@@ -300,8 +300,10 @@ def test_kriya_review_refits_each_batch_for_a_smaller_fallback(tmp_path, monkeyp
     cfg.llm.extra_body = {}
     small = FallbackModelConfig(model=FALLBACK, context_window=8192)
     cfg.agent_llms.reviewer = AgentModelConfig(llm_chain=[small])
-    (tmp_path / "a.py").write_text("a = 1  # first file\n" * 70)
-    (tmp_path / "b.py").write_text("b = 2  # second file\n" * 70)
+    # One file fits the 8K fallback's room, two do not: measured at the
+    # CAGC-0 Reviewer system prompt, 75..140 lines per file; 110 is the middle.
+    (tmp_path / "a.py").write_text("a = 1  # first file\n" * 110)
+    (tmp_path / "b.py").write_text("b = 2  # second file\n" * 110)
     monkeypatch.chdir(tmp_path)
     sent = []
 
