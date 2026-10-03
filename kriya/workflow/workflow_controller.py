@@ -87,7 +87,9 @@ from kriya.agents.contracts import (
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     parse_planner_structured_output,
 )
+from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.analyzer.graph import DependencyGraph
+from kriya.capabilities.guidance import Operation, Role, file_reader
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.commit_state import assess_workspace_commit_state
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
@@ -132,6 +134,12 @@ from kriya.static_analysis.service import (
 from kriya.workflow import subtask_executor
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
+from kriya.workflow.capability_guidance import (
+    CAPABILITY_GUIDANCE_EVENT,
+    compose_section,
+    event_details,
+    run_repository_facts,
+)
 from kriya.workflow.checkpoint import (
     ResumeStatus,
     compute_base_commit,
@@ -147,6 +155,7 @@ from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     candidate_model,
+    fit_guidance_section,
     fit_reference_section,
     fit_structural_evidence,
 )
@@ -4130,6 +4139,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "planner_max_tokens", None,
             )
         logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
+        # CAGC-0: the run's capability-guidance facts, once, on the original
+        # workspace (before the plan worktree exists); every subtask's
+        # run_generation_workflow receives them instead of recomputing.
+        capability_repository_facts = run_repository_facts(
+            workspace_path,
+            frameworks=RepositoryAnalyzer(workspace_path).analyze().frameworks,
+            dependency_graph_path=os.path.join(kernel.config.paths.memory, "dependency_graph.db")
+            if kernel is not None else None,
+            goal=goal,
+        )
         planning_repository_candidates = _authoritative_planner_extension_candidates(
             workspace_path, goal=goal,
         )
@@ -4205,18 +4224,38 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         for candidate in localization:
             structural_focus.setdefault(candidate.path, len(structural_focus) + 1)
         structural_lines = structural_evidence_text.split("\n") if structural_evidence_text else []
+        # CAGC-0: guidance selected from the owner candidates and the Code
+        # Intelligence candidate map - text the fit never trims (KRIYA_CAGC
+        # §7) - placed after the structural relationships and fitted before
+        # the fenced reference.
+        planner_guidance = compose_section(
+            Role.PLANNER, Operation.PLAN, capability_repository_facts,
+            [candidate.path for candidate in owner_candidates] + [candidate.path for candidate in localization],
+            file_reader(workspace_path),
+        )
+
+        def record_planner_guidance(model: Any) -> Callable[[Any, Any], Any]:
+            """The structured Planner's capability.guidance decision, recorded
+            once per request after its final fit (CAGC-0)."""
+            return lambda facts, block: ledger.record_and_persist(
+                workspace_path, CAPABILITY_GUIDANCE_EVENT, run_id=run_id,
+                **event_details(facts, block, request="structured_planner",
+                                model=model if isinstance(model, str) else None))
 
         def planner_prompts(request: str) -> Optional[CandidatePrompts]:
             """``request`` fitted for each Planner candidate's own request
             (PROMPT-FIT-ROLE-CHAIN-001): its structural relationships first
             (PLANNER-CONTEXT-FIT-001; the goal, protocol, requirements, owner
             and Code Intelligence candidates are never trimmed), then the
-            fenced reference into what is left - the untrusted reference gives
-            way first. None when there is nothing to fit (the request goes out
-            unchanged)."""
+            capability guidance (CAGC-0), then the fenced reference into what
+            is left - the untrusted reference gives way first. None when there
+            is nothing to fit (the request goes out unchanged)."""
             fits_structure = bool(structural_lines) and request.count(structural_evidence_text) == 1
-            if kernel is None or (not raw_reference.strip() and not fits_structure):
-                return None  # no configuration to size against, or nothing to fit
+            if kernel is None or (not raw_reference.strip() and not fits_structure and not planner_guidance.text):
+                # No configuration to size against, or nothing to fit: the
+                # request goes out unchanged, with no guidance in it.
+                planner_guidance.with_sink(record_planner_guidance(planner_model)).observe("")
+                return None
 
             def build(capacity: Any, candidate: Any) -> str:
                 text, structural = request, None
@@ -4235,6 +4274,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             + capacity.count(text))
                     else:
                         structural = None
+                model = candidate_model(kernel.config, candidate)
+                guidance = fit_guidance_section(capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, text),
+                                                planner_guidance.with_sink(record_planner_guidance(model)))
+                text += guidance.value
                 reference = None
                 if raw_reference.strip():
                     reference = fit_reference_section(capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, text),
@@ -4243,12 +4286,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     if not (reference.omitted or reference.builds > 1
                             or reference.value.count("\n[Source: ") < raw_reference.count("\n[Source: ")):
                         reference = None
-                if structural is not None or reference is not None:
+                guidance_fit = guidance.to_dict() if guidance.value != planner_guidance.text else None
+                if structural is not None or reference is not None or guidance_fit is not None:
                     ledger.record_and_persist(
                         workspace_path, "context.request_fit", run_id=run_id,
-                        request="structured_planner", model=candidate_model(kernel.config, candidate),
+                        request="structured_planner", model=model,
                         reference=reference.to_dict() if reference is not None else None,
-                        structural_evidence=structural,
+                        structural_evidence=structural, capability_guidance=guidance_fit,
                     )
                 return text
 
@@ -5193,6 +5237,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 work_unit=WorkUnitInvocation(
                     PlanSourceKind.STRUCTURED, plan.plan_id, target.id, plan.content_hash(),
                 ),
+                # CAGC-0: the run's facts, computed once before planning.
+                repository_facts=capability_repository_facts,
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
 

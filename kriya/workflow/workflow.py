@@ -24,6 +24,7 @@ from kriya.agents.agent import (
 )
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
+from kriya.capabilities.guidance import Operation, RepositoryFacts, Role, file_reader
 from kriya.code_intel.model import CALLABLE_KINDS
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
@@ -79,6 +80,7 @@ from kriya.workflow.attribution import (
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.best_of_n import BestOfNFailureRecorded
+from kriya.workflow.capability_guidance import compose_section, run_event_recorder, run_repository_facts
 from kriya.workflow.checkpoint import (
     ResumeAction,
     ResumeStatus,
@@ -397,6 +399,25 @@ def _review_refit_recorder(state: Any, stage: str, config: Any) -> Any:
                      "model": candidate_model(config, candidate), **details},
         ))
     return record
+
+
+def _review_guidance(state: Any, stage: str, config: Any, repository_facts: Optional[RepositoryFacts],
+                     files: Sequence[Tuple[str, str]]) -> Callable[[Any, int], Any]:
+    """CAGC-0: ``review_requests``' guidance factory. The review's guidance is
+    selected once from the changed candidate files it reviews (their
+    candidate bytes, not the workspace's), then fitted and reported per
+    request (batch and role candidate)."""
+    contents = dict(files)
+    section = compose_section(
+        Role.REVIEWER, Operation.REVIEW, repository_facts, list(contents),
+        lambda path: contents[path].encode("utf-8") if path in contents else None,
+    )
+
+    def for_request(candidate: Any, batch: int) -> Any:
+        return section.with_sink(run_event_recorder(state, f"reviewer.{stage}",
+                                                    model=candidate_model(config, candidate), batch=batch))
+
+    return for_request
 
 
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
@@ -1528,8 +1549,14 @@ class WorkflowEngine:
         deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
         work_unit: Optional[WorkUnitInvocation] = None,
         requirements_from_goal: bool = True,
+        repository_facts: Optional[RepositoryFacts] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        repository_facts (CAGC-0): the run's capability-guidance facts,
+        computed once on the original workspace. None computes them here
+        (before the greenfield bootstrap and any Kriya write); the enforce
+        controller passes its run's facts to every subtask.
 
         requirements_from_goal (PRD-020): False when ``goal`` is Kriya's own
         wording rather than the user's (``kriya fix``); no original
@@ -2169,6 +2196,15 @@ class WorkflowEngine:
         # schema refuses an absolute planned path - a model shown the absolute
         # root copied it into planned_files and was refused for Kriya's own echo.
         repo_context = repo_model.model_dump_json(indent=2, exclude={"dependency_versions", "root_path"})
+        # CAGC-0: the run's capability-guidance facts, on the ORIGINAL
+        # workspace - before create_git_worktree bootstraps a greenfield
+        # repository and before any Kriya write (advisory selection input).
+        if repository_facts is None:
+            repository_facts = run_repository_facts(
+                workspace_path, frameworks=repo_model.frameworks,
+                dependency_graph_path=os.path.join(self.kernel.config.paths.memory, "dependency_graph.db"),
+                goal=goal,
+            )
         
         # Load local workspace conventions if present
         from kriya.skills.skill import SkillEngine
@@ -2900,6 +2936,22 @@ class WorkflowEngine:
             )
             plan_prompt += grounding_block
 
+        def planning_guidance(role: Role, candidate: Any) -> Callable[[Sequence[str]], Any]:
+            """CAGC-0: a Planner/Architect request's guidance, selected from
+            the directly matched files its FITTED graph context still shows
+            (KRIYA_CAGC §7) and reported after the request's final fit."""
+            matched = list(getattr(graph_retrieval_result, "matched_files", None) or [])
+            model = candidate_model(self.kernel.config, candidate)
+
+            def guidance(shown_files: Sequence[str]) -> Any:
+                shown = set(shown_files)
+                return compose_section(
+                    role, Operation.PLAN, repository_facts, [path for path in matched if path in shown],
+                    file_reader(workspace_path), run_event_recorder(state, role.value, model=model),
+                )
+
+            return guidance
+
         # MODEL-EVIDENCE-HARDENING-001: set only when this run's Planner
         # produced the plan (never for a predetermined or resumed one), so
         # only a real response's outcome reaches the role metrics.
@@ -2927,6 +2979,8 @@ class WorkflowEngine:
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=plan_suffix,
                     rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
+                    guidance=planning_guidance(Role.PLANNER, candidate),
+                    graph_package=getattr(graph_retrieval_result, "context_package", None),
                 )
                 if plan_fit:
                     state.record_event(RunEvent(
@@ -3205,6 +3259,8 @@ class WorkflowEngine:
                     skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
                     suffix=design_suffix, request="architect",
                     rebuild_graph=lambda budget: graph_retrieval_result.rebuild_context(workspace_path, budget),
+                    guidance=planning_guidance(Role.ARCHITECT, candidate),
+                    graph_package=getattr(graph_retrieval_result, "context_package", None),
                 )
                 if design_fit:
                     state.record_event(RunEvent(
@@ -3990,6 +4046,7 @@ class WorkflowEngine:
             deterministic_failure_diagnostics=resolved_deterministic_failure_diagnostics,
             resume_plan=resume_plan,
             requirement_set=requirement_set,
+            repository_facts=repository_facts,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -4324,11 +4381,13 @@ class WorkflowEngine:
                         # PROMPT-BUDGET-FIT-001B: batches get the room this
                         # request leaves after its system prompt and header,
                         # refitted for each role candidate that is called.
+                        pre_approval_files = [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)]
                         review_batches, _, review_fit = review_requests(
-                            self.kernel.config, self.reviewer,
-                            [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
+                            self.kernel.config, self.reviewer, pre_approval_files,
                             self.reviewer.system_prompt, review_header,
                             on_refit=_review_refit_recorder(state, "pre_approval", self.kernel.config),
+                            guidance=_review_guidance(state, "pre_approval", self.kernel.config,
+                                                      repository_facts, pre_approval_files),
                         )
                         _record_review_fit(state, "pre_approval", review_fit)
                         # The completed report is attached to the approval context
@@ -5574,6 +5633,8 @@ class WorkflowEngine:
                 self.kernel.config, self.reviewer, file_contents_for_review,
                 reviewer_system_prompt_override or self.reviewer.system_prompt, goal_header,
                 on_refit=_review_refit_recorder(state, "final", self.kernel.config),
+                guidance=_review_guidance(state, "final", self.kernel.config, repository_facts,
+                                          file_contents_for_review),
             )
             _record_review_fit(state, "final", review_fit)
             # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied

@@ -242,8 +242,9 @@ def file_reader(root: str) -> Callable[[str], Optional[bytes]]:
     path does not exist or is not a regular file)."""
     def read(path: str) -> Optional[bytes]:
         full = os.path.join(root, path)
-        if not os.path.isfile(full):
+        try:
+            with open(full, "rb") as handle:
+                return handle.read()
+        except OSError:  # missing, a directory or unreadable: no current bytes (a path-only target)
             return None
-        with open(full, "rb") as handle:
-            return handle.read()
     return read

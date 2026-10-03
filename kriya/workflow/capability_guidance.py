@@ -91,6 +91,27 @@ def event_details(facts: SelectionFacts, block: GuidanceBlock, **extra: Any) -> 
     return {**guidance_event_details(facts, block), **extra}
 
 
+def run_event_recorder(state: Any, request: str, *, model: Optional[str] = None, batch: Optional[int] = None,
+                       ) -> Callable[[SelectionFacts, GuidanceBlock], None]:
+    """A GuidanceSection sink recording one ``capability.guidance`` run event
+    (ADVISORY) per request, after its final fit."""
+    from kriya.workflow.run_events import EventAuthority, RunEvent
+
+    def record(facts: SelectionFacts, block: GuidanceBlock) -> None:
+        extra: Dict[str, Any] = {"request": request, "model": model}
+        if batch is not None:
+            extra["batch"] = batch
+        state.record_event(RunEvent(
+            kind=CAPABILITY_GUIDANCE_EVENT, attempt=state.attempt_number, source="capability_guidance",
+            authority=EventAuthority.ADVISORY,
+            message=f"{request} request: {len(block.rule_ids)} capability guidance rule(s) sent "
+                    f"({block.estimated_tokens} estimated tokens)",
+            details=event_details(facts, block, **extra),
+        ))
+
+    return record
+
+
 def run_repository_facts(workspace_path: str, *, frameworks: Iterable[str], dependency_graph_path: Optional[str],
                          goal: str) -> RepositoryFacts:
     """The run's RepositoryFacts (on the original workspace, before any

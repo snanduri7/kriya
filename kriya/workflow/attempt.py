@@ -26,6 +26,7 @@ from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
+from kriya.capabilities.guidance import Role, file_reader
 from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
@@ -72,6 +73,13 @@ from kriya.workflow.attribution import (
 )
 from kriya.workflow.authority_escalation import grant_member_hints
 from kriya.workflow.banners import log_gate_banner
+from kriya.workflow.capability_guidance import (
+    CAPABILITY_GUIDANCE_SECTION,
+    GuidanceSection,
+    compose_section,
+    developer_operation,
+    run_event_recorder,
+)
 from kriya.workflow.context_budget import (
     DeveloperRequestFit,
     OptionalSection,
@@ -2230,16 +2238,35 @@ def _planned_source_context(
     return f"\n\n{PLANNED_SOURCE_HEADER}\n{body}" if body else ""
 
 
+def _developer_guidance(state: GenerationState, ctx: "AttemptContext", target_paths: Optional[Iterable[str]],
+                        ) -> GuidanceSection:
+    """CAGC-0: the capability guidance of one attempt's Developer requests,
+    selected from the attempt's authorized targets (their current worktree
+    bytes; path facts for a file that does not exist yet) and reported after
+    each request's final fit. The operation follows §6.1.1: any retry is
+    REPAIR, a first attempt EDITs an existing target, else CREATEs."""
+    targets = [path for path in (target_paths or ()) if path]
+    return compose_section(
+        Role.DEVELOPER, developer_operation(state.attempt_number, targets, ctx.workspace_path),
+        ctx.repository_facts, targets, file_reader(ctx.worktree_path),
+        run_event_recorder(state, "developer"),
+    )
+
+
 def _developer_optional_sections(
     ctx: "AttemptContext", graph_context: str, graph_exclude: Any, learned_reference: str,
-    planned_source: str = "",
+    planned_source: str = "", guidance: Optional[GuidanceSection] = None,
 ) -> Tuple[OptionalSection, ...]:
     """The optional sections an attempt branch placed in its Developer
-    context (DEVELOPER-PROMPT-FIT-001): the planned files' current source
-    and the graph context, each rebuilt smaller from the same candidates when
-    the request does not fit, and the fenced learned reference, trimmed at
-    whole entries."""
+    context (DEVELOPER-PROMPT-FIT-001): the planned files' current source,
+    the capability guidance (CAGC-0, observed so its event describes the block
+    each request finally carries) and the graph context, each rebuilt smaller
+    when the request does not fit, and the fenced learned reference, trimmed
+    at whole entries."""
     sections: List[OptionalSection] = []
+    if guidance is not None:
+        sections.append(OptionalSection(CAPABILITY_GUIDANCE_SECTION, guidance.text, guidance.rebuild,
+                                        guidance.observe))
     if planned_source:
         sections.append(OptionalSection(
             "planned_source", planned_source, lambda budget: _planned_source_context(ctx, graph_exclude, budget)))
@@ -2880,6 +2907,9 @@ class AttemptContext:
     # verifier (a direct goal, a milestone plan's integration unit). None
     # for units that verify something narrower (a milestone, a subtask).
     requirement_set: Optional["RequirementSet"] = None
+    # CAGC-0: the run's capability-guidance facts (computed once on the
+    # original workspace). None selects with conservative facts.
+    repository_facts: Optional[Any] = None
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:
@@ -6426,11 +6456,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             cache=ctx.source_cache,
         )
         planned_source = _planned_source_context(ctx, _graph_exclude)
-        base_code_context = ctx.skills_prompt + planned_source
-        if current_graph_context:
-            base_code_context += current_graph_context
-        if learned_reference:
-            base_code_context += learned_reference
 
         if use_api_contract_recovery:
             state.last_implicated_files = sorted({
@@ -6455,6 +6480,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 and state.repair_contract.status == RepairContractStatus.ACTIVE
             ) else None
         )
+        guidance = _developer_guidance(state, ctx, list(state.last_implicated_files) + (
+            list(active_repair_contract.generation_order) if active_repair_contract is not None else []))
+        base_code_context = ctx.skills_prompt + guidance.text + planned_source
+        if current_graph_context:
+            base_code_context += current_graph_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         if active_repair_contract is not None:
             logger.info(
@@ -6477,7 +6509,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             files, coordinated_candidate_view = await _run_coordinated_repair_generation(
                 state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
                 optional_sections=_developer_optional_sections(
-                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source, guidance=guidance),
             )
             # PRV-06 completion (2026-08-29): active_code_context was
             # previously left UNASSIGNED on this branch - live-reproduced
@@ -6595,7 +6627,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 files = await _run_developer_generation(
                     state, ctx,
                     optional_sections=_developer_optional_sections(
-                        ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                        ctx, current_graph_context, _graph_exclude, learned_reference, planned_source, guidance=guidance),
                     task_description=task_desc,
                     design_context=(task_desc if use_api_contract_recovery else ctx.design),
                     existing_code_context=active_code_context,
@@ -6657,7 +6689,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             cache=ctx.source_cache,
         )
         planned_source = _planned_source_context(ctx, _graph_exclude)
-        base_code_context = ctx.skills_prompt + planned_source
+        guidance = _developer_guidance(state, ctx, state.last_implicated_files)
+        base_code_context = ctx.skills_prompt + guidance.text + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
         if learned_reference:
@@ -6696,7 +6729,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             optional_sections=_developer_optional_sections(
-                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source, guidance=guidance),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6747,11 +6780,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             cache=ctx.source_cache,
         )
         planned_source = _planned_source_context(ctx, _graph_exclude)
-        base_code_context = ctx.skills_prompt + planned_source
-        if current_graph_context:
-            base_code_context += current_graph_context
-        if learned_reference:
-            base_code_context += learned_reference
 
         # last_missing_files (from find_missing_expected_files) is always
         # bare basenames (compared against written files by basename).
@@ -6767,6 +6795,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         resolved_missing_files = [
             ctx.architect_basename_to_path.get(basename, basename) for basename in state.last_missing_files
         ]
+        guidance = _developer_guidance(state, ctx, resolved_missing_files)
+        base_code_context = ctx.skills_prompt + guidance.text + planned_source
+        if current_graph_context:
+            base_code_context += current_graph_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         # VAL-001 G1 D1: _build_missing_files_retry_prompt reads every file in
         # all_files_written fresh from the worktree (real, complete, current) -
@@ -6787,7 +6821,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             optional_sections=_developer_optional_sections(
-                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source, guidance=guidance),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6899,7 +6933,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             cache=ctx.source_cache,
         )
         planned_source = _planned_source_context(ctx, _graph_exclude)
-        active_code_context = ctx.skills_prompt + planned_source
+        guidance = _developer_guidance(state, ctx, known_target_files or ctx.expected_files_upfront
+                                       or ctx.architect_files or state.all_files_written)
+        active_code_context = ctx.skills_prompt + guidance.text + planned_source
         if current_graph_context:
             active_code_context += current_graph_context
         if learned_reference:
@@ -7024,7 +7060,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             optional_sections=_developer_optional_sections(
-                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source, guidance=guidance),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
