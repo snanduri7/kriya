@@ -118,6 +118,10 @@ class LocalizationCandidate:
                 "score": self.score, "channels": [c for c, _ in self.channels]}
 
 
+# Room for an annotated signature or a configuration entry's own values.
+CANDIDATE_SIGNATURE_CHARS = 240
+
+
 def render_localization_candidates(candidates: Sequence[LocalizationCandidate]) -> str:
     """The compact candidate map for the Planner: ranked symbol ids, path,
     kind, compact signature and the channels that found each - never a
@@ -127,7 +131,7 @@ def render_localization_candidates(candidates: Sequence[LocalizationCandidate]) 
     lines = ["", "=== CODE INTELLIGENCE LOCALIZATION CANDIDATES (ranked; where the goal points, read-only, "
              "never write authority) ==="]
     for rank, candidate in enumerate(candidates, 1):
-        signature = " ".join(candidate.signature.split())[:160]
+        signature = " ".join(candidate.signature.split())[:CANDIDATE_SIGNATURE_CHARS]
         lines.append(f"{rank}. [{candidate.kind}] {candidate.lookup_key} - {candidate.path}"
                      f"{' - ' + signature if signature else ''} (via {', '.join(c for c, _ in candidate.channels)})"
                      f" id={candidate.symbol_id}")
@@ -348,8 +352,31 @@ def fused_localization(service: Any, text: str, semantic_hits: Iterable[Dict[str
     hits = service.locate(text, limit=limit, semantic=list(semantic_hits))
     symbols = {s.symbol_id: s for s in service._symbols_by_id([h.symbol_id for h in hits])}
     return [LocalizationCandidate(h.symbol_id, h.path, h.kind, h.lookup_key,
-                                  symbols[h.symbol_id].signature_text if h.symbol_id in symbols else "",
+                                  candidate_signature(service, symbols[h.symbol_id]) if h.symbol_id in symbols else "",
                                   h.score, h.channels) for h in hits]
+
+
+def candidate_signature(service: Any, symbol: Any) -> str:
+    """What a candidate line shows of ``symbol``: structural facts Code
+    Intelligence already holds, never a body. A code member: its annotation
+    names, then its signature. A configuration entry (``CONFIG_KINDS``): its
+    own declaration text from the current bytes, whitespace-collapsed - for
+    XML that includes nested values (a property's ``<set>`` of names), the
+    fact a "do it the same way as X" request is about. Measured (Spring XML
+    pet-types, 2026-10-03): with signatures alone neither Planner model ever
+    saw ``@Cacheable`` or the cache-name set and both omitted the
+    configuration file; with these facts both included it 3/3. Falls back to
+    the bare signature when the current bytes are not the indexed ones."""
+    from kriya.code_intel.model import CONFIG_KINDS, source_digest
+
+    if symbol.kind not in CONFIG_KINDS:
+        annotations = " ".join(f"@{name}" for name in symbol.annotations)
+        return f"{annotations} {symbol.signature_text}" if annotations else symbol.signature_text
+    data = service.current_bytes(symbol.path)
+    if data is None or source_digest(data) != symbol.source_digest:
+        return symbol.signature_text
+    text = data[symbol.declaration.start_byte:symbol.declaration.end_byte].decode("utf-8", "replace")
+    return " ".join(text.split()).replace("> <", "><")
 
 
 def member_id_for(candidate: LocalizationCandidate, namespace: str) -> str:
