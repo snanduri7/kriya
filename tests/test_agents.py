@@ -3513,11 +3513,28 @@ def test_architect_agent_requires_explicit_build_manifest():
     one - every retry failed on the same missing-dependency compile errors
     since nothing in the retry loop could recover a file that was never
     requested in the first place (see _detect_missing_build_manifest's
-    structural fix for the other half of this)."""
+    structural fix for the other half of this).
+
+    CAGC-0: the rule moved out of the Architect's base prompt into capability
+    guidance - exactly that greenfield goal still gets it (the goal names the
+    build system), for the Architect only."""
+    import tempfile
+
+    from kriya.capabilities.guidance import Operation, RepositoryFacts, Role, compose_guidance, selection_facts
+    from kriya.workflow.capability_guidance import run_repository_facts
+
+    with tempfile.TemporaryDirectory() as workspace:
+        repo = run_repository_facts(workspace, frameworks=[], dependency_graph_path=None,
+                                    goal="In a Maven project, print the parsed protocol message.")
+    assert repo.greenfield and isinstance(repo, RepositoryFacts)
+    architect = compose_guidance(selection_facts(Role.ARCHITECT, Operation.PLAN, repo, [], lambda _p: None))
+    planner = compose_guidance(selection_facts(Role.PLANNER, Operation.PLAN, repo, [], lambda _p: None))
+    assert architect.rule_ids == ("maven.plan.greenfield_manifest_required",)
+    assert "build file in the design" in architect.text
+    assert "maven.plan.greenfield_manifest_required" not in planner.rule_ids
     prompt = ArchitectAgent("architect", None).system_prompt
-    assert "pom.xml" in prompt
-    assert "build.gradle" in prompt
-    assert "not implicit" in prompt.lower()
+    assert "pom.xml" not in prompt and "already-existing build file" in prompt
+
 
 def test_planner_agent_prompt_forbids_unrequested_multi_module_structure():
     """Regression test for a real bug found live, 2026-08-15
@@ -3531,11 +3548,22 @@ def test_planner_agent_prompt_forbids_unrequested_multi_module_structure():
     stage - Architect and Developer just faithfully implemented what a wrong
     plan already specified. Unlike ArchitectAgent (which already has a
     MINIMALISM principle, added earlier), PlannerAgent - which runs FIRST
-    and originates this exact class of decision - had no equivalent."""
+    and originates this exact class of decision - had no equivalent.
+
+    CAGC-0: the stack-neutral half (a multi-part description is no reason
+    for more units; a single-entry-point constraint covers the whole
+    implementation) stays in the base prompt; the build-topology half is the
+    Planner's Maven/Gradle guidance (greenfield: one module/project)."""
+    from kriya.capabilities.guidance import Operation, RepositoryFacts, Role, compose_guidance, selection_facts
+
     prompt = PlannerAgent("planner", None).system_prompt
     assert "MINIMALISM" in prompt
-    assert "single Maven/Gradle module" in prompt
-    assert "multi-module" in prompt.lower()
+    assert "does not by itself call for more build units" in prompt
+    assert "applies to the WHOLE implementation" in prompt
+    greenfield = RepositoryFacts(False, True, (), frozenset({"maven", "gradle"}))
+    block = compose_guidance(selection_facts(Role.PLANNER, Operation.PLAN, greenfield, [], lambda _p: None))
+    assert set(block.rule_ids) == {"maven.plan.greenfield_minimal_topology", "gradle.plan.greenfield_minimal_topology"}
+    assert "one module unless the goal asks for more" in block.text
 
 
 def test_planner_agent_prompt_carries_process_boundary_testability_guidance():
