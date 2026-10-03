@@ -1,0 +1,12 @@
+{
+  "java-symbol-fraction": {"base": "PASS", "fixed": "PASS", "note": "no fix for the fraction goal exists in this workspace (base = the chop task base); base already passes"},
+  "java-behavior-accents": {"base": "FAIL", "fixed": "PASS"},
+  "java-symbol-chop": {"base": "FAIL", "fixed": "PASS"},
+  "spring-boot-pagesize": {"base": "FAIL", "fixed": "PASS", "note": "fixed = prior reference run (judge/boot-ref.validator.log, 2026-10-02, 2 run/0 failed); no fix commit or preserved reference tree; base re-measured fresh"},
+  "spring-xml-pettypes-cache": {"base": "FAIL", "fixed": "PASS", "note": "fixed = prior reference run (judge/xml-ref.validator.log, 2026-10-02, 2 run/0 failed); no fix commit or preserved reference tree; base re-measured fresh"},
+  "python-behavior-maxsplit": {"base": "FAIL", "fixed": "PASS"},
+  "python-symbol-one": {"base": "FAIL", "fixed": null, "note": "AMBIGUOUS for this A/B: the judge tests the value_chain fix (base 7847d43^, PASS with it) but the A/B runs were given the one()/only() goal (harness goal lookup by workspace name)"},
+  "python-symbol-ichunked": {"base": "FAIL", "fixed": "PASS"},
+  "python-symbol-zipb": {"base": "FAIL", "fixed": "PASS"},
+  "python-error-invalidurl": {"base": "FAIL", "fixed": "PASS"}
+}

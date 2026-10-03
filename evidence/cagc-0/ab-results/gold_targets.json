@@ -1,0 +1,8 @@
+{
+  "java-behavior-accents": ["src/main/java/org/apache/commons/lang3/StringUtils.java"],
+  "java-symbol-chop": ["src/main/java/org/apache/commons/lang3/StringUtils.java"],
+  "python-behavior-maxsplit": ["more_itertools/more.py"],
+  "python-symbol-ichunked": ["more_itertools/more.py"],
+  "python-symbol-zipb": ["more_itertools/more.py"],
+  "python-error-invalidurl": ["httpx/_urlparse.py"]
+}

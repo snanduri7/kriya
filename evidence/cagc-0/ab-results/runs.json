@@ -1,0 +1,5027 @@
+{
+  "incomplete": [],
+  "runs": [
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 21.052,
+      "developer_prompt_eval_tokens": 13672,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTrimStripTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 68.869,
+          "prompt_tokens": 13672
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 7.305,
+          "prompt_tokens": 2524
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 86.582,
+          "prompt_tokens": 13015
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 36.416,
+          "prompt_tokens": 11679
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 46.627,
+          "prompt_tokens": 21364
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 13.537,
+          "prompt_tokens": 7489
+        }
+      },
+      "run_id": "20261003T135916-d568a487",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "success",
+      "task": "java-behavior-accents",
+      "wall_seconds": 940,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 38.44,
+      "developer_prompt_eval_tokens": 30411,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T141937-db6a560c",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTrimStripTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 6,
+          "latency_seconds": 160.775,
+          "prompt_tokens": 30411
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 14.292,
+          "prompt_tokens": 2369
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 33.048,
+          "prompt_tokens": 8716
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 29.201,
+          "prompt_tokens": 11550
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 47.008,
+          "prompt_tokens": 21101
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 15.692,
+          "prompt_tokens": 7973
+        }
+      },
+      "run_id": "20261003T141937-db6a560c",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "success",
+      "task": "java-behavior-accents",
+      "wall_seconds": 818,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 23.018,
+      "developer_prompt_eval_tokens": 18055,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T143416-0a32fc0f",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTrimStripTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 105.937,
+          "prompt_tokens": 18055
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 17.979,
+          "prompt_tokens": 3595
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 37.5,
+          "prompt_tokens": 8716
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 39.478,
+          "prompt_tokens": 13077
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 46.52,
+          "prompt_tokens": 21103
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 13.749,
+          "prompt_tokens": 7430
+        }
+      },
+      "run_id": "20261003T143416-0a32fc0f",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "success",
+      "task": "java-behavior-accents",
+      "wall_seconds": 1154,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 55.561,
+      "developer_prompt_eval_tokens": 38014,
+      "developer_retries": 5,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTrimStripTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 10,
+          "latency_seconds": 295.841,
+          "prompt_tokens": 42129
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 16.022,
+          "prompt_tokens": 2345
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 39.047,
+          "prompt_tokens": 8676
+        },
+        "reviewer": {
+          "calls": 4,
+          "latency_seconds": 85.469,
+          "prompt_tokens": 25473
+        },
+        "run_verifier": {
+          "calls": 3,
+          "latency_seconds": 82.416,
+          "prompt_tokens": 31862
+        },
+        "spec_compliance": {
+          "calls": 5,
+          "latency_seconds": 35.126,
+          "prompt_tokens": 13230
+        }
+      },
+      "run_id": "20261003T145400-99189c52",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "java-behavior-accents",
+      "wall_seconds": 1791,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 53.272,
+      "developer_prompt_eval_tokens": 38166,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 9,
+          "latency_seconds": 225.377,
+          "prompt_tokens": 47748
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 3.474,
+          "prompt_tokens": 1302
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 63.563,
+          "prompt_tokens": 12759
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 55.377,
+          "prompt_tokens": 12909
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 24.504,
+          "prompt_tokens": 11464
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 3.262,
+          "prompt_tokens": 1788
+        },
+        "unattributed": {
+          "calls": 2,
+          "latency_seconds": 14.951,
+          "prompt_tokens": 8666
+        }
+      },
+      "run_id": "20261003T152912-b048853d",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "java-symbol-chop",
+      "wall_seconds": 1344,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 39.016,
+      "developer_prompt_eval_tokens": 29831,
+      "developer_retries": 3,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [
+        "java.dev.import_style"
+      ],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [
+            "java.dev.import_style"
+          ],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T155704-f6a44a17",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T155704-f6a44a17",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 6,
+          "latency_seconds": 186.429,
+          "prompt_tokens": 32990
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 63.62,
+          "prompt_tokens": 12440
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 41.385,
+          "prompt_tokens": 13171
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 67.412,
+          "prompt_tokens": 22848
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 15.76,
+          "prompt_tokens": 7280
+        },
+        "unattributed": {
+          "calls": 1,
+          "latency_seconds": 14.624,
+          "prompt_tokens": 4332
+        }
+      },
+      "run_id": "20261003T155704-f6a44a17",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "success",
+      "task": "java-symbol-chop",
+      "wall_seconds": 1323,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 62.519,
+      "developer_prompt_eval_tokens": 38847,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [
+        "java.dev.import_style"
+      ],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [
+            "java.dev.import_style"
+          ],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [
+            "java.dev.import_style"
+          ],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.final",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T161941-0ac7e929",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T161941-0ac7e929",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 7,
+          "latency_seconds": 287.807,
+          "prompt_tokens": 41979
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 3.382,
+          "prompt_tokens": 1241
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 61.098,
+          "prompt_tokens": 13124
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 52.354,
+          "prompt_tokens": 14066
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 29.013,
+          "prompt_tokens": 22816
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 4.987,
+          "prompt_tokens": 2687
+        },
+        "unattributed": {
+          "calls": 1,
+          "latency_seconds": 18.256,
+          "prompt_tokens": 4328
+        }
+      },
+      "run_id": "20261003T161941-0ac7e929",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "failed",
+      "task": "java-symbol-chop",
+      "wall_seconds": 1164,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 26.993,
+      "developer_prompt_eval_tokens": 17304,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/StringUtils.java",
+        "src/test/java/org/apache/commons/lang3/StringUtilsTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 3,
+          "latency_seconds": 69.907,
+          "prompt_tokens": 17304
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 3.922,
+          "prompt_tokens": 1291
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 38.943,
+          "prompt_tokens": 8743
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 49.255,
+          "prompt_tokens": 13326
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 53.786,
+          "prompt_tokens": 23028
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 12.577,
+          "prompt_tokens": 6815
+        }
+      },
+      "run_id": "20261003T163942-3efef59f",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "success",
+      "task": "java-symbol-chop",
+      "wall_seconds": 898,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 11.252,
+      "developer_prompt_eval_tokens": 7191,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/math/Fraction.java",
+        "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 39.023,
+          "prompt_tokens": 7191
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.347,
+          "prompt_tokens": 1208
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 85.981,
+          "prompt_tokens": 10713
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 23.868,
+          "prompt_tokens": 7136
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 24.607,
+          "prompt_tokens": 11526
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 4.152,
+          "prompt_tokens": 2368
+        }
+      },
+      "run_id": "20261003T123740-ff84f336",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "java-symbol-fraction",
+      "wall_seconds": 990,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 44.758,
+      "developer_prompt_eval_tokens": 29813,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T125944-07ef5770",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/math/Fraction.java",
+        "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 158.009,
+          "prompt_tokens": 29813
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 14.871,
+          "prompt_tokens": 2461
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 39.032,
+          "prompt_tokens": 6361
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 41.852,
+          "prompt_tokens": 14348
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 50.375,
+          "prompt_tokens": 22901
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 13.87,
+          "prompt_tokens": 7665
+        }
+      },
+      "run_id": "20261003T125944-07ef5770",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "success",
+      "task": "java-symbol-fraction",
+      "wall_seconds": 1229,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 18.511,
+      "developer_prompt_eval_tokens": 12098,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T132049-0e59f850",
+          "selected_capability_ids": [
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/math/Fraction.java",
+        "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 53.779,
+          "prompt_tokens": 12098
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.591,
+          "prompt_tokens": 1198
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 32.627,
+          "prompt_tokens": 6361
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 33.736,
+          "prompt_tokens": 6945
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 25.965,
+          "prompt_tokens": 11405
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 3.694,
+          "prompt_tokens": 1882
+        }
+      },
+      "run_id": "20261003T132049-0e59f850",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1"
+      ],
+      "status": "failed",
+      "task": "java-symbol-fraction",
+      "wall_seconds": 751,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 46.139,
+      "developer_prompt_eval_tokens": 28004,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": "PLANNING_ERROR",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/apache/commons/lang3/math/Fraction.java",
+        "src/test/java/org/apache/commons/lang3/math/FractionTest.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 146.013,
+          "prompt_tokens": 28004
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 15.249,
+          "prompt_tokens": 3553
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 53.128,
+          "prompt_tokens": 10680
+        },
+        "reviewer": {
+          "calls": 3,
+          "latency_seconds": 54.293,
+          "prompt_tokens": 21398
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 28.606,
+          "prompt_tokens": 22970
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 6.984,
+          "prompt_tokens": 3608
+        }
+      },
+      "run_id": "20261003T133357-7ef04b4f",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "needs_review",
+      "task": "java-symbol-fraction",
+      "wall_seconds": 1238,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 41.096,
+      "developer_prompt_eval_tokens": 25930,
+      "developer_retries": 6,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 8,
+          "latency_seconds": 394.262,
+          "prompt_tokens": 28530
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 11.033,
+          "prompt_tokens": 879
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 93.599,
+          "prompt_tokens": 11507
+        },
+        "reviewer": {
+          "calls": 3,
+          "latency_seconds": 85.949,
+          "prompt_tokens": 23921
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 13.476,
+          "prompt_tokens": 5214
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 25.33,
+          "prompt_tokens": 7085
+        }
+      },
+      "run_id": "20261003T174932-5df2868d",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-behavior-maxsplit",
+      "wall_seconds": 790,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 36.592,
+      "developer_prompt_eval_tokens": 18138,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.final",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T180332-cf817c8c",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T180332-cf817c8c",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 7,
+          "latency_seconds": 449.541,
+          "prompt_tokens": 22059
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.583,
+          "prompt_tokens": 870
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 76.614,
+          "prompt_tokens": 7920
+        },
+        "reviewer": {
+          "calls": 4,
+          "latency_seconds": 144.042,
+          "prompt_tokens": 32360
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.816,
+          "prompt_tokens": 2525
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 36.296,
+          "prompt_tokens": 8181
+        }
+      },
+      "run_id": "20261003T180332-cf817c8c",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-behavior-maxsplit",
+      "wall_seconds": 948,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 28.644,
+      "developer_prompt_eval_tokens": 24379,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T181927-ab89c7ce",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T181927-ab89c7ce",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T181927-ab89c7ce",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 269.558,
+          "prompt_tokens": 24379
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.019,
+          "prompt_tokens": 881
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 76.996,
+          "prompt_tokens": 10784
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 7.237,
+          "prompt_tokens": 2487
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 3.088,
+          "prompt_tokens": 839
+        }
+      },
+      "run_id": "20261003T181927-ab89c7ce",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-behavior-maxsplit",
+      "wall_seconds": 434,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 58.605,
+      "developer_prompt_eval_tokens": 27560,
+      "developer_retries": 5,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 8,
+          "latency_seconds": 408.223,
+          "prompt_tokens": 33781
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 12.178,
+          "prompt_tokens": 989
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 49.532,
+          "prompt_tokens": 3563
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 38.55,
+          "prompt_tokens": 7891
+        }
+      },
+      "run_id": "20261003T182647-d0ef4e13",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-behavior-maxsplit",
+      "wall_seconds": 634,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 7.905,
+      "developer_prompt_eval_tokens": 5058,
+      "developer_retries": 3,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "httpx/_exceptions.py"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 11.756,
+          "prompt_tokens": 5058
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.678,
+          "prompt_tokens": 890
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 30.482,
+          "prompt_tokens": 6470
+        }
+      },
+      "run_id": "20261003T195829-feea3bae",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-error-invalidurl",
+      "wall_seconds": 85,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 13.444,
+      "developer_prompt_eval_tokens": 6888,
+      "developer_retries": 3,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200036-7b2748ba",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200036-7b2748ba",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200036-7b2748ba",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "httpx/_exceptions.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 17.368,
+          "prompt_tokens": 6888
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.99,
+          "prompt_tokens": 931
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 56.702,
+          "prompt_tokens": 12995
+        }
+      },
+      "run_id": "20261003T200036-7b2748ba",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-error-invalidurl",
+      "wall_seconds": 115,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 0,
+      "developer_prompt_eval_tokens": 0,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200234-478d4205",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200234-478d4205",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T200234-478d4205",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "httpx/_exceptions.py",
+        "httpx/_urls.py",
+        "tests/models/test_url.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 0,
+          "latency_seconds": 0.0,
+          "prompt_tokens": 0
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.0,
+          "prompt_tokens": 906
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 68.552,
+          "prompt_tokens": 13999
+        }
+      },
+      "run_id": "20261003T200234-478d4205",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-error-invalidurl",
+      "wall_seconds": 98,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 13.213,
+      "developer_prompt_eval_tokens": 6860,
+      "developer_retries": 3,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "httpx/_exceptions.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 18.091,
+          "prompt_tokens": 6860
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.026,
+          "prompt_tokens": 916
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 63.035,
+          "prompt_tokens": 13055
+        }
+      },
+      "run_id": "20261003T200416-a5b1cf7e",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-error-invalidurl",
+      "wall_seconds": 111,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 17.793,
+      "developer_prompt_eval_tokens": 7266,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 39.827,
+          "prompt_tokens": 7266
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.749,
+          "prompt_tokens": 882
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 92.632,
+          "prompt_tokens": 12390
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 27.596,
+          "prompt_tokens": 8164
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.677,
+          "prompt_tokens": 2575
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 4.562,
+          "prompt_tokens": 1635
+        }
+      },
+      "run_id": "20261003T191357-b4f69699",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-symbol-ichunked",
+      "wall_seconds": 259,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 15.288,
+      "developer_prompt_eval_tokens": 6330,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T191903-34834be5",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T191903-34834be5",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T191903-34834be5",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 34.545,
+          "prompt_tokens": 6330
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 11.037,
+          "prompt_tokens": 907
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 92.365,
+          "prompt_tokens": 11827
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 29.117,
+          "prompt_tokens": 8157
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.191,
+          "prompt_tokens": 2507
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 5.066,
+          "prompt_tokens": 1645
+        }
+      },
+      "run_id": "20261003T191903-34834be5",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-ichunked",
+      "wall_seconds": 257,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 17.623,
+      "developer_prompt_eval_tokens": 7770,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T192327-6eeba02e",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T192327-6eeba02e",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 41.92,
+          "prompt_tokens": 7770
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 10.267,
+          "prompt_tokens": 902
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 57.527,
+          "prompt_tokens": 7665
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 26.253,
+          "prompt_tokens": 8145
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 5.902,
+          "prompt_tokens": 2513
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 4.365,
+          "prompt_tokens": 1638
+        }
+      },
+      "run_id": "20261003T192327-6eeba02e",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-ichunked",
+      "wall_seconds": 215,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 45.213,
+      "developer_prompt_eval_tokens": 21213,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 3,
+          "latency_seconds": 100.97,
+          "prompt_tokens": 21213
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 15.6,
+          "prompt_tokens": 2873
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 56.846,
+          "prompt_tokens": 7784
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 45.344,
+          "prompt_tokens": 15583
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 9.961,
+          "prompt_tokens": 5324
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 14.157,
+          "prompt_tokens": 6377
+        }
+      },
+      "run_id": "20261003T192709-8d4a0cb3",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "success",
+      "task": "python-symbol-ichunked",
+      "wall_seconds": 431,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 73.713,
+      "developer_prompt_eval_tokens": 43849,
+      "developer_retries": 6,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 7,
+          "latency_seconds": 281.009,
+          "prompt_tokens": 43849
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 14.699,
+          "prompt_tokens": 1866
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 60.335,
+          "prompt_tokens": 7725
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 56.882,
+          "prompt_tokens": 15810
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.735,
+          "prompt_tokens": 2580
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 7.021,
+          "prompt_tokens": 2471
+        }
+      },
+      "run_id": "20261003T183804-ac1eaaf1",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-symbol-one",
+      "wall_seconds": 554,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 62.759,
+      "developer_prompt_eval_tokens": 38283,
+      "developer_retries": 5,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.final",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T184803-848cb1a6",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T184803-848cb1a6",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 6,
+          "latency_seconds": 251.625,
+          "prompt_tokens": 38283
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 13.968,
+          "prompt_tokens": 1871
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 69.325,
+          "prompt_tokens": 7979
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 66.478,
+          "prompt_tokens": 15924
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.594,
+          "prompt_tokens": 2523
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 6.872,
+          "prompt_tokens": 2480
+        }
+      },
+      "run_id": "20261003T184803-848cb1a6",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-one",
+      "wall_seconds": 542,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 66.113,
+      "developer_prompt_eval_tokens": 38354,
+      "developer_retries": 5,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.final",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T185711-dd6c085c",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T185711-dd6c085c",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 6,
+          "latency_seconds": 196.424,
+          "prompt_tokens": 38354
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 15.222,
+          "prompt_tokens": 1908
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 55.386,
+          "prompt_tokens": 7552
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 54.614,
+          "prompt_tokens": 15911
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.331,
+          "prompt_tokens": 2507
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 6.432,
+          "prompt_tokens": 2448
+        }
+      },
+      "run_id": "20261003T185711-dd6c085c",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-one",
+      "wall_seconds": 493,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 54.919,
+      "developer_prompt_eval_tokens": 31739,
+      "developer_retries": 4,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 5,
+          "latency_seconds": 150.781,
+          "prompt_tokens": 31739
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 12.795,
+          "prompt_tokens": 1908
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 94.776,
+          "prompt_tokens": 12395
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 54.597,
+          "prompt_tokens": 15874
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 6.658,
+          "prompt_tokens": 2611
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 6.111,
+          "prompt_tokens": 2521
+        }
+      },
+      "run_id": "20261003T190530-7ac10f44",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-symbol-one",
+      "wall_seconds": 462,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 6.815,
+      "developer_prompt_eval_tokens": 3941,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py",
+        "tests/test_more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 1,
+          "latency_seconds": 27.341,
+          "prompt_tokens": 3941
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.304,
+          "prompt_tokens": 867
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 59.365,
+          "prompt_tokens": 8042
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 20.313,
+          "prompt_tokens": 8162
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 5.323,
+          "prompt_tokens": 2575
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 4.251,
+          "prompt_tokens": 1695
+        }
+      },
+      "run_id": "20261003T193459-ee4cdc04",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-symbol-zipb",
+      "wall_seconds": 482,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 15.651,
+      "developer_prompt_eval_tokens": 9736,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T194344-7b63e06f",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T194344-7b63e06f",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 55.149,
+          "prompt_tokens": 9736
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.551,
+          "prompt_tokens": 880
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 43.739,
+          "prompt_tokens": 6823
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 21.196,
+          "prompt_tokens": 8078
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 5.219,
+          "prompt_tokens": 2489
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 3.861,
+          "prompt_tokens": 1717
+        }
+      },
+      "run_id": "20261003T194344-7b63e06f",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-zipb",
+      "wall_seconds": 220,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 17.593,
+      "developer_prompt_eval_tokens": 10044,
+      "developer_retries": 1,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T194732-5e8bd9d8",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T194732-5e8bd9d8",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [],
+          "run_id": "20261003T194732-5e8bd9d8",
+          "selected_capability_ids": [
+            "pip@1",
+            "python@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py"
+      ],
+      "planner_repairs": 2,
+      "rendered_rules": [],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 67.972,
+          "prompt_tokens": 10044
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 9.451,
+          "prompt_tokens": 866
+        },
+        "planner": {
+          "calls": 3,
+          "latency_seconds": 65.009,
+          "prompt_tokens": 10387
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 24.15,
+          "prompt_tokens": 8096
+        },
+        "run_verifier": {
+          "calls": 1,
+          "latency_seconds": 5.218,
+          "prompt_tokens": 2484
+        },
+        "spec_compliance": {
+          "calls": 1,
+          "latency_seconds": 4.4,
+          "prompt_tokens": 1815
+        }
+      },
+      "run_id": "20261003T194732-5e8bd9d8",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "pip@1",
+        "python@1"
+      ],
+      "status": "failed",
+      "task": "python-symbol-zipb",
+      "wall_seconds": 244,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": true,
+      "developer_prefill_seconds": 24.35,
+      "developer_prompt_eval_tokens": 13331,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "more_itertools/more.py"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 3,
+          "latency_seconds": 74.703,
+          "prompt_tokens": 13331
+        },
+        "localization": {
+          "calls": 2,
+          "latency_seconds": 12.516,
+          "prompt_tokens": 1798
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 41.542,
+          "prompt_tokens": 6561
+        },
+        "reviewer": {
+          "calls": 1,
+          "latency_seconds": 27.496,
+          "prompt_tokens": 8151
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 7.387,
+          "prompt_tokens": 5162
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 7.415,
+          "prompt_tokens": 3279
+        }
+      },
+      "run_id": "20261003T195143-321cd89c",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "python-symbol-zipb",
+      "wall_seconds": 363,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 49.933,
+      "developer_prompt_eval_tokens": 33377,
+      "developer_retries": 3,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "src/main/resources/application.properties"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 5,
+          "latency_seconds": 93.605,
+          "prompt_tokens": 33377
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 18.289,
+          "prompt_tokens": 4205
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 39.095,
+          "prompt_tokens": 8781
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 16.105,
+          "prompt_tokens": 5001
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 22.169,
+          "prompt_tokens": 12533
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 7.128,
+          "prompt_tokens": 3630
+        },
+        "unattributed": {
+          "calls": 4,
+          "latency_seconds": 28.485,
+          "prompt_tokens": 11756
+        }
+      },
+      "run_id": "20261003T165535-fd260d70",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "spring-boot-pagesize",
+      "wall_seconds": 543,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 40.575,
+      "developer_prompt_eval_tokens": 27085,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_config@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_config@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "b6c83e246c0a672a79455a02be675e60937849f6c815139c6fb3f12305fa8a77",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 70,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [
+            "spring@1"
+          ],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [
+            "spring.review.transactional_self_invocation"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "939143e784e508fa46c32f409b2a6f274abb7ccdd538dbde4e2a8839218634bc",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 81,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "gradle@1",
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "gradle.plan.existing_topology_preserved",
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T170523-cdd88fcb",
+          "selected_capability_ids": [
+            "spring@1",
+            "spring_config@1",
+            "gradle@1",
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "src/main/resources/application.properties"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "gradle.plan.existing_topology_preserved",
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved",
+        "spring.review.transactional_self_invocation"
+      ],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 93.159,
+          "prompt_tokens": 27085
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 17.964,
+          "prompt_tokens": 4030
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 40.761,
+          "prompt_tokens": 8811
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 14.83,
+          "prompt_tokens": 4883
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 21.058,
+          "prompt_tokens": 12311
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 6.598,
+          "prompt_tokens": 3630
+        },
+        "unattributed": {
+          "calls": 4,
+          "latency_seconds": 27.905,
+          "prompt_tokens": 11773
+        }
+      },
+      "run_id": "20261003T170523-cdd88fcb",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "gradle@1",
+        "java@1",
+        "maven@1",
+        "spring@1",
+        "spring_config@1"
+      ],
+      "status": "failed",
+      "task": "spring-boot-pagesize",
+      "wall_seconds": 531,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 40.638,
+      "developer_prompt_eval_tokens": 25936,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_config@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_config@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "b6c83e246c0a672a79455a02be675e60937849f6c815139c6fb3f12305fa8a77",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 70,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [
+            "spring@1"
+          ],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [
+            "spring.review.transactional_self_invocation"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "939143e784e508fa46c32f409b2a6f274abb7ccdd538dbde4e2a8839218634bc",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 81,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "gradle@1",
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "gradle.plan.existing_topology_preserved",
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T171432-a6a362dd",
+          "selected_capability_ids": [
+            "spring@1",
+            "spring_config@1",
+            "gradle@1",
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "src/main/resources/application.properties"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "gradle.plan.existing_topology_preserved",
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved",
+        "spring.review.transactional_self_invocation"
+      ],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 91.123,
+          "prompt_tokens": 25936
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 21.866,
+          "prompt_tokens": 4099
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 30.851,
+          "prompt_tokens": 8811
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 18.629,
+          "prompt_tokens": 4844
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 22.455,
+          "prompt_tokens": 12241
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 7.859,
+          "prompt_tokens": 3666
+        },
+        "unattributed": {
+          "calls": 4,
+          "latency_seconds": 28.757,
+          "prompt_tokens": 11763
+        }
+      },
+      "run_id": "20261003T171432-a6a362dd",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "gradle@1",
+        "java@1",
+        "maven@1",
+        "spring@1",
+        "spring_config@1"
+      ],
+      "status": "failed",
+      "task": "spring-boot-pagesize",
+      "wall_seconds": 423,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 61.99,
+      "developer_prompt_eval_tokens": 33723,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        "src/main/resources/application.properties",
+        "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 5,
+          "latency_seconds": 159.935,
+          "prompt_tokens": 33723
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 22.693,
+          "prompt_tokens": 4006
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 70.176,
+          "prompt_tokens": 14051
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 17.375,
+          "prompt_tokens": 4862
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 24.256,
+          "prompt_tokens": 12387
+        },
+        "spec_compliance": {
+          "calls": 2,
+          "latency_seconds": 11.83,
+          "prompt_tokens": 4881
+        },
+        "unattributed": {
+          "calls": 1,
+          "latency_seconds": 7.089,
+          "prompt_tokens": 2838
+        }
+      },
+      "run_id": "20261003T172152-22cf5a62",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "failed",
+      "task": "spring-boot-pagesize",
+      "wall_seconds": 459,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 19.869,
+      "developer_prompt_eval_tokens": 9989,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+        "src/main/resources/spring/tools-config.xml"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r1",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 34.105,
+          "prompt_tokens": 9989
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 18.555,
+          "prompt_tokens": 4048
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 67.511,
+          "prompt_tokens": 12748
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 22.895,
+          "prompt_tokens": 4390
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 37.055,
+          "prompt_tokens": 16580
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 13.282,
+          "prompt_tokens": 5529
+        }
+      },
+      "run_id": "20261003T173013-6fbc831a",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "success",
+      "task": "spring-xml-pettypes-cache",
+      "wall_seconds": 353,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 42.562,
+      "developer_prompt_eval_tokens": 24510,
+      "developer_retries": 2,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "a3ff583c3ed63c1d937afe4610d007f371e0d8f2beb37fa2baea352358906c21",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 67,
+          "model": null,
+          "operation": "repair",
+          "rendered_capability_ids": [
+            "java@1"
+          ],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [
+            "java.dev.import_style"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "b6c83e246c0a672a79455a02be675e60937849f6c815139c6fb3f12305fa8a77",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 70,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [
+            "spring@1"
+          ],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [
+            "spring.review.transactional_self_invocation"
+          ],
+          "selected_capability_ids": [
+            "spring@1",
+            "java@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": null,
+          "operation": "edit",
+          "rendered_capability_ids": [],
+          "request": "developer",
+          "role": "developer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_xml@1"
+          ]
+        },
+        {
+          "batch": 1,
+          "context": "existing",
+          "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 0,
+          "model": "qwen3-coder:30b-kriya-e52213655394",
+          "operation": "review",
+          "rendered_capability_ids": [],
+          "request": "reviewer.pre_approval",
+          "role": "reviewer",
+          "rule_ids": [],
+          "selected_capability_ids": [
+            "spring_xml@1"
+          ]
+        },
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T173645-e11e227e",
+          "selected_capability_ids": [
+            "spring@1",
+            "spring_xml@1",
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+        "src/main/resources/spring/tools-config.xml"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "java.dev.import_style",
+        "maven.plan.existing_topology_preserved",
+        "spring.review.transactional_self_invocation"
+      ],
+      "replicate": "r2",
+      "roles": {
+        "developer": {
+          "calls": 4,
+          "latency_seconds": 74.256,
+          "prompt_tokens": 24510
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 17.819,
+          "prompt_tokens": 3837
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 39.312,
+          "prompt_tokens": 9088
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 15.262,
+          "prompt_tokens": 4240
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 34.255,
+          "prompt_tokens": 16289
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 14.026,
+          "prompt_tokens": 5829
+        }
+      },
+      "run_id": "20261003T173645-e11e227e",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1",
+        "spring@1",
+        "spring_xml@1"
+      ],
+      "status": "success",
+      "task": "spring-xml-pettypes-cache",
+      "wall_seconds": 358,
+      "workspace_diff_present": true
+    },
+    {
+      "arm": "B",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 0,
+      "developer_prompt_eval_tokens": 0,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": "failed",
+      "fit_drops": [],
+      "guidance": [
+        {
+          "context": "existing",
+          "digest": "01a6ba88b853b4fd12cf5df6f71fb79a758ee53a4a4633a79d3a8103f94ce3b6",
+          "dropped_by_cap_rule_ids": [],
+          "dropped_by_fit_rule_ids": [],
+          "estimated_tokens": 58,
+          "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+          "operation": "plan",
+          "rendered_capability_ids": [
+            "maven@1"
+          ],
+          "request": "structured_planner",
+          "role": "planner",
+          "rule_ids": [
+            "maven.plan.existing_topology_preserved"
+          ],
+          "run_id": "20261003T174257-67b6c0a6",
+          "selected_capability_ids": [
+            "spring@1",
+            "spring_xml@1",
+            "maven@1",
+            "java@1"
+          ]
+        }
+      ],
+      "judge": "NOT_SOLVED",
+      "outcome": "FAILURE",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+        "src/main/resources/spring/tools-config.xml"
+      ],
+      "planner_repairs": 0,
+      "rendered_rules": [
+        "maven.plan.existing_topology_preserved"
+      ],
+      "replicate": "r3",
+      "roles": {
+        "developer": {
+          "calls": 0,
+          "latency_seconds": 0.0,
+          "prompt_tokens": 0
+        },
+        "localization": {
+          "calls": 1,
+          "latency_seconds": 13.16,
+          "prompt_tokens": 1354
+        },
+        "planner": {
+          "calls": 1,
+          "latency_seconds": 40.251,
+          "prompt_tokens": 9088
+        }
+      },
+      "run_id": "20261003T174257-67b6c0a6",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [
+        "java@1",
+        "maven@1",
+        "spring@1",
+        "spring_xml@1"
+      ],
+      "status": "failed",
+      "task": "spring-xml-pettypes-cache",
+      "wall_seconds": 76,
+      "workspace_diff_present": false
+    },
+    {
+      "arm": "A",
+      "cap_drops": [],
+      "correct_targets": false,
+      "developer_prefill_seconds": 10.156,
+      "developer_prompt_eval_tokens": 6631,
+      "developer_retries": 0,
+      "exact_t0_present": true,
+      "failure_category": null,
+      "fit_drops": [],
+      "guidance": [],
+      "judge": "SOLVED",
+      "outcome": "SUCCESS",
+      "planned_files": [
+        "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+        "src/main/resources/spring/tools-config.xml"
+      ],
+      "planner_repairs": 1,
+      "rendered_rules": [],
+      "replicate": "r4",
+      "roles": {
+        "developer": {
+          "calls": 2,
+          "latency_seconds": 23.348,
+          "prompt_tokens": 6631
+        },
+        "localization": {
+          "calls": 3,
+          "latency_seconds": 18.631,
+          "prompt_tokens": 3887
+        },
+        "planner": {
+          "calls": 2,
+          "latency_seconds": 48.887,
+          "prompt_tokens": 11606
+        },
+        "reviewer": {
+          "calls": 2,
+          "latency_seconds": 17.206,
+          "prompt_tokens": 4311
+        },
+        "run_verifier": {
+          "calls": 2,
+          "latency_seconds": 32.948,
+          "prompt_tokens": 16484
+        },
+        "spec_compliance": {
+          "calls": 3,
+          "latency_seconds": 12.949,
+          "prompt_tokens": 5530
+        }
+      },
+      "run_id": "20261003T174428-d11c6d2b",
+      "runtime_digests": [
+        "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+        "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+      ],
+      "selected_capabilities": [],
+      "status": "success",
+      "task": "spring-xml-pettypes-cache",
+      "wall_seconds": 254,
+      "workspace_diff_present": true
+    }
+  ]
+}

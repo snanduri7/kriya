@@ -1,0 +1,29 @@
+2026-10-03 12:28:18,445 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b-kriya-e52213655394, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+Model runtime: qwen3-coder:30b-kriya-e52213655394
+  adapter_version: kriya-ollama-native/2
+  alias: qwen3-coder:30b-kriya-e52213655394
+  artifact_digest: sha256:141e95d786b871df832f727594b8229e6bd91097e1701738085661521ab00086
+  chat_template: renderer:qwen3-coder
+  configured_context_window: 32768
+  digest: 0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437
+  effective_context_window: 32768
+  endpoint: http://localhost:11434/v1
+  exact: True
+  family: qwen3moe
+  kriya_protocol: capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0
+  missing_components: []
+  model_context_length: 262144
+  model_format: gguf
+  parameter_size: 30.5B
+  probe_errors: []
+  provider: ollama
+  provider_version: 0.34.4
+  quantization: Q4_K_M
+  runtime_parameters_digest: sha256:e78bb89813de74d2f001c9811a2e0a47f5de88bd4fd90f0a5ece1f6c07847645
+  schema_version: 1
+  served_capabilities: ['completion', 'tools']
+  server_parameters: ['num_ctx 32768', 'repeat_penalty 1.05', 'stop "<|endoftext|>"', 'stop "<|im_end|>"', 'stop "<|im_start|>"', 'temperature 0.7', 'top_k 20', 'top_p 0.8']
+  tokenizer_digest: sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b
+  tokenizer_identity: gpt2/qwen2
+  tool_call_parser: parser:qwen3-coder
+  weights_digest: sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a

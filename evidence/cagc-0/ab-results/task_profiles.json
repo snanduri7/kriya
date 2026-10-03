@@ -1,0 +1,97 @@
+{
+ "java-symbol-fraction": {
+  "forbidden_capabilities": [
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "gradle",
+   "python",
+   "pip"
+  ]
+ },
+ "java-behavior-accents": {
+  "forbidden_capabilities": [
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "gradle",
+   "python",
+   "pip"
+  ]
+ },
+ "java-symbol-chop": {
+  "forbidden_capabilities": [
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "gradle",
+   "python",
+   "pip"
+  ]
+ },
+ "spring-boot-pagesize": {
+  "forbidden_capabilities": [
+   "spring_xml",
+   "python",
+   "pip"
+  ]
+ },
+ "spring-xml-pettypes-cache": {
+  "forbidden_capabilities": [
+   "gradle",
+   "python",
+   "pip",
+   "spring_config"
+  ]
+ },
+ "python-behavior-maxsplit": {
+  "forbidden_capabilities": [
+   "java",
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "maven",
+   "gradle"
+  ]
+ },
+ "python-symbol-one": {
+  "forbidden_capabilities": [
+   "java",
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "maven",
+   "gradle"
+  ]
+ },
+ "python-symbol-ichunked": {
+  "forbidden_capabilities": [
+   "java",
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "maven",
+   "gradle"
+  ]
+ },
+ "python-symbol-zipb": {
+  "forbidden_capabilities": [
+   "java",
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "maven",
+   "gradle"
+  ]
+ },
+ "python-error-invalidurl": {
+  "forbidden_capabilities": [
+   "java",
+   "spring",
+   "spring_xml",
+   "spring_config",
+   "maven",
+   "gradle"
+  ]
+ }
+}

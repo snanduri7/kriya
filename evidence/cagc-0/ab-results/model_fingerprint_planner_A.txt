@@ -1,0 +1,29 @@
+2026-10-03 12:28:26,361 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+Model runtime: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+  adapter_version: kriya-ollama-native/2
+  alias: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+  artifact_digest: sha256:b2e941213e244ca516a5359f6a980e91511d097e44cdf8091666ddf7069b3482
+  chat_template: renderer:qwen3.5
+  configured_context_window: 32768
+  digest: 26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3
+  effective_context_window: 32768
+  endpoint: http://localhost:11434/v1
+  exact: True
+  family: qwen35moe
+  kriya_protocol: capabilities-sha256:79f62ca38cabb90c262dfc92b80b9ba16aaa6dca0da99daf79cdd9f4da28e324
+  missing_components: []
+  model_context_length: 262144
+  model_format: gguf
+  parameter_size: 36.0B
+  probe_errors: []
+  provider: ollama
+  provider_version: 0.34.4
+  quantization: Q4_K_M
+  runtime_parameters_digest: sha256:cd54bdaeb88708484c8730a3948f9eb8ec993746a727e88ef5dc5b4733393f8f
+  schema_version: 1
+  served_capabilities: ['completion', 'thinking', 'tools', 'vision']
+  server_parameters: ['min_p 0', 'num_ctx 32768', 'presence_penalty 1.5', 'repeat_penalty 1', 'temperature 1', 'top_k 20', 'top_p 0.95']
+  tokenizer_digest: sha256:3f1a2932b98cd5a39553f0336164ef55c8a6333722c1a6058735b3fdabd795d9
+  tokenizer_identity: gpt2/qwen35
+  tool_call_parser: parser:qwen3.5
+  weights_digest: sha256:f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d
