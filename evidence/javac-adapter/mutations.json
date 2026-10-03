@@ -1,0 +1,17 @@
+{"tests": ["tests/test_capability_adapters.py"],
+ "deferred": "run after the CAGC-0 A/B matrix finishes (no heavy work while it measures latency)",
+ "mutations": [
+  {"name":"existing-file filter dropped","file":"kriya/capabilities/javac.py","old":"            and os.path.isfile(os.path.join(v.workspace_path, f))\n","new":""},
+  {"name":"-proc:none dropped","file":"kriya/capabilities/javac.py","old":"cmd = [\"javac\", \"-proc:none\", \"-d\",","new":"cmd = [\"javac\", \"-d\","},
+  {"name":"output dir not created","file":"kriya/capabilities/javac.py","old":"        os.makedirs(os.path.join(v.workspace_path, OUTPUT_DIR), exist_ok=True)\n","new":""},
+  {"name":"no-files message","file":"kriya/capabilities/javac.py","old":"return {\"success\": True, \"output\": \"No Java files to compile.\"}","new":"return None"},
+  {"name":"failure not enriched","file":"kriya/capabilities/javac.py","old":"                    error_output = enrich_java_compiler_errors(","new":"                    error_output = error_output or enrich_java_compiler_errors("},
+  {"name":"external lookup allowed","file":"kriya/capabilities/javac.py","old":"v.autonomy_cfg.egress_policy != \"local_only\"","new":"True"},
+  {"name":"containment swallowed","file":"kriya/capabilities/javac.py","old":"        except ContainmentSetupError:\n            # SEC-002","new":"        except ZeroDivisionError:\n            # SEC-002"},
+  {"name":"start failure undecided","file":"kriya/capabilities/javac.py","old":"            return {\"success\": False, \"output\": f\"Javac compilation tool invocation failed: {e}\"}","new":"            return {\"success\": True, \"output\": f\"Javac compilation tool invocation failed: {e}\"}"},
+  {"name":"output roots wrong","file":"kriya/capabilities/javac.py","old":"return [cmd[cmd.index(\"-d\") + 1]] if \"-d\" in cmd[:-1] else []","new":"return [cmd[cmd.index(\"-d\") + 1]] if \"-d\" in cmd else []"},
+  {"name":"detects claims workspaces","file":"kriya/capabilities/javac.py","old":"        del workspace_root\n        return False","new":"        return True"},
+  {"name":"javac before build adapters","file":"kriya/tools/validate.py","old":"            for adapter in BUILD_ADAPTERS:\n                if adapter.language == \"java\":\n                    decided = adapter.compile","new":"            for adapter in (JAVAC,) + BUILD_ADAPTERS:\n                if adapter.language == \"java\":\n                    decided = adapter.compile"},
+  {"name":"javac not in tool lookup","file":"kriya/capabilities/__init__.py","old":"BUILD_ADAPTERS + (JAVAC,) if adapter.invokes(tool)","new":"BUILD_ADAPTERS if adapter.invokes(tool)"},
+  {"name":"no-test message","file":"kriya/capabilities/javac.py","old":"\"No Java test config found (pom.xml/gradle). Skipping.\"","new":"\"Skipping.\""}
+ ]}

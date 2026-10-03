@@ -17,6 +17,7 @@ from kriya.capabilities import (
     BUILD_ADAPTERS,
     GRADLE,
     JAVA,
+    JAVAC,
     LANGUAGE_ADAPTERS,
     MAVEN,
     PIP,
@@ -53,7 +54,8 @@ def test_the_registry_is_closed_and_typed():
     assert (GRADLE.build_system, GRADLE.language) == ("gradle", "java")
     assert all(build_adapter_for_tool(tool) is MAVEN for tool in ("mvn", "mvnw", "mvn.cmd"))
     assert all(build_adapter_for_tool(tool) is GRADLE for tool in ("gradle", "gradlew", "gradle.bat"))
-    assert build_adapter_for_tool("javac") is None  # javac / Python / Ruby are still inline
+    assert build_adapter_for_tool("javac") is JAVAC and JAVAC not in BUILD_ADAPTERS  # the fallback, never a marker
+    assert (JAVAC.build_system, JAVAC.language) == ("javac", "java") and isinstance(JAVAC, BuildAdapter)
 
 
 def test_maven_output_roots_are_every_module_target(tmp_path):
@@ -146,7 +148,8 @@ def test_the_moved_validator_seams_name_no_build_system_detail():
                       "build.gradle", "build.gradle.kts", "gradle", "gradlew", "./gradlew", "gradle.bat",
                       "compileJava", "--tests",
                       "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile",
-                      "py_compile", "pytest", "py.test", "__pycache__", ".pytest_cache", ".py"}
+                      "py_compile", "pytest", "py.test", "__pycache__", ".pytest_cache", ".py",
+                      "javac", "-proc:none", ".java", "build"}
     for name in _MOVED_SEAMS:
         found = constants(getattr(PolymorphicValidator, name))
         assert not found & build_literals, (name, found & build_literals)
@@ -382,3 +385,132 @@ def test_the_pytest_gate_passes_each_target_as_its_own_argument(tmp_path):
     assert repr([str(tmp_path), os.path.join(str(tmp_path), "src")]) in cmd[2]
     with patch.object(PolymorphicValidator, "_resolve_python_interpreter", return_value=("x", "pip install failed")):
         assert v.run_tests(None) == {"success": False, "output": "pip install failed"}
+
+
+# --- javac fallback (Capability Adapters R1, javac slice) ---------------------
+
+
+def _javac_runs(result=None, side_effect=None):
+    seen = []
+
+    def run(_validator, cmd, cwd=None, **_kwargs):
+        seen.append((list(cmd), cwd))
+        if side_effect is not None:
+            raise side_effect
+        return dict(result or {"returncode": 0, "stdout": "", "stderr": ""})
+
+    return seen, patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=run)
+
+
+def test_a_plain_java_workspace_compiles_with_the_javac_fallback(tmp_path):
+    _write(tmp_path, "src/App.java", "class App {}")
+    _write(tmp_path, "src/Util.java", "class Util {}")
+    seen, patched = _javac_runs()
+    with patched:
+        result = _validator(tmp_path).run_compile_check(["src/App.java", "src/Missing.java", "README.md",
+                                                         "src/Util.java"])
+    build = os.path.join(str(tmp_path), "build")
+    assert seen == [(["javac", "-proc:none", "-d", build, os.path.join(str(tmp_path), "src/App.java"),
+                      os.path.join(str(tmp_path), "src/Util.java")], str(tmp_path))]
+    assert os.path.isdir(build)
+    assert result["success"] is True and result["output"] == "Java classes compiled successfully."
+
+
+def test_no_existing_java_file_compiles_nothing(tmp_path):
+    _write(tmp_path, "src/App.java", "class App {}")
+    seen, patched = _javac_runs()
+    with patched:
+        result = _validator(tmp_path).run_compile_check(["src/Gone.java", "notes.txt"])
+    assert seen == [] and result == {"success": True, "output": "No Java files to compile."}
+    assert not os.path.exists(os.path.join(str(tmp_path), "build"))
+
+
+def test_a_javac_failure_is_decided_with_the_enriched_compiler_output(tmp_path):
+    _write(tmp_path, "App.java", "class App {")
+    seen, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error: reached end"})
+    with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors",
+                        side_effect=lambda text, allow_external_lookup: text + f"\n[enriched {allow_external_lookup}]"):
+        result = _validator(tmp_path).run_compile_check(["App.java"])
+    assert result["success"] is False
+    assert result["output"].startswith("Java compilation failed:\nApp.java:1: error: reached end")
+    assert result["output"].endswith("[enriched False]")  # local_only egress: no external lookup
+    with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors", side_effect=RuntimeError("down")):
+        unenriched = _validator(tmp_path).run_compile_check(["App.java"])
+    assert unenriched["success"] is False and unenriched["output"] == \
+        "Java compilation failed:\nApp.java:1: error: reached end"
+
+
+def test_javac_start_failures_behave_exactly_as_before(tmp_path):
+    from kriya.tools.containment import ContainmentSetupError
+
+    _write(tmp_path, "App.java", "class App {}")
+    _, patched = _javac_runs(side_effect=FileNotFoundError("javac"))
+    with patched:
+        assert _validator(tmp_path).run_compile_check(["App.java"]) == {
+            "success": False, "output": "Javac compilation tool invocation failed: javac"}
+    _, patched = _javac_runs(side_effect=ContainmentSetupError("no backend"))
+    with patched, pytest.raises(ContainmentSetupError):
+        _validator(tmp_path).run_compile_check(["App.java"])
+
+
+@pytest.mark.parametrize("marker", ["pom.xml", "build.gradle"])
+def test_a_maven_or_gradle_workspace_never_reaches_javac(tmp_path, marker):
+    _write(tmp_path, marker, POM.format(deps="") if marker == "pom.xml" else "")
+    _write(tmp_path, "src/main/java/App.java", "class App {}")
+    seen, patched = _javac_runs()
+    with patched, patch.object(PolymorphicValidator, "_run_maven_cmd",
+                               return_value={"returncode": 0, "stdout": "", "stderr": ""}):
+        _validator(tmp_path).run_compile_check(["src/main/java/App.java"])
+    assert not any(cmd[0] == "javac" for cmd, _cwd in seen)
+    assert JAVAC.detects(str(tmp_path)) is False
+
+
+def test_javac_runs_only_after_every_build_adapter_left_the_compile_undecided(tmp_path):
+    """Maven, then Gradle, then javac: an mvn start failure (undecided) falls
+    through to javac, exactly as before."""
+    _write(tmp_path, "pom.xml", POM.format(deps=""))
+    _write(tmp_path, "App.java", "class App {}")
+    order = []
+    seen, patched = _javac_runs()
+    real_maven, real_gradle = MAVEN.compile, GRADLE.compile
+
+    def maven(*args, **kwargs):
+        order.append("maven")
+        with patch.object(PolymorphicValidator, "_run_maven_cmd", side_effect=RuntimeError("boom")):
+            return real_maven(*args, **kwargs)
+
+    def gradle(*args, **kwargs):
+        order.append("gradle")
+        return real_gradle(*args, **kwargs)
+
+    with patched, patch.object(MAVEN, "compile", new=maven), patch.object(GRADLE, "compile", new=gradle):
+        result = _validator(tmp_path).run_compile_check(["App.java"])
+    assert order == ["maven", "gradle"] and [cmd[0] for cmd, _ in seen] == ["javac"]
+    assert result["success"] is True
+
+
+def test_javac_output_roots_are_exactly_its_destination(tmp_path):
+    assert gate_output_roots(["javac", "-proc:none", "-d", "/ws/build", "/ws/A.java"], "/ws") == ["/ws/build"]
+    assert gate_output_roots(["javac", "-d", "out", "A.java"], "/ws") == ["out"]
+    assert gate_output_roots(["javac", "A.java"], "/ws") == []
+    assert gate_output_roots(["javac", "A.java", "-d"], "/ws") == []  # a trailing -d names no destination
+
+
+def test_a_plain_java_workspace_has_no_test_gate(tmp_path):
+    _write(tmp_path, "src/App.java", "class App {}")
+    assert _validator(tmp_path).run_tests("src/AppTest.java") == {
+        "success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
+
+
+@pytest.mark.parametrize("egress, web_lookup, expected", [
+    ("local_only", True, False), ("local_only", False, False), ("unrestricted", True, True), ("unrestricted", False, False)])
+def test_javac_resolver_lookup_needs_both_open_egress_and_web_lookup(tmp_path, egress, web_lookup, expected):
+    _write(tmp_path, "App.java", "class App {")
+    autonomy = AppConfig().autonomy.model_copy(update={"egress_policy": egress, "web_lookup_enabled": web_lookup})
+    v = PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy)
+    seen = []
+    _, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error"})
+    with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors",
+                        side_effect=lambda text, allow_external_lookup: seen.append(allow_external_lookup) or text):
+        v.run_compile_check(["App.java"])
+    assert seen == [expected]
