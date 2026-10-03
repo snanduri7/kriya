@@ -11,7 +11,7 @@ import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
-from kriya.capabilities import BUILD_ADAPTERS, JAVA, PIP, PYTHON, build_adapter_for_tool
+from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
@@ -239,8 +239,6 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     adapter = build_adapter_for_tool(tool)
     if adapter is not None:
         return adapter.output_roots(cmd, cwd)
-    if tool == "javac" and "-d" in cmd[:-1]:
-        return [cmd[cmd.index("-d") + 1]]
     return []
 
 
@@ -1443,52 +1441,8 @@ class PolymorphicValidator:
                     if decided is not None:
                         return decided
 
-            # 3. Fallback to raw javac syntax check (for simple single-class projects)
-            # `files` can include controller-provided established-file context
-            # used to inform planning and runtime judgment. Only pass sources
-            # that physically exist in this sandbox to javac: a contextual name
-            # that has not been materialized here must not turn an otherwise
-            # valid compile into javac's unrelated "file not found" failure.
-            java_files = [
-                os.path.join(self.workspace_path, f)
-                for f in files
-                if f.endswith(".java")
-                and os.path.isfile(os.path.join(self.workspace_path, f))
-            ]
-            if not java_files:
-                return {"success": True, "output": "No Java files to compile."}
-                
-            cmd = ["javac", "-proc:none", "-d", os.path.join(self.workspace_path, "build")]
-            cmd.extend(java_files)
-            os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
-            
-            try:
-                res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                if res["returncode"] != 0:
-                    error_output = f"Java compilation failed:\n{res['stderr']}"
-                    try:
-                        from kriya.tools.resolver import enrich_java_compiler_errors
-                        error_output = enrich_java_compiler_errors(
-                            error_output,
-                            allow_external_lookup=(
-                                self.autonomy_cfg.egress_policy != "local_only"
-                                and self.autonomy_cfg.web_lookup_enabled
-                            ),
-                        )
-                    except Exception as ree:
-                        logger.warning(f"Resolver failed to run: {ree}")
-                    return self._validation_result(False, error_output, res)
-                return self._validation_result(True, "Java classes compiled successfully.", res)
-            except ContainmentSetupError:
-                # SEC-002 (2026-09-12): must propagate as the distinct
-                # containment-setup failure it is, not be reported as an
-                # ordinary "javac tool invocation failed" toolchain problem -
-                # that framing hides the real root cause and never reaches
-                # handle_attempt_failure's containment_setup_failed
-                # classification.
-                raise
-            except Exception as e:
-                return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
+            # 3. No build adapter decided: the raw javac fallback (JAVAC).
+            return JAVAC.compile(self, files, deadline=deadline)
 
         elif self.stack == "ruby":
             errors = []
@@ -1575,7 +1529,7 @@ class PolymorphicValidator:
                 for adapter in BUILD_ADAPTERS:
                     if adapter.language == "java" and adapter.detects(self.workspace_path):
                         return adapter.run_tests(self, java_test_class)
-                return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
+                return JAVAC.run_tests(self, java_test_class)
  
             elif self.stack == "ruby":
                 # A fresh sandbox never has gems installed, so `bundle exec rspec`

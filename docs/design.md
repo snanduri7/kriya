@@ -895,7 +895,14 @@ tests = pass) and its output roots (`__pycache__/` of every source directory plu
 the inline rule: any `python*` interpreter or pytest). Interpreter and virtualenv resolution stays on the validator
 (`_resolve_python_interpreter`, also used by runtime verification). Dependencies still install only from
 requirements.txt / pyproject.toml; Poetry and Pipenv dependency installation is a recorded later slice
-(PYTHON-POETRY-PIPENV-001). Java markers still outrank Python ones. javac and Ruby remain inline.
+(PYTHON-POETRY-PIPENV-001). Java markers still outrank Python ones. Fourth slice, moved unchanged:
+`JavacBuildAdapter` (`JAVAC`) owns the raw javac fallback compile gate (`javac -proc:none -d <workspace>/build`
+over the changed `.java` files that exist; no classpath, release flag or module path; a failure enriched by the
+resolver; a containment setup failure propagates, any other start failure is a decided failure), the absent test
+gate ("No Java test config found") and the `javac -d X` output root. It is not in `BUILD_ADAPTERS`: no workspace
+declares a raw-javac build (`detects` is always False); the validator calls it after Maven and Gradle left the
+compile undecided, so the ordering is unchanged. The runtime-verification step's own `javac -d` directory
+preparation stays with runtime verification. Ruby remains inline.
 
 ### 2.10 `kriya/workflow/` Module Layout
 
