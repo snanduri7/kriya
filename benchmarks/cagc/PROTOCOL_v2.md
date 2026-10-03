@@ -1,7 +1,8 @@
 # CAGC A/B acceptance protocol v2 (prospective)
 
-**Status: PROPOSED (amended 2026-10-03: amendments 1-4 of the owner's decision; freeze pending consistency
-checks).** After freezing, any
+**Status: APPROVED / FROZEN (2026-10-03).** Approved by the owner with amendments 1-4, committed as f7abcf4 and
+checked for consistency (benchmark manifest, driver order, configs, analyzer metrics) before this freeze commit.
+After freezing, any
 change - to a task, a count, the order, a model, a judge, a metric or a rule below - is a new protocol version
 with a written reason, committed before the matrix it governs. No live run of this experiment starts before the
 freeze. This protocol supersedes the CAGC-0 matrix-40 gate (judge-verified B >= A at n=2) **for future decisions
