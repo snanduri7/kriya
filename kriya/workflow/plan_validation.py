@@ -500,6 +500,23 @@ async def validate_plan(
                 "cannot own process exit, process termination, or process stdout/stderr evidence"
             )
             reason_codes.append("APPLICATION_RUNTIME_OWNER_MISSING")
+    elif require_model_planned_files:
+        # PLAN-VERIFICATION-SCOPE-001: the request does not require runtime
+        # evidence, so a runtime verifier the deterministic normalization
+        # (plan_normalization.scope_verification_to_requirements) could not
+        # safely remove is a Planner-invented obligation - refused before any
+        # unit runs it.
+        unjustified_runtime_ids = sorted({
+            st.id for st in plan.subtasks
+            if any(vm.requires_application_runtime for vm in st.verification)
+        })
+        if unjustified_runtime_ids:
+            errors.append(
+                f"subtask(s) {unjustified_runtime_ids!r} declare application-runtime verification, but the "
+                "request requires no runtime evidence - no requirement, user request or Kriya verification "
+                "policy calls for running the application; use compile/test verification instead"
+            )
+            reason_codes.append("PLAN_VERIFICATION_SCOPE_UNJUSTIFIED")
 
     stack_violation = validate_stack_contract_artifacts(
         stack_contract, (pf.path for st in plan.subtasks for pf in st.planned_files),

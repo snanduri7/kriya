@@ -636,13 +636,15 @@ def _verification_only_subtask(verification, **overrides):
 
 @pytest.mark.asyncio
 async def test_verification_only_application_runtime_passes_validation(tmp_path):
+    # The request in this scenario requires runtime evidence (PLAN-VERIFICATION-SCOPE-001).
     subtask = _verification_only_subtask([VerificationMethod(
         type=VerificationMethodType.JUDGMENT,
         description="verify the application output shows transformed customer name in uppercase",
         verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True,
     )])
     plan = _plan([subtask])
-    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+                                 runtime_verification_required=True)
     assert result.valid is True
     assert "VERIFICATION_EVIDENCE_PATH_MISSING" not in result.reason_codes
 
@@ -703,7 +705,8 @@ async def test_application_runtime_runtime_omitted_self_heals_and_validation_pas
     """requires_runtime_execution omitted (defaults False) with
     verifier_kind=application_runtime - VerificationMethod's own pairing
     self-heal (plan_schema.py) must flip it to True BEFORE validate_plan
-    ever sees it, so this is valid, not rejected."""
+    ever sees it, so this is valid, not rejected. The request requires runtime
+    evidence (PLAN-VERIFICATION-SCOPE-001)."""
     subtask = _verification_only_subtask([VerificationMethod(
         type=VerificationMethodType.JUDGMENT,
         description="run the application and observe uppercase output",
@@ -711,7 +714,8 @@ async def test_application_runtime_runtime_omitted_self_heals_and_validation_pas
     )])
     assert subtask.verification[0].requires_runtime_execution is True
     plan = _plan([subtask])
-    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    result = await validate_plan(plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+                                 runtime_verification_required=True)
     assert result.valid is True
 
 
@@ -759,13 +763,15 @@ async def test_evidence_path_check_not_enforced_without_require_model_planned_fi
 async def test_repaired_verification_requirement_converts_to_executable_and_validation_passes(tmp_path):
     """Simulates a PLAN_REPAIR round: the Planner's corrected redraft
     converts the previously-unexecutable requirement to
-    verifier_kind=application_runtime, and the corrected plan is accepted."""
+    verifier_kind=application_runtime, and the corrected plan is accepted. The
+    request requires runtime evidence (PLAN-VERIFICATION-SCOPE-001)."""
     broken_subtask = _verification_only_subtask([VerificationMethod(
         type=VerificationMethodType.JUDGMENT,
         description="Verify that the application output shows transformed customer name in uppercase",
     )])
     broken_plan = _plan([broken_subtask])
-    first = await validate_plan(broken_plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    first = await validate_plan(broken_plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+                                 runtime_verification_required=True)
     assert first.valid is False
     assert "VERIFICATION_EVIDENCE_PATH_MISSING" in first.reason_codes
 
@@ -775,7 +781,8 @@ async def test_repaired_verification_requirement_converts_to_executable_and_vali
         verifier_kind=VerifierKind.APPLICATION_RUNTIME, requires_runtime_execution=True,
     )])
     repaired_plan = _plan([repaired_subtask])
-    second = await validate_plan(repaired_plan, workspace_path=str(tmp_path), require_model_planned_files=True)
+    second = await validate_plan(repaired_plan, workspace_path=str(tmp_path), require_model_planned_files=True,
+                                 runtime_verification_required=True)
     assert second.valid is True
 
 

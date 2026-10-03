@@ -184,7 +184,11 @@ from kriya.workflow.ownership_findings import (
     settle_findings,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
-from kriya.workflow.plan_normalization import coalesce_same_file_owners, derive_verification_contracts
+from kriya.workflow.plan_normalization import (
+    coalesce_same_file_owners,
+    derive_verification_contracts,
+    scope_verification_to_requirements,
+)
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -4324,11 +4328,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # A verification unit's contract is what its own
                     # depends_on consumes (deterministic restatement).
                     plan, derived_contracts = derive_verification_contracts(plan)
-                    if coalesced or derived_contracts:
+                    # PLAN-VERIFICATION-SCOPE-001: runtime verification the
+                    # request does not require is removed when that is safe;
+                    # what remains is refused by validate_plan below.
+                    plan, verification_scope = scope_verification_to_requirements(
+                        plan, goal_requires_runtime_behavior(goal),
+                    )
+                    if coalesced or derived_contracts or verification_scope:
                         ledger.record_and_persist(
                             workspace_path, "structured_plan_normalized", run_id=run_id,
                             repair_attempt=repair_attempts, merges=coalesced,
-                            derived_contracts=derived_contracts,
+                            derived_contracts=derived_contracts, verification_scope=verification_scope,
                         )
                     # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
                     # longer refused here - they now execute through the
