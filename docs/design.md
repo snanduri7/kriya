@@ -904,12 +904,50 @@ declares a raw-javac build (`detects` is always False); the validator calls it a
 compile undecided, so the ordering is unchanged. The runtime-verification step's own `javac -d` directory
 preparation stays with runtime verification. Ruby remains inline.
 
+### 2.9l Capability-Aware Generation Context (`kriya/capabilities/guidance/`) - CAGC-0
+
+CAGC adds small, deterministic, role-aware **advisory** guidance - stable language, framework and build semantics -
+for the evidence a model request actually carries, and removes stack-specific text and incident narratives from the
+language-neutral role prompts. It never authorizes, verifies or decides anything: no semantic, authority, acceptance
+or verification decision reads a guidance block's text, rule ids or digest. Reliability order: render a deterministic
+fact first, a repository convention second (skills), a deterministic check third (validation); a CAGC rule only for
+a stable semantic none of those express; model-specific behaviour is model choice, never a rule.
+
+- **Model.** `GuidanceRule` (stable `<capability>.<plan|dev|review>.<name>` id, one sentence <= 200 chars, explicit
+  roles, optional operations and contexts, priority, evidence), `CapabilityGuidance` (id, version, domain), and the
+  `GuidanceBlock` a request carries (selected vs rendered capability ids, the immutable role-capped
+  `base_rule_entries`, the visible rules, cap and fit drops, estimated tokens, digest).
+- **Selection.** One predicate per capability in the closed `CAPABILITY_SELECTORS` map (java, spring, spring_xml,
+  spring_config, maven, gradle, python, pip), exactly the registry's ids; no dependency expansion (Spring XML never
+  pulls Java). Build capabilities are selected by a target build file, and for planning roles also by the build roots
+  owning the targets. Roles: Planner (direct + structured), Architect, Developer, Reviewer; the Milestone Planner is
+  not wired in R1 (MILESTONE-PLANNER-ROLE-BINDING-001).
+- **Facts.** `RepositoryFacts` once per run on the original workspace (greenfield, build roots, Spring evidence; the
+  goal's named build systems for a greenfield request without targets); `SelectionFacts` per request from that
+  request's own selection inputs: Developer = its authorized targets (current bytes); direct Planner/Architect = the
+  directly matched files the fitted graph context still shows; enforce Planner = owner candidates + the Code
+  Intelligence candidate map; Reviewer = the changed candidate files.
+- **Fitting.** Caps once (Planner/Architect 250/100, Developer and Reviewer 200/90 estimated tokens, total/per
+  capability); the request's own fitter then drops whole rules, always from the base entries. Order: Developer
+  `planned_source, siblings, capability_guidance, graph_context, investigation, learned_reference`; direct
+  Planner/Architect graph -> guidance -> reference (placed between skills and graph); enforce Planner structural
+  relationships -> guidance -> reference; Reviewer files first, guidance in what they leave.
+- **Evidence.** One ADVISORY `capability.guidance` event per wired request after its final fit (role, operation,
+  context, selected/rendered ids, rule ids, cap and fit drops, tokens, digest of the exact text sent). Guidance is
+  not part of qualification identity; the registry is package source, so `kriya_runtime_fingerprint` covers resume.
+- **CAGC-0 registry (migrated rules only).** spring.review.transactional_self_invocation (Reviewer),
+  spring_xml.plan.extend_existing_context (Architect, existing), maven/gradle .plan.greenfield_minimal_topology and
+  .plan.existing_topology_preserved (Planner), .plan.greenfield_manifest_required (Architect, greenfield),
+  maven.review.manifest_care (Reviewer), java.dev.import_style (Developer); spring_config, python and pip carry no
+  rule yet. Per-rule ablation and admission are CAGC-1 (owner-gated); Python/pip rules are CAGC-2.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
 
 *   `worktree.py` - git worktree sandbox lifecycle (create/reset/sync/remove).
 *   `context_budget.py` - skeletonization tiers, token estimation, the Graph RAG context budget allocator (§2.5).
+*   `capability_guidance.py` - CAGC-0 request integration: a request's GuidanceSection (refit from its original block, observed after the final fit), run repository facts, the Developer operation mapping (§2.9l).
 *   `edit_safety.py` - anchored search/replace application, whitespace normalization, structural-corruption detection (§2.4). As of 2026-08-14 this holds only *mechanical* edit-safety (does an edit apply cleanly, does the result look structurally sound) - the "which file does this edit concern" checks that used to live here moved into `attribution.py` (§7.8).
 *   `file_resolution.py` - expected/missing-file tracking, run-command/filepath resolution, `IncompleteGenerationError`.
 *   `skill_extraction.py` - skill-gap rule dedup/identity matching, misattribution filtering, per-rule verification provenance (§2.3.5).
