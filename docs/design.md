@@ -863,7 +863,7 @@ loop returning the identical plan for checks whose fix is fully determined by th
   judge; the runs still failed closed on planning beyond the goal (SPRING-XML-PLANNER-OVERSCOPE-001). Changing this
   module stales context-certification records (`index_implementation_digest`).
 
-### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 first slice
+### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 (Maven, Java, Gradle)
 
 Ecosystem knowledge sits behind two narrow ports (`ports.py`), traced from the verification core's call sites:
 `LanguageAdapter` (`language`, `has_sources`, `source_files`) and `BuildAdapter` (`build_system`, `language`,
@@ -875,7 +875,18 @@ enumeration (two distinct skip sets, as before). `PolymorphicValidator` delegate
 compile falls through to Gradle / javac exactly as before. Adapters run only through the validator handle
 (containment, registry-scoped acquisition, gate binding) and never import a process API
 (`tests/test_capability_adapters.py`, including an AST tripwire that the moved seams carry no Maven literal).
-Gradle, javac, Python and Ruby remain inline for later slices.
+Second slice, moved unchanged: `GradleBuildAdapter` owns the `build.gradle` marker, the wrapper choice
+(`./gradlew` when the project ships it, else `gradle`), the `compileJava` gate (a missing executable is a decided
+failure, a containment setup failure propagates, any other start failure is undecided), the `test [--tests Class]`
+gate and Gradle's output roots (`build/` of every `build.gradle[.kts]` project plus the root `.gradle/`). The
+validator iterates `BUILD_ADAPTERS` in registry order for stack detection, compile and test - the order is the
+precedence (a workspace declaring both builds stays Maven) - so its seams name no build-system literal (the AST
+tripwire covers Gradle too). `toolchain._goal_or_repo_targets_java` reads the same adapters instead of its own
+copy of the pom.xml / build.gradle marker rule. R1 Gradle support is what the validator already had: one root
+build runs `compileJava` / `test` for every included subproject; a Kotlin-DSL-only root and per-project build
+roots for changed files are recorded capability gaps (GRADLE-KOTLIN-DSL-001, GRADLE-PROJECT-ROOT-001). Maven POM
+artifact records (`kriya/control/artifacts.py`) are a Maven domain model, not a marker rule, and stay there.
+javac, Python and Ruby remain inline for later slices.
 
 ### 2.10 `kriya/workflow/` Module Layout
 

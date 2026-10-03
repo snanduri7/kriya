@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any, Iterable, List, Optional, Tuple
 
+from kriya.capabilities import BUILD_ADAPTERS
 from kriya.platform.toolchain_locator import jdk_home_for_version as _resolve_jdk_home_for_version
 
 logger = logging.getLogger(__name__)
@@ -92,8 +93,7 @@ def _goal_or_repo_targets_java(goal: str, workspace_path: str) -> bool:
     existing Java project would miss this fact) - that's a narrower,
     rarer miss than the false-positive-on-every-non-Java-goal bug it
     replaces."""
-    if (os.path.exists(os.path.join(workspace_path, "pom.xml")) or
-            os.path.exists(os.path.join(workspace_path, "build.gradle"))):
+    if any(adapter.detects(workspace_path) for adapter in BUILD_ADAPTERS if adapter.language == "java"):
         return True
     return bool(re.search(r"\b(java|jvm|maven|gradle|spring(?:\s*boot)?)\b", goal, re.IGNORECASE))
 

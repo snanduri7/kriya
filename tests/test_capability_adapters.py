@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kriya.capabilities import BUILD_ADAPTERS, JAVA, LANGUAGE_ADAPTERS, MAVEN, build_adapter_for_tool
+from kriya.capabilities import BUILD_ADAPTERS, GRADLE, JAVA, LANGUAGE_ADAPTERS, MAVEN, build_adapter_for_tool
 from kriya.capabilities.ports import BuildAdapter, LanguageAdapter
 from kriya.config import AppConfig
 from kriya.tools import validate
@@ -37,11 +37,14 @@ def _validator(workspace, original=None):
 
 
 def test_the_registry_is_closed_and_typed():
-    assert BUILD_ADAPTERS == (MAVEN,) and LANGUAGE_ADAPTERS == (JAVA,)
-    assert isinstance(MAVEN, BuildAdapter) and isinstance(JAVA, LanguageAdapter)
+    assert BUILD_ADAPTERS == (MAVEN, GRADLE) and LANGUAGE_ADAPTERS == (JAVA,)  # order = precedence
+    assert all(isinstance(adapter, BuildAdapter) for adapter in BUILD_ADAPTERS)
+    assert isinstance(JAVA, LanguageAdapter)
     assert (MAVEN.build_system, MAVEN.language, JAVA.language) == ("maven", "java", "java")
+    assert (GRADLE.build_system, GRADLE.language) == ("gradle", "java")
     assert all(build_adapter_for_tool(tool) is MAVEN for tool in ("mvn", "mvnw", "mvn.cmd"))
-    assert build_adapter_for_tool("gradle") is None  # Gradle is still inline (a later slice)
+    assert all(build_adapter_for_tool(tool) is GRADLE for tool in ("gradle", "gradlew", "gradle.bat"))
+    assert build_adapter_for_tool("javac") is None  # javac / Python / Ruby are still inline
 
 
 def test_maven_output_roots_are_every_module_target(tmp_path):
@@ -119,21 +122,24 @@ def test_the_maven_test_gate_names_the_bare_test_class(tmp_path):
 _MOVED_SEAMS = ("run_compile_check", "run_tests", "_detect_stack", "_has_any_java_file", "_java_sources")
 
 
-def test_the_moved_validator_seams_name_no_maven_detail():
-    """The Maven pieces of these seams are the adapter's now; a returning
-    pom.xml / mvn literal means a second, divergent copy."""
+def test_the_moved_validator_seams_name_no_build_system_detail():
+    """The Maven and Gradle pieces of these seams are the adapters' now; a
+    returning pom.xml / mvn / build.gradle / gradlew literal means a second,
+    divergent copy."""
     import textwrap
 
     def constants(function):
         tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
         return {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)}
 
-    maven = {"pom.xml", "mvn", "mvnw", "mvn.cmd", "test"}
+    build_literals = {"pom.xml", "mvn", "mvnw", "mvn.cmd",
+                      "build.gradle", "build.gradle.kts", "gradle", "gradlew", "./gradlew", "gradle.bat",
+                      "compileJava", "--tests"}
     for name in _MOVED_SEAMS:
         found = constants(getattr(PolymorphicValidator, name))
-        assert not found & {"pom.xml", "mvn", "mvnw", "mvn.cmd"}, (name, found & maven)
+        assert not found & build_literals, (name, found & build_literals)
         assert not any(str(value).startswith("-Dtest=") for value in found), name
-    assert not constants(validate.gate_output_roots) & {"mvn", "mvnw", "mvn.cmd", "pom.xml"}
+    assert not constants(validate.gate_output_roots) & build_literals
 
 
 def test_no_adapter_starts_a_process_of_its_own():
@@ -159,3 +165,122 @@ def test_a_gradle_project_never_takes_the_maven_test_path(tmp_path):
                       return_value={"returncode": 0, "stdout": "BUILD SUCCESSFUL", "stderr": ""}):
         result = _validator(tmp_path).run_tests(None)
     assert calls == [] and result["success"] is True
+
+
+# --- Gradle (second slice) ---------------------------------------------------------
+
+def _gradle_runs(tmp_path, *, wrapper=False, result=None, side_effect=None, pom=False):
+    _write(tmp_path, "build.gradle", "plugins { id 'java' }\n")
+    if wrapper:
+        _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    if pom:
+        _write(tmp_path, "pom.xml", POM.format(deps=""))
+    seen = []
+
+    def fake(self, cmd, cwd, **_):
+        seen.append(list(cmd))
+        if side_effect is not None:
+            raise side_effect
+        return result or {"returncode": 0, "stdout": "BUILD SUCCESSFUL", "stderr": ""}
+    return seen, patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=fake)
+
+
+def test_gradle_detects_the_groovy_root_script_only(tmp_path):
+    """R1 behaviour, pinned: a Kotlin-DSL-only root is a recorded capability
+    gap (GRADLE-KOTLIN-DSL-001), not detected."""
+    _write(tmp_path, "build.gradle.kts")
+    assert GRADLE.detects(str(tmp_path)) is False
+    _write(tmp_path, "build.gradle")
+    assert GRADLE.detects(str(tmp_path)) is True
+
+
+def test_gradle_output_roots_are_every_project_build_dir_and_the_root_cache(tmp_path):
+    _write(tmp_path, "build.gradle")
+    _write(tmp_path, "app/build.gradle.kts")
+    _write(tmp_path, "docs/readme.md")
+    roots = sorted(os.path.relpath(p, tmp_path) for p in gate_output_roots(["./gradlew", "test"], str(tmp_path)))
+    assert roots == [".gradle", "app/build", "build"]
+    assert gate_output_roots(["gradle", "build"], str(tmp_path)) == GRADLE.output_roots(["gradle"], str(tmp_path))
+
+
+@pytest.mark.parametrize("wrapper,expected", [(True, "./gradlew"), (False, "gradle")])
+def test_gradle_compile_uses_the_project_wrapper_when_it_ships_one(tmp_path, wrapper, expected):
+    seen, patched = _gradle_runs(tmp_path, wrapper=wrapper)
+    with patched:
+        result = _validator(tmp_path).run_compile_check(["src/main/java/App.java"])
+    assert seen == [[expected, "compileJava"]]
+    assert result["success"] is True and "Gradle compilation succeeded." in result["output"]
+
+
+def test_a_gradle_compile_failure_is_decided_with_its_output(tmp_path):
+    seen, patched = _gradle_runs(tmp_path, result={"returncode": 1, "stdout": "e: App.java:3", "stderr": "FAILED"})
+    with patched:
+        result = _validator(tmp_path).run_compile_check(["App.java"])
+    assert seen == [["gradle", "compileJava"]]
+    assert result["success"] is False and "Gradle compilation failed:\ne: App.java:3\nFAILED" in result["output"]
+
+
+def test_a_gradle_start_failure_behaves_exactly_as_before(tmp_path):
+    """A missing executable is a decided failure (never the misleading javac
+    fallback); a containment setup failure propagates; any other failure to
+    start is left undecided."""
+    from kriya.tools.containment import ContainmentSetupError
+
+    _, patched = _gradle_runs(tmp_path, wrapper=True, side_effect=FileNotFoundError("gradlew"))
+    with patched:
+        assert GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None) == {
+            "success": False, "output": "Failed to invoke ./gradlew compileJava: gradlew"}
+    _, patched = _gradle_runs(tmp_path, side_effect=ContainmentSetupError("x"))
+    with patched, pytest.raises(ContainmentSetupError):
+        GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None)
+    _, patched = _gradle_runs(tmp_path, side_effect=RuntimeError("boom"))
+    with patched:
+        assert GRADLE.compile(_validator(tmp_path), ["App.java"], deadline=None) is None
+    assert GRADLE.compile(_validator(tmp_path / "empty"), ["App.java"], deadline=None) is None
+
+
+def test_the_gradle_test_gate_names_the_bare_test_class(tmp_path):
+    seen, patched = _gradle_runs(tmp_path, wrapper=True)
+    with patched:
+        result = _validator(tmp_path).run_tests("src/test/java/a/LedgerTest.java")
+    assert seen == [["./gradlew", "test", "--tests", "LedgerTest"]] and result["success"] is True
+    seen, patched = _gradle_runs(tmp_path)
+    with patched:
+        _validator(tmp_path).run_tests(None)
+    assert seen == [["./gradlew", "test"]]
+
+
+def test_a_workspace_declaring_both_builds_stays_maven(tmp_path):
+    """Precedence is the registry order: Maven decides compile and test."""
+    maven, gradle = [], []
+    seen, patched = _gradle_runs(tmp_path, pom=True)
+
+    def fake_mvn(self, goals, cwd, timeout=300, **_):
+        maven.append(goals)
+        return {"returncode": 0, "stdout": "ok", "stderr": ""}
+    with patched, patch.object(PolymorphicValidator, "_run_maven_cmd", new=fake_mvn):
+        v = _validator(tmp_path)
+        assert v.stack == "java"
+        v.run_tests(None)
+        v.run_compile_check(["pom.xml"])
+    gradle.extend(seen)
+    assert maven == [["test"], ["clean", "compile", "-Dmaven.compiler.showWarnings=true",
+                                "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked"]]
+    assert gradle == []
+
+
+def test_stack_detection_reads_the_gradle_marker_from_the_adapter(tmp_path):
+    _write(tmp_path, "build.gradle")
+    assert _validator(tmp_path).stack == "java"
+    with patch.object(GRADLE, "detects", return_value=False):
+        assert _validator(tmp_path).stack != "java"
+
+
+def test_the_toolchain_fact_gate_reads_the_build_adapters(tmp_path):
+    from kriya.workflow.toolchain import _goal_or_repo_targets_java
+
+    _write(tmp_path, "build.gradle")
+    assert _goal_or_repo_targets_java("add a feature", str(tmp_path)) is True
+    with patch.object(GRADLE, "detects", return_value=False):
+        assert _goal_or_repo_targets_java("add a feature", str(tmp_path)) is False
+    assert _goal_or_repo_targets_java("a gradle build", str(tmp_path / "none")) is True
