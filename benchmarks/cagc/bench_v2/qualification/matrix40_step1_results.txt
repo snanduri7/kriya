@@ -1,0 +1,23 @@
+JUDGE java-symbol-fraction base: PASS @@ success True ['Tests run: 35, Failures: 0, Errors: 0, Skipped: 0']
+JUDGE java-symbol-fraction fixed: PASS @@ success True ['Tests run: 35, Failures: 0, Errors: 0, Skipped: 0']
+JUDGE java-behavior-accents base: FAIL @@ success False ['Tests run: 12, Failures: 1, Errors: 0, Skipped: 1']
+JUDGE java-behavior-accents fixed: PASS @@ success True ['Tests run: 12, Failures: 0, Errors: 0, Skipped: 1']
+JUDGE java-symbol-chop base: FAIL @@ success False ['Tests run: 173, Failures: 1, Errors: 0, Skipped: 1']
+JUDGE java-symbol-chop fixed: PASS @@ success True ['Tests run: 173, Failures: 0, Errors: 0, Skipped: 1']
+JUDGE spring-boot-pagesize base: FAIL @@ success False ['Tests run: 2, Failures: 1, Errors: 0, Skipped: 0']
+JUDGE spring-boot-pagesize fixed: NO_FIX_COMMIT
+JUDGE spring-xml-pettypes-cache base: FAIL @@ success False ['Tests run: 2, Failures: 1, Errors: 0, Skipped: 0']
+JUDGE spring-xml-pettypes-cache fixed: NO_FIX_COMMIT
+JUDGE python-behavior-maxsplit base: FAIL (failed=3)
+JUDGE python-behavior-maxsplit fixed: PASS (failed=0)
+JUDGE python-symbol-one base: FAIL (failed=1)
+JUDGE python-symbol-one fixed: PASS (failed=0)
+JUDGE python-symbol-ichunked base: FAIL (failed=2)
+JUDGE python-symbol-ichunked fixed: PASS (failed=0)
+JUDGE python-symbol-zipb base: FAIL (failed=4)
+JUDGE python-symbol-zipb fixed: PASS (failed=0)
+JUDGE python-error-invalidurl base: FAIL (failed=2)
+JUDGE python-error-invalidurl fixed: PASS (failed=0)
+JUDGES_COMPLETE
+
+[exited with code 0]

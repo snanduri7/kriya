@@ -1,0 +1,213 @@
+{
+ "version": 2,
+ "tasks": [
+  {
+   "id": "java-behavior-accents",
+   "goal": "strip accents \"\u0111\" and \"\u0110\"",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/java-behavior-accents",
+   "base": "49d2835c987a23822ca79ef8bee980a33df6c329",
+   "reference": {
+    "kind": "commit",
+    "commit": "851de661c657",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "src/main/java/org/apache/commons/lang3/StringUtils.java"
+   ],
+   "judge": {
+    "kind": "maven_validator",
+    "target_test": "StringUtilsTrimStripTest",
+    "pass_when": "success and Failures: 0, Errors: 0"
+   }
+  },
+  {
+   "id": "java-symbol-chop",
+   "goal": "Keep chop from splitting a trailing surrogate pair",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/java-symbol-chop",
+   "base": "5cba51c7e97b29c4e8ab8031197bd1432758c0b5",
+   "reference": {
+    "kind": "commit",
+    "commit": "62f6edfd",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "src/main/java/org/apache/commons/lang3/StringUtils.java"
+   ],
+   "judge": {
+    "kind": "maven_validator",
+    "target_test": "StringUtilsTest",
+    "pass_when": "success and Failures: 0, Errors: 0"
+   }
+  },
+  {
+   "id": "java-symbol-fraction",
+   "goal": "fix silent int overflow in Fraction.getFraction(double)",
+   "workspace_source": "~/kriya-cagc-bench-v2/ws/java-symbol-fraction",
+   "base": "cab37e0c8",
+   "reference": {
+    "kind": "commit",
+    "commit": "a0ffef035d6a0e7803da8405ebceacb011efbaa0",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "src/main/java/org/apache/commons/lang3/math/Fraction.java"
+   ],
+   "judge": {
+    "kind": "maven_validator",
+    "target_test": "FractionTest",
+    "pass_when": "success and Failures: 0, Errors: 0"
+   },
+   "notes": "re-mined: a0ffef035^ + the commit's tests (matrix-40's workspace was the chop base); mined with ~/kriya-bench-live/matrix/mined_workspace.sh's convention"
+  },
+  {
+   "id": "spring-boot-pagesize",
+   "goal": "Owner search results are always shown five per page. Make the number of owners per page configurable through an application property named petclinic.owners.page-size, keeping 5 as the default.",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/spring-boot-pagesize",
+   "base": "500158f732419217507c7656904b8e6aa1bcc0d6",
+   "reference": {
+    "kind": "patch",
+    "patch": "reference/spring-boot-pagesize.patch"
+   },
+   "expected_changed_files": [
+    "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+    "src/main/resources/application.properties"
+   ],
+   "gold_targets": null,
+   "judge": {
+    "kind": "maven_validator_held_out",
+    "held_out": "judge/OwnerPageSizeJudgeTests.java",
+    "dest": "src/test/java/org/springframework/samples/petclinic/owner",
+    "target_test": "OwnerPageSizeJudgeTests",
+    "pass_when": "success and Failures: 0, Errors: 0"
+   }
+  },
+  {
+   "id": "spring-xml-pettypes-cache",
+   "goal": "Cache the pet types the same way the vets are cached, so that repeated pet type lookups do not query the database again.",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/spring-xml-pettypes-cache",
+   "base": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+   "reference": {
+    "kind": "patch",
+    "patch": "reference/spring-xml-pettypes-cache.patch"
+   },
+   "expected_changed_files": [
+    "src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java",
+    "src/main/resources/spring/tools-config.xml"
+   ],
+   "gold_targets": null,
+   "judge": {
+    "kind": "maven_validator_held_out",
+    "held_out": "judge/PetTypesCacheJudgeTests.java",
+    "dest": "src/test/java/org/springframework/samples/petclinic/service",
+    "target_test": "PetTypesCacheJudgeTests",
+    "pass_when": "success and Failures: 0, Errors: 0"
+   }
+  },
+  {
+   "id": "python-behavior-maxsplit",
+   "goal": "Do not yield an empty list for an empty iterable when maxsplit is 0",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/python-behavior-maxsplit",
+   "base": "f8e972e9a5f2144ee9b72d8d1819afbf875281be",
+   "reference": {
+    "kind": "commit",
+    "commit": "ce676d2",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "more_itertools/more.py"
+   ],
+   "judge": {
+    "kind": "pytest",
+    "tests": [
+     "tests/test_more.py"
+    ],
+    "pass_when": "failed set == []"
+   }
+  },
+  {
+   "id": "python-symbol-valuechain",
+   "goal": "Don't mask TypeError raised while iterating in value_chain",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/python-symbol-one",
+   "base": "0054e02c381f34e4996d9e470b95c0752da85da7",
+   "reference": {
+    "kind": "commit",
+    "commit": "7847d43",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "more_itertools/more.py"
+   ],
+   "judge": {
+    "kind": "pytest",
+    "tests": [
+     "tests/test_more.py"
+    ],
+    "pass_when": "failed set == []"
+   },
+   "notes": "replaces matrix-40 python-symbol-one: workspace ws/python-symbol-one was mined for 7847d43 (value_chain); the goal is now keyed by this id"
+  },
+  {
+   "id": "python-symbol-ichunked",
+   "goal": "Issue 1304: make ichunked match chunked for n=0 and negative n",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/python-symbol-ichunked",
+   "base": "b6bb1eb19add8d304a58b4d26c79f415eec29d2b",
+   "reference": {
+    "kind": "commit",
+    "commit": "f89d7a3",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "more_itertools/more.py"
+   ],
+   "judge": {
+    "kind": "pytest",
+    "tests": [
+     "tests/test_more.py"
+    ],
+    "pass_when": "failed set == []"
+   }
+  },
+  {
+   "id": "python-symbol-zipb",
+   "goal": "Reuse input iterators in zip_broadcast",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/python-symbol-zipb",
+   "base": "b0004939d7b9f3a47acd43311159d701128e8ff2",
+   "reference": {
+    "kind": "commit",
+    "commit": "e426d25",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "more_itertools/more.py"
+   ],
+   "judge": {
+    "kind": "pytest",
+    "tests": [
+     "tests/test_more.py"
+    ],
+    "pass_when": "failed set == []"
+   }
+  },
+  {
+   "id": "python-error-invalidurl",
+   "goal": "Improve InvalidURL error message.",
+   "workspace_source": "~/kriya-bench-live/matrix/ws/python-error-invalidurl",
+   "base": "3de191518046515336cfa2127cfd9931338d1391",
+   "reference": {
+    "kind": "commit",
+    "commit": "7c0cda153d30",
+    "apply": "non-test, non-doc changes"
+   },
+   "gold_targets": [
+    "httpx/_urlparse.py"
+   ],
+   "judge": {
+    "kind": "pytest",
+    "tests": [
+     "tests/models/test_url.py"
+    ],
+    "pass_when": "failed set == []"
+   }
+  }
+ ]
+}

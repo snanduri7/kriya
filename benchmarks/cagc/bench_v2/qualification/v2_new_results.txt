@@ -1,0 +1,7 @@
+JUDGE java-symbol-fraction base: FAIL @@ success False ['Tests run: 35, Failures: 1, Errors: 0, Skipped: 0']
+JUDGE java-symbol-fraction ref: PASS @@ success True ['Tests run: 35, Failures: 0, Errors: 0, Skipped: 0']
+JUDGE spring-boot-pagesize ref: PASS @@ success True ['Tests run: 2, Failures: 0, Errors: 0, Skipped: 0']
+JUDGE spring-xml-pettypes-cache ref: PASS @@ success True ['Tests run: 2, Failures: 0, Errors: 0, Skipped: 0']
+QUALIFICATION_COMPLETE
+
+[exited with code 0]

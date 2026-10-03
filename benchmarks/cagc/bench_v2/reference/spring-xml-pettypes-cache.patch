@@ -1,0 +1,24 @@
+diff --git a/src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java b/src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java
+index dc7f5a2..073caf9 100644
+--- a/src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java
++++ b/src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java
+@@ -53,6 +53,7 @@ public class ClinicServiceImpl implements ClinicService {
+ 
+     @Override
+     @Transactional(readOnly = true)
++    @Cacheable("pettypes")
+     public Collection<PetType> findPetTypes() {
+         return petRepository.findPetTypes();
+     }
+diff --git a/src/main/resources/spring/tools-config.xml b/src/main/resources/spring/tools-config.xml
+index 20cc835..377b5c1 100644
+--- a/src/main/resources/spring/tools-config.xml
++++ b/src/main/resources/spring/tools-config.xml
+@@ -42,6 +42,7 @@
+             <set>
+                 <value>default</value>
+                 <value>vets</value>
++                <value>pettypes</value>
+             </set>
+         </property>
+     </bean>
