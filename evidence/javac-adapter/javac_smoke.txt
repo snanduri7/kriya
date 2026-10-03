@@ -1,0 +1,6 @@
+kriya from /Users/sriramnanduri/kriya-wt/javac-adapter/kriya/__init__.py javac /usr/bin/javac
+stack java
+valid: True Java classes compiled successfully. ['App.class', 'Util.class']
+broken: False Java compilation failed: | ['/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/tmpf5cahvbb/src/demo/Util.java:2: error: cannot find symbol']
+tests: {'success': True, 'output': 'No Java test config found (pom.xml/gradle). Skipping.'}
+output roots: True
