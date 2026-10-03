@@ -14,6 +14,10 @@ from kriya.platform.filesystem_semantics import identity_key
 
 logger = logging.getLogger(__name__)
 
+# The framework name analyze() records for a Spring Boot build (read by
+# capability guidance selection, kriya/capabilities/guidance/facts.py).
+SPRING_BOOT_FRAMEWORK = "Spring Boot"
+
 # Extensions to languages map
 EXTENSION_MAP = {
     ".py": "Python",
@@ -748,7 +752,7 @@ class RepositoryAnalyzer:
                 with open(pom_path, "r", errors="replace") as f:
                     content = f.read()
                     if "spring-boot" in content:
-                        frameworks.add("Spring Boot")
+                        frameworks.add(SPRING_BOOT_FRAMEWORK)
                     if "junit" in content:
                         testing.add("JUnit")
                     # Extract maven dependencies
@@ -788,7 +792,7 @@ class RepositoryAnalyzer:
                     for _group, artifact, version in triples:
                         dependency_versions[artifact.strip()] = version.strip()
                     if "spring-boot" in content:
-                        frameworks.add("Spring Boot")
+                        frameworks.add(SPRING_BOOT_FRAMEWORK)
                     if "junit" in content:
                         testing.add("JUnit")
             except Exception as e:

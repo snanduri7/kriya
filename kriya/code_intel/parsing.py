@@ -27,7 +27,9 @@ from kriya.code_intel.model import (
 # /2: configuration structure (config_parsing.py: Spring XML, properties, YAML).
 STRUCTURAL_PARSER_VERSION = "ci-structural/3"
 
-_LANGUAGE_BY_EXTENSION = {".java": "java", ".py": "python"}
+JAVA = "java"
+PYTHON = "python"
+_LANGUAGE_BY_EXTENSION = {".java": JAVA, ".py": PYTHON}
 
 
 def language_for_path(path: str) -> Optional[str]:

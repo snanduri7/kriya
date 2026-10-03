@@ -136,6 +136,20 @@ class StructuralStore:
                                  (self.parser_digest,)).fetchall()
         return {r["path"]: (r["source_digest"], ParseState(r["state"])) for r in rows}
 
+    def has_file(self, language: str, state: ParseState) -> bool:
+        """Whether any current-identity file of ``language`` is in ``state``."""
+        return self.conn.execute(
+            "SELECT 1 FROM ci_files WHERE language = ? AND state = ? AND parser_digest = ? LIMIT 1",
+            (language, state.value, self.parser_digest)).fetchone() is not None
+
+    def has_import_prefix(self, language: str, prefix: str) -> bool:
+        """Whether any current-identity ``language`` file imports a name
+        starting with ``prefix`` (imports are stored as a JSON string list)."""
+        pattern = '%"' + prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        return self.conn.execute(
+            "SELECT 1 FROM ci_files WHERE language = ? AND parser_digest = ? AND imports LIKE ? ESCAPE '\\' LIMIT 1",
+            (language, self.parser_digest, pattern)).fetchone() is not None
+
     def _select(self, where: str, params: Sequence, exclude_paths: Iterable[str] = ()) -> List[Symbol]:
         excluded = tuple(exclude_paths)
         clause = f"({where}) AND f.parser_digest = ?"
