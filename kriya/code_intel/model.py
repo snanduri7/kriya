@@ -86,8 +86,11 @@ TYPE_KINDS = frozenset({"class", "interface", "enum", "record", "annotation_type
 CALLABLE_KINDS = frozenset({"method", "constructor", "function", "annotation_element"})
 # Configuration structure (config_parsing.py): localization and read-only
 # context evidence, never mutation authority.
-CONFIG_KINDS = frozenset({"bean", "bean_property", "bean_constructor_arg", "component_scan", "config_import",
-                          "config_key"})
+CONFIG_KEY = "config_key"
+# The kinds only a Spring XML context produces (CAGC selection reads this
+# constant; it is never derived from CONFIG_KINDS).
+SPRING_XML_KINDS = frozenset({"bean", "bean_property", "bean_constructor_arg", "component_scan", "config_import"})
+CONFIG_KINDS = SPRING_XML_KINDS | {CONFIG_KEY}
 
 
 @dataclass(frozen=True)

@@ -34,8 +34,11 @@ import re
 from typing import Dict, List, Optional, Tuple
 from xml.parsers import expat
 
-from kriya.code_intel.model import FileStructure, ParseState, Span, Symbol, source_digest
+from kriya.code_intel.model import CONFIG_KEY, FileStructure, ParseState, Span, Symbol, source_digest
 
+SPRING_XML = "spring-xml"
+PROPERTIES = "properties"
+YAML = "yaml"
 _SPRING_P = "http://www.springframework.org/schema/p"
 _SPRING_C = "http://www.springframework.org/schema/c"
 _SPRING_BEANS_ROOT = "beans"
@@ -53,12 +56,12 @@ def config_language_for_path(path: str) -> Optional[str]:
     name = os.path.basename(path)
     extension = os.path.splitext(name)[1].lower()
     if extension == ".xml":
-        return "spring-xml"
+        return SPRING_XML
     if _APPLICATION_RE.match(name):
-        return "properties" if extension == ".properties" else "yaml"
+        return PROPERTIES if extension == ".properties" else YAML
     if extension == ".properties" and _RESOURCES_RE.search(path.replace(os.sep, "/")) and not \
             _MESSAGE_BUNDLE_RE.search(name):
-        return "properties"
+        return PROPERTIES
     return None
 
 
@@ -114,7 +117,7 @@ def parse_config_file(path: str, data: bytes) -> FileStructure:
                              detail="no configuration parser")
     builder = _Builder(language, path, data)
     try:
-        if language == "spring-xml":
+        if language == SPRING_XML:
             if not _SpringXml(builder).run():
                 return FileStructure(path, "", builder.digest, ParseState.UNSUPPORTED, parser_identity().digest,
                                      detail="not a Spring beans document")
@@ -303,7 +306,7 @@ def _parse_properties(builder: _Builder) -> None:
         key = (stripped[:separator.start()] if separator else stripped).strip().replace("\\", "")
         if not key:
             continue
-        builder.add("config_key", key, key, start + (len(raw) - len(raw.lstrip())), end,
+        builder.add(CONFIG_KEY, key, key, start + (len(raw) - len(raw.lstrip())), end,
                     signature_text=stripped[:_MAX_VALUE], modifiers=modifiers)
 
 
@@ -331,7 +334,7 @@ def _parse_yaml(builder: _Builder) -> None:
             start = char_to_byte(key_node.start_mark.index)
             end = char_to_byte(value_node.end_mark.index)
             line_text = text[key_node.start_mark.index:value_node.end_mark.index].split("\n", 1)[0]
-            builder.add("config_key", key, key, start, max(end, start + 1), signature_text=line_text[:_MAX_VALUE],
+            builder.add(CONFIG_KEY, key, key, start, max(end, start + 1), signature_text=line_text[:_MAX_VALUE],
                         modifiers=modifiers)
 
 

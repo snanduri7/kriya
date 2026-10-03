@@ -57,7 +57,7 @@ import re
 import tokenize
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
@@ -873,6 +873,16 @@ def _positively_requested_frameworks(goal: str, names: Tuple[str, ...]) -> Tuple
         if clause.strip() and not _NEGATION_CUE_RE.search(clause)
     ).lower()
     return tuple(name for name in names if name in positive_text)
+
+
+def positively_requested_terms(goal: str, terms: Iterable[str]) -> FrozenSet[str]:
+    """The ``terms`` the goal names as whole words (case-insensitive) in a
+    clause that does not prohibit them - the stack contract's own clause rule
+    (_goal_clauses / _NEGATION_CUE_RE). A term named only in a prohibition
+    clause is not requested."""
+    clauses = [clause for clause in _goal_clauses(goal) if clause.strip() and not _NEGATION_CUE_RE.search(clause)]
+    return frozenset(term for term in terms
+                     if any(re.search(rf"\b{re.escape(term)}\b", clause, re.IGNORECASE) for clause in clauses))
 
 
 def derive_stack_contract(goal: str) -> Optional[StackContract]:
