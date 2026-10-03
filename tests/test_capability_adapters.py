@@ -500,3 +500,17 @@ def test_a_plain_java_workspace_has_no_test_gate(tmp_path):
     _write(tmp_path, "src/App.java", "class App {}")
     assert _validator(tmp_path).run_tests("src/AppTest.java") == {
         "success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
+
+
+@pytest.mark.parametrize("egress, web_lookup, expected", [
+    ("local_only", True, False), ("local_only", False, False), ("unrestricted", True, True), ("unrestricted", False, False)])
+def test_javac_resolver_lookup_needs_both_open_egress_and_web_lookup(tmp_path, egress, web_lookup, expected):
+    _write(tmp_path, "App.java", "class App {")
+    autonomy = AppConfig().autonomy.model_copy(update={"egress_policy": egress, "web_lookup_enabled": web_lookup})
+    v = PolymorphicValidator(str(tmp_path), autonomy_cfg=autonomy)
+    seen = []
+    _, patched = _javac_runs({"returncode": 1, "stdout": "", "stderr": "App.java:1: error"})
+    with patched, patch("kriya.tools.resolver.enrich_java_compiler_errors",
+                        side_effect=lambda text, allow_external_lookup: seen.append(allow_external_lookup) or text):
+        v.run_compile_check(["App.java"])
+    assert seen == [expected]
