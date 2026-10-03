@@ -256,3 +256,60 @@ def test_exact_match_and_extra_target_rates_count_eligible_runs_only(tmp_path):
     arm = ab.summarize(runs, {}, PROFILES)["arms"]["B"]
     assert arm["exact_target_set_match"] == {"hits": 1, "eligible": 2, "rate": 0.5}
     assert arm["extra_target_rate"] == {"hits": 1, "eligible": 2, "rate": 0.5}
+
+
+def _plan(*subtasks):
+    return [{"approved_plan": {"subtasks": [
+        {"planned_files": [{"path": path, "action": action} for path, action in files]} for files in subtasks]}}]
+
+
+def test_multi_existing_target_subtasks_count_only_existing_targets():
+    """PROTOCOL_v2 amendment 2: a subtask owning more than one EXISTING target
+    (action modify/delete), the shape behind matrix-40's B 2/20 vs A 0/20."""
+    assert ab.multi_existing_target_subtasks(_plan([("a", "modify"), ("b", "modify")], [("c", "modify")])) == 1
+    assert ab.multi_existing_target_subtasks(_plan([("a", "modify"), ("b", "create")])) == 0
+    assert ab.multi_existing_target_subtasks(_plan([("a", "delete"), ("b", "modify")])) == 1
+    assert ab.multi_existing_target_subtasks([{"attempt": 1}]) is None
+
+
+def _package(files, tiers, omitted):
+    return [("context.known_target_package", {"details": {
+        "known_target_files": files, "tiers": [{"path": p, "tier": t} for p, t in tiers],
+        "omitted": [dict(path=p, reason=r, **({"member_id": m} if m else {})) for p, r, m in omitted]}})]
+
+
+def test_capacity_refusal_and_starvation_suspect_are_kept_apart():
+    """PROTOCOL_v2 amendment 3: minimum_authority_unfit is a capacity outcome;
+    a planned target shown in no tier and omitted budget_exhausted without it
+    is a starvation suspect for deterministic replay."""
+    capacity = ab.known_target_outcomes(_package(
+        ["x", "y"], [("x", "member_exact")], [("y", "minimum_authority_unfit", None), ("y", "budget_exhausted", None)]))
+    assert capacity == {"capacity_refusals": [{"path": "y", "shown": False}], "starvation_suspects": []}
+    starved = ab.known_target_outcomes(_package(["x", "y"], [("x", "member_exact")], [("y", "budget_exhausted", None)]))
+    assert starved == {"capacity_refusals": [], "starvation_suspects": [{"path": "y"}]}
+    excerpt = ab.known_target_outcomes(_package(["x", "y"], [("x", "member_exact"), ("y", "skeleton")],
+                                                [("y", "minimum_authority_unfit", None), ("y", "body_elided", None)]))
+    assert excerpt["capacity_refusals"] == [{"path": "y", "shown": True}] and excerpt["starvation_suspects"] == []
+    member_only = ab.known_target_outcomes(_package(["x"], [("x", "member_exact")], [("x", "budget_exhausted", "X.m")]))
+    assert member_only == {"capacity_refusals": [], "starvation_suspects": []}
+
+
+def test_descriptive_metrics_per_arm(tmp_path):
+    run_dir = _run(tmp_path, "B", "java-x", "r3")
+    (run_dir / "kriya" / "control" / "planning-diagnostics" / "p.jsonl").write_text(json.dumps(
+        _plan([("src/X.java", "modify"), ("src/Y.xml", "modify")])[0]))
+    _run(tmp_path, "B", "java-x", "r2")
+    runs, _ = ab.collect(str(tmp_path), GOLD)
+    arm = ab.summarize(runs, {}, PROFILES)["arms"]["B"]
+    assert arm["multi_existing_target_subtask_rate"] == {"hits": 1, "eligible": 2, "rate": 0.5}
+    assert arm["minimum_authority_unfit"] == {"runs": 0, "refusals": 0, "rate": 0.0}
+    assert arm["starvation_suspects"] == {"runs": 0, "omissions": 0}
+
+
+def test_only_a_target_left_with_nothing_shown_is_a_starvation_suspect():
+    """A member-level omission is about one member, not the target's minimum;
+    a target that is shown in some tier was not deprived of everything."""
+    member_level = ab.known_target_outcomes(_package(["x"], [], [("x", "budget_exhausted", "X.m")]))
+    assert member_level["starvation_suspects"] == []
+    shown = ab.known_target_outcomes(_package(["x"], [("x", "signatures")], [("x", "budget_exhausted", None)]))
+    assert shown["starvation_suspects"] == []

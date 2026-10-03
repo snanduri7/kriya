@@ -168,6 +168,49 @@ def _planned_files(diagnostics: List[Dict[str, Any]]) -> Tuple[List[str], int]:
     return planned, attempts
 
 
+EXISTING_TARGET_ACTIONS = ("modify", "delete")
+MINIMUM_AUTHORITY_UNFIT, BUDGET_EXHAUSTED = "minimum_authority_unfit", "budget_exhausted"
+
+
+def multi_existing_target_subtasks(diagnostics: List[Dict[str, Any]]) -> Optional[int]:
+    """Subtasks of the last approved plan that own more than one existing
+    target (planned_files with action modify/delete); None without an
+    approved plan."""
+    plan = None
+    for record in diagnostics:
+        if (record.get("approved_plan") or {}).get("subtasks"):
+            plan = record["approved_plan"]
+    if plan is None:
+        return None
+    return sum(1 for subtask in plan["subtasks"]
+               if sum(f.get("action") in EXISTING_TARGET_ACTIONS for f in subtask.get("planned_files", [])) > 1)
+
+
+def known_target_outcomes(events: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Per known-target package event: capacity refusals (an explicit
+    minimum_authority_unfit) and starvation suspects (a planned target shown
+    in no tier and omitted budget_exhausted with no capacity record). A
+    suspect is not a verdict: the package records no minimum sizes or
+    protected room, so a deterministic replay decides it."""
+    capacity, suspects = [], []
+    for kind, event in events:
+        if kind != "context.known_target_package":
+            continue
+        details = event.get("details") or {}
+        shown = {tier.get("path") for tier in details.get("tiers", [])}
+        reasons: Dict[str, List[str]] = {}
+        for entry in details.get("omitted", []):
+            if entry.get("member_id") is None:
+                reasons.setdefault(entry.get("path"), []).append(entry.get("reason"))
+        for path in details.get("known_target_files", []):
+            omitted = reasons.get(path, [])
+            if MINIMUM_AUTHORITY_UNFIT in omitted:
+                capacity.append({"path": path, "shown": path in shown})
+            elif path not in shown and BUDGET_EXHAUSTED in omitted:
+                suspects.append({"path": path})
+    return {"capacity_refusals": capacity, "starvation_suspects": suspects}
+
+
 def analyze_run(run_dir: str, arm: str, task: str, label: str, gold_targets: List[str]) -> Dict[str, Any]:
     rows = _read_json(os.path.join(run_dir, "traces.json"), [])
     enforce = next((r for r in rows if str(r.get("run_id", "")).endswith(".enforce")), None)
@@ -235,6 +278,8 @@ def analyze_run(run_dir: str, arm: str, task: str, label: str, gold_targets: Lis
         "gold_targets": sorted(gold_targets),
         **localization(planned, gold_targets),
         "exact_t0_present": t0,
+        "multi_existing_target_subtasks": multi_existing_target_subtasks(diagnostics),
+        **known_target_outcomes(events),
         "planner_repairs": repairs, "developer_retries": developer_retries,
         "guidance": guidance,
         "selected_capabilities": sorted({c for g in guidance for c in g.get("selected_capability_ids", [])}),
@@ -305,6 +350,15 @@ def summarize(runs: List[Dict[str, Any]], judges: Dict[str, str], profiles: Dict
             "extra_target_rate": _eligible_rate([bool(r["extra_targets"]) for r in mine
                                                  if r["extra_targets"] is not None]),
             "exact_t0_rate": _rate(sum(r["exact_t0_present"] for r in mine), len(mine)),
+            # Descriptive (PROTOCOL_v2 amendment 2), never acceptance gates.
+            "multi_existing_target_subtask_rate": _eligible_rate(
+                [r["multi_existing_target_subtasks"] > 0 for r in mine
+                 if r["multi_existing_target_subtasks"] is not None]),
+            "minimum_authority_unfit": {"runs": sum(bool(r["capacity_refusals"]) for r in mine),
+                                        "refusals": sum(len(r["capacity_refusals"]) for r in mine),
+                                        "rate": _rate(sum(bool(r["capacity_refusals"]) for r in mine), len(mine))},
+            "starvation_suspects": {"runs": sum(bool(r["starvation_suspects"]) for r in mine),
+                                    "omissions": sum(len(r["starvation_suspects"]) for r in mine)},
             "planner_repairs": _distribution(r["planner_repairs"] for r in mine),
             "developer_retries": _distribution(r["developer_retries"] for r in mine),
         }
