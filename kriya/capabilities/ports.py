@@ -8,7 +8,7 @@ adapter instead of carrying each ecosystem inline.
 This is ownership, not authority: an adapter runs only through the
 validator handle it is given (its containment, gate binding, resource
 limits and acquisition rules), never a process of its own. The first slice
-moves existing Maven and Java behaviour unchanged.
+moved existing Maven and Java behaviour unchanged; Gradle, Python and pip followed.
 """
 from __future__ import annotations
 
@@ -37,6 +37,10 @@ class BuildAdapter(ABC):
     language: str
     tools: FrozenSet[str]  # executable basenames that invoke this build system
 
+    def invokes(self, tool: str) -> bool:
+        """Whether the executable basename ``tool`` invokes this build system."""
+        return tool in self.tools
+
     @abstractmethod
     def detects(self, workspace_root: str) -> bool:
         """Whether the workspace declares a project of this build system."""
@@ -51,5 +55,7 @@ class BuildAdapter(ABC):
         decide it (the caller continues with its next option)."""
 
     @abstractmethod
-    def run_tests(self, validator: Any, test_class: Optional[str]) -> Dict[str, Any]:
-        """The test gate result (``test_class``: a bare class name or None)."""
+    def run_tests(self, validator: Any, test_class: Optional[Any]) -> Dict[str, Any]:
+        """The test gate result. ``test_class`` is the build system's own test
+        selection: a bare class name for a JVM build, a list of test paths for
+        pip; None runs the whole suite."""
