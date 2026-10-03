@@ -1,7 +1,12 @@
 # Python live reliability investigation (opened 2026-10-03)
 
-Registry: PYTHON-LIVE-RELIABILITY-001. Not a CAGC finding: the Python requests carried **no** capability
-guidance in either arm (MEASURED, matrix-40), and the same failure shapes occur in both arms.
+Registry: PYTHON-LIVE-RELIABILITY-001. Causality relative to CAGC: **UNKNOWN / not attributable from the historical
+data.** Python live reliability was 1/16 valid runs (A 1/8, B 0/8). The Python requests carried no capability
+guidance in either arm, but Arm B also changed the base role prompts, so "no guidance rendered" does not mean
+"same prompt"; the data do not establish whether the difference is attributable to CAGC, the base-prompt changes,
+ordinary model behaviour or another cause. PROTOCOL_v2 classifies failures prospectively. *(Corrected 2026-10-03;
+the first version said "not a CAGC finding".)* No retry, early-stop, fallback or localization policy changes before
+the CAGC v2 experiment: the findings below are classifications, not implementation authorization.
 
 Valid Python sample of matrix-40: maxsplit, ichunked, zipb, invalidurl x (A r1, B r2, B r3, A r4) = 16 runs
 (python-symbol-one excluded: wrong goal for its workspace). Kriya SUCCESS **1/16** (ichunked A r4).
