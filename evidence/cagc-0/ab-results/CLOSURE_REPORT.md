@@ -1,5 +1,8 @@
 # CAGC-0 closure report (KRIYA_CAGC v0.7 §13, §17.4)
 
+> **Corrections 2026-10-03 (post-closure review): see `CORRECTIONS.md`.** This report is kept as written; the
+> corrected values are marked inline. The predeclared judge-verified gate result (A 5/16, B 4/16: FAIL) is unchanged.
+
 Arm A = 0bea22f (tree e6f5c4c), Arm B = b7cd737 (tree d3d43ea); 10 tasks x A,B,B,A = 40 runs, 2026-10-03
 12:32-20:06, all completed in the planned order. Model identity identical in both arms (MEASURED: Developer/primary
 qwen3-coder runtime 0769fe62..., Planner qwen3.6 runtime 26cb2deb...; every role QUALIFIED; the same two runtime
@@ -37,7 +40,7 @@ branch tools/cagc-ab-analyzer). Evidence: ~/kriya-cagc-ab/{A,B}/evidence/<task>.
 | Judge-verified SUCCESS (DISCRIMINATING judges only, 16 runs/arm) | **5/16** | **4/16** |
 | SUCCESS not independently verifiable (non-discriminating judge) | 0 | 1 (fraction r2) |
 | False successes | 0 | 0 |
-| Correct-target rate (tasks with gold) | 0.50 | 0.50 |
+| Correct-target rate (tasks with gold) - **as reported 0.50 was WRONG (mis-computed over all 20 runs); corrected = gold_target_recall over the 12 eligible runs, CORRECTIONS.md §1** | 0.50 → **10/12** | 0.50 → **10/12** |
 | Exact T0 present | 1.00 | 1.00 |
 | Planner repairs, total (distribution 0/1/2) | 19 (5/11/4) | 17 (8/7/5) |
 | Developer retries, total | 46 | 45 |
@@ -123,7 +126,7 @@ exercise the unexercised rules (greenfield Maven/Gradle, the direct Architect pa
 | False successes = 0 | PASS (0 / 0) |
 | Judge-verified B >= A | **FAIL, 4 vs 5** - the one-run difference is Spring XML B r3, a pre-existing Kriya defect, plus ichunked variance |
 | Spring XML SUCCESS + held-out judge | PASS (B r2) |
-| Correct-target / exact-T0 no regression | PASS (0.50 / 1.00 both) |
+| Correct-target / exact-T0 no regression | PASS (0.50 / 1.00 both) ← **corrected: gold_target_recall 10/12 vs 10/12 (CORRECTIONS.md §1); PASS unchanged** |
 | No capability leakage | PASS (0) |
 | Median Developer guidance <= 150 | PASS (33.5; 67 non-empty) |
 | Prompt tokens per request | PASS by construction for the CAGC text (base smaller everywhere; guidance <= 70 est tokens, within role caps); observed per-call averages are dominated by trajectory/context variance (reported, not gated) |

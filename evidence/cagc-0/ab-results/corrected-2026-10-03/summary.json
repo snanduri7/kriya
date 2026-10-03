@@ -1,0 +1,256 @@
+{
+  "arms": {
+    "A": {
+      "developer_retries": {
+        "0": 6,
+        "1": 3,
+        "2": 2,
+        "3": 3,
+        "4": 2,
+        "5": 2,
+        "6": 2
+      },
+      "exact_t0_rate": 1.0,
+      "exact_target_set_match": {
+        "eligible": 12,
+        "hits": 10,
+        "rate": 0.8333
+      },
+      "extra_target_rate": {
+        "eligible": 12,
+        "hits": 2,
+        "rate": 0.1667
+      },
+      "false_success": 0,
+      "gold_target_recall": {
+        "eligible": 12,
+        "hits": 10,
+        "rate": 0.8333
+      },
+      "judge_verified_denominator": 16,
+      "judge_verified_success": 5,
+      "judge_verified_success_rate": 0.3125,
+      "kriya_success": 5,
+      "kriya_success_rate": 0.25,
+      "planner_repairs": {
+        "0": 5,
+        "1": 11,
+        "2": 4
+      },
+      "runs": 20,
+      "success_not_independently_verifiable": 0
+    },
+    "B": {
+      "developer_retries": {
+        "0": 4,
+        "1": 3,
+        "2": 5,
+        "3": 2,
+        "4": 4,
+        "5": 2
+      },
+      "exact_t0_rate": 1.0,
+      "exact_target_set_match": {
+        "eligible": 12,
+        "hits": 10,
+        "rate": 0.8333
+      },
+      "extra_target_rate": {
+        "eligible": 12,
+        "hits": 2,
+        "rate": 0.1667
+      },
+      "false_success": 0,
+      "gold_target_recall": {
+        "eligible": 12,
+        "hits": 10,
+        "rate": 0.8333
+      },
+      "judge_verified_denominator": 16,
+      "judge_verified_success": 4,
+      "judge_verified_success_rate": 0.25,
+      "kriya_success": 5,
+      "kriya_success_rate": 0.25,
+      "planner_repairs": {
+        "0": 8,
+        "1": 7,
+        "2": 5
+      },
+      "runs": 20,
+      "success_not_independently_verifiable": 1
+    }
+  },
+  "guidance": {
+    "developer_median_estimated_tokens": 33.5,
+    "leakage": [],
+    "planner_fit_drop_rate": 0.0,
+    "planner_requests": 37,
+    "requests": 132,
+    "requests_with_cap_drop": 0,
+    "requests_with_fit_drop": 3
+  },
+  "judges": {
+    "java-behavior-accents": "DISCRIMINATING",
+    "java-symbol-chop": "DISCRIMINATING",
+    "java-symbol-fraction": "NON_DISCRIMINATING",
+    "python-behavior-maxsplit": "DISCRIMINATING",
+    "python-error-invalidurl": "DISCRIMINATING",
+    "python-symbol-ichunked": "DISCRIMINATING",
+    "python-symbol-one": "AMBIGUOUS",
+    "python-symbol-zipb": "DISCRIMINATING",
+    "spring-boot-pagesize": "DISCRIMINATING",
+    "spring-xml-pettypes-cache": "DISCRIMINATING"
+  },
+  "per_task": {
+    "java-behavior-accents": {
+      "developer_prefill_seconds": {
+        "A": 38.3,
+        "B": 30.7
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 25843,
+        "B": 24233,
+        "delta": -1610
+      },
+      "guidance_applicable": true,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "PASS"
+    },
+    "java-symbol-chop": {
+      "developer_prefill_seconds": {
+        "A": 40.1,
+        "B": 50.8
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 27735,
+        "B": 34339,
+        "delta": 6604
+      },
+      "guidance_applicable": true,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "FAIL"
+    },
+    "java-symbol-fraction": {
+      "developer_prefill_seconds": {
+        "A": 28.7,
+        "B": 31.6
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 17597.5,
+        "B": 20955.5,
+        "delta": 3358.0
+      },
+      "guidance_applicable": true,
+      "judge": "NON_DISCRIMINATING",
+      "prompt_gate": "FAIL"
+    },
+    "python-behavior-maxsplit": {
+      "developer_prefill_seconds": {
+        "A": 49.9,
+        "B": 32.6
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 26745,
+        "B": 21258.5,
+        "delta": -5486.5
+      },
+      "guidance_applicable": false,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "PASS"
+    },
+    "python-error-invalidurl": {
+      "developer_prefill_seconds": {
+        "A": 10.6,
+        "B": 6.7
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 5959,
+        "B": 3444,
+        "delta": -2515
+      },
+      "guidance_applicable": false,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "PASS"
+    },
+    "python-symbol-ichunked": {
+      "developer_prefill_seconds": {
+        "A": 31.5,
+        "B": 16.5
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 14239.5,
+        "B": 7050,
+        "delta": -7189.5
+      },
+      "guidance_applicable": false,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "PASS"
+    },
+    "python-symbol-one": {
+      "developer_prefill_seconds": {
+        "A": 64.3,
+        "B": 64.4
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 37794,
+        "B": 38318.5,
+        "delta": 524.5
+      },
+      "guidance_applicable": false,
+      "judge": "AMBIGUOUS",
+      "prompt_gate": "FAIL"
+    },
+    "python-symbol-zipb": {
+      "developer_prefill_seconds": {
+        "A": 15.6,
+        "B": 16.6
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 8636,
+        "B": 9890,
+        "delta": 1254
+      },
+      "guidance_applicable": false,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "FAIL"
+    },
+    "spring-boot-pagesize": {
+      "developer_prefill_seconds": {
+        "A": 56.0,
+        "B": 40.6
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 33550,
+        "B": 26510.5,
+        "delta": -7039.5
+      },
+      "guidance_applicable": true,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "PASS"
+    },
+    "spring-xml-pettypes-cache": {
+      "developer_prefill_seconds": {
+        "A": 15.0,
+        "B": 21.3
+      },
+      "developer_prompt_eval_tokens": {
+        "A": 8310,
+        "B": 12255,
+        "delta": 3945
+      },
+      "guidance_applicable": true,
+      "judge": "DISCRIMINATING",
+      "prompt_gate": "FAIL"
+    }
+  },
+  "runtime_digests": {
+    "A": [
+      "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+      "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+    ],
+    "B": [
+      "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437",
+      "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3"
+    ]
+  }
+}
