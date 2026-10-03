@@ -1,0 +1,24 @@
+0a1
+> # provider-contract-v5-production: v4 (sha256 of v4 unchanged) + a static Planner role binding (agent_llms.planner.llm).
+71a73,93
+>     # Static Planner role specialization (2026-10-03): the already-qualified
+>     # llm_chain[0] binding, verbatim. Selected from the measured cross-task
+>     # Planner matrix (commons-lang, Spring Boot, Python, Spring XML): correct
+>     # targets 4/4 and no over-scoped unit, vs qwen3-coder 4/4 and 1 over-scoped
+>     # unit (Spring XML 9/9 earlier). The Developer stays qwen3-coder (llm).
+>     llm:
+>       provider: openai
+>       model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       context_window: 32768
+>       temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>         reasoning_effort: none
