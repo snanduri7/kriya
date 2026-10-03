@@ -791,6 +791,19 @@ loop returning the identical plan for checks whose fix is fully determined by th
   requires gets `requires` = its `depends_on` units' provides - a restatement of its own edges. Nothing is derived
   when its dependencies provide nothing (the validator still reports `SUBTASK_SEMANTIC_CONTRACT_MISSING`).
   Decision field `derived_contracts`.
+- **Planner context fit** (PLANNER-CONTEXT-FIT-001, `context_budget.fit_structural_evidence`). The enforce Planner
+  request is fitted per role candidate (`CandidatePrompts`) by priority: goal, protocol, requirements, grounded
+  owners and the Code Intelligence candidate map (annotations, configuration values) are never trimmed; the
+  `source references -> target` relationships get the room they leave, then the fenced reference gets what is
+  left (it gives way first). When the relationships do not all fit, whole lines are kept by the best focus rank of
+  either endpoint (grounded owners, then candidates in rank order; lines touching neither last; ties in order),
+  shown in their original order with one explicit elision line counting the rest. A request that fits is
+  byte-identical; one whose mandatory text cannot fit is still refused by the unchanged dispatch check. Decision
+  `context.request_fit` field `structural_evidence` (line counts, room, estimated tokens before/after). Measured:
+  the commons-lang `chop` request for qwen3.6 was refused before inference (estimated 33,567 tokens > 32,768 at
+  its qualified 1.6852 bytes/token; the same-size request to qwen3-coder used 12,273 real tokens); fitted, it is
+  24,162 estimated tokens with all 47 relationships of the target file kept and 111 of 236 elided. The estimator's
+  conservatism is a residual (ADMISSION-ESTIMATOR-CONSERVATISM-001), never bypassed with post-call counts.
 - **Verification scope** (PLAN-VERIFICATION-SCOPE-001, `scope_verification_to_requirements`). A Planner may not add
   application-runtime verification the request does not require. The one source is Kriya's own reading of the
   request, `acceptance.goal_requires_runtime_behavior` (the value enforce already validates and runs with); there is
