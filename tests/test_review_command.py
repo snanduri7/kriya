@@ -207,15 +207,15 @@ def test_review_multiple_files_over_budget_splits_into_batches(tmp_path):
     to multiple separate review calls (each within budget) rather than either
     silently truncating the combined prompt or crashing - every file must
     actually reach the model in some call, clearly labeled which batch."""
-    # ~30 lines: one file's wrapped review blob counts ~252 dispatch tokens.
     # A 4000-token window with a 512-token output budget leaves ~3200 prompt
-    # tokens; the Reviewer system prompt (~2456) and the review header take
-    # most of it (PROMPT-BUDGET-FIT-001B reserves them), leaving room for one
-    # blob but not two (~504).
+    # tokens; the Reviewer system prompt and the review header take most of
+    # it (PROMPT-BUDGET-FIT-001B reserves them), leaving room for one file's
+    # blob but not two. Measured at the CAGC-0 (stack-neutral) system prompt:
+    # 38..75 padding lines give exactly two batches; 55 sits in the middle.
     (tmp_path / "kriya.yaml").write_text(
         "llm:\n  context_window: 4000\n  max_tokens: 512\n"
     )
-    padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(30))
+    padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(55))
     (tmp_path / "a.py").write_text(padding)
     (tmp_path / "b.py").write_text(padding.replace("x_", "y_"))
 
