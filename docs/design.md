@@ -835,7 +835,9 @@ loop returning the identical plan for checks whose fix is fully determined by th
   model included the configuration file (production model 0/3; fallback 1/3; naming the targets outright 1/3 each);
   with these facts both included it 3/3, and the fallback model produced a fully correct plan 3/3. The production
   model still gave mutation ownership to unneeded callers in every response (a model-specific limit, not fixed
-  here). Changing this module stales context-certification records (`index_implementation_digest`).
+  here). Live, both full runs then planned the configuration file and the Developer's candidates pass the held-out
+  judge; the runs still failed closed on planning beyond the goal (SPRING-XML-PLANNER-OVERSCOPE-001). Changing this
+  module stales context-certification records (`index_implementation_digest`).
 
 ### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 first slice
 
