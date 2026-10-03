@@ -7,6 +7,8 @@ set -u
 T=$1; V=$2; SRC=$3; BASE=$4; REF=$5; TEST=$6; HELD=${7:-}; DEST=${8:-}; CFGT=${9:-$T}
 AB=$HOME/kriya-cagc-ab; R=$HOME/kriya-cagc-bench-v2/judge-out; TREE=$R/$T/$V; OUT=$R/$T/$V.out; mkdir -p $OUT
 JUDGE_PY=/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python
+# The validator the Java judges run is THIS checkout's Kriya (never whatever the venv's editable install points at).
+export PYTHONPATH=${0:A:h:h:h:h:h}
 rm -rf "${TREE:?}"; git clone -q --no-hardlinks $SRC $TREE && git -C $TREE checkout -q --detach $BASE || exit 2
 if [ $V = ref ]; then
   if [ -f "$REF" ]; then git -C $TREE apply $REF || { echo "JUDGE $T ref: REF_DOES_NOT_APPLY" | tee $OUT/judge.result; exit 0; }
@@ -20,6 +22,8 @@ git -C $TREE diff --stat > $OUT/applied.stat
 source $AB/A/env.sh
 cd $AB/A/ws/$CFGT && $JUDGE_PY - "$TREE" "$AB/A/config/$CFGT.yaml" "$TEST" "$OUT/judge.log" <<'PY' 2>&1 | grep "^@@\|JUDGE" > $OUT/judge.raw
 import os, re, sys
+import kriya
+print("@@ kriya", os.path.dirname(kriya.__file__))
 from kriya.config.config import load_config
 from kriya.tools.validate import PolymorphicValidator
 root, config, test, log = sys.argv[1:]
