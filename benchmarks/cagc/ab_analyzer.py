@@ -15,6 +15,18 @@ NON_DISCRIMINATING (the untouched base already passes) or AMBIGUOUS
 success; a passing non-discriminating judge is a regression check, never
 independent proof that the requested change was achieved.
 
+Localization is measured against the gold targets (``gold_targets.json``): the
+non-test, non-documentation files the task's known-good fix commit changes.
+Only runs of a task WITH gold targets are eligible; a task whose gold is
+unknown is excluded from every localization denominator, never counted as a
+miss. Planned files are compared in the same scope the gold was taken in
+(``in_gold_scope``):
+  gold_target_recall       every gold target is among the planned files
+  exact_target_set_match   the in-scope planned files equal the gold targets
+  extra_target_rate        some in-scope planned file is not a gold target
+(Correction 2026-10-03: the first report's "correct_target_rate" divided the
+recall hits by every run of the arm, gold or not, and was misnamed.)
+
 usage: python ab_analyzer.py <ab-root> <gold_targets.json> <base_judges.json> <task_profiles.json> <out-dir>
 """
 from __future__ import annotations
@@ -72,6 +84,24 @@ def _read_text(path: str) -> str:
 
 
 _CONTROL = ".kriya/control/"
+# The gold scope: the rule judge_tree.sh uses to take the gold from a fix
+# commit (tests and documentation are not gold targets).
+_OUT_OF_GOLD_SCOPE = re.compile(r"(^|/)(src/test/|tests?/)|\.(md|rst)$")
+
+
+def in_gold_scope(path: str) -> bool:
+    return not _OUT_OF_GOLD_SCOPE.search(path)
+
+
+def localization(planned: List[str], gold_targets: List[str]) -> Dict[str, Any]:
+    """Per-run localization facts against the task's gold targets; every
+    value is None when the task has no known gold (not eligible)."""
+    if not gold_targets:
+        return {"gold_target_recall": None, "exact_target_set_match": None, "extra_targets": None}
+    scoped = {p for p in planned if in_gold_scope(p)}
+    gold = set(gold_targets)
+    return {"gold_target_recall": gold <= set(planned), "exact_target_set_match": scoped == gold,
+            "extra_targets": sorted(scoped - gold)}
 
 
 def _metadata_member(name: str) -> bool:
@@ -202,7 +232,8 @@ def analyze_run(run_dir: str, arm: str, task: str, label: str, gold_targets: Lis
         "outcome": "SUCCESS" if success else "FAILURE", "status": status, "failure_category": failure,
         "wall_seconds": int(wall.group("seconds")) if wall else None,
         "planned_files": planned,
-        "correct_targets": bool(gold_targets) and set(gold_targets) <= set(planned),
+        "gold_targets": sorted(gold_targets),
+        **localization(planned, gold_targets),
         "exact_t0_present": t0,
         "planner_repairs": repairs, "developer_retries": developer_retries,
         "guidance": guidance,
@@ -243,6 +274,11 @@ def _rate(hits: int, total: int) -> Optional[float]:
     return round(hits / total, 4) if total else None
 
 
+def _eligible_rate(values: List[bool]) -> Dict[str, Any]:
+    """hits / eligible runs, with both counts shown."""
+    return {"hits": sum(values), "eligible": len(values), "rate": _rate(sum(values), len(values))}
+
+
 def summarize(runs: List[Dict[str, Any]], judges: Dict[str, str], profiles: Dict[str, Any]) -> Dict[str, Any]:
     arms: Dict[str, Any] = {}
     for arm in ARMS:
@@ -262,7 +298,12 @@ def summarize(runs: List[Dict[str, Any]], judges: Dict[str, str], profiles: Dict
             "success_not_independently_verifiable": sum(
                 r["outcome"] == "SUCCESS" and judges.get(r["task"]) != DISCRIMINATING and r["judge"] == "SOLVED"
                 for r in mine),
-            "correct_target_rate": _rate(sum(r["correct_targets"] for r in mine), len(mine)),
+            "gold_target_recall": _eligible_rate([r["gold_target_recall"] for r in mine
+                                                  if r["gold_target_recall"] is not None]),
+            "exact_target_set_match": _eligible_rate([r["exact_target_set_match"] for r in mine
+                                                      if r["exact_target_set_match"] is not None]),
+            "extra_target_rate": _eligible_rate([bool(r["extra_targets"]) for r in mine
+                                                 if r["extra_targets"] is not None]),
             "exact_t0_rate": _rate(sum(r["exact_t0_present"] for r in mine), len(mine)),
             "planner_repairs": _distribution(r["planner_repairs"] for r in mine),
             "developer_retries": _distribution(r["developer_retries"] for r in mine),
@@ -327,14 +368,14 @@ def _distribution(values: Iterable[int]) -> Dict[str, int]:
 
 
 def markdown(runs: List[Dict[str, Any]], summary: Dict[str, Any], incomplete: List[str]) -> str:
-    lines = ["| task | arm | rep | run id | outcome | s | targets | T0 | repairs | retries | rules sent | fit drops "
+    lines = ["| task | arm | rep | run id | outcome | s | gold recall | T0 | repairs | retries | rules sent | fit drops "
              "| dev prompt tokens | dev prefill s | judge | diff |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in runs:
         lines.append("| {task} | {arm} | {replicate} | {run_id} | {outcome} | {wall_seconds} | {ct} | {t0} | "
                      "{planner_repairs} | {developer_retries} | {rules} | {fit} | {developer_prompt_eval_tokens} | "
                      "{developer_prefill_seconds} | {judge} | {diff} |".format(
-                         ct="yes" if r["correct_targets"] else "no", t0="yes" if r["exact_t0_present"] else "no",
+                         ct={True: "yes", False: "no", None: "n/a"}[r["gold_target_recall"]], t0="yes" if r["exact_t0_present"] else "no",
                          rules=", ".join(r["rendered_rules"]) or "-", fit=", ".join(r["fit_drops"]) or "-",
                          diff="yes" if r["workspace_diff_present"] else "no", **r))
     if incomplete:

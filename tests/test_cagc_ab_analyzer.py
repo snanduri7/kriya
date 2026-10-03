@@ -83,7 +83,8 @@ def test_one_run_is_read_completely(tmp_path):
     [run] = runs
     assert (run["task"], run["arm"], run["replicate"], run["run_id"]) == ("java-x", "B", "r2", "20261003Tr2")
     assert run["outcome"] == "SUCCESS" and run["wall_seconds"] == 600
-    assert run["correct_targets"] is True and run["workspace_diff_present"] is True  # the fixture's diff text and run["exact_t0_present"] is True
+    assert run["gold_target_recall"] is True and run["exact_target_set_match"] is True
+    assert run["extra_targets"] == [] and run["exact_t0_present"] is True
     assert run["planner_repairs"] == 1 and run["developer_retries"] == 2
     assert run["rendered_rules"] == ["java.dev.import_style", "maven.plan.existing_topology_preserved"]
     assert run["fit_drops"] == ["spring.review.transactional_self_invocation"] and run["cap_drops"] == []
@@ -134,7 +135,7 @@ def test_control_records_come_from_the_runs_own_archive(tmp_path):
             archive.addfile(info, io.BytesIO(data))
     [run] = ab.collect(str(tmp_path), GOLD)[0]
     assert run["planner_repairs"] == 2 and run["rendered_rules"] == ["m.plan.r"]
-    assert run["correct_targets"] is True and run["workspace_diff_present"] is True  # the fixture's diff text
+    assert run["gold_target_recall"] is True and run["workspace_diff_present"] is True  # the fixture's diff text
 
 
 def test_only_discriminating_judges_verify_success(tmp_path):
@@ -214,3 +215,44 @@ def test_main_is_deterministic_and_never_writes_evidence(tmp_path):
     summary = json.loads(outputs[0]["summary.json"])
     assert summary["judges"] == {"java-x": ab.DISCRIMINATING} and summary["arms"]["B"]["judge_verified_success"] == 1
     assert os.path.getsize(tmp_path / "out1" / "report.md") > 0
+
+
+def test_tasks_without_known_gold_are_excluded_from_the_localization_denominator(tmp_path):
+    """The first report divided gold-target hits by every run of the arm, so a
+    task with no known gold counted as a miss (0.50 instead of 10/12)."""
+    _run(tmp_path, "A", "java-x", "r1", planned=("src/X.java", "src/test/XTest.java"))   # gold, hit
+    _run(tmp_path, "A", "python-y", "r1", planned=("pkg/other.py",))                     # gold, miss
+    _run(tmp_path, "A", "spring-z", "r1", planned=("src/A.java", "conf/a.xml"))          # no gold
+    _run(tmp_path, "A", "spring-z", "r4", planned=("src/A.java",))                       # no gold
+    runs, _ = ab.collect(str(tmp_path), GOLD)
+    unknown = [r for r in runs if r["task"] == "spring-z"]
+    assert all(r["gold_target_recall"] is None and r["exact_target_set_match"] is None
+               and r["extra_targets"] is None for r in unknown)
+    arm = ab.summarize(runs, {}, PROFILES)["arms"]["A"]
+    assert arm["gold_target_recall"] == {"hits": 1, "eligible": 2, "rate": 0.5}
+    assert "correct_target_rate" not in arm
+    report = ab.markdown(runs, ab.summarize(runs, {}, PROFILES), [])
+    assert "| spring-z | A | r1 |" in report and "| n/a |" in report
+
+
+@pytest.mark.parametrize("planned, recall, exact, extra", [
+    (("src/X.java",), True, True, []),
+    (("src/X.java", "src/test/java/XTest.java", "README.md"), True, True, []),   # tests/docs: outside gold scope
+    (("src/X.java", "src/Y.java"), True, False, ["src/Y.java"]),
+    (("src/Y.java",), False, False, ["src/Y.java"]),
+    ((), False, False, [])])
+def test_localization_is_measured_in_the_gold_scope(planned, recall, exact, extra):
+    assert ab.localization(list(planned), ["src/X.java"]) == {
+        "gold_target_recall": recall, "exact_target_set_match": exact, "extra_targets": extra}
+    assert ab.localization(list(planned), []) == {
+        "gold_target_recall": None, "exact_target_set_match": None, "extra_targets": None}
+
+
+def test_exact_match_and_extra_target_rates_count_eligible_runs_only(tmp_path):
+    _run(tmp_path, "B", "java-x", "r2", planned=("src/X.java",))
+    _run(tmp_path, "B", "java-x", "r3", planned=("src/X.java", "src/Extra.java"))
+    _run(tmp_path, "B", "spring-z", "r2", planned=("src/A.java",))
+    runs, _ = ab.collect(str(tmp_path), GOLD)
+    arm = ab.summarize(runs, {}, PROFILES)["arms"]["B"]
+    assert arm["exact_target_set_match"] == {"hits": 1, "eligible": 2, "rate": 0.5}
+    assert arm["extra_target_rate"] == {"hits": 1, "eligible": 2, "rate": 0.5}
