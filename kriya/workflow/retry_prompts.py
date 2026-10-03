@@ -31,7 +31,7 @@ ECOSYSTEM_INVARIANT_HEADER = (
 RESOURCE_LIFECYCLE_HEADER = (
     "\n\n=== Resource Lifecycle (required) ===\n"
     "Any stateful resource you open in this goal's code - a database/cache client "
-    "or connection (e.g. Ignite, JDBC, Redis), a message broker client/connection, "
+    "or connection, a message broker client/connection, "
     "a thread pool or executor, a network socket or server, a file handle - must be "
     "started/opened exactly ONCE for the lifetime it's actually needed, reused "
     "rather than re-opened per operation/method call, and explicitly closed/shut "
