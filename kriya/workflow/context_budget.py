@@ -892,45 +892,80 @@ def fit_structural_evidence(
                  "focus_lines": sum(1 for rank in ranks if rank < unranked), **fit.to_dict()}
 
 
+def _package_paths(package: Any) -> List[str]:
+    return [item.path for item in getattr(package, "relevant_files", ()) if getattr(item, "path", None)]
+
+
+def fit_guidance_section(capacity: RequestCapacity, fixed_texts: Sequence[str], section: Any) -> SectionFit:
+    """A capability-guidance section (kriya/workflow/capability_guidance.py)
+    fitted into the room ``fixed_texts`` leave (fit_variable_section): kept
+    whole when it fits, else rebuilt from its original block by whole rules
+    (``section.rebuild``), "" when no rule fits. ``section.observe`` is told
+    the final text."""
+
+    def build(budget: int) -> str:
+        return section.text if estimate_tokens(section.text) <= budget else section.rebuild(budget)
+
+    fit = fit_variable_section(capacity, fixed_texts, build) if section.text else SectionFit("", 0, 0, 0, False)
+    section.observe(fit.value)
+    return fit
+
+
 def fit_planner_request(
     capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
     reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]], request: str = "planner",
+    guidance: Optional[Callable[[Sequence[str]], Any]] = None, graph_package: Any = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """The direct Planner request (PROMPT-BUDGET-FIT-001A): ``head`` (goal,
-    error, repository model) + skills + graph context + fenced reference +
-    ``suffix`` (owner, requirement, tool and grounding blocks). The graph
-    context, then the untrusted reference, get the room the system prompt
-    and every mandatory section leave (repository evidence outranks
-    untrusted reference text). The graph context is rebuilt at its room by
-    ``rebuild_graph(budget) -> (text, ContextPackage)`` only when it does not
-    fit. Returns the prompt and the fit details (empty when both sections
-    went in unchanged, so the prompt is byte-identical to the unfitted one)."""
+    error, repository model) + skills + capability guidance + graph context +
+    fenced reference + ``suffix`` (owner, requirement, tool and grounding
+    blocks). The graph context, then the capability guidance, then the
+    untrusted reference, get the room the system prompt and every mandatory
+    section leave (repository evidence outranks advisory guidance, which
+    outranks untrusted reference text). The graph context is rebuilt at its
+    room by ``rebuild_graph(budget) -> (text, ContextPackage)`` only when it
+    does not fit. ``guidance(shown_files)`` (CAGC-0) is called after the
+    graph fit with the files the fitted graph context still shows
+    (``graph_package`` holds the unfitted context's files), so guidance is
+    never selected by a file the fit left out. Returns the prompt and the fit
+    details (empty when every section went in unchanged, so the prompt is
+    byte-identical to the unfitted one)."""
     from kriya.workflow.untrusted_context import fence_untrusted_reference
 
     fixed = (system_prompt, head, skills_prompt, suffix)
     omitted_files: List[str] = []
+    shown_files: List[str] = _package_paths(graph_package)
 
     def build_graph(budget: int) -> str:
         if estimate_tokens(graph_context) <= budget:
             return graph_context
         text, package = rebuild_graph(budget)
         omitted_files[:] = [entry.get("path") for entry in getattr(package, "omitted", ()) if entry.get("path")]
+        shown_files[:] = _package_paths(package)
         return text
 
     graph = fit_variable_section(capacity, fixed, build_graph) if graph_context else None
     graph_text = graph.value if graph is not None else ""
+    guidance_fit, guidance_text, guidance_section = None, "", None
+    if guidance is not None:
+        guidance_section = guidance(tuple(shown_files) if graph_text else ())
+        guidance_fit = fit_guidance_section(capacity, fixed + (graph_text,), guidance_section)
+        guidance_text = guidance_fit.value
     fenced = fence_untrusted_reference(reference)
-    ref = fit_reference_section(capacity, fixed + (graph_text,), reference) if fenced else None
+    ref = fit_reference_section(capacity, fixed + (graph_text, guidance_text), reference) if fenced else None
     ref_text = ref.value if ref is not None else ""
     details: Dict[str, Any] = {}
-    if graph_text != graph_context or ref_text != fenced:
+    guidance_reduced = guidance_section is not None and guidance_text != guidance_section.text
+    if graph_text != graph_context or ref_text != fenced or guidance_reduced:
         details = {
             "request": request,
             "graph": graph.to_dict() if graph is not None else None,
             "graph_omitted_files": omitted_files,
             "reference": ref.to_dict() if ref is not None else None,
         }
-    return head + skills_prompt + graph_text + ref_text + suffix, details
+        if guidance_fit is not None:
+            details["capability_guidance"] = guidance_fit.to_dict()
+    return head + skills_prompt + guidance_text + graph_text + ref_text + suffix, details
 
 
 def conversation_tokens(capacity: RequestCapacity, messages: Sequence[Dict[str, Any]],
@@ -952,11 +987,14 @@ class OptionalSection:
     """An optional section a Developer request carries verbatim
     (DEVELOPER-PROMPT-FIT-001): ``text`` exactly as placed in the request,
     ``rebuild(budget)`` the same section rebuilt within ``budget`` allocator
-    units ("" leaves it out). ``kind`` is one of DEVELOPER_SECTION_ORDER."""
+    units ("" leaves it out). ``kind`` is one of DEVELOPER_SECTION_ORDER.
+    ``observe``, when set, is called once per fitted request with the text
+    the request finally carries for this section ("" when it is not there)."""
 
     kind: str
     text: str
     rebuild: Callable[[int], str]
+    observe: Optional[Callable[[str], Any]] = None
 
 
 # The order a Developer request keeps its optional sections in when it does
@@ -970,7 +1008,12 @@ class OptionalSection:
 # GRAPHIFY-OVERSIZE-REQUEST-001: the planned files' own current source is
 # the most relevant optional text a Developer request carries, so it is
 # given room first.
-DEVELOPER_SECTION_ORDER = ("planned_source", "siblings", "graph_context", "investigation", "learned_reference")
+# CAGC-0: capability guidance (advisory language/framework/build semantics
+# of the request's own targets) ranks below the planned source and siblings
+# and above repository graph context, investigation evidence and the
+# learned reference.
+DEVELOPER_SECTION_ORDER = ("planned_source", "siblings", "capability_guidance", "graph_context", "investigation",
+                           "learned_reference")
 
 
 def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt: str,
@@ -985,8 +1028,10 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
     The mandatory text is never trimmed: if it alone does not fit, every
     section is left out and the dispatch check refuses the request
     (CONTEXT_BUDGET_UNSATISFIABLE). Returns the prompt and the fit details
-    ({} when unchanged)."""
+    ({} when unchanged). Every section's ``observe`` is told what the final
+    request carries for it."""
     if capacity.count(system_prompt) + capacity.count(prompt) <= capacity.tokens:
+        _observe_sections(sections, prompt)
         return prompt, {}
     unlocated: List[str] = []
     located: List[Tuple[int, int, OptionalSection]] = []
@@ -1034,12 +1079,28 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
         fitted.append(fits[index].value)
         cursor = end
     fitted.append(prompt[cursor:])
+    final = {id(spans[index][2]): fit.value for index, fit in fits.items()}
+    _observe_sections(sections, prompt, final)
     return "".join(fitted), {
         "request": "developer", "capacity_tokens": capacity.tokens,
         "sections": {spans[index][2].kind: {**fit.to_dict(), "reduced": fit.value != spans[index][2].text}
                      for index, fit in fits.items()},
         "unlocated_sections": unlocated,
     }
+
+
+def _observe_sections(sections: Sequence[OptionalSection], prompt: str,
+                      fitted: Optional[Dict[int, str]] = None) -> None:
+    """Tells each observed section what the request finally carries: its
+    fitted value, its own text when it stayed in as mandatory text (found
+    but not fitted), or "" when the request does not carry it."""
+    for section in sections:
+        if section.observe is None:
+            continue
+        if fitted is not None and id(section) in fitted:
+            section.observe(fitted[id(section)])
+        else:
+            section.observe(section.text if section.text and section.text in prompt else "")
 
 
 class DeveloperRequestFit:
@@ -1218,6 +1279,7 @@ REVIEW_FILES_NOT_SHOWN_NOTE = (
 
 def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], system_prompt: str, header: str,
                     *, on_refit: Optional[Callable[[Optional[Any], int, Dict[str, Any]], None]] = None,
+                    guidance: Optional[Callable[[Optional[Any], int], Any]] = None,
                     ) -> Tuple[List[CandidatePrompts], List[str], SectionFit]:
     """The requests of one review: ``system_prompt`` (the one actually sent)
     and ``header`` (goal, candidate diff, evidence) are fixed text, the file
@@ -1234,8 +1296,11 @@ def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], sy
     files that fit, in order, plus REVIEW_FILES_NOT_SHOWN_NOTE naming the
     rest (REVIEW_FILES_OMITTED_NOTE when none fits) - reported through
     ``on_refit(candidate, batch_number, details)``. The fixed text is never
-    trimmed for any candidate. Returns the requests, the first candidate's
-    truncated relpaths and its fit."""
+    trimmed for any candidate. Capability guidance (CAGC-0;
+    ``guidance(candidate, batch_number)`` returns that request's
+    GuidanceSection) is placed after the header and gets only the room the
+    files leave: it is dropped before any file is omitted. Returns the
+    requests, the first candidate's truncated relpaths and its fit."""
     capacity = agent_request_capacity(config, reviewer, "reviewer")
     fixed = (system_prompt, header, REVIEW_BATCH_LABEL_BOUND)
     fit = _fit_review_groups(capacity, files, *fixed)
@@ -1246,8 +1311,15 @@ def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], sy
 
     def request(number: int, batch: str, paths: List[str]) -> CandidatePrompts:
         def build(candidate_capacity: RequestCapacity, candidate: Optional[Any]) -> str:
+            files_text = files_for(candidate_capacity, candidate)
+            if guidance is None:
+                return header + files_text
+            fit = fit_guidance_section(candidate_capacity, fixed + (files_text,), guidance(candidate, number))
+            return header + fit.value + files_text
+
+        def files_for(candidate_capacity: RequestCapacity, candidate: Optional[Any]) -> str:
             if not paths or candidate_capacity.count(batch) <= candidate_capacity.room(*fixed):
-                return header + batch
+                return batch
             note_bound = REVIEW_FILES_NOT_SHOWN_NOTE.format(paths=", ".join(paths))
             refit = _fit_review_groups(candidate_capacity, [(path, contents[path]) for path in paths],
                                        *fixed, note_bound)
@@ -1262,7 +1334,7 @@ def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], sy
                     "files": list(paths), "shown_files": list(shown), "not_shown_files": not_shown,
                     "truncated_files": [path for path in cut if path in shown], **refit.to_dict(),
                 })
-            return header + text
+            return text
 
         return CandidatePrompts(config, reviewer, "reviewer", build)
 
