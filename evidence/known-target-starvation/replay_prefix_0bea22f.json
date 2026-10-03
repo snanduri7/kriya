@@ -1,0 +1,12 @@
+{
+ "spring-xml-pettypes-cache.r3": {
+  "{\"items\": [[\"ClinicServiceImpl.java\", \"member_exact\"]], \"omitted\": [[\"tools-config.xml\", \"budget_exhausted\"]]}": "21 (limit, T0) combinations, e.g. (1000, 2000)",
+  "{\"items\": [[\"ClinicServiceImpl.java\", \"member_exact\"], [\"tools-config.xml\", \"skeleton\"]], \"omitted\": [[\"ClinicServiceImpl.java\", \"body_elided\"], [\"tools-config.xml\", \"body_elided\"]]}": "28 (limit, T0) combinations, e.g. (1150, 2000)",
+  "{\"items\": [[\"ClinicServiceImpl.java\", \"member_exact\"], [\"ClinicServiceImpl.java\", \"signatures\"], [\"tools-config.xml\", \"skeleton\"]], \"omitted\": [[\"tools-config.xml\", \"body_elided\"]]}": "49 (limit, T0) combinations, e.g. (1350, 2000)"
+ },
+ "python-error-invalidurl.r3": {
+  "{\"items\": [[\"_exceptions.py\", \"member_exact\"]], \"omitted\": [[\"_urls.py\", \"budget_exhausted\"]]}": "28 (limit, T0) combinations, e.g. (1000, 2000)",
+  "{\"items\": [[\"_exceptions.py\", \"member_exact\"], [\"_urls.py\", \"skeleton\"]], \"omitted\": [[\"_exceptions.py\", \"body_elided\"], [\"_urls.py\", \"body_elided\"]]}": "7 (limit, T0) combinations, e.g. (1200, 2000)",
+  "{\"items\": [[\"_exceptions.py\", \"member_exact\"], [\"_exceptions.py\", \"signatures\"], [\"_urls.py\", \"skeleton\"]], \"omitted\": [[\"_urls.py\", \"body_elided\"]]}": "63 (limit, T0) combinations, e.g. (1250, 2000)"
+ }
+}

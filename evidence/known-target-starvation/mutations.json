@@ -1,0 +1,47 @@
+[
+ {
+  "mutant": "M1 T0 room ignored for minima",
+  "killed": true,
+  "by": "test_spring_shape_second_target_gets_its_whole_source_before_any_enrichment"
+ },
+ {
+  "mutant": "M2 whole-file minimum not charged to T0",
+  "killed": true,
+  "by": "test_a_targets_further_members_are_enrichment_after_every_minimum[True]"
+ },
+ {
+  "mutant": "M3 all members in pass 1",
+  "killed": true,
+  "by": "test_a_targets_further_members_are_enrichment_after_every_minimum[True]"
+ },
+ {
+  "mutant": "M4 no capacity omission reason",
+  "killed": true,
+  "by": "test_httpx_shape_as_measured_is_a_typed_capacity_refusal_not_starvation"
+ },
+ {
+  "mutant": "M5 excerpt sized from T0 room",
+  "killed": true,
+  "by": "test_a_minimum_that_fits_nowhere_is_omitted_typed_and_limits_hold"
+ },
+ {
+  "mutant": "M6 early skip uses shared limit only",
+  "killed": true,
+  "by": "test_every_minimum_is_admitted_before_any_enrichment[0]"
+ },
+ {
+  "mutant": "M7 whole-file minimum against shared limit",
+  "killed": true,
+  "by": "test_spring_shape_second_target_gets_its_whole_source_before_any_enrichment"
+ },
+ {
+  "mutant": "M8 render in admission order",
+  "killed": true,
+  "by": "test_rendering_follows_rank_even_when_a_higher_target_is_filled_in_pass_two"
+ },
+ {
+  "mutant": "M9 enrichment before other minima (package in pass 1)",
+  "killed": true,
+  "by": "test_a_targets_further_members_are_enrichment_after_every_minimum[True]"
+ }
+]

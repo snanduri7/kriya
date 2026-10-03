@@ -1377,6 +1377,11 @@ REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION = "unsupported_structural_extraction"
 REASON_STALE_REVISION_REJECTED = "stale_revision_rejected"
 REASON_LOWER_RELEVANCE = "lower_relevance"
 REASON_SOURCE_UNAVAILABLE = "source_unavailable"
+# KNOWN-TARGET-MULTI-TARGET-STARVATION-001: an existing target's minimum
+# authoritative unit (its whole current source when no grounded member is
+# shown) does not fit even T0's protected room - a capacity limit of this
+# request, never the starvation of one target by another's enrichment.
+REASON_MINIMUM_AUTHORITY_UNFIT = "minimum_authority_unfit"
 
 # CTX-001 P1 WP7/A5 (architecture doc section 10): a known-target file's
 # EFFECTIVE score is max(retrieval_score, KNOWN_TARGET_FLOOR) - high enough
@@ -1861,11 +1866,81 @@ def build_known_target_context(
     ordered_paths = [p for p in dict.fromkeys(known_target_files) if p not in exclude_set]
     ordered_paths.sort(key=effective_score, reverse=True)
 
-    items: List[Any] = []
+    # KNOWN-TARGET-MULTI-TARGET-STARVATION-001: two passes. Pass 1 gives
+    # EVERY existing target its minimum authoritative editable unit (its
+    # first grounded member_exact unit, else its whole current source)
+    # before pass 2 spends anything on enrichment (further grounded members,
+    # the member package, sibling signatures, a bounded excerpt). A minimum
+    # unit is admitted against T0's own room as well as the shared limit -
+    # the rule a grounded member always had - so neither optional context
+    # nor another target's enrichment can leave a planned existing target
+    # with no editable source. A minimum that does not fit is omitted as
+    # before, and the edit capability then refuses the invocation typed
+    # (CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE) before any model call.
+    items_by_path: Dict[str, List[Any]] = {}
     omitted: List[Dict[str, Any]] = []
     consumed = 0
     consumed_exact = 0
 
+    def mandatory_room() -> int:
+        room = budget_limit - consumed
+        if exact_member_budget is not None:
+            room = max(room, exact_member_budget - consumed_exact)
+        return room
+
+    def admit(item: Any, cost: int, *, mandatory: bool) -> None:
+        nonlocal consumed, consumed_exact
+        items_by_path.setdefault(item.path, []).append(item)
+        consumed += cost
+        if mandatory:
+            consumed_exact += cost
+
+    def admit_member(rank: int, path: str, resolved: Any, member_id: str, boundary: Any) -> bool:
+        """One grounded member's exact current body against T0's room; an
+        omission entry when it cannot be shown."""
+        member_remaining = mandatory_room()
+        if member_remaining <= 0:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                estimated_tokens=0, member_id=member_id,
+            ))
+            return False
+        if cache is not None:
+            # Cache-key discriminator includes the boundary's own line range,
+            # not just member_id - an ambiguous (overloaded) name can resolve
+            # to SEVERAL distinct boundaries sharing one member_id (see
+            # boundaries_matching_member_id's own docstring); using member_id
+            # alone here would collide two real, DIFFERENT bodies into one
+            # cache entry. The ContextItem's own member_id (below) stays the
+            # clean, real value - this discriminator is a cache-key-only detail.
+            cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
+            member_content, member_cost = cache.get_or_compute_derivation(
+                path, cache_member_id, "member_exact", resolved.revision,
+                lambda b=boundary, r=resolved: extract_member_body(r.content, b.start_line, b.end_line),
+            )
+        else:
+            member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
+            member_cost = estimate_tokens(member_content)
+        if member_cost > member_remaining:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
+                member_id=member_id,
+            ))
+            return False
+        admit(make_context_item(
+            path=path, content=member_content, reason="known_target_member_exact",
+            source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+            score=effective_score(path), member_id=member_id,
+            start_line=boundary.start_line, end_line=boundary.end_line,
+            tier="member_exact", is_exact=True, revision=resolved.revision,
+            omitted_regions=False,
+        ), member_cost, mandatory=True)
+        return True
+
+    # Pass 1: each target's minimum authoritative unit, in rank order.
+    # Per target: (rank, path, resolved, member units still to try, the
+    # boundary its minimum came from, whole file deferred to pass 2).
+    pending: List[Tuple[int, str, Any, List[Tuple[str, Any]], Any, bool]] = []
     for rank, path in enumerate(ordered_paths, start=1):
         resolved = resolver.resolve(path)
         if not resolved.exists:
@@ -1878,9 +1953,8 @@ def build_known_target_context(
             # known_revisions hint didn't match reality.
             omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_STALE_REVISION_REJECTED, estimated_tokens=0))
 
-        remaining = budget_limit - consumed
         hinted = bool((member_hints or {}).get(path))
-        if remaining <= 0 and not (hinted and exact_member_budget is not None):
+        if mandatory_room() <= 0 and not (hinted and exact_member_budget is not None):
             omitted.append(make_omitted_entry(
                 path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
                 estimated_tokens=estimate_tokens(resolved.content),
@@ -1903,8 +1977,7 @@ def build_known_target_context(
         else:
             member_id_candidates = []
 
-        member_produced = False
-        produced_boundaries: List[Any] = []
+        units: List[Tuple[str, Any]] = []
         if member_id_candidates:
             boundaries = member_boundaries_for(path, resolved.content)
             if boundaries is None:
@@ -1925,113 +1998,89 @@ def build_known_target_context(
                             path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
                             estimated_tokens=0, member_id=member_id,
                         ))
-                        continue
-                    for boundary in matching_boundaries:
-                        member_remaining = budget_limit - consumed
-                        if exact_member_budget is not None:
-                            member_remaining = max(member_remaining, exact_member_budget - consumed_exact)
-                        if member_remaining <= 0:
-                            omitted.append(make_omitted_entry(
-                                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
-                                estimated_tokens=0, member_id=member_id,
-                            ))
-                            continue
-                        if cache is not None:
-                            # Cache-key discriminator includes the boundary's
-                            # own line range, not just member_id - an
-                            # ambiguous (overloaded) name can resolve to
-                            # SEVERAL distinct boundaries sharing one
-                            # member_id (see boundaries_matching_member_id's
-                            # own docstring); using member_id alone here
-                            # would collide two real, DIFFERENT bodies into
-                            # one cache entry. The ContextItem's own
-                            # member_id (below) stays the clean, real value -
-                            # this discriminator is a cache-key-only detail.
-                            cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
-                            member_content, member_cost = cache.get_or_compute_derivation(
-                                path, cache_member_id, "member_exact", resolved.revision,
-                                lambda b=boundary, r=resolved: extract_member_body(r.content, b.start_line, b.end_line),
-                            )
-                        else:
-                            member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
-                            member_cost = estimate_tokens(member_content)
-                        if member_cost <= member_remaining:
-                            items.append(make_context_item(
-                                path=path, content=member_content, reason="known_target_member_exact",
-                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
-                                score=effective_score(path), member_id=member_id,
-                                start_line=boundary.start_line, end_line=boundary.end_line,
-                                tier="member_exact", is_exact=True, revision=resolved.revision,
-                                omitted_regions=False,
-                            ))
-                            consumed += member_cost
-                            consumed_exact += member_cost
-                            member_produced = True
-                            produced_boundaries.append(boundary)
-                        else:
-                            omitted.append(make_omitted_entry(
-                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
-                                member_id=member_id,
-                            ))
+                    units.extend((member_id, boundary) for boundary in matching_boundaries)
 
-            if member_produced:
-                sibling_remaining = budget_limit - consumed
-                package_text = _known_target_member_package(
-                    code_intelligence, workspace_path, path, resolved.content, produced_boundaries[0],
-                    sibling_remaining) if sibling_remaining > 0 else None
-                if package_text:
-                    items.append(make_context_item(
-                        path=path, content=package_text, reason="known_target_member_package",
+        first_boundary = None
+        while units and first_boundary is None:
+            member_id, boundary = units.pop(0)
+            if admit_member(rank, path, resolved, member_id, boundary):
+                first_boundary = boundary
+        if first_boundary is not None:
+            pending.append((rank, path, resolved, units, first_boundary, False))
+            continue
+        # No member unit: the whole current source is the minimum.
+        cost = estimate_tokens(resolved.content)
+        if 0 < cost <= mandatory_room():
+            admit(make_context_item(
+                path=path, content=resolved.content, reason="known_target_full_source",
+                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY, score=effective_score(path),
+                tier="full", is_exact=True, revision=resolved.revision, omitted_regions=False,
+            ), cost, mandatory=True)
+            continue
+        if cost > 0:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_MINIMUM_AUTHORITY_UNFIT, estimated_tokens=cost,
+            ))
+        pending.append((rank, path, resolved, [], None, True))
+
+    # Pass 2: enrichment, in rank order, from what is left.
+    for rank, path, resolved, units, first_boundary, whole_file_deferred in pending:
+        if whole_file_deferred:
+            fit = _fit_whole_file(resolved.content, budget_limit - consumed)
+            if fit is None:
+                omitted.append(make_omitted_entry(
+                    path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                    estimated_tokens=estimate_tokens(resolved.content),
+                ))
+                continue
+            tier, rendered_content, reason, omitted_regions = fit
+            admit(make_context_item(
+                path=path, content=rendered_content, reason=reason, source_type="named_in_request",
+                trust_level=TrustLevel.REPOSITORY, score=effective_score(path), tier=tier,
+                is_exact=(tier == "full"), revision=resolved.revision, omitted_regions=omitted_regions,
+            ), estimate_tokens(rendered_content), mandatory=False)
+            if omitted_regions:
+                omitted.append(make_omitted_entry(
+                    path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(rendered_content),
+                ))
+            continue
+
+        for member_id, boundary in units:
+            admit_member(rank, path, resolved, member_id, boundary)
+        sibling_remaining = budget_limit - consumed
+        package_text = _known_target_member_package(
+            code_intelligence, workspace_path, path, resolved.content, first_boundary,
+            sibling_remaining) if sibling_remaining > 0 else None
+        if package_text:
+            admit(make_context_item(
+                path=path, content=package_text, reason="known_target_member_package",
+                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                score=effective_score(path), tier="signatures", is_exact=False,
+                revision=resolved.revision, omitted_regions=True,
+            ), estimate_tokens(package_text), mandatory=False)
+        elif sibling_remaining > 0:
+            if cache is not None:
+                sibling_text, sib_cost = cache.get_or_compute_derivation(
+                    path, None, "signatures", resolved.revision,
+                    lambda r=resolved, p=path: skeletonize_code(r.content, p, "signatures"),
+                )
+            else:
+                sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                sib_cost = estimate_tokens(sibling_text) if sibling_text else 0
+            if sibling_text:
+                if sib_cost <= sibling_remaining:
+                    admit(make_context_item(
+                        path=path, content=sibling_text, reason="known_target_sibling_signatures",
                         source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
                         score=effective_score(path), tier="signatures", is_exact=False,
                         revision=resolved.revision, omitted_regions=True,
+                    ), sib_cost, mandatory=False)
+                else:
+                    omitted.append(make_omitted_entry(
+                        path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
                     ))
-                    consumed += estimate_tokens(package_text)
-                elif sibling_remaining > 0:
-                    if cache is not None:
-                        sibling_text, sib_cost = cache.get_or_compute_derivation(
-                            path, None, "signatures", resolved.revision,
-                            lambda r=resolved, p=path: skeletonize_code(r.content, p, "signatures"),
-                        )
-                    else:
-                        sibling_text = skeletonize_code(resolved.content, path, "signatures")
-                        sib_cost = estimate_tokens(sibling_text) if sibling_text else 0
-                    if sibling_text:
-                        if sib_cost <= sibling_remaining:
-                            items.append(make_context_item(
-                                path=path, content=sibling_text, reason="known_target_sibling_signatures",
-                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
-                                score=effective_score(path), tier="signatures", is_exact=False,
-                                revision=resolved.revision, omitted_regions=True,
-                            ))
-                            consumed += sib_cost
-                        else:
-                            omitted.append(make_omitted_entry(
-                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
-                            ))
 
-        if member_produced:
-            continue
-
-        remaining = budget_limit - consumed
-        fit = _fit_whole_file(resolved.content, remaining)
-        if fit is None:
-            omitted.append(make_omitted_entry(
-                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
-                estimated_tokens=estimate_tokens(resolved.content),
-            ))
-            continue
-        tier, rendered_content, reason, omitted_regions = fit
-        items.append(make_context_item(
-            path=path, content=rendered_content, reason=reason, source_type="named_in_request",
-            trust_level=TrustLevel.REPOSITORY, score=effective_score(path), tier=tier,
-            is_exact=(tier == "full"), revision=resolved.revision, omitted_regions=omitted_regions,
-        ))
-        consumed += estimate_tokens(rendered_content)
-        if omitted_regions:
-            omitted.append(make_omitted_entry(
-                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(rendered_content),
-            ))
+    items = [item for path in ordered_paths for item in items_by_path.get(path, [])]
 
     package = build_context_package(
         relevant_files=tuple(items),
