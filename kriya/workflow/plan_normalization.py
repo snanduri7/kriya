@@ -28,10 +28,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, ExecutionRole, PlannedFile, Subtask
+from kriya.workflow.plan_schema import (
+    EngineeringPlan,
+    ExecutionMethod,
+    ExecutionRole,
+    PlannedFile,
+    Subtask,
+    VerificationMethodType,
+)
 
 COALESCED_FILE_OWNERS = "PLAN_FILE_OWNERS_COALESCED"
 VERIFICATION_CONTRACT_DERIVED = "PLAN_VERIFICATION_CONTRACT_DERIVED"
+VERIFICATION_SCOPE_NORMALIZED = "PLAN_VERIFICATION_SCOPE_NORMALIZED"
 
 
 def _mutates(subtask: Subtask) -> bool:
@@ -185,3 +193,81 @@ def derive_verification_contracts(plan: EngineeringPlan) -> Tuple[EngineeringPla
         return plan, records
     return EngineeringPlan.model_validate(
         plan.model_copy(update={"subtasks": subtasks}).model_dump(mode="json")), records
+
+
+def _runtime_verifier(method: Any) -> bool:
+    return bool(method.requires_application_runtime)
+
+
+def scope_verification_to_requirements(
+    plan: EngineeringPlan, runtime_verification_required: bool,
+) -> Tuple[EngineeringPlan, List[Dict[str, Any]]]:
+    """Remove application-runtime verification the request does not require
+    (PLAN-VERIFICATION-SCOPE-001).
+
+    ``runtime_verification_required`` is Kriya's own deterministic reading of
+    the user's request (``acceptance.goal_requires_runtime_behavior``, the same
+    value enforce validates the plan and runs each unit with). When it is
+    False, a runtime verifier is a verification category the Planner invented:
+    executing it makes the unit require runtime evidence nothing asked for
+    (live, Spring XML pet types: correct mutation units and a passing suite,
+    then a verification unit "the application starts" whose run verifier
+    rightly produced no command -> the run failed closed).
+
+    Compile/test verifiers are never touched. Only removals whose correctness
+    is obvious are made:
+
+    - a unit keeping another verifier with an evidence producer loses just the
+      runtime verifier;
+    - a verification-only unit whose verifiers all lack a basis is removed
+      when nothing else rests on it: no unit depends on it or consumes what it
+      provides, no integration relationship names it, every requirement id it
+      cites is cited elsewhere, and every acceptance criterion only it cites
+      is a judgment criterion (removed with it - a tool criterion never is).
+
+    Anything else is left unchanged; validate_plan then refuses it
+    (PLAN_VERIFICATION_SCOPE_UNJUSTIFIED) and the bounded Planner repair runs.
+    Pure; one record per change."""
+    if runtime_verification_required:
+        return plan, []
+    criteria = {ac.id: ac for ac in plan.acceptance_criteria}
+    related = {sid for rel in plan.integration_relationships
+               for sid in (*rel.producer_subtask_ids, *rel.consumer_subtask_ids)}
+    records: List[Dict[str, Any]] = []
+    removed_criteria: Set[str] = set()
+    subtasks: List[Subtask] = []
+    for st in plan.subtasks:
+        runtime = [vm for vm in st.verification if _runtime_verifier(vm)]
+        if not runtime:
+            subtasks.append(st)
+            continue
+        kept = [vm for vm in st.verification if not _runtime_verifier(vm)]
+        if any(vm.has_evidence_producer for vm in kept):
+            subtasks.append(st.model_copy(update={"verification": kept}))
+            records.append({"reason_code": VERIFICATION_SCOPE_NORMALIZED, "action": "verifier_removed",
+                            "subtask": st.id, "removed": [vm.description for vm in runtime]})
+            continue
+        others = [o for o in plan.subtasks if o.id != st.id]
+        exclusive = [cid for cid in st.acceptance_criteria_ids
+                     if not any(cid in o.acceptance_criteria_ids for o in others)]
+        removable = (
+            st.execution_role == ExecutionRole.VERIFICATION and not st.planned_files
+            and not any(st.id in o.depends_on for o in others)
+            and not set(st.provides) & {r for o in others for r in o.requires}
+            and st.id not in related
+            and set(st.requirement_ids) <= {r for o in others for r in o.requirement_ids}
+            and all(cid in criteria and criteria[cid].method == VerificationMethodType.JUDGMENT for cid in exclusive)
+        )
+        if not removable:
+            subtasks.append(st)
+            continue
+        removed_criteria.update(exclusive)
+        records.append({"reason_code": VERIFICATION_SCOPE_NORMALIZED, "action": "unit_removed", "subtask": st.id,
+                        "removed": [vm.description for vm in st.verification],
+                        "acceptance_criteria_removed": exclusive})
+    if not records:
+        return plan, records
+    return EngineeringPlan.model_validate(plan.model_copy(update={
+        "subtasks": subtasks,
+        "acceptance_criteria": [ac for ac in plan.acceptance_criteria if ac.id not in removed_criteria],
+    }).model_dump(mode="json")), records

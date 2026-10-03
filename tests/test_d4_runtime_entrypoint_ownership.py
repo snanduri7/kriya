@@ -321,7 +321,9 @@ async def test_enforce_reopens_the_pom_owner_only_for_pom_and_reverifies(tmp_pat
     we.run_generation_workflow = fake_run
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
-        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+        result = await WorkflowController(we).execute(
+            # a runtime-verified run (PLAN-VERIFICATION-SCOPE-001)
+            "Run the application and check its output.", str(tmp_path), migration_mode="enforce")
 
     assert result.legacy_result["status"] == "success", result.legacy_result
     assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)

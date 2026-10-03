@@ -303,7 +303,9 @@ async def _run_controller(tmp_path, repaired_config):
     we.run_generation_workflow = fake_run
     p1, p2, p3 = _patched(_plan())
     with p1, p2, p3:
-        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+        result = await WorkflowController(we).execute(
+            # a runtime-verified run (PLAN-VERIFICATION-SCOPE-001)
+            "Run the application and check its output.", str(tmp_path), migration_mode="enforce")
     return result, calls
 
 

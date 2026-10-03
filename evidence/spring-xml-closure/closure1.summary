@@ -1,0 +1,16 @@
+== spring-xml-pettypes-cache [closure1] start 09:49:53 base 09351b3 kriya c355b70
+goal: Cache the pet types the same way the vets are cached, so that repeated pet type lookups do not query the database again.
+analyze exit=0 seconds=2
+generate exit=0 wall_seconds=236
+ M src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java
+ M src/main/resources/spring/tools-config.xml
+09351b3 Add DEP-001 patch candidate (#280)
+21fcc0e Bump tools.jackson.core:jackson-databind from 3.2.1 to 3.2.2 (#294)
+cd43fc0 Bump org.apache.maven:apache-maven from 3.8.4 to 3.9.16 (#292)
+== spring-xml-pettypes-cache [closure1] end 09:53:51
+judge spring-xml-pettypes-cache at 09351b3 + working-tree diff:
+ .../org/springframework/samples/petclinic/service/ClinicServiceImpl.java | 1 +
+ src/main/resources/spring/tools-config.xml                               | 1 +
+ 2 files changed, 2 insertions(+)
+@@ spring-xml-pettypes-cache success True ['Tests run: 2, Failures: 0, Errors: 0, Skipped: 0']
+JUDGE: SOLVED
