@@ -1,0 +1,11 @@
+{"tests": ["tests/test_cagc_evidence.py"],
+"mutations": [
+ {"name":"planner selects from unfitted matched files","file":"kriya/workflow/workflow.py","old":"role, Operation.PLAN, repository_facts, [path for path in matched if path in shown],","new":"role, Operation.PLAN, repository_facts, matched,"},
+ {"name":"enforce early return emits nothing","file":"kriya/workflow/workflow_controller.py","old":"                planner_guidance.with_sink(record_planner_guidance(planner_model)).observe(\"\")\n","new":""},
+ {"name":"developer targets dropped","file":"kriya/workflow/attempt.py","old":"    targets = [path for path in (target_paths or ()) if path]\n    return compose_section(","new":"    targets = []\n    return compose_section("},
+ {"name":"developer guidance not observed","file":"kriya/workflow/attempt.py","old":"        sections.append(OptionalSection(CAPABILITY_GUIDANCE_SECTION, guidance.text, guidance.rebuild,\n                                        guidance.observe))","new":"        sections.append(OptionalSection(CAPABILITY_GUIDANCE_SECTION, guidance.text, guidance.rebuild))"},
+ {"name":"developer guidance not in prompt","file":"kriya/workflow/attempt.py","old":"        active_code_context = ctx.skills_prompt + guidance.text + planned_source","new":"        active_code_context = ctx.skills_prompt + planned_source"},
+ {"name":"reviewer guidance not wired (final)","file":"kriya/workflow/workflow.py","old":"                guidance=_review_guidance(state, \"final\", self.kernel.config, repository_facts,\n                                          file_contents_for_review),\n","new":""},
+ {"name":"architect not wired","file":"kriya/workflow/workflow.py","old":"                    guidance=planning_guidance(Role.ARCHITECT, candidate),\n","new":""},
+ {"name":"recorder wrong authority","file":"kriya/workflow/capability_guidance.py","old":"            authority=EventAuthority.ADVISORY,","new":"            authority=EventAuthority.AUTHORITATIVE,"}
+]}

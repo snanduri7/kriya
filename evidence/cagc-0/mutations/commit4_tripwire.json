@@ -1,0 +1,8 @@
+{"tests": ["tests/test_cagc_neutral_base_prompts.py"],
+"mutations": [
+ {"name":"Maven back in Planner","file":"kriya/agents/agent.py","old":"\"MINIMALISM: Produce the smallest, simplest structure that satisfies the goal. A goal \"","new":"\"MINIMALISM: Produce a single Maven module that satisfies the goal. A goal \""},
+ {"name":"narrative in judge (allowlisted owner)","file":"kriya/agents/agent.py","old":"\"the real gap is in the verification commands themselves, not the code.\\n\"","new":"\"the real gap is in the verification commands themselves, not the code. Confirmed live in a run.\\n\""},
+ {"name":"Ignite in resource header","file":"kriya/workflow/retry_prompts.py","old":"\"or connection, a message broker client/connection, \"","new":"\"or connection (e.g. Ignite), a message broker client/connection, \""},
+ {"name":"pytest in structured planner","file":"kriya/workflow/workflow_controller.py","old":"\"- Put ambient runtimes and tools (language runtimes, build tools, test runners) in \"","new":"\"- Put ambient runtimes and tools such as pytest in \""},
+ {"name":"Spring in milestone planner","file":"kriya/agents/agent.py","old":"\"CONCRETE WORKED PATTERN: a goal combining a caching system with a \"","new":"\"CONCRETE WORKED PATTERN: a goal combining a Spring caching system with a \""}
+]}

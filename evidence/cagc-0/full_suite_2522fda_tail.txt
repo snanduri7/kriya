@@ -1,0 +1,5 @@
+FAILED tests/test_prompt_fit_role_chain_001.py::test_kriya_review_refits_each_batch_for_a_smaller_fallback
+FAILED tests/test_review_command.py::test_review_multiple_files_over_budget_splits_into_batches
+2 failed, 8542 passed, 14 warnings in 521.61s (0:08:41)
+
+[exited with code 0]
