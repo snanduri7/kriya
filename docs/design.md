@@ -826,6 +826,19 @@ loop returning the identical plan for checks whose fix is fully determined by th
   compile verifier on every unit; its failure (the configuration file omitted, units for files needing no change)
   is classified PLANNER_MODEL_CAPABILITY, not a structural defect.
 
+- **Candidate evidence** (SPRING-XML-PLANNER-EVIDENCE-001, `graph_retrieval.candidate_signature`). A Planner
+  localization candidate line shows the structural facts Code Intelligence already holds, never a body: a code
+  member's annotation names before its signature, a configuration entry's (`CONFIG_KINDS`) own declaration text
+  from the current bytes, whitespace-collapsed (the indexed signature when the bytes changed), bounded at
+  `CANDIDATE_SIGNATURE_CHARS` (240). Measured on the reconstructed exact Spring XML Planner request (2026-10-03):
+  with bare signatures the request ranked the cache-name property 4th and the cache-manager bean 6th, yet neither
+  model included the configuration file (production model 0/3; fallback 1/3; naming the targets outright 1/3 each);
+  with these facts both included it 3/3, and the fallback model produced a fully correct plan 3/3. The production
+  model still gave mutation ownership to unneeded callers in every response (a model-specific limit, not fixed
+  here). Live, both full runs then planned the configuration file and the Developer's candidates pass the held-out
+  judge; the runs still failed closed on planning beyond the goal (SPRING-XML-PLANNER-OVERSCOPE-001). Changing this
+  module stales context-certification records (`index_implementation_digest`).
+
 ### 2.9k Capability Adapters (`kriya/capabilities/`) - R1 first slice
 
 Ecosystem knowledge sits behind two narrow ports (`ports.py`), traced from the verification core's call sites:
