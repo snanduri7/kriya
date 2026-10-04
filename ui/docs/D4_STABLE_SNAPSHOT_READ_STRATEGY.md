@@ -1,8 +1,10 @@
 # Stable-snapshot read strategy for the D-4 gate decision
 
-Status: **specification for the owner's decision - not implemented, not a review round.** Prepared 2026-10-04 at the
-owner's request. D-4 stands as written: no `immutable=1`, no `-shm` exception, typed refusal for a store that cannot
-be read without writing. Phase C stays on hold until the owner decides.
+Status: **approved with six conditions in `handover/GUI-D4-READ-STRATEGY/03_GATE.md` (2026-10-04) and implemented on
+fixtures in `kriya/kup/` (commits `db96b12`, `f4bd13f`) - see `ui/docs/PHASE_C_HANDOFF.md` for the as-built decisions
+(the gate wins where this text differs: e.g. §4's 2 GiB and §8's 1 GiB were resolved as 512 MiB per snapshot, newest 3
+retained, 2 GiB directory ceiling; history reads require a snapshot id; metadata equality never skips an acquisition).**
+D-4 stands as written for inspection: no `immutable=1`, no `-shm` exception.
 
 Evidence this rests on: `ui/spikes/a1_zero_write/A1_REPORT.md` (the read candidate, nine store states) and
 `ui/spikes/a1_zero_write/results/backup_probe.md` (the acquisition candidate, measured 2026-10-04 on fixtures with
