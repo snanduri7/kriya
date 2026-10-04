@@ -865,7 +865,7 @@ _WRITE_RE = re.compile(
     r"|shutil\.(copy|copy2|copyfile|copytree|move|rmtree)\(|os\.(replace|rename|unlink|remove|rmdir|symlink|truncate)\("
 )
 _AUDITED_WRITE_SITES = {
-    "kriya/cli.py": 7, "kriya/config/authority_approval.py": 4, "kriya/control/persistence.py": 1,
+    "kriya/cli.py": 7, "kriya/config/authority_approval.py": 4, "kriya/kup/acquire.py": 5, "kriya/control/persistence.py": 1,
     "kriya/control/recovery.py": 3, "kriya/control/retention.py": 1, "kriya/core/model_certification.py": 4,
     "kriya/core/model_qualification.py": 3, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
 
