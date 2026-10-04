@@ -1,0 +1,72 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { AVAILABILITY_STATES, KUP_ERROR_CODES, validate, validateData, type KupEnvelope } from '../src/index';
+
+const GEN = join(__dirname, '..', '..', 'fixtures', 'generated');
+const read = (f: string) => JSON.parse(readFileSync(join(GEN, f), 'utf8')) as KupEnvelope;
+const files = () => readdirSync(GEN).filter((f) => f.endsWith('.json') && f !== 'index.json');
+const INJECTIONS = ['; rm -rf /', '$(id)', 'a\nb', 'x\0y', '--help', '-n 5', '../../etc/passwd', '', 'run id', 'run"id'];
+
+describe('golden fixtures validate against the schema (06 Phase B item 4)', () => {
+  it('fixtures exist', () => { expect(existsSync(join(GEN, 'index.json'))).toBe(true); });
+  it('every fixture envelope and its payload validate', () => {
+    for (const f of files()) {
+      const env = read(f);
+      const r = validate.envelope(env); expect(r.ok, `${f}: ${!r.ok ? r.errors.join('; ') : ''}`).toBe(true);
+      if (env.data !== null) { const d = validateData(env.operation, env.data); expect(d.ok, `${f} data: ${!d.ok ? d.errors.join('; ') : ''}`).toBe(true); }
+    }
+    for (const code of KUP_ERROR_CODES) expect(validate.envelope(read(`errors/${code}.json`)).ok).toBe(true);
+  });
+  it('round-trips through TypeScript with unknown fields preserved', () => {
+    const env = read('history.detail.run-unknown-fields.json');
+    const again = JSON.parse(JSON.stringify(env)) as KupEnvelope<Record<string, unknown>>;
+    expect(again).toEqual(env);
+    expect((again.data as Record<string, unknown>).novel_top_level_section).toBeDefined();
+    const events = ((again.data as Record<string, unknown>).run_events as { data: Record<string, unknown>[] }).data;
+    expect(events[0]?.severity_v9).toBe('novel');
+    expect(Object.keys(events[0] ?? {}).some((k) => k.startsWith('extra_'))).toBe(true);
+    expect(validate.runDetail(again.data).ok).toBe(true); // unknown fields do not invalidate an open record
+  });
+});
+
+describe('envelope refusals (P-27)', () => {
+  const base = read('capabilities.json');
+  it('refuses schema_version 2, a missing field, a non-object error and a bad operation', () => {
+    expect(validate.envelope({ ...base, schema_version: 2 }).ok).toBe(false);
+    const { observed_at: _o, ...missing } = base; expect(validate.envelope(missing).ok).toBe(false);
+    expect(validate.envelope({ ...base, error: 'oops' }).ok).toBe(false);
+    expect(validate.envelope({ ...base, operation: 'history.delete' }).ok).toBe(false);
+    expect(validate.envelope(null).ok).toBe(false);
+  });
+  it('a section needs a known availability; data may be anything including null', () => {
+    for (const s of AVAILABILITY_STATES) expect(validate.section({ availability: s, data: null }).ok).toBe(true);
+    expect(validate.section({ availability: 'definitely_fine', data: 1 }).ok).toBe(false);
+    expect(validate.section({ data: [] }).ok).toBe(false);
+  });
+  it('a run detail must carry every section', () => {
+    const d = read('history.detail.run-diff-2000.json').data as Record<string, unknown>;
+    const { comparisons: _c, ...without } = d; expect(validate.runDetail(without).ok).toBe(false);
+  });
+});
+
+describe('host contract (gate A-2 P-R2) matches the Electron host validators', () => {
+  it('accepts the five operations and refuses injection shapes, extra keys and leading dashes', () => {
+    expect(validate.kupRequest({ operation: 'capabilities' }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'history.list', limit: 200, cursor: 'WyIyMDI2IiwicnVuIl0=' }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'history.detail', run_id: 'run-0001.a:b_c' }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'workspace.status', workspace: '/w' }).ok).toBe(true);
+    for (const bad of INJECTIONS) {
+      expect(validate.kupRequest({ operation: 'history.detail', run_id: bad }).ok, `run_id ${JSON.stringify(bad)}`).toBe(false);
+      expect(validate.kupRequest({ operation: 'history.list', cursor: bad }).ok, `cursor ${JSON.stringify(bad)}`).toBe(false);
+    }
+    expect(validate.kupRequest({ operation: 'capabilities', extra: 1 }).ok).toBe(false);
+    expect(validate.kupRequest({ operation: 'history.list', limit: 201 }).ok).toBe(false);
+    expect(validate.kupRequest({ operation: 'workspace.status', workspace: 'rel' }).ok).toBe(false);
+    expect(validate.openInIdeRequest({ path: '/w/a.py', line: 7 }).ok).toBe(true);
+    expect(validate.openInIdeRequest({ path: '/w/a.py', line: 0 }).ok).toBe(false);
+    expect(validate.openInIdeRequest({ path: '/w/a.py', cmd: 'x' }).ok).toBe(false);
+    expect(validate.hostInfo({ kind: 'electron', hostVersion: '0.0.1', fixtureMode: true }).ok).toBe(true);
+    expect(validate.hostInfo({ kind: 'electron', hostVersion: '0.0.1', fixtureMode: true, extra: 1 }).ok).toBe(false);
+  });
+});

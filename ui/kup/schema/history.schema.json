@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/history.schema.json",
+  "title": "History operations",
+  "description": "Payloads of history.list, history.detail and history.prompt (P-25, P-26, P-30). Stored values are verbatim; timestamps exactly as stored (no timezone); files_modified stays the raw comma-joined string.",
+  "$defs": {
+    "RunSummary": {
+      "type": "object",
+      "required": ["run_id", "timestamp", "goal", "duration_sec", "attempts", "status", "failure_category", "files_modified"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "timestamp": { "type": ["string", "null"], "description": "Exactly as stored in runs.timestamp; timezone unknown." },
+        "goal": { "type": ["string", "null"] },
+        "duration_sec": { "type": ["number", "null"] },
+        "attempts": { "type": ["integer", "null"] },
+        "status": { "type": ["string", "null"], "description": "Literal stored value; a host never maps an unknown status to success." },
+        "failure_category": { "type": ["string", "null"] },
+        "files_modified": { "type": ["string", "null"], "description": "Raw comma-joined string (kriya/core/trace.py), never split into a list by Kriya." },
+        "milestone_group_id": { "type": ["string", "null"] },
+        "milestone_index": { "type": ["integer", "null"] },
+        "milestone_total": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "HistoryList": {
+      "type": "object",
+      "required": ["runs", "next_cursor"],
+      "properties": {
+        "runs": { "type": "array", "items": { "$ref": "#/$defs/RunSummary" } },
+        "next_cursor": { "type": ["string", "null"], "description": "Opaque cursor (recorded timestamp + run id + store binding); pagination is observational, not a snapshot across invocations." }
+      },
+      "additionalProperties": true
+    },
+    "RunEvent": {
+      "description": "A recorded run event (kriya/workflow/run_events.py). Every field beyond these is preserved verbatim.",
+      "type": "object",
+      "properties": {
+        "event": { "type": "string" },
+        "attempt": { "type": ["integer", "null"] },
+        "source": { "type": ["string", "null"] },
+        "authority": { "type": ["string", "null"] },
+        "at": { "type": ["string", "null"] },
+        "payload": { "type": ["object", "array", "string", "number", "boolean", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "ContextItem": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" },
+        "tier": { "type": ["string", "null"] },
+        "member_ids": { "type": ["array", "null"], "items": { "type": "string" } },
+        "omitted": { "type": "boolean" },
+        "omission_reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "TokenAccounting": {
+      "description": "Estimated (Kriya) and provider-reported counts are kept separate (P-23).",
+      "type": "object",
+      "properties": {
+        "estimated": { "type": ["object", "null"], "additionalProperties": { "type": "number" } },
+        "provider_reported": { "type": ["object", "null"], "additionalProperties": { "type": "number" } }
+      },
+      "additionalProperties": true
+    },
+    "ContextRecord": {
+      "type": "object",
+      "required": ["items", "tokens"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/ContextItem" } },
+        "tokens": { "oneOf": [{ "$ref": "#/$defs/TokenAccounting" }, { "type": "null" }] },
+        "package_hash": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "AttributionRecord": {
+      "description": "Recorded causal attribution only (P-23). The PROTOCOL_v2 vocabulary is a display vocabulary for recorded classifications, not a classifier.",
+      "type": "object",
+      "properties": {
+        "first_incorrect_state": { "type": ["string", "null"] },
+        "cause": { "type": ["string", "null"] },
+        "category": { "type": ["string", "null"] },
+        "evidence_ids": { "type": ["array", "null"], "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "ComparisonSide": {
+      "type": "object",
+      "required": ["text", "provenance"],
+      "properties": {
+        "text": { "type": "string" },
+        "provenance": { "type": "string" },
+        "revision": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "Comparison": {
+      "description": "Recorded before/after text with provenance; never today's file (P-23).",
+      "type": "object",
+      "required": ["path", "before", "after"],
+      "properties": {
+        "path": { "type": "string" },
+        "before": { "$ref": "#/$defs/ComparisonSide" },
+        "after": { "$ref": "#/$defs/ComparisonSide" }
+      },
+      "additionalProperties": true
+    },
+    "RunDetail": {
+      "description": "One exact stored row in recorded form plus optional typed sections, each with availability (P-25, P-26).",
+      "type": "object",
+      "required": ["run", "fields", "run_events", "evidence_records", "gate_outcomes", "model_hops", "generation_metrics", "failure_report", "context", "attribution", "diagnostics", "comparisons", "output"],
+      "properties": {
+        "run": { "$ref": "#/$defs/RunSummary" },
+        "fields": { "type": "object", "description": "Per-column availability of the stored TEXT columns (data = StoredText).", "additionalProperties": { "$ref": "common.schema.json#/$defs/Section" } },
+        "run_events": { "$ref": "common.schema.json#/$defs/Section" },
+        "evidence_records": { "$ref": "common.schema.json#/$defs/Section" },
+        "gate_outcomes": { "$ref": "common.schema.json#/$defs/Section" },
+        "model_hops": { "$ref": "common.schema.json#/$defs/Section" },
+        "generation_metrics": { "$ref": "common.schema.json#/$defs/Section" },
+        "failure_report": { "$ref": "common.schema.json#/$defs/Section" },
+        "context": { "$ref": "common.schema.json#/$defs/Section" },
+        "attribution": { "$ref": "common.schema.json#/$defs/Section" },
+        "diagnostics": { "$ref": "common.schema.json#/$defs/Section" },
+        "comparisons": { "$ref": "common.schema.json#/$defs/Section" },
+        "output": { "$ref": "common.schema.json#/$defs/Section" }
+      },
+      "additionalProperties": true
+    },
+    "Prompt": {
+      "description": "history.prompt: explicitly requested stored prompt_rendered, labelled with its known role/scope; no claim of per-attempt completeness (P-25, P-30).",
+      "type": "object",
+      "required": ["prompt_rendered", "role", "scope"],
+      "properties": {
+        "prompt_rendered": { "type": ["string", "null"] },
+        "role": { "type": ["string", "null"] },
+        "scope": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  }
+}

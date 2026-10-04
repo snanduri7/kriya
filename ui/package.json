@@ -14,7 +14,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "check:shared-deps": "node scripts/check-shared-deps.mjs",
-    "check": "npm run fixtures && npm run typecheck && npm run lint && npm run check:shared-deps && npm run test",
+    "check": "npm run fixtures && npm run check:generated -w @kriya-ui/kup && npm run typecheck && npm run lint && npm run check:shared-deps && npm run test && npm run java:check -w @kriya-ui/kup",
     "fixtures": "node fixtures/generate.mjs",
     "build": "npm run build --workspaces --if-present"
   },

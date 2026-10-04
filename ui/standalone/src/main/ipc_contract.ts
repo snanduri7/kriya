@@ -57,7 +57,8 @@ export function validateCursor(v: unknown): ValidationResult<string> {
 
 export function validateWorkspacePath(v: unknown): ValidationResult<string> {
   if (typeof v !== 'string' || !v.length || v.length > LIMITS.pathMax) return { ok: false, message: 'workspace must be a non-empty path' };
-  if (!v.startsWith('/') || v.includes('\0') || /[\r\n]/.test(v)) return { ok: false, message: 'workspace must be an absolute path without control characters' };
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (!v.startsWith('/') || /[\u0000-\u001f]/.test(v)) return { ok: false, message: 'workspace must be an absolute path without control characters' };
   return { ok: true, value: v };
 }
 
@@ -96,7 +97,8 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
 
 export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; line?: number }> {
   if (!isObj(v) || typeof v.path !== 'string' || !v.path.length || v.path.length > LIMITS.pathMax) return { ok: false, message: 'path must be a non-empty string' };
-  if (v.path.includes('\0') || /[\r\n]/.test(v.path)) return { ok: false, message: 'path contains control characters' };
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (/[\u0000-\u001f]/.test(v.path)) return { ok: false, message: 'path contains control characters' };
   if (!Object.keys(v).every((k) => k === 'path' || k === 'line')) return { ok: false, message: 'openInIde accepts only path and line' };
   if ('line' in v && v.line !== undefined) {
     if (typeof v.line !== 'number' || !Number.isInteger(v.line) || v.line < 1 || v.line > 10_000_000) return { ok: false, message: 'line must be a positive integer' };

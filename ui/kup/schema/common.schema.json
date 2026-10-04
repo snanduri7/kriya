@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/common.schema.json",
+  "title": "KUP v1 common definitions",
+  "description": "Kriya UI Protocol v1 (P-24). Shared definitions for the envelope, availability sections and errors. Unknown properties are allowed everywhere a Kriya record is carried: the contract never silently discards recorded detail.",
+  "$defs": {
+    "Availability": {
+      "description": "Availability of an optional panel section (P-24). A host treats any value outside this list as unknown, never as success.",
+      "type": "string",
+      "enum": ["recorded", "not_recorded", "unreadable", "excluded", "unsupported"]
+    },
+    "Section": {
+      "description": "An optional panel section: availability first; data only when recorded (D-5: nothing is reconstructed).",
+      "type": "object",
+      "required": ["availability"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/Availability" },
+        "provenance": { "type": ["string", "null"], "description": "Which persisted record the data comes from (e.g. runs.run_events)." },
+        "reason": { "type": ["string", "null"], "description": "Why the section is not recorded/unreadable/excluded/unsupported. PROVISIONAL free text in v1 (owner instruction 2026-10-04): database-state reasons will be typed once the D-4 topic is decided." },
+        "data": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Present and non-null only when availability is recorded." }
+      },
+      "additionalProperties": true
+    },
+    "ErrorCode": {
+      "description": "Typed KUP error codes (06 Phase B). A host may receive other codes from a newer Kriya and must show them literally.",
+      "type": "string",
+      "enum": ["UNSUPPORTED_SCHEMA_VERSION", "INVALID_RESPONSE", "STORE_BUSY", "READ_ONLY_UNAVAILABLE", "RESPONSE_TOO_LARGE", "CONFIG_AUTHORITY_REFUSED"]
+    },
+    "KupError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "description": "Usually one of ErrorCode; kept open so a newer Kriya can add codes without breaking an older host (P-27)." },
+        "message": { "type": "string" },
+        "database_state": { "type": ["string", "null"], "description": "PROVISIONAL: the store state that produced STORE_BUSY/READ_ONLY_UNAVAILABLE (e.g. the A1 case id). Not final until the D-4 topic closes." }
+      },
+      "additionalProperties": true
+    },
+    "Source": {
+      "type": "object",
+      "required": ["state_directory", "trace_database"],
+      "properties": {
+        "state_directory": { "type": "string", "description": "Absolute path, as resolved by Kriya (SEC-009 / state_paths)." },
+        "trace_database": { "type": "string", "description": "Absolute path of the trace database read." }
+      },
+      "additionalProperties": true
+    },
+    "Consistency": {
+      "type": "object",
+      "required": ["kind", "live_stream"],
+      "properties": {
+        "kind": { "type": "string", "description": "PROVISIONAL (owner instruction 2026-10-04): the read-consistency model. Expected values include sqlite_transaction_snapshot; the final vocabulary depends on the D-4 decision (A1 measured that WAL stores need a write-denying boundary or a sidecar exception to be readable)." },
+        "live_stream": { "type": "boolean", "description": "Always false in M1 (manual refresh, P-32)." }
+      },
+      "additionalProperties": true
+    },
+    "Envelope": {
+      "description": "Every KUP response. On error, data is null and source/consistency may be null (resolution may have failed before they were known).",
+      "type": "object",
+      "required": ["schema_version", "operation", "request_id", "observed_at", "source", "consistency", "data", "error"],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "operation": { "type": "string", "enum": ["capabilities", "history.list", "history.detail", "history.prompt", "workspace.status"] },
+        "request_id": { "type": "string", "description": "Opaque, client-chosen; echoed verbatim." },
+        "observed_at": { "type": "string", "description": "UTC observation time set by Kriya (ISO 8601)." },
+        "source": { "oneOf": [{ "$ref": "#/$defs/Source" }, { "type": "null" }] },
+        "consistency": { "oneOf": [{ "$ref": "#/$defs/Consistency" }, { "type": "null" }] },
+        "data": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Operation payload, or null on error." },
+        "error": { "oneOf": [{ "$ref": "#/$defs/KupError" }, { "type": "null" }] }
+      },
+      "additionalProperties": true
+    },
+    "StoredText": {
+      "description": "A stored TEXT column in recorded form: the raw string (JSON text stays JSON text), or null when NULL in the row.",
+      "type": ["string", "null"]
+    }
+  }
+}
