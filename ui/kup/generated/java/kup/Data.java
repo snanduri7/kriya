@@ -18,6 +18,8 @@ import java.util.Map;
  *
  * Present and non-null only when availability is recorded.
  *
+ * Trace-safe local data of the event; shape depends on kind.
+ *
  * RecoveryAssessment.to_dict() verbatim (kriya/control/recovery.py).
  */
 @JsonDeserialize(using = Data.Deserializer.class)

@@ -34,11 +34,26 @@ export function parseStoredJson(text: string | null | undefined): { parsed: unkn
   }
 }
 
-const KNOWN_EVENT_KEYS = new Set(['event', 'attempt', 'source', 'authority', 'at', 'payload']);
+/** Kriya's serializer keys (kriya/workflow/run_events.py::RunEvent.to_dict) - the only event shape stored. */
+export const RUN_EVENT_KEYS = ['kind', 'attempt', 'source', 'authority', 'message', 'failure_type', 'operation', 'details', 'created_at'] as const;
+const KNOWN_EVENT_KEYS = new Set<string>(RUN_EVENT_KEYS);
 
 /** Keys of an event that this UI does not know: shown literally, never dropped. */
 export function unknownEventKeys(event: RunEvent): string[] {
   return Object.keys(event).filter((k) => !KNOWN_EVENT_KEYS.has(k)).sort();
+}
+
+/** created_at is recorded as Unix epoch seconds (time.time()); render it as UTC, labelled, never as local time. */
+export function formatEventTime(createdAt: unknown): string {
+  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return 'time not recorded';
+  const d = new Date(createdAt * 1000);
+  return Number.isNaN(d.getTime()) ? 'time not recorded' : `${d.toISOString().replace('T', ' ').replace('Z', '')} UTC`;
+}
+
+/** The event's `details` as an object, or an empty object when details are absent or not an object. */
+export function eventDetails(event: RunEvent): Record<string, unknown> {
+  const d = (event as { details?: unknown }).details;
+  return typeof d === 'object' && d !== null && !Array.isArray(d) ? (d as Record<string, unknown>) : {};
 }
 
 export function asSection<T>(value: unknown): Section<T> {

@@ -31,6 +31,27 @@ describe('golden fixtures validate against the schema (06 Phase B item 4)', () =
   });
 });
 
+describe('run events are Kriya\'s serializer shape (08 review F-3)', () => {
+  const serializer = JSON.parse(readFileSync(join(GEN, '..', 'serializer', 'run_events.json'), 'utf8')) as { run_events: Record<string, unknown>[]; serializer_keys: string[] };
+  it('every event produced by RunEvent.to_dict through the adapter validates, with exactly the serializer keys', () => {
+    expect(serializer.run_events.length).toBe(4);
+    for (const e of serializer.run_events) {
+      expect(validate.runEvent(e).ok, JSON.stringify(e).slice(0, 80)).toBe(true);
+      expect(Object.keys(e).sort()).toEqual([...serializer.serializer_keys].sort());
+      expect(typeof e.created_at).toBe('number');
+    }
+    const detail = read('history.detail.run-serializer-events.json');
+    expect(validate.runDetail(detail.data).ok).toBe(true);
+    expect(((detail.data as Record<string, unknown>).run_events as { data: unknown[] }).data).toEqual(serializer.run_events);
+  });
+  it('the invented event/at/payload shape of the first draft is refused: kind and created_at are required', () => {
+    expect(validate.runEvent({ event: 'gate.compile', attempt: 1, at: '2026-09-12 10:00:00', payload: { k: 1 } }).ok).toBe(false);
+    expect(validate.runEvent({ kind: 'gate.compile', attempt: 1 }).ok).toBe(false);
+    expect(validate.runEvent({ kind: 'gate.compile', created_at: '2026-09-12' }).ok).toBe(false);
+    expect(validate.runEvent({ kind: 'gate.compile', created_at: 1759561200.25 }).ok).toBe(true);
+  });
+});
+
 describe('envelope refusals (P-27)', () => {
   const base = read('capabilities.json');
   it('refuses schema_version 2, a missing field, a non-object error and a bad operation', () => {

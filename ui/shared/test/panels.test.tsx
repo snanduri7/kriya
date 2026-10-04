@@ -10,7 +10,8 @@ function detailFor(id: string, avail: Availability, extra: Partial<RunDetail> = 
   const sec = <T,>(data: T) => ({ availability: avail, data: avail === 'recorded' ? data : null, reason: avail === 'recorded' ? null : `fixture ${avail}`, provenance: 'fixture' });
   return {
     run: run(id), fields: {},
-    run_events: sec([{ event: 'context.known_target_package', attempt: 1, at: 't1', payload: { x: 1 }, novel_field: 'kept' }, { event: 'gate.compile', attempt: 2, at: 't2', payload: 'p' }]),
+    run_events: sec([{ kind: 'context.known_target_package', attempt: 1, source: 'attempt.run_attempt', authority: 'advisory', message: 'package', failure_type: null, operation: null, details: { x: 1 }, created_at: 1759561200.25, novel_field: 'kept' },
+      { kind: 'candidate_gates.passed', attempt: 2, source: 'workflow', authority: 'authoritative', message: 'gates', failure_type: null, operation: null, details: 'p', created_at: 1759561260 }]),
     evidence_records: sec([{ evidence_id: 'ev1' }]), gate_outcomes: sec([{ attempt: 1, gate: 'compile', passed: false }]), model_hops: sec([]),
     generation_metrics: sec({ a: 1 }), failure_report: sec([{ failure_type: 'compile', category: 'quality_gate_failed', attribution_tier: 'locator' }]),
     context: sec({ items: [{ path: 'a.py', tier: 'full', member_ids: ['A.f'] }, { path: 'b.py', tier: 'signatures', omitted: true, omission_reason: 'budget_exhausted' }], tokens: { estimated: { total: 100 }, provider_reported: { prompt: 98 } } }),
@@ -45,6 +46,43 @@ async function renderAndSelect(detail: RunDetail) {
   await waitFor(() => expect(screen.getByRole('heading', { name: 'goal of r1' })).toBeInTheDocument());
   return host;
 }
+
+/** run_events produced by Kriya's own serializer through the KUP adapter (ui/fixtures/serializer_events.py). */
+import serializerFixture from '../../fixtures/serializer/run_events.json';
+const SERIALIZER = serializerFixture as unknown as { run_events: Record<string, unknown>[]; serializer_keys: string[] };
+
+describe('events exactly as Kriya serializes them reach every consumer (08 review F-3)', () => {
+  it('timeline names, context list, model strip and the selected-event payload all show the serializer-shaped events', async () => {
+    const events = SERIALIZER.run_events;
+    expect(events.map((e) => e.kind)).toEqual(['context.known_target_package', 'developer.prompt_composition', 'model.transition', 'model.role_metrics']);
+    for (const e of events) expect(Object.keys(e).sort()).toEqual([...SERIALIZER.serializer_keys].sort());
+    const detail = detailFor('r1', 'recorded', { run_events: { availability: 'recorded', provenance: 'runs.run_events', reason: null, data: events } } as unknown as Partial<RunDetail>);
+    await renderAndSelect(detail);
+    // timeline: every event named, none "(unnamed event)", times rendered as labelled UTC from created_at
+    const list = screen.getByRole('listbox', { name: /recorded events/i });
+    for (const e of events) expect(within(list).getAllByText(String(e.kind)).length).toBeGreaterThan(0);
+    expect(within(list).queryByText('(unnamed event)')).not.toBeInTheDocument();
+    expect(within(list).getAllByText(/2026-10-04 07:0[01]:\d\d\.\d{3} UTC/).length).toBe(4);
+    expect(screen.getByText(/all events \(4\)/)).toBeInTheDocument();
+    // context tab lists the context package and the prompt composition
+    const contextList = screen.getByText('Context events (recorded)').nextElementSibling as HTMLElement;
+    expect(contextList).toHaveTextContent('context.known_target_package');
+    expect(contextList).toHaveTextContent('developer.prompt_composition');
+    expect(contextList).not.toHaveTextContent('model.role_metrics');
+    // trust strip: the Developer request profile (model.transition details.to) supplies model and qualification
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('qwen2.5-coder:14b / QUALIFIED');
+    // selecting the metrics event shows its real details (rows) in the evidence tab
+    fireEvent.click(within(list).getAllByText('model.role_metrics')[0]!);
+    fireEvent.click(screen.getByRole('tab', { name: /^Evidence/ }));
+    await waitFor(() => expect(screen.getByText(/"runtime_digest"/)).toBeInTheDocument());
+    expect(screen.queryByText(/unknown fields preserved/)).not.toBeInTheDocument();
+  });
+  it('role metrics alone still name the model; without any model event both facts stay "unknown"', async () => {
+    const metricsOnly = SERIALIZER.run_events.filter((e) => e.kind === 'model.role_metrics');
+    await renderAndSelect(detailFor('r1', 'recorded', { run_events: { availability: 'recorded', provenance: 'runs.run_events', reason: null, data: metricsOnly } } as unknown as Partial<RunDetail>));
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('qwen2.5-coder:7b / unknown');
+  });
+});
 
 describe('every panel renders with a fake host (P-R3)', () => {
   it('trust strip, runs, timeline, inspector tabs and drawer all render recorded data', async () => {

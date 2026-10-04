@@ -1,6 +1,7 @@
 import type { Capabilities, HistoryList, KupEnvelope, RunDetail, WorkspaceStatus } from '../model/kup';
 import type { SlotState } from '../state/requests';
 import { isRecorded } from '../model/availability';
+import { eventDetails } from '../model/normalize';
 import { sanitizeText } from '../render/sanitize';
 import type { FreshnessLabel, SnapshotSession } from '../state/snapshot';
 
@@ -16,17 +17,25 @@ export interface TrustStripProps {
   label: FreshnessLabel;
 }
 
-/** Recorded model / qualification facts for the selected run, or "unknown" (P-22). */
+/** Recorded model / qualification facts for the selected run, or "unknown" (P-22), read from Kriya's own event
+ * shapes: model.transition details.to (a ModelRequestProfile: model, qualification) and model.role_metrics
+ * details.rows (RoleRuntimeMetrics rows: role, model, ...; the developer row preferred). A recorded Developer request
+ * profile (transition) is the more specific fact and outranks the aggregate metrics row; among transitions the last wins. */
 export function recordedModelFacts(detail: RunDetail | null): { model: string; qualification: string } {
-  let model = 'unknown', qualification = 'unknown';
+  let model = 'unknown', qualification = 'unknown', fromProfile = false;
   if (detail && isRecorded(detail.run_events)) {
     for (const e of detail.run_events.data) {
-      const p = (e.payload ?? {}) as Record<string, unknown>;
-      if (e.event === 'model.role_metrics' || e.event === 'model.transition') {
-        const m = p.model ?? p.to ?? (Array.isArray(p.rows) ? (p.rows[0] as Record<string, unknown> | undefined)?.model : undefined);
-        if (typeof m === 'string') model = m;
+      const d = eventDetails(e);
+      if (e.kind === 'model.transition') {
+        const to = typeof d.to === 'object' && d.to !== null ? (d.to as Record<string, unknown>) : {};
+        if (typeof to.model === 'string') { model = to.model; fromProfile = true; }
+        if (typeof to.qualification === 'string') qualification = to.qualification;
       }
-      if (typeof p.qualification === 'string') qualification = p.qualification;
+      if (e.kind === 'model.role_metrics' && !fromProfile && Array.isArray(d.rows)) {
+        const rows = d.rows.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null);
+        const row = rows.find((r) => r.role === 'developer') ?? rows[0];
+        if (row && typeof row.model === 'string') model = row.model;
+      }
     }
   }
   return { model, qualification };

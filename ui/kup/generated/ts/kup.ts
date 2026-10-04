@@ -262,15 +262,26 @@ export interface RunDetail {
 }
 // ---- RunEvent (history.schema.json#/$defs/RunEvent) ----
 /**
- * A recorded run event (kriya/workflow/run_events.py). Every field beyond these is preserved verbatim.
+ * A recorded run event EXACTLY as Kriya serializes it (kriya/workflow/run_events.py::RunEvent.to_dict; every stored event is produced by it): kind, attempt, source, authority, message, failure_type, operation, details, created_at. Every field beyond these is preserved verbatim.
  */
 export interface RunEvent {
-  event?: string;
+  /**
+   * The event name (e.g. context.known_target_package, developer.prompt_composition, model.role_metrics).
+   */
+  kind: string;
   attempt?: number | null;
   source?: string | null;
+  /**
+   * EventAuthority value: authoritative | advisory | auxiliary. Shown literally, never interpreted.
+   */
   authority?: string | null;
-  at?: string | null;
-  payload?:
+  message?: string | null;
+  failure_type?: string | null;
+  operation?: string | null;
+  /**
+   * Trace-safe local data of the event; shape depends on kind.
+   */
+  details?:
     | {
         [k: string]: unknown;
       }
@@ -279,6 +290,10 @@ export interface RunEvent {
     | number
     | boolean
     | null;
+  /**
+   * Unix epoch seconds as recorded (time.time()); a host renders it as UTC and labels it so.
+   */
+  created_at: number;
   [k: string]: unknown;
 }
 

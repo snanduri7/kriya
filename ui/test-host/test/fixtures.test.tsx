@@ -66,6 +66,19 @@ describe('every special fixture renders in the browser test host', () => {
     expect(screen.getAllByText('PARTIALLY_SETTLED_v9').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2 unknown fields/).length).toBeGreaterThan(0);
   });
+  it('the serializer-shaped run shows its event names in the timeline (08 review F-3)', async () => {
+    render(<App host={new BrowserFixtureHost('', null)} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBeGreaterThan(0), { timeout: 10000 });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'exactly as Kriya serializes' } });
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(1));
+    fireEvent.click(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow'))[0]!);
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('exactly as Kriya serializes'));
+    const list = screen.getByRole('listbox', { name: /recorded events/i });
+    for (const kind of ['context.known_target_package', 'developer.prompt_composition', 'model.transition', 'model.role_metrics']) expect(list).toHaveTextContent(kind);
+    expect(list).not.toHaveTextContent('(unnamed event)');
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('qwen2.5-coder:14b / QUALIFIED');
+  });
   for (const code of index().errors) {
     it(`error envelope ${code} is shown typed and no run is rendered`, async () => {
       render(<App host={new BrowserFixtureHost('', code)} />);

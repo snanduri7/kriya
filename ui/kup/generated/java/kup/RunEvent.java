@@ -7,8 +7,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A recorded run event (kriya/workflow/run_events.py). Every field beyond these is
- * preserved verbatim.
+ * A recorded run event EXACTLY as Kriya serializes it
+ * (kriya/workflow/run_events.py::RunEvent.to_dict; every stored event is produced by it):
+ * kind, attempt, source, authority, message, failure_type, operation, details, created_at.
+ * Every field beyond these is preserved verbatim.
  */
 public class RunEvent {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
@@ -18,37 +20,69 @@ public class RunEvent {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private String at;
     private Long attempt;
     private String authority;
-    private String event;
-    private Data payload;
+    private double createdAt;
+    private Data details;
+    private String failureType;
+    private String kind;
+    private String message;
+    private String operation;
     private String source;
-
-    @JsonProperty("at")
-    public String getAt() { return at; }
-    @JsonProperty("at")
-    public void setAt(String value) { this.at = value; }
 
     @JsonProperty("attempt")
     public Long getAttempt() { return attempt; }
     @JsonProperty("attempt")
     public void setAttempt(Long value) { this.attempt = value; }
 
+    /**
+     * EventAuthority value: authoritative | advisory | auxiliary. Shown literally, never
+     * interpreted.
+     */
     @JsonProperty("authority")
     public String getAuthority() { return authority; }
     @JsonProperty("authority")
     public void setAuthority(String value) { this.authority = value; }
 
-    @JsonProperty("event")
-    public String getEvent() { return event; }
-    @JsonProperty("event")
-    public void setEvent(String value) { this.event = value; }
+    /**
+     * Unix epoch seconds as recorded (time.time()); a host renders it as UTC and labels it so.
+     */
+    @JsonProperty("created_at")
+    public double getCreatedAt() { return createdAt; }
+    @JsonProperty("created_at")
+    public void setCreatedAt(double value) { this.createdAt = value; }
 
-    @JsonProperty("payload")
-    public Data getPayload() { return payload; }
-    @JsonProperty("payload")
-    public void setPayload(Data value) { this.payload = value; }
+    /**
+     * Trace-safe local data of the event; shape depends on kind.
+     */
+    @JsonProperty("details")
+    public Data getDetails() { return details; }
+    @JsonProperty("details")
+    public void setDetails(Data value) { this.details = value; }
+
+    @JsonProperty("failure_type")
+    public String getFailureType() { return failureType; }
+    @JsonProperty("failure_type")
+    public void setFailureType(String value) { this.failureType = value; }
+
+    /**
+     * The event name (e.g. context.known_target_package, developer.prompt_composition,
+     * model.role_metrics).
+     */
+    @JsonProperty("kind")
+    public String getKind() { return kind; }
+    @JsonProperty("kind")
+    public void setKind(String value) { this.kind = value; }
+
+    @JsonProperty("message")
+    public String getMessage() { return message; }
+    @JsonProperty("message")
+    public void setMessage(String value) { this.message = value; }
+
+    @JsonProperty("operation")
+    public String getOperation() { return operation; }
+    @JsonProperty("operation")
+    public void setOperation(String value) { this.operation = value; }
 
     @JsonProperty("source")
     public String getSource() { return source; }

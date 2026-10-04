@@ -32,15 +32,19 @@
       "additionalProperties": true
     },
     "RunEvent": {
-      "description": "A recorded run event (kriya/workflow/run_events.py). Every field beyond these is preserved verbatim.",
+      "description": "A recorded run event EXACTLY as Kriya serializes it (kriya/workflow/run_events.py::RunEvent.to_dict; every stored event is produced by it): kind, attempt, source, authority, message, failure_type, operation, details, created_at. Every field beyond these is preserved verbatim.",
       "type": "object",
+      "required": ["kind", "created_at"],
       "properties": {
-        "event": { "type": "string" },
+        "kind": { "type": "string", "description": "The event name (e.g. context.known_target_package, developer.prompt_composition, model.role_metrics)." },
         "attempt": { "type": ["integer", "null"] },
         "source": { "type": ["string", "null"] },
-        "authority": { "type": ["string", "null"] },
-        "at": { "type": ["string", "null"] },
-        "payload": { "type": ["object", "array", "string", "number", "boolean", "null"] }
+        "authority": { "type": ["string", "null"], "description": "EventAuthority value: authoritative | advisory | auxiliary. Shown literally, never interpreted." },
+        "message": { "type": ["string", "null"] },
+        "failure_type": { "type": ["string", "null"] },
+        "operation": { "type": ["string", "null"] },
+        "details": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Trace-safe local data of the event; shape depends on kind." },
+        "created_at": { "type": "number", "description": "Unix epoch seconds as recorded (time.time()); a host renders it as UTC and labels it so." }
       },
       "additionalProperties": true
     },

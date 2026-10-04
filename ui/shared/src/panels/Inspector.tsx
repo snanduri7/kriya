@@ -3,7 +3,7 @@ import type { HostAdapter, OpenInIdeResult } from '../host/HostAdapter';
 import type { SlotState } from '../state/requests';
 import { INSPECTOR_TABS, type InspectorTab } from '../state/selection';
 import { isRecorded } from '../model/availability';
-import { unknownEventKeys } from '../model/normalize';
+import { formatEventTime, unknownEventKeys } from '../model/normalize';
 import { sanitizeText } from '../render/sanitize';
 import { AvailabilityBadge, Recorded } from './Availability';
 import { Payload } from './Payload';
@@ -64,8 +64,8 @@ export function Inspector({ detail, selectedEvent, tab, onTab, prompt, onLoadPro
             <h3>Context events (recorded)</h3>
             {detail && isRecorded(detail.run_events) ? (
               <ul className="plain">
-                {detail.run_events.data.filter((e) => typeof e.event === 'string' && (e.event.startsWith('context.') || e.event === 'developer.prompt_composition')).slice(0, 200).map((e, i) => (
-                  <li key={i} className="mono small">{sanitizeText(e.at ?? '-')} {sanitizeText(e.event ?? '')} (attempt {e.attempt ?? '?'})</li>
+                {detail.run_events.data.filter((e) => typeof e.kind === 'string' && (e.kind.startsWith('context.') || e.kind === 'developer.prompt_composition')).slice(0, 200).map((e, i) => (
+                  <li key={i} className="mono small" title={typeof e.message === 'string' ? sanitizeText(e.message) : undefined}>{formatEventTime(e.created_at)} {sanitizeText(e.kind)} (attempt {e.attempt ?? '?'})</li>
                 ))}
               </ul>
             ) : <div className="availability">run events: <AvailabilityBadge section={detail.run_events} /></div>}

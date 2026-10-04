@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { availabilityLabel, isRecorded } from '../src/model/availability';
-import { checkEnvelope, eventsByAttempt, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
+import { checkEnvelope, eventsByAttempt, formatEventTime, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
 import { AVAILABILITY_STATES } from '../src/model/kup';
 import { sanitizeText } from '../src/render/sanitize';
 import { diffLines } from '../src/render/diff';
@@ -35,11 +35,21 @@ describe('availability (P-24, D-5)', () => {
 
 describe('stored values (P-25, P-30)', () => {
   it('keeps a non-JSON stored string verbatim', () => { expect(parseStoredJson('a,b')).toEqual({ parsed: 'a,b', raw: 'a,b', isJson: false }); });
-  it('preserves unknown event keys', () => { expect(unknownEventKeys({ event: 'x', attempt: 1, zebra: 1, alpha: 2 })).toEqual(['alpha', 'zebra']); });
+  it('preserves unknown event keys; the serializer keys are the known set', () => {
+    expect(unknownEventKeys({ kind: 'x', created_at: 1, attempt: 1, zebra: 1, alpha: 2 })).toEqual(['alpha', 'zebra']);
+    expect(unknownEventKeys({ kind: 'x', created_at: 1, attempt: 1, source: 's', authority: 'advisory', message: 'm', failure_type: null, operation: null, details: {} })).toEqual([]);
+    // the invented shape of the first draft is UNKNOWN to this UI - it would be surfaced as unknown fields, never read silently
+    expect(unknownEventKeys({ kind: 'x', created_at: 1, event: 'x', at: 't', payload: {} })).toEqual(['at', 'event', 'payload']);
+  });
   it('groups events by recorded attempt in recorded order, attempt-less events in their own group', () => {
-    const g = eventsByAttempt([{ event: 'a', attempt: 2 }, { event: 'b' }, { event: 'c', attempt: 2 }]);
+    const g = eventsByAttempt([{ kind: 'a', created_at: 1, attempt: 2 }, { kind: 'b', created_at: 2 }, { kind: 'c', created_at: 3, attempt: 2 }]);
     expect([...g.keys()]).toEqual(['attempt 2', 'no attempt recorded']);
-    expect(g.get('attempt 2')?.map((e) => e.event)).toEqual(['a', 'c']);
+    expect(g.get('attempt 2')?.map((e) => e.kind)).toEqual(['a', 'c']);
+  });
+  it('renders created_at (epoch seconds) as labelled UTC, never local time; anything else is "time not recorded"', () => {
+    expect(formatEventTime(1791097200.25)).toBe('2026-10-04 07:00:00.250 UTC');
+    expect(formatEventTime(0)).toBe('1970-01-01 00:00:00.000 UTC');
+    for (const bad of [null, undefined, '2026-10-04', Number.NaN, Number.POSITIVE_INFINITY, {}]) expect(formatEventTime(bad)).toBe('time not recorded');
   });
   it('normalizeDetail fills every missing optional section as not_recorded and keeps unknown top-level keys', () => {
     const d = normalizeDetail({ run: { run_id: 'r1' }, mystery: 42 });

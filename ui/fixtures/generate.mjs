@@ -5,11 +5,15 @@
  * Synthetic content only. Exercises: a 2,000-line diff, a >4 MiB event payload with heavy escaping, unknown event
  * fields, incomplete context, every availability state, every error code, pagination with equal timestamps.
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const out = join(dirname(fileURLToPath(import.meta.url)), 'generated');
+const here = dirname(fileURLToPath(import.meta.url));
+const out = join(here, 'generated');
+// run_events produced by Kriya's OWN serializer through the KUP adapter (fixtures/serializer_events.py, committed):
+// the shape every synthetic event below follows, and the content of the run-serializer-events fixture.
+const SERIALIZER = JSON.parse(readFileSync(join(here, 'serializer', 'run_events.json'), 'utf8'));
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'errors'), { recursive: true });
 
@@ -36,17 +40,22 @@ const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj))
 const AVAIL = ['recorded', 'not_recorded', 'unreadable', 'excluded', 'unsupported'];
 const STATUS = ['SUCCESS', 'FAILED', 'FAILED', 'NEEDS_REVIEW', 'SUCCESS'];
 const CATS = ['quality_gate_failed', 'time_budget_exhausted', 'fallback_model_incompatible', null, 'final_review_refused'];
-const EVENTS = ['retrieval.expansion_seeds', 'context.known_target_package', 'context.retry_target_source', 'developer.prompt_composition', 'model.transition', 'model.role_metrics', 'gate.compile', 'gate.tests', 'approval.decision', 'commit.verified'];
+// Real Kriya event kinds (grep kind="..." in kriya/); the shape is RunEvent.to_dict's: kind, attempt, source, authority,
+// message, failure_type, operation, details, created_at (epoch seconds). Details of the kinds the UI interprets follow
+// the serializer fixture's real shapes.
+const EVENTS = ['attempt.started', 'context.known_target_package', 'context.retry_target_source', 'context.request_fit', 'developer.prompt_composition', 'model.transition', 'model.role_metrics', 'generation.completed', 'approval.decision', 'candidate_gates.passed'];
+const AUTHORITIES = ['authoritative', 'advisory', 'auxiliary'];
+const REAL = Object.fromEntries(SERIALIZER.run_events.map((e) => [e.kind, e]));
 
 function events(n, { unknownFields = false, big = false, attempts = 2 } = {}) {
   const list = [];
   for (let k = 0; k < n; k++) {
-    const e = { event: pick(EVENTS), attempt: (k % attempts) + 1, source: 'workflow', authority: pick(['deterministic', 'model', 'verifier']), at: `2026-09-12 10:${String(Math.floor(k / 60) % 60).padStart(2, '0')}:${String(k % 60).padStart(2, '0')}`, payload: { k } };
-    if (e.event === 'model.transition') e.payload = { from: 'qwen2.5-coder:7b', to: 'qwen2.5-coder:14b', model: 'qwen2.5-coder:14b', qualification: 'QUALIFIED', changes: { context_window: [8192, 16384] } };
-    if (e.event === 'model.role_metrics') e.payload = { rows: [{ role: 'developer', model: 'qwen2.5-coder:7b', calls: 3 }] };
-    if (e.event === 'context.known_target_package') e.payload = { path: `src/mod${k % 7}/a.py`, tier: pick(['full', 'skeleton', 'signatures', 'member_exact']), member_ids: [`Mod${k % 7}.run`], omissions: k % 3 === 0 ? [{ path: 'src/big.py', reason: 'budget_exhausted' }] : [] };
-    if (e.event === 'developer.prompt_composition') e.payload = { sections: { skills_prompt: 812, graph_context: 2048, known_target: 1400 }, estimated_total: 4260, provider_prompt_tokens: 4190, prompt_eval_ms: 1830 };
-    if (big) e.payload = { ...e.payload, blob: 'quoted "json" \\ back\\slash \n newline \t tab é—中😀 </script> <img onerror=x> '.repeat(40) };
+    const e = { kind: pick(EVENTS), attempt: (k % attempts) + 1, source: 'workflow', authority: pick(AUTHORITIES), message: `fixture event ${k}`, failure_type: null, operation: null, details: { k }, created_at: 1757671200 + k * 1.5 };
+    if (e.kind === 'model.transition') e.details = { ...REAL['model.transition'].details, changes: ['model', 'context_window'] };
+    if (e.kind === 'model.role_metrics') e.details = { rows: REAL['model.role_metrics'].details.rows.map((r) => ({ ...r, calls: r.calls + (k % 3) })) };
+    if (e.kind === 'context.known_target_package') e.details = { ...REAL['context.known_target_package'].details, known_target_files: [`src/mod${k % 7}/a.py`], tiers: [{ path: `src/mod${k % 7}/a.py`, member_id: `Mod${k % 7}.run`, tier: pick(['full', 'skeleton', 'signatures', 'member_exact']) }], omitted: k % 3 === 0 ? [{ path: 'src/big.py', reason: 'budget_exhausted' }] : [] };
+    if (e.kind === 'developer.prompt_composition') e.details = { ...REAL['developer.prompt_composition'].details, prompt_tokens_reported: 4190 + k };
+    if (big) e.details = { ...e.details, blob: 'quoted "json" \\ back\\slash \n newline \t tab é—中😀 </script> <img onerror=x> '.repeat(40) };
     if (unknownFields) { e[`extra_${k % 5}`] = { nested: [k, 'unknown', null] }; e.severity_v9 = 'novel'; }
     list.push(e);
   }
@@ -88,6 +97,9 @@ addRun('run-diff-2000', { goal: 'FIXTURE: 2,000-line recorded diff' }, { compari
 addRun('run-big-events', { goal: 'FIXTURE: >4 MiB run_events payload with heavy JSON escaping' }, {}, { big: true, eventCount: 1800, attempts: 3 });
 addRun('run-unknown-fields', { goal: 'FIXTURE: unknown event fields and an unknown status', status: 'PARTIALLY_SETTLED_v9' }, { novel_top_level_section: { availability: 'recorded', data: { hello: 'future' } } }, { unknownFields: true });
 addRun('run-incomplete-context', { goal: 'FIXTURE: incomplete context record' }, { context: sec('recorded', { items: [{ path: 'src/mod1/a.py' }, { path: 'src/mod1/b.py', omitted: true }], tokens: null }, 'package hash and token accounting were not recorded', 'run_events:context.known_target_package') });
+// run_events exactly as Kriya serializes them, read back through the KUP adapter (fixtures/serializer_events.py).
+addRun('run-serializer-events', { goal: 'FIXTURE: run_events exactly as Kriya serializes them (RunEvent.to_dict through the KUP adapter)', status: 'SUCCESS', failure_category: null, attempts: 2 },
+  { run_events: { availability: SERIALIZER.section.availability, provenance: SERIALIZER.section.provenance, reason: SERIALIZER.section.reason, data: SERIALIZER.run_events } });
 for (const a of AVAIL) addRun(`run-avail-${a}`, { goal: `FIXTURE: every section "${a}"`, timestamp: '2026-09-20 12:00:00' }, {}, { availability: a });
 addRun('run-no-events', { goal: 'FIXTURE: a trace row with an empty event list', timestamp: '2026-09-20 12:00:00' }, {}, { eventCount: 0 });
 addRun('run-no-prompt', { goal: 'FIXTURE: prompt column empty', timestamp: '2026-09-20 12:00:00' }, {}, { noPrompt: true });
@@ -115,7 +127,7 @@ const ERRORS = [['UNSUPPORTED_SCHEMA_VERSION', 'the host requested KUP 1; this K
   ['SNAPSHOT_FAILED', 'insufficient free space', null], ['SNAPSHOT_TOO_LARGE', 'the store image is 600000000 bytes; the per-snapshot bound is 536870912 bytes', null], ['SNAPSHOT_CORRUPT', 'snapshot file size or mtime differs from its manifest', null],
   ['ACQUISITION_IN_PROGRESS', 'another acquisition or prune holds the snapshot directory', null], ['ACQUISITION_REFUSED_RUN_ACTIVE', 'a run is active for the selected workspace; acquisition is refused by policy', null]];
 for (const [code, message, database_state] of ERRORS) write(`errors/${code}.json`, envelope(code.startsWith('ACQUISITION') || code.startsWith('SNAPSHOT_F') || code.startsWith('SNAPSHOT_T') || code === 'STORE_BUSY' || code === 'READ_ONLY_UNAVAILABLE' ? 'snapshot.acquire' : 'history.list', null, { code, message, database_state, snapshot_id: null, reason: null }));
-write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt'], pages: pages.length, errors: ERRORS.map(([c]) => c), snapshots: SNAPSHOTS.map((s) => s.snapshot_id) });
+write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', 'run-serializer-events', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt'], pages: pages.length, errors: ERRORS.map(([c]) => c), snapshots: SNAPSHOTS.map((s) => s.snapshot_id) });
 import { statSync } from 'node:fs';
 const bigBytes = statSync(join(out, 'history.detail.run-big-events.json')).size;
 console.log(`fixtures: ${RUNS.length} runs, ${pages.length} pages, big-events detail = ${(bigBytes / 1048576).toFixed(2)} MiB -> ${out}`);

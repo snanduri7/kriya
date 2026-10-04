@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { RunDetail, RunEvent } from '../model/kup';
 import { isRecorded } from '../model/availability';
-import { eventsByAttempt, unknownEventKeys } from '../model/normalize';
+import { eventsByAttempt, formatEventTime, unknownEventKeys } from '../model/normalize';
 import { sanitizeText } from '../render/sanitize';
 import { AvailabilityBadge, Recorded } from './Availability';
 import { VirtualList } from './VirtualList';
@@ -70,8 +70,8 @@ export function Timeline({ detail, pending, error, attempt, eventIndex, onSelect
               return (
                 <div className="evrow">
                   <span className="muted mono">#{i + 1}</span>
-                  <span className="muted mono">{sanitizeText(e.at ?? '-')}</span>
-                  <span className="evname">{sanitizeText(e.event ?? '(unnamed event)')}</span>
+                  <span className="muted mono" title={`created_at ${String(e.created_at)}`}>{formatEventTime(e.created_at)}</span>
+                  <span className="evname" title={typeof e.message === 'string' ? sanitizeText(e.message) : undefined}>{sanitizeText(e.kind || '(unnamed event)')}</span>
                   <span className="muted">{sanitizeText(e.source ?? '?')} / {sanitizeText(e.authority ?? '?')}</span>
                   {unknown.length ? <span className="badge" title={unknown.join(', ')}>{unknown.length} unknown field{unknown.length > 1 ? 's' : ''}</span> : null}
                 </div>
@@ -80,7 +80,7 @@ export function Timeline({ detail, pending, error, attempt, eventIndex, onSelect
           />
         )}
       </Recorded>
-      <p className="muted note">Stages that were not recorded are unknown; nothing here is inferred (P-30).</p>
+      <p className="muted note">Stages that were not recorded are unknown; nothing here is inferred (P-30). Event times are the recorded created_at (epoch seconds) shown as UTC.</p>
     </section>
   );
 }
