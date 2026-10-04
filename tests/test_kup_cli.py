@@ -286,3 +286,46 @@ def test_snapshot_verify_is_bound_to_the_exact_id_and_catches_a_same_size_same_m
     assert env["error"]["code"] == policy.SNAPSHOT_CORRUPT and env["error"]["snapshot_id"] == snapshot_id, env
     # verification is per id: the other snapshot still verifies
     assert _json(["traces", "--json", "--snapshot-verify", other])["data"]["digest_verified"] is True
+
+
+# ------------------------------------------------------------------ event contract: the adapter returns Kriya's serializer shape (08 review F-3)
+
+def test_history_detail_returns_run_events_exactly_as_kriya_serializes_them():
+    """Real RunEvent objects (kriya/workflow/run_events.py) written through TraceLogger.log_run, read back through
+    acquisition + history.detail: the adapter must hand the UI the serializer's own keys (kind, attempt, source,
+    authority, message, failure_type, operation, details, created_at) - not an invented event/at/payload shape."""
+    from kriya.core.role_metrics import RoleRuntimeMetrics
+    from kriya.core.trace import TraceLogger
+    from kriya.workflow.prompt_composition import prompt_composition
+    from kriya.workflow.run_events import EventAuthority, RunEvent
+
+    events = [
+        RunEvent(kind="context.known_target_package", attempt=1, source="attempt.run_attempt", authority=EventAuthority.ADVISORY,
+                 message="Known-target context package built for the attempt-1 owner-contract replacement.",
+                 details={"known_target_files": ["src/a.py"], "unit_count": 1, "tiers": [{"path": "src/a.py", "member_id": "A.run", "tier": "member_exact"}],
+                          "omitted": [], "package_hash": "sha256:" + "ab" * 32, "member_hint_paths": ["src/a.py"]}, created_at=1759561200.25),
+        RunEvent(kind="developer.prompt_composition", attempt=1, source="developer", authority=EventAuthority.ADVISORY,
+                 message="Developer prompt composition (estimated per section; provider-reported total).",
+                 details=prompt_composition("def run():\n    return 1\n", "skills", prompt_tokens_reported=4190,
+                                            provider_metadata={"prompt_eval_ms": 1830, "load_ms": 12}, prefix_reuse={"prefix_shared_chars": 400, "prefix_break": "goal"}),
+                 created_at=1759561201.5),
+        RunEvent(kind="model.role_metrics", attempt=2, source="workflow", authority=EventAuthority.AUXILIARY,
+                 message="per-role model metrics of this run (observations, not verification evidence)",
+                 details={"rows": [RoleRuntimeMetrics("developer", "qwen2.5-coder:7b", "sha256:" + "cd" * 32, True, calls=3, latency_seconds=1.2345).to_dict()]},
+                 created_at=1759561202.0),
+    ]
+    serialized = [e.to_dict() for e in events]
+    TraceLogger(trace_db_path(AppConfig())).log_run(run_id="run-serializer", goal="serializer shape", duration_sec=1.0, attempts=2, status="SUCCESS",
+                                                    files_modified=["src/a.py"], run_events=serialized)
+    snapshot_id = _acquire()
+    detail = _json(["traces", "--json", "--snapshot-id", snapshot_id, "--run-id", "run-serializer"])
+    assert detail["error"] is None, detail
+    got = detail["data"]["run_events"]
+    assert got["availability"] == "recorded" and got["provenance"] == "runs.run_events"
+    assert got["data"] == json.loads(json.dumps(serialized)), "the adapter must return the stored events verbatim"
+    for event in got["data"]:
+        assert set(event) == {"kind", "attempt", "source", "authority", "message", "failure_type", "operation", "details", "created_at"}
+        assert isinstance(event["created_at"], float) and isinstance(event["kind"], str) and isinstance(event["details"], dict)
+        assert event["authority"] in {"authoritative", "advisory", "auxiliary"}
+    assert [e["kind"] for e in got["data"]] == ["context.known_target_package", "developer.prompt_composition", "model.role_metrics"]
+    assert got["data"][2]["details"]["rows"][0]["model"] == "qwen2.5-coder:7b" and got["data"][1]["details"]["prompt_tokens_reported"] == 4190

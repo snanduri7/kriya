@@ -32,8 +32,11 @@ def deterministic_rows(count: int, equal_timestamps: bool = False) -> List[tuple
             json.dumps([{"attempt": 1, "gate": "compile", "passed": i % 2 == 0}]),
             "[]", None if i % 2 == 0 else "quality_gate_failed",
             f"group-{i // 5}" if i % 2 else None, i % 5 if i % 2 else None, 5 if i % 2 else None,
-            json.dumps([{"event": "gate.compile", "attempt": 1, "source": "workflow", "authority": "deterministic",
-                         "at": f"{ts}.000", "payload": {"k": i}, "novel_field": "kept"}]),
+            # Kriya's own event shape (kriya/workflow/run_events.py::RunEvent.to_dict): kind, attempt, source,
+            # authority, message, failure_type, operation, details, created_at (epoch seconds), plus an unknown field.
+            json.dumps([{"kind": "gate.compile", "attempt": 1, "source": "workflow", "authority": "authoritative",
+                         "message": f"compile gate of run {i}", "failure_type": None, "operation": None,
+                         "details": {"k": i}, "created_at": 1758369600.0 + i, "novel_field": "kept"}]),
             json.dumps([{"evidence_id": f"ev-{i}"}]), json.dumps({"prompt_tokens_estimated": 100 + i}),
             json.dumps([{"failure_type": "compile", "category": "quality_gate_failed", "attribution_tier": "locator"}]) if i % 2 else "[]",
         ))
