@@ -1,0 +1,376 @@
+{
+  "kind": "soak",
+  "started_at": "2026-10-04T04:50:09.515Z",
+  "done": true,
+  "elapsed_s": 7206,
+  "options": {
+    "seconds": 7200,
+    "minSelections": 1000,
+    "sampleSeconds": 300,
+    "warmupSeconds": 600,
+    "ceilingMB": 550
+  },
+  "electron": "44.5.1",
+  "chrome": "152.0.7977.130",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "os_release": "25.6.0"
+  },
+  "forced_gc": false,
+  "selection_interval_ms": 6120,
+  "selections": 1177,
+  "errors_count": 0,
+  "errors": [],
+  "samples": [
+    {
+      "at_s": 0,
+      "selections": 0,
+      "totalWorkingSetMB": 394,
+      "byType": {
+        "Browser": 158,
+        "GPU": 82,
+        "Utility": 46,
+        "Tab": 109
+      },
+      "psRssTotalMB": 394,
+      "errors": 0
+    },
+    {
+      "at_s": 1,
+      "selections": 1,
+      "totalWorkingSetMB": 454,
+      "byType": {
+        "Browser": 190,
+        "GPU": 83,
+        "Utility": 46,
+        "Tab": 135
+      },
+      "psRssTotalMB": 455,
+      "errors": 0
+    },
+    {
+      "at_s": 307,
+      "selections": 51,
+      "totalWorkingSetMB": 447,
+      "byType": {
+        "Browser": 168,
+        "GPU": 83,
+        "Utility": 46,
+        "Tab": 149
+      },
+      "psRssTotalMB": 447,
+      "errors": 0
+    },
+    {
+      "at_s": 613,
+      "selections": 101,
+      "totalWorkingSetMB": 380,
+      "byType": {
+        "Browser": 140,
+        "GPU": 72,
+        "Utility": 40,
+        "Tab": 128
+      },
+      "psRssTotalMB": 380,
+      "errors": 0
+    },
+    {
+      "at_s": 919,
+      "selections": 151,
+      "totalWorkingSetMB": 385,
+      "byType": {
+        "Browser": 140,
+        "GPU": 69,
+        "Utility": 40,
+        "Tab": 136
+      },
+      "psRssTotalMB": 385,
+      "errors": 0
+    },
+    {
+      "at_s": 1225,
+      "selections": 201,
+      "totalWorkingSetMB": 386,
+      "byType": {
+        "Browser": 141,
+        "GPU": 69,
+        "Utility": 40,
+        "Tab": 136
+      },
+      "psRssTotalMB": 386,
+      "errors": 0
+    },
+    {
+      "at_s": 1531,
+      "selections": 251,
+      "totalWorkingSetMB": 380,
+      "byType": {
+        "Browser": 141,
+        "GPU": 73,
+        "Utility": 40,
+        "Tab": 127
+      },
+      "psRssTotalMB": 380,
+      "errors": 0
+    },
+    {
+      "at_s": 1837,
+      "selections": 301,
+      "totalWorkingSetMB": 375,
+      "byType": {
+        "Browser": 132,
+        "GPU": 74,
+        "Utility": 40,
+        "Tab": 129
+      },
+      "psRssTotalMB": 378,
+      "errors": 0
+    },
+    {
+      "at_s": 2143,
+      "selections": 351,
+      "totalWorkingSetMB": 376,
+      "byType": {
+        "Browser": 136,
+        "GPU": 66,
+        "Utility": 39,
+        "Tab": 136
+      },
+      "psRssTotalMB": 376,
+      "errors": 0
+    },
+    {
+      "at_s": 2449,
+      "selections": 401,
+      "totalWorkingSetMB": 370,
+      "byType": {
+        "Browser": 131,
+        "GPU": 67,
+        "Utility": 38,
+        "Tab": 134
+      },
+      "psRssTotalMB": 370,
+      "errors": 0
+    },
+    {
+      "at_s": 2755,
+      "selections": 451,
+      "totalWorkingSetMB": 371,
+      "byType": {
+        "Browser": 131,
+        "GPU": 68,
+        "Utility": 38,
+        "Tab": 133
+      },
+      "psRssTotalMB": 371,
+      "errors": 0
+    },
+    {
+      "at_s": 3061,
+      "selections": 501,
+      "totalWorkingSetMB": 401,
+      "byType": {
+        "Browser": 161,
+        "GPU": 67,
+        "Utility": 38,
+        "Tab": 135
+      },
+      "psRssTotalMB": 401,
+      "errors": 0
+    },
+    {
+      "at_s": 3367,
+      "selections": 551,
+      "totalWorkingSetMB": 381,
+      "byType": {
+        "Browser": 130,
+        "GPU": 71,
+        "Utility": 38,
+        "Tab": 142
+      },
+      "psRssTotalMB": 383,
+      "errors": 0
+    },
+    {
+      "at_s": 3673,
+      "selections": 601,
+      "totalWorkingSetMB": 354,
+      "byType": {
+        "Browser": 124,
+        "GPU": 63,
+        "Utility": 38,
+        "Tab": 129
+      },
+      "psRssTotalMB": 354,
+      "errors": 0
+    },
+    {
+      "at_s": 3979,
+      "selections": 651,
+      "totalWorkingSetMB": 354,
+      "byType": {
+        "Browser": 124,
+        "GPU": 63,
+        "Utility": 38,
+        "Tab": 129
+      },
+      "psRssTotalMB": 354,
+      "errors": 0
+    },
+    {
+      "at_s": 4286,
+      "selections": 701,
+      "totalWorkingSetMB": 357,
+      "byType": {
+        "Browser": 124,
+        "GPU": 63,
+        "Utility": 38,
+        "Tab": 132
+      },
+      "psRssTotalMB": 357,
+      "errors": 0
+    },
+    {
+      "at_s": 4586,
+      "selections": 750,
+      "totalWorkingSetMB": 356,
+      "byType": {
+        "Browser": 125,
+        "GPU": 63,
+        "Utility": 38,
+        "Tab": 130
+      },
+      "psRssTotalMB": 356,
+      "errors": 0
+    },
+    {
+      "at_s": 4892,
+      "selections": 800,
+      "totalWorkingSetMB": 370,
+      "byType": {
+        "Browser": 127,
+        "GPU": 69,
+        "Utility": 38,
+        "Tab": 136
+      },
+      "psRssTotalMB": 371,
+      "errors": 0
+    },
+    {
+      "at_s": 5192,
+      "selections": 849,
+      "totalWorkingSetMB": 364,
+      "byType": {
+        "Browser": 121,
+        "GPU": 70,
+        "Utility": 38,
+        "Tab": 135
+      },
+      "psRssTotalMB": 364,
+      "errors": 0
+    },
+    {
+      "at_s": 5498,
+      "selections": 899,
+      "totalWorkingSetMB": 368,
+      "byType": {
+        "Browser": 129,
+        "GPU": 70,
+        "Utility": 38,
+        "Tab": 131
+      },
+      "psRssTotalMB": 368,
+      "errors": 0
+    },
+    {
+      "at_s": 5804,
+      "selections": 949,
+      "totalWorkingSetMB": 374,
+      "byType": {
+        "Browser": 129,
+        "GPU": 69,
+        "Utility": 38,
+        "Tab": 137
+      },
+      "psRssTotalMB": 374,
+      "errors": 0
+    },
+    {
+      "at_s": 6110,
+      "selections": 999,
+      "totalWorkingSetMB": 376,
+      "byType": {
+        "Browser": 130,
+        "GPU": 66,
+        "Utility": 38,
+        "Tab": 142
+      },
+      "psRssTotalMB": 376,
+      "errors": 0
+    },
+    {
+      "at_s": 6416,
+      "selections": 1049,
+      "totalWorkingSetMB": 363,
+      "byType": {
+        "Browser": 129,
+        "GPU": 62,
+        "Utility": 38,
+        "Tab": 134
+      },
+      "psRssTotalMB": 363,
+      "errors": 0
+    },
+    {
+      "at_s": 6723,
+      "selections": 1099,
+      "totalWorkingSetMB": 364,
+      "byType": {
+        "Browser": 129,
+        "GPU": 62,
+        "Utility": 38,
+        "Tab": 135
+      },
+      "psRssTotalMB": 364,
+      "errors": 0
+    },
+    {
+      "at_s": 7028,
+      "selections": 1149,
+      "totalWorkingSetMB": 392,
+      "byType": {
+        "Browser": 158,
+        "GPU": 62,
+        "Utility": 38,
+        "Tab": 133
+      },
+      "psRssTotalMB": 392,
+      "errors": 0
+    },
+    {
+      "at_s": 7206,
+      "selections": 1177,
+      "totalWorkingSetMB": 364,
+      "byType": {
+        "Browser": 129,
+        "GPU": 62,
+        "Utility": 38,
+        "Tab": 135
+      },
+      "psRssTotalMB": 364,
+      "errors": 0
+    }
+  ],
+  "ceiling_check": {
+    "ceiling_MB": 550,
+    "max_total_working_set_after_warmup_MB": 401,
+    "pass": true,
+    "post_warmup_samples": 23
+  },
+  "sustained_growth": {
+    "slope_MB_per_hour_after_warmup": -7.29,
+    "first_post_warmup_MB": 380,
+    "last_MB": 364
+  }
+}

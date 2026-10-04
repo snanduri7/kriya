@@ -74,8 +74,28 @@ validator refused; both now refuse every C0 control character in `workspace` and
   Electron process sampled every five minutes (plus `ps` RSS), progress flushed at every sample, then the ceiling
   check (max total working set after a 10-minute warm-up <= 550 MB) and the sustained-growth check (least-squares
   slope in MB/hour over the post-warm-up samples). A 20-second smoke validated the mechanics. The two-hour run was
-  started at 10:20 IST on fixtures (a snapshot copy, so nothing regenerated during the run can reach it) and its
-  result is appended below when it completes.
+  started at 10:20 IST on fixtures (a snapshot copy, so nothing regenerated during the run can reach it).
+
+### Soak result (MEASURED; `standalone/measurements/soak-2026-10-04T04-50-09-515Z.json`)
+
+Electron 44.5.1, macOS 26.7 arm64, fixtures via the stand-in, window visible, no forced GC. 2 h 0 m 6 s wall time,
+**1,177 selections** (one every 6.12 s, cycling the four heavy fixtures and all 50 page-1 runs), **0 errors**,
+25 samples, `ps` RSS within 3 MB of `app.getAppMetrics()` at every sample.
+
+| measure | value |
+|---|---|
+| start (idle, before any selection) | 394 MB total working set |
+| end of the 10-minute warm-up | 380 MB |
+| post-warm-up samples (23) | min 354, mean 372, **max 401 MB** |
+| **550 MB ceiling after warm-up** | **PASS** (401 MB) |
+| sustained growth (least squares over the 23 post-warm-up samples) | **-7.3 MB per hour** (380 -> 364 MB), i.e. no growth |
+| per process at the end | Browser 129, GPU 62, Utility 38, renderer 135 MB |
+
+The two transient peaks (401 MB at 51 min, 392 MB at 117 min) are Browser-process excursions of ~30 MB that fall back
+within one sample; the renderer stayed between 127 and 149 MB throughout. Classification (rule 21):
+`EXPECTED_BOUNDED_CACHE`; no `KRIYA_PRODUCT_LEAK` signal in two hours. Caveats: fixtures only (real `kriya` output
+volumes and a loaded local model are still to be measured after D-9 is lifted), and the development build ran other
+work (npm tests, the Java check) on the same machine during the first 30 minutes.
 
 ## Owner checks still outstanding
 
