@@ -1,0 +1,760 @@
+{
+ "environment_keys": [
+  "HOME",
+  "KRIYA_STATE_DIR",
+  "PATH",
+  "PYTHONDONTWRITEBYTECODE"
+ ],
+ "runs": [
+  {
+   "phase": "negative_control",
+   "pid": 82267,
+   "args": [
+    "traces",
+    "--json",
+    "--capabilities"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"kind\":\"not_applicable\",\"live_stream\":false},\"data\":{\"features\":{\"attribution\":false,\"comparisons\":false,\"consistency_kinds\":[\"snapshot_copy\",\"live_observation\",\"not_applicable\"],\"database_states\":[\"missing\",\"hot_journal\",\"locked\",\"readonly_directory\",\"unreadable\",\"not_a_database\"],\"diagnostics\":false,\"error_codes\":[\"UNSUPPORTED_SCHEMA_VERSION\",\"INVALID_RESPONSE\",\"INVALID_REQUEST\",\"STORE_BUSY\",\"READ_ONLY_UNAVAILABLE\",\"RESPONSE_TOO_LARGE\",\"CONFIG_AUTHORITY_REFUSED\",\"CONFIG_LOAD_FAILED\",\"SNAPSHOT_MISSING\",\"SNAPSHOT_UNAVAILABLE\",\"SNAPSHOT_FAILED\",\"SNAPSHOT_TOO_LARGE\",\"SNAPSHOT_CORRUPT\",\"ACQUISITION_IN_PROGRESS\",\"ACQUISITION_REFUSED_RUN_ACTIVE\"],\"output\":false,\"prompt\":true,\"snapshot\":true},\"identity\":{\"build_provenance\":\"unavailable\",\"commit\":\"UNKNOWN\",\"implementation\":\"kriya-kup/1\",\"kriya_version\":\"0.1.0\",\"sqlite_version\":\"3.53.4\"},\"kup_versions\":[1],\"limits\":{\"acquisition_deadline_seconds\":45.0,\"busy_timeout_seconds\":2.0,\"cursor_max_chars\":1024,\"directory_ceiling_bytes\":2147483648,\"list_default\":50,\"list_max\":200,\"max_response_bytes\":8388608,\"max_snapshot_bytes\":536870912,\"retain_snapshots\":3,\"retained_bytes_ceiling\":1610612736,\"run_id_max_chars\":256},\"operations\":[\"capabilities\",\"history.list\",\"history.detail\",\"history.prompt\",\"workspace.status\",\"snapshot.acquire\",\"snapshot.list\",\"snapshot.prune\",\"snapshot.verify\"]},\"error\":null,\"observed_at\":\"2026-10-04T08:31:58.265976Z\",\"operation\":\"capabilities\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/state/traces.db\"}}\n",
+   "stderr": ""
+  }
+ ],
+ "denials": [
+  {
+   "proc": "python3.14",
+   "pid": "82267",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:57.124 E  kernel[0:28a48b7] (Sandbox) Sandbox: python3.14(82267) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:57.131 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "raw": "2026-10-04 14:01:57.149 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "raw": "2026-10-04 14:01:57.254 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "raw": "2026-10-04 14:01:57.254 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "raw": "2026-10-04 14:01:57.312 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.312 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.339 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "raw": "2026-10-04 14:01:57.339 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/agents/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "raw": "2026-10-04 14:01:57.340 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "raw": "2026-10-04 14:01:57.382 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.382 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.706 E  kernel[0:28a48b8] (Sandbox) 8 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:57.706 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:57.710 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.710 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.715 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.720 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.720 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.727 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "raw": "2026-10-04 14:01:57.727 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "raw": "2026-10-04 14:01:57.734 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "raw": "2026-10-04 14:01:57.734 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "raw": "2026-10-04 14:01:57.738 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "raw": "2026-10-04 14:01:57.738 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:57.738 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:57.757 E  kernel[0:28a48b8] (Sandbox) 5 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.757 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.768 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:57.768 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:57.776 E  kernel[0:28a48b8] (Sandbox) 4 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "raw": "2026-10-04 14:01:57.776 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "raw": "2026-10-04 14:01:57.781 E  kernel[0:28a48b8] (Sandbox) 5 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.781 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.786 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/plugins/__pycache__",
+   "raw": "2026-10-04 14:01:57.786 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/plugins/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/plugins/__pycache__",
+   "raw": "2026-10-04 14:01:57.787 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/plugins/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/prompt/__pycache__",
+   "raw": "2026-10-04 14:01:57.787 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/prompt/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/prompt/__pycache__",
+   "raw": "2026-10-04 14:01:57.799 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/prompt/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/skills/__pycache__",
+   "raw": "2026-10-04 14:01:57.799 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/skills/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/skills/__pycache__",
+   "raw": "2026-10-04 14:01:57.838 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/skills/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.838 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/code_intel/__pycache__",
+   "raw": "2026-10-04 14:01:57.838 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/code_intel/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/code_intel/__pycache__",
+   "raw": "2026-10-04 14:01:57.845 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/code_intel/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.845 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:57.847 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:57.851 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "raw": "2026-10-04 14:01:57.851 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "raw": "2026-10-04 14:01:57.874 E  kernel[0:28a48b8] (Sandbox) 7 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/adapters/__pycache__",
+   "raw": "2026-10-04 14:01:57.874 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/adapters/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "raw": "2026-10-04 14:01:57.877 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "raw": "2026-10-04 14:01:57.883 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/static_analysis/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "raw": "2026-10-04 14:01:57.883 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "raw": "2026-10-04 14:01:57.889 E  kernel[0:28a48b8] (Sandbox) 1 duplicate report for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/config/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:57.889 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:57.897 E  kernel[0:28a48b8] (Sandbox) 4 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:57.897 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:57.911 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/capabilities/__pycache__",
+   "raw": "2026-10-04 14:01:57.912 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/capabilities/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/capabilities/__pycache__",
+   "raw": "2026-10-04 14:01:57.916 E  kernel[0:28a48b8] (Sandbox) 7 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/capabilities/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:57.916 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:57.922 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:57.931 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:57.931 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.005 E  kernel[0:28a48b8] (Sandbox) 4 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "raw": "2026-10-04 14:01:58.005 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/tools/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.013 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.033 E  kernel[0:28a48b8] (Sandbox) 5 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:58.033 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.039 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.043 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:58.043 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.047 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.061 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:58.061 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.064 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.110 E  kernel[0:28a48b8] (Sandbox) 18 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "raw": "2026-10-04 14:01:58.110 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.115 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.122 E  kernel[0:28a48b8] (Sandbox) 2 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "raw": "2026-10-04 14:01:58.122 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/platform/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.123 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.136 E  kernel[0:28a48b8] (Sandbox) 7 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "raw": "2026-10-04 14:01:58.136 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/policy/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.137 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.176 E  kernel[0:28a48b8] (Sandbox) 12 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "raw": "2026-10-04 14:01:58.176 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/analyzer/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "raw": "2026-10-04 14:01:58.177 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/core/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.178 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.248 E  kernel[0:28a48b8] (Sandbox) 18 duplicate reports for Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "raw": "2026-10-04 14:01:58.248 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/control/__pycache__",
+   "class": "BYTECODE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82267",
+   "op": "file-write-create",
+   "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "raw": "2026-10-04 14:01:58.249 E  kernel[0:28a48b8] (Sandbox) Sandbox: Python(82267) deny(1) file-write-create /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_negative_control_without_0/fresh/kriya/workflow/__pycache__",
+   "class": "BYTECODE"
+  }
+ ]
+}

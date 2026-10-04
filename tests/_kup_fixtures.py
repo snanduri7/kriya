@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import sys
 import time
 from typing import Iterable, List, Optional
 
@@ -138,3 +139,54 @@ def wait_for(predicate, timeout: float = 10.0, interval: float = 0.02) -> bool:
 
 def file_names(directory: str) -> Iterable[str]:
     return sorted(os.listdir(directory)) if os.path.isdir(directory) else []
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The GUI host's production launch policy for the real `kriya` child (owner decision 2026-10-04; 08 review F-1/F-2).
+# EXACT COPY of the rule in the GUI checkout's ui/standalone/src/main/child_env.ts - keep the two in step. The
+# Kriya-side tests build the child environment from THIS rule so the sandbox evidence is produced under the same
+# environment the real app provides, never a more permissive test-only one.
+# ---------------------------------------------------------------------------------------------------------------
+HOST_CHILD_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+HOST_CHILD_ENV_KEYS = ("PATH", "PYTHONDONTWRITEBYTECODE", "HOME", "KRIYA_STATE_DIR")
+
+
+def host_child_env(home: str, state_dir: Optional[str] = None) -> dict:
+    """Fixed approved PATH; fixed PYTHONDONTWRITEBYTECODE=1 (set before the interpreter imports anything, which
+    `sys.dont_write_bytecode` inside the command cannot do); the operator's HOME; optionally the operator's
+    KRIYA_STATE_DIR, absolute only. Nothing else: no PYTHONPATH/PYTHONHOME, no KRIYA_TRUST_FILE, no credentials, no
+    config-path variable (configuration discovery stays Kriya's own: CWD, then the install directory)."""
+    if not isinstance(home, str) or not os.path.isabs(home):
+        raise ValueError("HOME must be an absolute path")
+    env = {"PATH": HOST_CHILD_PATH, "PYTHONDONTWRITEBYTECODE": "1", "HOME": home}
+    if state_dir is not None:
+        if not isinstance(state_dir, str) or not os.path.isabs(state_dir):
+            raise ValueError("KRIYA_STATE_DIR must be an absolute path")
+        env["KRIYA_STATE_DIR"] = state_dir
+    return env
+
+
+def fresh_package_tree(dest: str) -> str:
+    """A copy of the installed `kriya` package WITHOUT any __pycache__ / .pyc: what a fresh install looks like to the
+    interpreter, so a bytecode write attempt on first import is observable (the checkout's own tree is already cached)."""
+    import shutil
+
+    import kriya
+
+    shutil.copytree(os.path.dirname(kriya.__file__), os.path.join(dest, "kriya"), ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return dest
+
+
+def cli_subprocess_argv(fresh_root: Optional[str] = None) -> List[str]:
+    """How a test starts the real CLI entry point in a subprocess. Without ``fresh_root``: the installed console script
+    (exactly what the GUI host executes), else `python -c` running the console script's own two lines. With
+    ``fresh_root``: the package is imported from that tree, asserted inside the child so a wrong import location fails
+    loudly instead of silently testing the cached checkout."""
+    if fresh_root is None:
+        script = os.path.join(os.path.dirname(sys.executable), "kriya")
+        if os.path.exists(script):
+            return [script]
+        return [sys.executable, "-c", "import sys; from kriya.cli import main; sys.exit(main())"]
+    program = ("import sys; sys.path.insert(0, %r); import kriya; assert kriya.__file__.startswith(%r), kriya.__file__; "
+               "from kriya.cli import main; sys.exit(main())") % (fresh_root, fresh_root)
+    return [sys.executable, "-c", program]
