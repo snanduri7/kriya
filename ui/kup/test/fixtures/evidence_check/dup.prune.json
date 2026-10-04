@@ -1,0 +1,25 @@
+{
+ "schema_version": 1,
+ "operation": "snapshot.prune",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db"
+ },
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "removed": [
+   "20261004T083000000000Z-f1c70000"
+  ],
+  "orphans_removed": [],
+  "kept": [
+   "20261004T093000000000Z-f1c70001",
+   "20261004T083000000000Z-f1c70000"
+  ]
+ },
+ "error": null
+}

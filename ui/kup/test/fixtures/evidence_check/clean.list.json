@@ -1,0 +1,81 @@
+{
+ "schema_version": 1,
+ "operation": "history.list",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_now": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_changed": false
+ },
+ "data": {
+  "runs": [
+   {
+    "run_id": "r-other",
+    "timestamp": "2026-09-25 09:00:00",
+    "goal": "goal of r-other",
+    "duration_sec": 53,
+    "attempts": 2,
+    "status": "FAILED",
+    "failure_category": "quality_gate_failed",
+    "files_modified": "src/mod1/a.py,src/mod1/b.py",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null
+   },
+   {
+    "run_id": "r-clean",
+    "timestamp": "2026-09-24 14:00:00",
+    "goal": "goal of r-clean",
+    "duration_sec": 53,
+    "attempts": 2,
+    "status": "SUCCESS",
+    "failure_category": null,
+    "files_modified": "src/mod1/a.py,src/mod1/b.py",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null
+   },
+   {
+    "run_id": "r-null-ts",
+    "timestamp": null,
+    "goal": "goal of r-null-ts",
+    "duration_sec": 53,
+    "attempts": 2,
+    "status": "SUCCESS",
+    "failure_category": null,
+    "files_modified": "src/mod1/a.py,src/mod1/b.py",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null
+   }
+  ],
+  "next_cursor": null
+ },
+ "error": null
+}

@@ -1,0 +1,380 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_now": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_changed": false
+ },
+ "data": {
+  "run": {
+   "run_id": "r-clean",
+   "timestamp": "2026-09-24 14:00:00",
+   "goal": "goal of r-clean",
+   "duration_sec": 53,
+   "attempts": 2,
+   "status": "SUCCESS",
+   "failure_category": null,
+   "files_modified": "src/mod1/a.py,src/mod1/b.py",
+   "milestone_group_id": null,
+   "milestone_index": null,
+   "milestone_total": null
+  },
+  "fields": {
+   "retrieved_chunks": {
+    "availability": "recorded",
+    "provenance": "runs.retrieved_chunks",
+    "reason": null,
+    "data": "[]"
+   },
+   "active_skills": {
+    "availability": "recorded",
+    "provenance": "runs.active_skills",
+    "reason": null,
+    "data": "skill-a,skill-b"
+   },
+   "gate_outcomes": {
+    "availability": "recorded",
+    "provenance": "runs.gate_outcomes",
+    "reason": null,
+    "data": "[{\"attempt\":1,\"type\":\"compile\",\"success\":false,\"output\":\"error: x\",\"mode\":\"contained\",\"likely_files\":[\"src/mod1/a.py\"],\"file_locations\":[],\"failed_content\":{},\"attempted_edits\":[],\"self_correction_attempt\":0,\"attribution_tier\":\"locator\",\"attribution_confidence\":\"high\",\"attribution_reasoning\":\"compiler names the file\"}]"
+   },
+   "model_hops": {
+    "availability": "recorded",
+    "provenance": "runs.model_hops",
+    "reason": null,
+    "data": "[\"qwen2.5-coder:7b\"]"
+   },
+   "run_events": {
+    "availability": "recorded",
+    "provenance": "runs.run_events",
+    "reason": null,
+    "data": "[{\"attempt\":1,\"authority\":\"advisory\",\"created_at\":1791097200.25,\"details\":{\"known_target_files\":[\"src/mod1/a.py\",\"src/mod1/b.py\"],\"member_hint_paths\":[\"src/mod1/a.py\"],\"omitted\":[{\"path\":\"src/big.py\",\"reason\":\"budget_exhausted\"}],\"package_hash\":\"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"tiers\":[{\"member_id\":\"Mod1.run\",\"path\":\"src/mod1/a.py\",\"tier\":\"member_exact\"},{\"member_id\":null,\"path\":\"src/mod1/b.py\",\"tier\":\"skeleton\"}],\"unit_count\":2},\"failure_type\":null,\"kind\":\"context.known_target_package\",\"message\":\"Known-target context package built for the attempt-1 owner-contract replacement.\",\"operation\":null,\"source\":\"attempt.run_attempt\"},{\"attempt\":1,\"authority\":\"advisory\",\"created_at\":1791097201.5,\"details\":{\"code_context_tokens\":29,\"load_seconds\":0.012,\"prefill_seconds\":1.83,\"prefix_break\":\"goal\",\"prefix_shared_tokens\":400,\"prompt_tokens_reported\":4190,\"sibling_signatures_tokens\":0,\"skills_tokens\":12,\"t0_header_tokens\":0,\"t0_member_tokens\":0,\"t1_tokens\":0,\"t2_tokens\":0,\"t3_tokens\":0,\"token_counts\":\"estimated (len/4) per section; total as reported by the provider\"},\"failure_type\":null,\"kind\":\"developer.prompt_composition\",\"message\":\"Developer prompt composition (estimated per section; provider-reported total).\",\"operation\":null,\"source\":\"developer\"},{\"attempt\":2,\"authority\":\"advisory\",\"created_at\":1791097230,\"details\":{\"changes\":[\"allocation_window\",\"context_window\",\"model\",\"runtime_digest\"],\"fallback\":true,\"from\":{\"allocation_window\":6400,\"capability_source\":\"qualification\",\"context_policy\":\"fixed\",\"context_window\":8192,\"digest\":\"5f0eba7efe1f4011eb31047157610329c822ac9d166d2c14f5b24f2665549b83\",\"edit_protocol\":\"kriya_sentinel_v1\",\"endpoint\":\"http://localhost:11434/v1\",\"failed_cases\":[],\"json_mode\":true,\"model\":\"qwen2.5-coder:7b\",\"native_tool_calls\":false,\"output_tokens\":2048,\"qualification\":\"QUALIFIED\",\"reasoning\":false,\"reliable_multiline_json\":true,\"retry_inference_settings_digest\":null,\"retry_qualification\":null,\"runtime_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"runtime_exact\":true,\"streaming\":false},\"initial\":false,\"to\":{\"allocation_window\":13000,\"capability_source\":\"qualification\",\"context_policy\":\"fixed\",\"context_window\":16384,\"digest\":\"9931520704cd103806c52784c0246d91fc03eff37da1018f0d95665791c4d63f\",\"edit_protocol\":\"kriya_sentinel_v1\",\"endpoint\":\"http://localhost:11434/v1\",\"failed_cases\":[],\"json_mode\":true,\"model\":\"qwen2.5-coder:14b\",\"native_tool_calls\":false,\"output_tokens\":2048,\"qualification\":\"QUALIFIED\",\"reasoning\":false,\"reliable_multiline_json\":true,\"retry_inference_settings_digest\":null,\"retry_qualification\":null,\"runtime_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"runtime_exact\":true,\"streaming\":false}},\"failure_type\":null,\"kind\":\"model.transition\",\"message\":\"Developer request profile for qwen2.5-coder:14b (was qwen2.5-coder:7b): allocation_window, context_window, model, runtime_digest changed\",\"operation\":null,\"source\":\"attempt._run_developer_generation\"},{\"attempt\":2,\"authority\":\"auxiliary\",\"created_at\":1791097261.75,\"details\":{\"rows\":[{\"attempts\":2,\"attempts_passed\":1,\"calls\":3,\"completion_tokens\":2436,\"estimated_token_calls\":0,\"first_pass_success\":null,\"inference_settings_digest\":\"settings:3333333333333333\",\"latency_seconds\":12.346,\"model\":\"qwen2.5-coder:7b\",\"prompt_tokens\":12570,\"protocol_failures\":1,\"retries_triggered\":0,\"role\":\"developer\",\"runtime_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"runtime_exact\":true,\"schema_failures\":0,\"structured_malformed\":0,\"structured_other_failures\":0,\"structured_policy_rejections\":0,\"structured_valid\":0,\"structured_validation_failures\":0},{\"attempts\":0,\"attempts_passed\":0,\"calls\":1,\"completion_tokens\":420,\"estimated_token_calls\":0,\"first_pass_success\":null,\"inference_settings_digest\":\"settings:4444444444444444\",\"latency_seconds\":4.5,\"model\":\"qwen2.5-coder:14b\",\"prompt_tokens\":3100,\"protocol_failures\":0,\"retries_triggered\":0,\"role\":\"planner\",\"runtime_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"runtime_exact\":true,\"schema_failures\":0,\"structured_malformed\":0,\"structured_other_failures\":0,\"structured_policy_rejections\":0,\"structured_valid\":0,\"structured_validation_failures\":0}]},\"failure_type\":null,\"kind\":\"model.role_metrics\",\"message\":\"per-role model metrics of this run (observations, not verification evidence)\",\"operation\":null,\"source\":\"workflow\"}]"
+   },
+   "evidence_records": {
+    "availability": "recorded",
+    "provenance": "runs.evidence_records",
+    "reason": null,
+    "data": "[]"
+   },
+   "generation_metrics": {
+    "availability": "recorded",
+    "provenance": "runs.generation_metrics",
+    "reason": null,
+    "data": "{\"wall_ms\":53000}"
+   },
+   "failure_report": {
+    "availability": "recorded",
+    "provenance": "runs.failure_report",
+    "reason": null,
+    "data": "[]"
+   }
+  },
+  "run_events": {
+   "availability": "recorded",
+   "provenance": "runs.run_events",
+   "reason": null,
+   "data": [
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "created_at": 1791097200.25,
+     "details": {
+      "known_target_files": [
+       "src/mod1/a.py",
+       "src/mod1/b.py"
+      ],
+      "member_hint_paths": [
+       "src/mod1/a.py"
+      ],
+      "omitted": [
+       {
+        "path": "src/big.py",
+        "reason": "budget_exhausted"
+       }
+      ],
+      "package_hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "tiers": [
+       {
+        "member_id": "Mod1.run",
+        "path": "src/mod1/a.py",
+        "tier": "member_exact"
+       },
+       {
+        "member_id": null,
+        "path": "src/mod1/b.py",
+        "tier": "skeleton"
+       }
+      ],
+      "unit_count": 2
+     },
+     "failure_type": null,
+     "kind": "context.known_target_package",
+     "message": "Known-target context package built for the attempt-1 owner-contract replacement.",
+     "operation": null,
+     "source": "attempt.run_attempt"
+    },
+    {
+     "attempt": 1,
+     "authority": "advisory",
+     "created_at": 1791097201.5,
+     "details": {
+      "code_context_tokens": 29,
+      "load_seconds": 0.012,
+      "prefill_seconds": 1.83,
+      "prefix_break": "goal",
+      "prefix_shared_tokens": 400,
+      "prompt_tokens_reported": 4190,
+      "sibling_signatures_tokens": 0,
+      "skills_tokens": 12,
+      "t0_header_tokens": 0,
+      "t0_member_tokens": 0,
+      "t1_tokens": 0,
+      "t2_tokens": 0,
+      "t3_tokens": 0,
+      "token_counts": "estimated (len/4) per section; total as reported by the provider"
+     },
+     "failure_type": null,
+     "kind": "developer.prompt_composition",
+     "message": "Developer prompt composition (estimated per section; provider-reported total).",
+     "operation": null,
+     "source": "developer"
+    },
+    {
+     "attempt": 2,
+     "authority": "advisory",
+     "created_at": 1791097230,
+     "details": {
+      "changes": [
+       "allocation_window",
+       "context_window",
+       "model",
+       "runtime_digest"
+      ],
+      "fallback": true,
+      "from": {
+       "allocation_window": 6400,
+       "capability_source": "qualification",
+       "context_policy": "fixed",
+       "context_window": 8192,
+       "digest": "5f0eba7efe1f4011eb31047157610329c822ac9d166d2c14f5b24f2665549b83",
+       "edit_protocol": "kriya_sentinel_v1",
+       "endpoint": "http://localhost:11434/v1",
+       "failed_cases": [],
+       "json_mode": true,
+       "model": "qwen2.5-coder:7b",
+       "native_tool_calls": false,
+       "output_tokens": 2048,
+       "qualification": "QUALIFIED",
+       "reasoning": false,
+       "reliable_multiline_json": true,
+       "retry_inference_settings_digest": null,
+       "retry_qualification": null,
+       "runtime_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "runtime_exact": true,
+       "streaming": false
+      },
+      "initial": false,
+      "to": {
+       "allocation_window": 13000,
+       "capability_source": "qualification",
+       "context_policy": "fixed",
+       "context_window": 16384,
+       "digest": "9931520704cd103806c52784c0246d91fc03eff37da1018f0d95665791c4d63f",
+       "edit_protocol": "kriya_sentinel_v1",
+       "endpoint": "http://localhost:11434/v1",
+       "failed_cases": [],
+       "json_mode": true,
+       "model": "qwen2.5-coder:14b",
+       "native_tool_calls": false,
+       "output_tokens": 2048,
+       "qualification": "QUALIFIED",
+       "reasoning": false,
+       "reliable_multiline_json": true,
+       "retry_inference_settings_digest": null,
+       "retry_qualification": null,
+       "runtime_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "runtime_exact": true,
+       "streaming": false
+      }
+     },
+     "failure_type": null,
+     "kind": "model.transition",
+     "message": "Developer request profile for qwen2.5-coder:14b (was qwen2.5-coder:7b): allocation_window, context_window, model, runtime_digest changed",
+     "operation": null,
+     "source": "attempt._run_developer_generation"
+    },
+    {
+     "attempt": 2,
+     "authority": "auxiliary",
+     "created_at": 1791097261.75,
+     "details": {
+      "rows": [
+       {
+        "attempts": 2,
+        "attempts_passed": 1,
+        "calls": 3,
+        "completion_tokens": 2436,
+        "estimated_token_calls": 0,
+        "first_pass_success": null,
+        "inference_settings_digest": "settings:3333333333333333",
+        "latency_seconds": 12.346,
+        "model": "qwen2.5-coder:7b",
+        "prompt_tokens": 12570,
+        "protocol_failures": 1,
+        "retries_triggered": 0,
+        "role": "developer",
+        "runtime_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_policy_rejections": 0,
+        "structured_valid": 0,
+        "structured_validation_failures": 0
+       },
+       {
+        "attempts": 0,
+        "attempts_passed": 0,
+        "calls": 1,
+        "completion_tokens": 420,
+        "estimated_token_calls": 0,
+        "first_pass_success": null,
+        "inference_settings_digest": "settings:4444444444444444",
+        "latency_seconds": 4.5,
+        "model": "qwen2.5-coder:14b",
+        "prompt_tokens": 3100,
+        "protocol_failures": 0,
+        "retries_triggered": 0,
+        "role": "planner",
+        "runtime_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_policy_rejections": 0,
+        "structured_valid": 0,
+        "structured_validation_failures": 0
+       }
+      ]
+     },
+     "failure_type": null,
+     "kind": "model.role_metrics",
+     "message": "per-role model metrics of this run (observations, not verification evidence)",
+     "operation": null,
+     "source": "workflow"
+    }
+   ]
+  },
+  "evidence_records": {
+   "availability": "recorded",
+   "provenance": "runs.evidence_records",
+   "reason": null,
+   "data": []
+  },
+  "gate_outcomes": {
+   "availability": "recorded",
+   "provenance": "runs.gate_outcomes",
+   "reason": null,
+   "data": [
+    {
+     "attempt": 1,
+     "type": "compile",
+     "success": false,
+     "output": "error: x",
+     "mode": "contained",
+     "likely_files": [
+      "src/mod1/a.py"
+     ],
+     "file_locations": [],
+     "failed_content": {},
+     "attempted_edits": [],
+     "self_correction_attempt": 0,
+     "attribution_tier": "locator",
+     "attribution_confidence": "high",
+     "attribution_reasoning": "compiler names the file"
+    }
+   ]
+  },
+  "model_hops": {
+   "availability": "recorded",
+   "provenance": "runs.model_hops",
+   "reason": null,
+   "data": [
+    "qwen2.5-coder:7b"
+   ]
+  },
+  "generation_metrics": {
+   "availability": "recorded",
+   "provenance": "runs.generation_metrics",
+   "reason": null,
+   "data": {
+    "wall_ms": 53000
+   }
+  },
+  "failure_report": {
+   "availability": "recorded",
+   "provenance": "runs.failure_report",
+   "reason": null,
+   "data": []
+  },
+  "context": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row persists context only inside run_events (context.* events); no context record is stored",
+   "data": null
+  },
+  "attribution": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the baseline persists failure categories, not causal attribution",
+   "data": null
+  },
+  "diagnostics": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "no diagnostics record is persisted",
+   "data": null
+  },
+  "comparisons": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row stores modified paths, not before/after text",
+   "data": null
+  },
+  "output": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "Developer output is not persisted",
+   "data": null
+  }
+ },
+ "error": null
+}

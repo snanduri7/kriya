@@ -1,0 +1,21 @@
+{
+ "schema_version": 1,
+ "operation": "workspace.status",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": null,
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "workspace": "/fixture/workspace",
+  "run_active": false,
+  "status": "CLEAN",
+  "exit_code": 0,
+  "assessment": {
+   "status": "CLEAN"
+  }
+ },
+ "error": null
+}
