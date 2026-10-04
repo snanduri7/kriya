@@ -34,6 +34,7 @@ OPERATIONS = (
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",
+    "snapshot.verify",  # SHA-256 of exactly one published snapshot (digest verified at pin; metadata checked per query)
 )
 
 # Error codes (closed vocabulary; the host shows an unknown code literally).

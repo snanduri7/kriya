@@ -4595,6 +4595,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
               help="With --snapshot: refuse acquisition while a run is active for this workspace (policy).")
 @click.option("--snapshots", "list_snaps", is_flag=True, help="KUP: list the published snapshots.")
 @click.option("--verify", is_flag=True, help="With --snapshots: also verify every snapshot's digest.")
+@click.option("--snapshot-verify", "verify_id", default=None,
+              help="KUP: verify the SHA-256 of exactly this published snapshot (the host does this when it pins a snapshot; "
+                   "per-query checks stay size/mtime only).")
 @click.option("--snapshot-prune", "prune", is_flag=True, help="KUP: remove published snapshots beyond --keep and orphaned staging.")
 @click.option("--keep", type=int, default=None, help="With --snapshot-prune: how many newest snapshots to keep (default 3; 0 removes all).")
 @click.option("--snapshot-id", "snapshot_id", default=None,
@@ -4605,8 +4608,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 @click.pass_context
 def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_legacy: bool, legacy_path: Optional[str],
            as_json: bool, capabilities: bool, acquire: bool, workspace: Optional[str], list_snaps: bool, verify: bool,
-           prune: bool, keep: Optional[int], snapshot_id: Optional[str], cursor: Optional[str], run_id: Optional[str],
-           include_prompt: bool) -> None:
+           verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str], cursor: Optional[str],
+           run_id: Optional[str], include_prompt: bool) -> None:
     """Show persistent run trace logs and metrics of past runs.
 
     With --json this is the KUP v1 read path (GUI M1 Phase C, handover/GUI-D4-READ-STRATEGY/03_GATE.md): it never
@@ -4623,19 +4626,19 @@ def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_leg
     if config_error is not None and not as_json:
         click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
         sys.exit(1)
-    kup_flags = any([capabilities, acquire, list_snaps, verify, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace])
+    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace])
     if as_json:
         if migrate_legacy or legacy_path is not None or show_all:
             raise click.UsageError("--json (KUP) cannot be combined with --migrate-legacy, --legacy-path or --all")
         if config_error is not None:
             _traces_kup_config_error(config_error)
             return
-        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, prune, keep, snapshot_id, cursor, run_id, include_prompt)
+        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt)
         return
     cfg: AppConfig = ctx.obj['config']
     if kup_flags:
-        raise click.UsageError("the KUP options (--capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-id, --cursor, "
-                               "--run-id, --include-prompt, --workspace, --verify, --keep) require --json")
+        raise click.UsageError("the KUP options (--capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, --snapshot-id, "
+                               "--cursor, --run-id, --include-prompt, --workspace, --verify, --keep) require --json")
     # Text mode: byte-identical to the pre-KUP command. Logging is configured here (main() leaves it to traces).
     _bootstrap_logging(cfg)
     if limit is None:
@@ -4738,7 +4741,7 @@ def _traces_kup_config_error(error: Exception) -> None:
 
 
 def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquire: bool, workspace: Optional[str],
-                list_snaps: bool, verify: bool, prune: bool, keep: Optional[int], snapshot_id: Optional[str],
+                list_snaps: bool, verify: bool, verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str],
                 cursor: Optional[str], run_id: Optional[str], include_prompt: bool) -> None:
     """Translate the KUP flag grammar into one operation request and print its envelope (exit 0; typed errors are
     envelopes, so the host can tell a protocol refusal from a crash)."""
@@ -4748,12 +4751,13 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
     from kriya.kup.policy import INVALID_REQUEST
 
     modes = [name for name, flag in (("capabilities", capabilities), ("snapshot.acquire", acquire), ("snapshot.list", list_snaps),
-                                     ("snapshot.prune", prune), ("history", bool(snapshot_id or run_id or cursor or include_prompt))) if flag]
+                                     ("snapshot.prune", prune), ("snapshot.verify", bool(verify_id)),
+                                     ("history", bool(snapshot_id or run_id or cursor or include_prompt))) if flag]
     if not modes:
         modes = ["history"]  # plain `--json [-n N]`: a history read, which requires --snapshot-id (typed below)
     if len(modes) != 1:
         click.echo(encode_response(error_envelope("unknown", "cli", INVALID_REQUEST,
-                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, or a history read (--snapshot-id ...)")))
+                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, or a history read (--snapshot-id ...)")))
         return
     mode = modes[0]
     request: Dict[str, Any]
@@ -4765,6 +4769,8 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
         request = {"operation": "snapshot.list", "verify": verify}
     elif mode == "snapshot.prune":
         request = {"operation": "snapshot.prune", "keep": keep}
+    elif mode == "snapshot.verify":
+        request = {"operation": "snapshot.verify", "snapshot_id": verify_id}
     else:
         if run_id is not None:
             if cursor is not None or limit is not None:

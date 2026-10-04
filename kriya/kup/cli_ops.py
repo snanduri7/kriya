@@ -8,6 +8,7 @@ kernel, plugin or model; ``sys.dont_write_bytecode`` is set by the CLI before th
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, Optional
 
 from kriya.kup import policy
@@ -23,6 +24,7 @@ from kriya.kup.inspect import (
     not_applicable_consistency,
     snapshot_consistency,
     source_block,
+    utc_now,
 )
 from kriya.kup.store import (
     SnapshotError,
@@ -47,6 +49,8 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _list_snapshots(cfg, request, request_id)
         if operation == "snapshot.prune":
             return _prune(cfg, request, request_id)
+        if operation == "snapshot.verify":
+            return _verify(cfg, request, request_id)
         if operation in ("history.list", "history.detail", "history.prompt"):
             return _history(cfg, operation, request, request_id)
         if operation == "workspace.status":
@@ -103,6 +107,25 @@ def _list_snapshots(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, 
         items.append(entry)
     return envelope("snapshot.list", request_id, data={"snapshot_directory": snapdir, "snapshots": items, "retain": policy.RETAIN_SNAPSHOTS},
                     source=_source(cfg), consistency=live_consistency())
+
+
+def _verify(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """Digest verification of EXACTLY the requested snapshot (the host calls this when it pins a snapshot for a
+    browsing session). Guarantee, stated precisely: digest verified at pin; metadata (size, mtime) checked per
+    query. A later modification that preserves size and mtime is caught only by the next explicit verification."""
+    snapshot_id = request.get("snapshot_id")
+    if not snapshot_id:
+        raise SnapshotError(policy.INVALID_REQUEST, "snapshot_id is required for snapshot.verify")
+    snap = require_snapshot(snapshot_directory(cfg), str(snapshot_id))  # typed MISSING / UNAVAILABLE / CORRUPT; never another id
+    started = time.monotonic()
+    reason = verify_digest(snap)
+    if reason:
+        raise SnapshotError(policy.SNAPSHOT_CORRUPT, reason, snapshot_id=snap.snapshot_id)
+    file_meta = snap.manifest.get("snapshot_file", {})
+    data = {"snapshot_id": snap.snapshot_id, "digest_verified": True, "sha256": file_meta.get("sha256"), "size": file_meta.get("size"),
+            "verified_at": utc_now(), "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+            "guarantee": "digest verified at this request; size and mtime are checked on every later query"}
+    return envelope("snapshot.verify", request_id, data=data, source=_source(cfg, snap), consistency=live_consistency())
 
 
 def _prune(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:

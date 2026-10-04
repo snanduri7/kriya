@@ -65,7 +65,8 @@ def test_text_mode_still_bootstraps_logging_and_json_mode_never_does():
 
 
 def test_kup_flags_without_json_are_a_usage_error():
-    for args in (["traces", "--capabilities"], ["traces", "--snapshot"], ["traces", "--snapshot-id", "x"], ["traces", "--run-id", "r"]):
+    for args in (["traces", "--capabilities"], ["traces", "--snapshot"], ["traces", "--snapshot-id", "x"], ["traces", "--run-id", "r"],
+                 ["traces", "--snapshot-verify", "20260101T000000000000Z-00000000"]):
         res = _invoke(args)
         assert res.exit_code == 2 and "require --json" in res.output, args
     res = _invoke(["traces", "--json", "--all"])
@@ -248,3 +249,40 @@ def test_snapshots_list_prune_and_verify():
     assert env["data"]["kept"] == [ids[-1]] and env["data"]["removed"] == [ids[0]]
     env = _json(["traces", "--json", "--snapshot-prune", "--keep", "0"])
     assert env["data"]["kept"] == []
+
+
+# ------------------------------------------------------------------ digest verified at pin (08 review F-4)
+
+def test_snapshot_verify_is_bound_to_the_exact_id_and_catches_a_same_size_same_mtime_tamper():
+    """The host verifies the SHA-256 of exactly the snapshot it pins. The per-query check is size/mtime only, so a
+    tamper that preserves both is invisible to it (MEASURED below) and must be caught by the explicit verification."""
+    from kriya.kup.store import cheap_integrity, list_snapshots, snapshot_directory
+
+    seed_store(trace_db_path(AppConfig()), 6)
+    snapshot_id = _acquire()
+    other = _acquire()
+    env = _json(["traces", "--json", "--snapshot-verify", snapshot_id])
+    assert env["operation"] == "snapshot.verify" and env["error"] is None, env
+    assert env["data"]["snapshot_id"] == snapshot_id and env["data"]["digest_verified"] is True and len(env["data"]["sha256"]) == 64
+    assert env["consistency"]["kind"] == "live_observation" and env["source"]["snapshot_id"] == snapshot_id
+    assert "digest verified at this request" in env["data"]["guarantee"]
+    # exact binding: an unpublished id is UNAVAILABLE, a malformed id INVALID_REQUEST, never a substitute
+    assert _json(["traces", "--json", "--snapshot-verify", "20260101T000000000000Z-00000000"])["error"]["code"] == policy.SNAPSHOT_UNAVAILABLE
+    assert _json(["traces", "--json", "--snapshot-verify", "latest"])["error"]["code"] == policy.INVALID_REQUEST
+    assert _json(["traces", "--json", "--snapshot-verify", snapshot_id, "--capabilities"])["error"]["code"] == policy.INVALID_REQUEST
+    # tamper preserving size and mtime
+    snap = next(s for s in list_snapshots(snapshot_directory(AppConfig())) if s.snapshot_id == snapshot_id)
+    st = os.stat(snap.db_path)
+    os.chmod(snap.db_path, 0o600)
+    with open(snap.db_path, "r+b") as f:
+        f.seek(st.st_size - 1)
+        last = f.read(1)
+        f.seek(st.st_size - 1)
+        f.write(bytes([last[0] ^ 0xFF]))
+    os.utime(snap.db_path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    os.chmod(snap.db_path, 0o400)
+    assert cheap_integrity(snap) is None, "the per-query metadata check cannot see a same-size same-mtime tamper (by design)"
+    env = _json(["traces", "--json", "--snapshot-verify", snapshot_id])
+    assert env["error"]["code"] == policy.SNAPSHOT_CORRUPT and env["error"]["snapshot_id"] == snapshot_id, env
+    # verification is per id: the other snapshot still verifies
+    assert _json(["traces", "--json", "--snapshot-verify", other])["data"]["digest_verified"] is True
