@@ -195,7 +195,33 @@ owner's pre-existing untracked `kriya/workflow/orig-attempt.py`, which was not m
 
 9. The child environment rule exists twice by necessity (TypeScript in the GUI checkout, Python in the Kriya tests);
    both are pinned to the same key set and constants by tests, but a change to one must be mirrored by hand.
-10. The GUI child inherits the Electron process's working directory, so a `kriya.yaml` there is discovered exactly as a
-    terminal `kriya` started there would discover it; the parity test covers this, but a Finder-launched app has `/` as
-    its working directory, which differs from the operator's shell. No config-path variable was invented, per the owner.
+10. (Resolved in §7, F-5.) The child's working directory is now the explicit, validated configuration directory, never
+    Electron's own launch directory. No config-path variable was invented, per the owner.
 11. The real store has still never been touched; the first real acquisition and verification follow after D-9 is lifted.
+
+## 7. F-5: explicit, visible configuration directory (owner instruction and 08 addendum 3, 2026-10-04)
+
+Reviewed against the code first: CONFIRMED that `main.ts` passed no `cwd`, so the real child inherited Electron's
+working directory, and Kriya discovers `kriya.yaml` (and classifies it under SEC-009) from its working directory.
+
+| commit | kind | content |
+|---|---|---|
+| `b531404` | **KUP:** (tests only; merge candidate 6) | `tests/test_kup_host_environment.py`: identical configuration/store resolution when the host sits in `/`, HOME or an unrelated directory and passes the configuration directory (with a `kriya.yaml` naming `paths.state`) as the child's cwd; equal to the operator's shell started there; a different configuration directory resolves a different store. Acquisition with `--workspace W` from configuration directories A and B writes under A's and B's stores and nothing under W; `runs status --workspace W` assesses W from either and loads no configuration |
+| `59106b8` | GUI-C | host setting `configDirectory` (null = operator HOME), `resolveConfigDirectory` (absolute, no control characters, existing directory), passed as `cwd` to every kriya child (real and stand-in); invalid = typed `HOST_ERROR` on every call; `HostInfo` carries `configDirectory`/`configDirectorySource`/`configDirectoryProblem`; trust strip shows "Configuration directory" with its source and "Workspace (recovery assessment)"; schema and generated outputs updated |
+| (this commit) | GUI-C docs | this section, README |
+
+- **Explicit and visible:** the strip shows the directory and whether it comes from the setting or the HOME default,
+  next to the resolved history-store path; an invalid value is shown with the host's reason.
+- **Validated cwd, never inherited:** `main.ts` never reads `process.cwd()` (structural test); a real spawn from `/`
+  and from the temporary directory lands in the explicit cwd (stand-in `echocwd`).
+- **Distinct from the recovery workspace:** `workspacePath` only travels as an explicit argument; the Kriya-side test
+  proves swapping the configuration directory changes the store and not the assessed workspace, and that the workspace
+  receives no file.
+- **No new configuration environment variable**; the mirrored environment rule is unchanged.
+- **Tests (MEASURED):** `tests/test_kup_host_environment.py` 6 pass (4 + 2 new); `npm run check` 125 tests
+  (kup 10, shared 38, test-host 32, standalone 45) + generated drift + Java round trip over 266 fixtures pass; pylint and
+  ruff clean. Not run: the full suite at `-n 2` (still on hold).
+- **Limitation:** M1 has no settings form; `configDirectory` is edited in the host's settings file like the other
+  settings, and `HOME` is the default until then.
+
+**Kriya-side merge candidates, in order:** `db96b12`, `f4bd13f`, `f4688ea`, `8065005`, `f876f49`, `b531404`.

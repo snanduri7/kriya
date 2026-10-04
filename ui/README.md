@@ -29,8 +29,16 @@ Child environment of the real `kriya` (owner policy 2026-10-04; `standalone/src/
 `tests/_kup_fixtures.py::host_child_env`): fixed `PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`, fixed
 `PYTHONDONTWRITEBYTECODE=1`, the operator's `HOME`, and `KRIYA_STATE_DIR` only when the operator set it to an absolute
 path. Nothing else is passed (no `PYTHONPATH`/`PYTHONHOME`, no `KRIYA_TRUST_FILE`, no credentials, no config-path
-variable); configuration discovery stays Kriya's own (working directory, then install directory), so the GUI's child
-inherits the Electron process's working directory for `kriya.yaml` discovery.
+variable); configuration discovery stays Kriya's own (working directory, then install directory).
+
+Configuration directory (08 review F-5): every kriya child - real or stand-in - runs with `cwd` set to the validated
+host setting `configDirectory` (absolute, existing directory; null = the operator's `HOME`), so `kriya.yaml` discovery
+and SEC-009 classification happen in one explicit place and never in Electron's own launch directory (`/` from Finder, a
+shell's directory from a terminal). It is shown in the trust strip ("Configuration directory", with its source) next to
+the history-store path, and is independent of `workspacePath`, the recovery-assessment workspace, which only ever travels
+as an explicit argument (`runs status --workspace`, `traces --snapshot --workspace`). An unset or invalid directory makes
+every KUP call a typed `HOST_ERROR` until the setting is fixed. Settings are edited in the host's settings file
+(`<userData>/kriya-ui-settings.json`); M1 has no settings form.
 
 Snapshot integrity (gate C-2 + 08 review F-4): **digest verified at pin; metadata checked per query.** The UI requests
 `snapshot.verify <id>` for exactly the snapshot it is about to display (after an acquisition, or on a user's choice) and
