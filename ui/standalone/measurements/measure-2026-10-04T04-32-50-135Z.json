@@ -1,0 +1,408 @@
+{
+  "measured_at": "2026-10-04T04:32:50.135Z",
+  "electron": "44.5.1",
+  "chrome": "152.0.7977.130",
+  "node": "24.21.0",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "os_release": "25.6.0",
+    "cpus": 10,
+    "total_memory_gb": 68.7
+  },
+  "cycles": 3,
+  "runs_available": 50,
+  "samples": [
+    {
+      "label": "idle_after_load_3s_pre_gc",
+      "at_ms": 3009,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 162832,
+          "peakWorkingSetKB": 162848,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 79136,
+          "peakWorkingSetKB": 83584,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47360,
+          "peakWorkingSetKB": 47360,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 112304,
+          "peakWorkingSetKB": 112304,
+          "privateKB": null,
+          "cpuPercent": 0
+        }
+      ],
+      "totalWorkingSetMB": 392,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_load_3s_post_gc",
+      "at_ms": 3318,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 162928,
+          "peakWorkingSetKB": 162928,
+          "privateKB": null,
+          "cpuPercent": 0.05347437982328237
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 79136,
+          "peakWorkingSetKB": 83584,
+          "privateKB": null,
+          "cpuPercent": 0.0027480432315695204
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47360,
+          "peakWorkingSetKB": 47360,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 113776,
+          "peakWorkingSetKB": 114000,
+          "privateKB": null,
+          "cpuPercent": 0.4310604027713566
+        }
+      ],
+      "totalWorkingSetMB": 394,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_first_selection",
+      "at_ms": 3502,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 195856,
+          "peakWorkingSetKB": 210000,
+          "privateKB": null,
+          "cpuPercent": 1.6147341031061964
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 84160,
+          "peakWorkingSetKB": 84192,
+          "privateKB": null,
+          "cpuPercent": 0.636305470003904
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47360,
+          "peakWorkingSetKB": 47360,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 143648,
+          "peakWorkingSetKB": 145328,
+          "privateKB": null,
+          "cpuPercent": 3.1298608324022954
+        }
+      ],
+      "totalWorkingSetMB": 460,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_3_cycles_pre_gc",
+      "at_ms": 3659,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 196752,
+          "peakWorkingSetKB": 210000,
+          "privateKB": null,
+          "cpuPercent": 0.4547518401749685
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 86560,
+          "peakWorkingSetKB": 87152,
+          "privateKB": null,
+          "cpuPercent": 1.3658311961575604
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47360,
+          "peakWorkingSetKB": 47360,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 147824,
+          "peakWorkingSetKB": 147824,
+          "privateKB": null,
+          "cpuPercent": 1.8969927985776232
+        }
+      ],
+      "totalWorkingSetMB": 467,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_3_cycles_post_gc",
+      "at_ms": 3968,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 196752,
+          "peakWorkingSetKB": 210000,
+          "privateKB": null,
+          "cpuPercent": 0.0733686158305405
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 87936,
+          "peakWorkingSetKB": 88336,
+          "privateKB": null,
+          "cpuPercent": 0.2747984940421513
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47360,
+          "peakWorkingSetKB": 47360,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 130832,
+          "peakWorkingSetKB": 148656,
+          "privateKB": null,
+          "cpuPercent": 0.7967286168413495
+        }
+      ],
+      "totalWorkingSetMB": 452,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_cycles_3s_pre_gc",
+      "at_ms": 6970,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 196608,
+          "peakWorkingSetKB": 210000,
+          "privateKB": null,
+          "cpuPercent": 0.013910786422459525
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 82352,
+          "peakWorkingSetKB": 88336,
+          "privateKB": null,
+          "cpuPercent": 0.28224938758025414
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47392,
+          "peakWorkingSetKB": 47408,
+          "privateKB": null,
+          "cpuPercent": 0.0019087008109813254
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 130128,
+          "peakWorkingSetKB": 148656,
+          "privateKB": null,
+          "cpuPercent": 0.4638812274320129
+        }
+      ],
+      "totalWorkingSetMB": 446,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_cycles_3s_post_gc",
+      "at_ms": 7281,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 89595,
+          "workingSetKB": 196624,
+          "peakWorkingSetKB": 210000,
+          "privateKB": null,
+          "cpuPercent": 0.05225981882833743
+        },
+        {
+          "type": "GPU",
+          "pid": 89600,
+          "workingSetKB": 82352,
+          "peakWorkingSetKB": 88336,
+          "privateKB": null,
+          "cpuPercent": 0.20005343341906284
+        },
+        {
+          "type": "Utility",
+          "pid": 89602,
+          "workingSetKB": 47392,
+          "peakWorkingSetKB": 47408,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 89624,
+          "workingSetKB": 130048,
+          "peakWorkingSetKB": 148656,
+          "privateKB": null,
+          "cpuPercent": 0.9143681362022169
+        }
+      ],
+      "totalWorkingSetMB": 446,
+      "rendererJsHeapMB": 9.5
+    }
+  ],
+  "long_tasks": {
+    "count": 0,
+    "over_200ms": [],
+    "max_ms": 0
+  },
+  "frame_gaps_over_100ms": {
+    "count": 0,
+    "over_200ms": [],
+    "max_ms": 0,
+    "first_10": []
+  },
+  "gc": {
+    "forced_via_devtools_protocol": true,
+    "error": null
+  },
+  "populate": {
+    "max_ms": 179.8,
+    "p95_ms": 179.8,
+    "median_ms": 81,
+    "over_2000ms": [],
+    "first_12": [
+      {
+        "runId": "run-big-events",
+        "ms": 179.8
+      },
+      {
+        "runId": "run-diff-2000",
+        "ms": 81
+      },
+      {
+        "runId": "run-unknown-fields",
+        "ms": 74.1
+      }
+    ]
+  },
+  "memory_flatness_MB": {
+    "working_set_pre_gc": {
+      "idle": 392,
+      "after_cycles": 467,
+      "idle_after": 446
+    },
+    "working_set_post_gc": {
+      "idle": 394,
+      "after_cycles": 452,
+      "idle_after": 446
+    },
+    "renderer_js_heap_post_gc": {
+      "idle": 9.5,
+      "after_cycles": 9.5,
+      "idle_after": 9.5
+    }
+  },
+  "keyboard_only_selection": {
+    "focusedRole": "listbox",
+    "selectedPos": "4",
+    "heading": "Fixture goal 112: add an audit log to module 0 and cover it with tests",
+    "after_tab": {
+      "tag": "BUTTON",
+      "text": "Load more",
+      "focusVisible": true,
+      "outlineStyle": "solid",
+      "outlineWidth": "3px"
+    }
+  },
+  "accessibility_snapshot": {
+    "controls": 51,
+    "unnamed": [],
+    "roles": {
+      "region": 1,
+      "listbox": 2,
+      "option": 30,
+      "tablist": 2,
+      "tab": 7,
+      "tabpanel": 5,
+      "status": 0,
+      "alert": 0,
+      "group": 1,
+      "searchbox": 1
+    },
+    "headings": 3
+  },
+  "resize": {
+    "narrow_800px": {
+      "width": 800,
+      "narrowToggleDisplay": "flex",
+      "inspectorDisplay": "none",
+      "columns": "240px 560px",
+      "horizontalOverflow": false
+    },
+    "wide_1400px": {
+      "width": 1400,
+      "narrowToggleDisplay": "none",
+      "inspectorDisplay": "block",
+      "columns": "308px 672px 420px"
+    }
+  },
+  "ps_cross_check": {
+    "rss_total_MB": 490,
+    "rows": [
+      "89595 189920 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele",
+      "89600 118176 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele",
+      "89602 47392 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/elec",
+      "89624 145808 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele"
+    ]
+  },
+  "pids_for_cross_check": [
+    "Browser:89595",
+    "GPU:89600",
+    "Utility:89602",
+    "Tab:89624"
+  ]
+}

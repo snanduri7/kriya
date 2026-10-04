@@ -1,0 +1,24 @@
+{
+  "name": "@kriya-ui/standalone",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Electron standalone shell (gate A-1 hardening). Only the main process spawns processes, and only the allowlisted kriya command grammar.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.test.json",
+    "build:main": "tsc -p tsconfig.main.json && vite build --config vite.preload.config.mts",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "electron .",
+    "measure": "KRIYA_UI_MEASURE=1 electron .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kriya-ui/shared": "0.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "electron": "44.5.1"
+  }
+}
