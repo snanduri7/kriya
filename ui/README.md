@@ -6,7 +6,7 @@ imported by `kriya/` (P-34).
 
 | package | role |
 |---|---|
-| `kup/` | KUP v1 JSON Schema, generated TypeScript types, host contract schema (Phase B; placeholder in Phase A) |
+| `kup/` | KUP v1 JSON Schemas (`schema/`), GENERATED TypeScript types, dependency-free precompiled validators and Java classes (`generated/`, `npm run generate -w @kriya-ui/kup`; `--check` detects drift), the host contract schema, and the Java usability check (`npm run java:check -w @kriya-ui/kup`: javac + Jackson round trip over the golden fixtures) |
 | `shared/` | host-independent React/TypeScript panels, selection reducers, normalization and availability rules. Every host capability goes through `HostAdapter` (P-R1). No Electron or Node import, enforced by ESLint (`no-restricted-imports`) AND `scripts/check-shared-deps.mjs` |
 | `test-host/` | plain-browser host with a fake `HostAdapter` over the generated fixtures; renders every panel in CI (P-R3) |
 | `standalone/` | Electron shell (gate A-1 hardening); the only process spawner; fixture `kriya` stand-in while D-9 holds |
@@ -17,7 +17,8 @@ imported by `kriya/` (P-34).
 cd ui && npm install            # pinned versions, package-lock.json committed
 npm run check                   # fixtures + typecheck + lint + shared dependency check + every test
 npm run build -w @kriya-ui/standalone && npm start -w @kriya-ui/standalone     # the Electron app on fixtures
-KRIYA_UI_MEASURE=1 npm start -w @kriya-ui/standalone                          # P-35 measurement -> standalone/measurements/
+KRIYA_UI_MEASURE=1 npm start -w @kriya-ui/standalone                          # P-35 measurement (forced-GC diagnostic) -> standalone/measurements/
+KRIYA_UI_SOAK=1 npm start -w @kriya-ui/standalone                             # 2 h soak, >=1,000 selections, no forced GC, 5-min samples -> soak-*.json
 npm run dev -w @kriya-ui/test-host                                             # browser test host at http://127.0.0.1:5181 (?scenario=STORE_BUSY etc.)
 ```
 
