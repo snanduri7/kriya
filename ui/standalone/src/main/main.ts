@@ -36,6 +36,7 @@ function fakeEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   if (process.env.KRIYA_FAKE_BEHAVIOR) env.KRIYA_FAKE_BEHAVIOR = process.env.KRIYA_FAKE_BEHAVIOR;
   if (process.env.KRIYA_FAKE_FIXTURES) env.KRIYA_FAKE_FIXTURES = process.env.KRIYA_FAKE_FIXTURES;
+  env.KRIYA_FAKE_STATE = process.env.KRIYA_FAKE_STATE ?? join(app.getPath('userData'), 'fake-kriya-snapshots.json');
   return env;
 }
 

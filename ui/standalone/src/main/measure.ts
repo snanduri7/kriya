@@ -39,6 +39,8 @@ export async function runMeasurement(win: BrowserWindow, outDir: string, cycles 
   await mark('idle_after_load_3s');
   await js(`window.__kriyaLongTasks = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__kriyaLongTasks.push({ start: e.startTime, duration: e.duration }); }).observe({ type: 'longtask', buffered: true });
     window.__kriyaFrameGaps = []; (function () { let last = performance.now(); function loop() { const now = performance.now(); if (now - last > 100) window.__kriyaFrameGaps.push({ at: Math.round(now), gap: Math.round(now - last) }); last = now; requestAnimationFrame(loop); } requestAnimationFrame(loop); })(); true`);
+  // Gate C-1: nothing is read until a snapshot is pinned; the measurement acquires one explicitly first.
+  await js('window.__kriyaDriver ? window.__kriyaDriver.acquire() : null');
   let runIds: string[] = [];
   for (let i = 0; i < 50 && runIds.length === 0; i++) { runIds = (await js('window.__kriyaDriver ? window.__kriyaDriver.listRunIds() : []')) as string[]; if (!runIds.length) await sleep(200); }
   if (!runIds.length) throw new Error('driver has no runs; the fixture list did not load');

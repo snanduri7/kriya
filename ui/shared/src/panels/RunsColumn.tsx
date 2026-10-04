@@ -10,6 +10,7 @@ export interface RunsColumnProps {
   onLoadMore: (() => void) | null;
   pending: boolean;
   height: number;
+  emptyText?: string;
 }
 
 export function statusClass(status: string | null): string {
@@ -21,7 +22,7 @@ export function statusClass(status: string | null): string {
   }
 }
 
-export function RunsColumn({ runs, selectedRunId, onSelect, onLoadMore, pending, height }: RunsColumnProps) {
+export function RunsColumn({ runs, selectedRunId, onSelect, onLoadMore, pending, height, emptyText }: RunsColumnProps) {
   const [filter, setFilter] = useState('');
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -43,7 +44,7 @@ export function RunsColumn({ runs, selectedRunId, onSelect, onLoadMore, pending,
         onSelect={(i) => { const r = filtered[i]; if (r) onSelect(r.run_id); }}
         getKey={(r) => r.run_id}
         ariaLabel="Recorded runs"
-        emptyText={pending ? 'loading…' : 'no runs recorded in this store'}
+        emptyText={pending ? 'loading…' : emptyText ?? 'no runs recorded in this snapshot'}
         renderRow={(r) => (
           <div className="runrow" title={r.goal ?? ''}>
             <div className="runrow-top">

@@ -34,12 +34,22 @@ const CURSOR_RE = /^[A-Za-z0-9][A-Za-z0-9+/=_-]*$/;
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
+const SNAPSHOT_ID_RE = /^\d{8}T\d{12}Z-[0-9a-f]{8}$/;
+
 export type KupRequest =
   | { operation: 'capabilities' }
-  | { operation: 'history.list'; limit?: number; cursor?: string }
-  | { operation: 'history.detail'; run_id: string }
-  | { operation: 'history.prompt'; run_id: string }
+  | { operation: 'snapshot.acquire'; workspace?: string }
+  | { operation: 'snapshot.list'; verify?: boolean }
+  | { operation: 'snapshot.prune'; keep?: number }
+  | { operation: 'history.list'; snapshot_id: string; limit?: number; cursor?: string }
+  | { operation: 'history.detail'; snapshot_id: string; run_id: string }
+  | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
   | { operation: 'workspace.status'; workspace: string };
+
+export function validateSnapshotId(v: unknown): ValidationResult<string> {
+  if (typeof v !== 'string' || !SNAPSHOT_ID_RE.test(v)) return { ok: false, message: 'snapshot_id must be a published snapshot id (YYYYMMDDTHHMMSSffffffZ-xxxxxxxx)' };
+  return { ok: true, value: v };
+}
 
 function isObj(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
 
@@ -69,9 +79,25 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
   switch (v.operation) {
     case 'capabilities':
       return keys.join() === 'operation' ? { ok: true, value: { operation: 'capabilities' } } : { ok: false, message: 'capabilities takes no parameters' };
+    case 'snapshot.acquire': {
+      if (!keys.every((k) => ['operation', 'workspace'].includes(k))) return { ok: false, message: 'snapshot.acquire accepts only workspace' };
+      if ('workspace' in v && v.workspace !== undefined) { const w = validateWorkspacePath(v.workspace); if (!w.ok) return w; return { ok: true, value: { operation: 'snapshot.acquire', workspace: w.value } }; }
+      return { ok: true, value: { operation: 'snapshot.acquire' } };
+    }
+    case 'snapshot.list': {
+      if (!keys.every((k) => ['operation', 'verify'].includes(k))) return { ok: false, message: 'snapshot.list accepts only verify' };
+      if ('verify' in v && typeof v.verify !== 'boolean') return { ok: false, message: 'verify must be a boolean' };
+      return { ok: true, value: 'verify' in v ? { operation: 'snapshot.list', verify: v.verify as boolean } : { operation: 'snapshot.list' } };
+    }
+    case 'snapshot.prune': {
+      if (!keys.every((k) => ['operation', 'keep'].includes(k))) return { ok: false, message: 'snapshot.prune accepts only keep' };
+      if ('keep' in v && (typeof v.keep !== 'number' || !Number.isInteger(v.keep) || v.keep < 0 || v.keep > 1000)) return { ok: false, message: 'keep must be an integer in 0..1000' };
+      return { ok: true, value: 'keep' in v ? { operation: 'snapshot.prune', keep: v.keep as number } : { operation: 'snapshot.prune' } };
+    }
     case 'history.list': {
-      if (!keys.every((k) => ['operation', 'limit', 'cursor'].includes(k))) return { ok: false, message: 'history.list accepts only limit and cursor' };
-      const out: KupRequest = { operation: 'history.list' };
+      if (!keys.every((k) => ['operation', 'snapshot_id', 'limit', 'cursor'].includes(k))) return { ok: false, message: 'history.list accepts only snapshot_id, limit and cursor' };
+      const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid;
+      const out: KupRequest = { operation: 'history.list', snapshot_id: sid.value };
       if ('limit' in v) {
         if (typeof v.limit !== 'number' || !Number.isInteger(v.limit) || v.limit < 1 || v.limit > LIMITS.listMax) return { ok: false, message: `limit must be an integer in 1..${LIMITS.listMax}` };
         out.limit = v.limit;
@@ -81,9 +107,10 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     }
     case 'history.detail':
     case 'history.prompt': {
-      if (keys.join() !== 'operation,run_id') return { ok: false, message: `${v.operation} takes exactly run_id` };
+      if (keys.join() !== 'operation,run_id,snapshot_id') return { ok: false, message: `${v.operation} takes exactly snapshot_id and run_id` };
+      const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid;
       const r = validateRunId(v.run_id); if (!r.ok) return r;
-      return { ok: true, value: { operation: v.operation, run_id: r.value } };
+      return { ok: true, value: { operation: v.operation, snapshot_id: sid.value, run_id: r.value } };
     }
     case 'workspace.status': {
       if (keys.join() !== 'operation,workspace') return { ok: false, message: 'workspace.status takes exactly workspace' };

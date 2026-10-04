@@ -1,0 +1,457 @@
+{
+  "measured_at": "2026-10-04T08:03:47.054Z",
+  "electron": "44.5.1",
+  "chrome": "152.0.7977.130",
+  "node": "24.21.0",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "os_release": "25.6.0",
+    "cpus": 10,
+    "total_memory_gb": 68.7
+  },
+  "cycles": 5,
+  "runs_available": 50,
+  "samples": [
+    {
+      "label": "idle_after_load_3s_pre_gc",
+      "at_ms": 3007,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 163120,
+          "peakWorkingSetKB": 163152,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 85184,
+          "peakWorkingSetKB": 89664,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 47328,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 112576,
+          "peakWorkingSetKB": 112640,
+          "privateKB": null,
+          "cpuPercent": 0
+        }
+      ],
+      "totalWorkingSetMB": 399,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_load_3s_post_gc",
+      "at_ms": 3327,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 163232,
+          "peakWorkingSetKB": 163232,
+          "privateKB": null,
+          "cpuPercent": 0.057099257647110324
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 85184,
+          "peakWorkingSetKB": 89664,
+          "privateKB": null,
+          "cpuPercent": 0.0027202801575886434
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 47328,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 114240,
+          "peakWorkingSetKB": 114560,
+          "privateKB": null,
+          "cpuPercent": 0.46962345084601625
+        }
+      ],
+      "totalWorkingSetMB": 400,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_first_selection",
+      "at_ms": 3893,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 196704,
+          "peakWorkingSetKB": 212000,
+          "privateKB": null,
+          "cpuPercent": 0.5771669180803899
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 91568,
+          "peakWorkingSetKB": 91616,
+          "privateKB": null,
+          "cpuPercent": 0.48875863971758643
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 47328,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 139952,
+          "peakWorkingSetKB": 147424,
+          "privateKB": null,
+          "cpuPercent": 1.1723514595803088
+        }
+      ],
+      "totalWorkingSetMB": 464,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_5_cycles_pre_gc",
+      "at_ms": 4231,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 197696,
+          "peakWorkingSetKB": 212000,
+          "privateKB": null,
+          "cpuPercent": 0.33768664427033823
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 93600,
+          "peakWorkingSetKB": 93744,
+          "privateKB": null,
+          "cpuPercent": 0.7313761088724557
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 47328,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 147072,
+          "peakWorkingSetKB": 147424,
+          "privateKB": null,
+          "cpuPercent": 1.598214628357535
+        }
+      ],
+      "totalWorkingSetMB": 474,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "after_5_cycles_post_gc",
+      "at_ms": 4538,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 197568,
+          "peakWorkingSetKB": 212000,
+          "privateKB": null,
+          "cpuPercent": 0.04676325855777415
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 93936,
+          "peakWorkingSetKB": 94416,
+          "privateKB": null,
+          "cpuPercent": 0.3291406731518652
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 47296,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 130736,
+          "peakWorkingSetKB": 147424,
+          "privateKB": null,
+          "cpuPercent": 0.8735141128703507
+        }
+      ],
+      "totalWorkingSetMB": 459,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_cycles_3s_pre_gc",
+      "at_ms": 7542,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 143920,
+          "peakWorkingSetKB": 212000,
+          "privateKB": null,
+          "cpuPercent": 0.00864754062878975
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 75616,
+          "peakWorkingSetKB": 94416,
+          "privateKB": null,
+          "cpuPercent": 0.29148556889062616
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 39056,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0.0004761069236267895
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 114960,
+          "peakWorkingSetKB": 147424,
+          "privateKB": null,
+          "cpuPercent": 0.5082659004762611
+        }
+      ],
+      "totalWorkingSetMB": 365,
+      "rendererJsHeapMB": 9.5
+    },
+    {
+      "label": "idle_after_cycles_3s_post_gc",
+      "at_ms": 7848,
+      "processes": [
+        {
+          "type": "Browser",
+          "pid": 71950,
+          "workingSetKB": 143968,
+          "peakWorkingSetKB": 212000,
+          "privateKB": null,
+          "cpuPercent": 0.05247557003257329
+        },
+        {
+          "type": "GPU",
+          "pid": 71953,
+          "workingSetKB": 75616,
+          "peakWorkingSetKB": 94416,
+          "privateKB": null,
+          "cpuPercent": 0.23714667622990904
+        },
+        {
+          "type": "Utility",
+          "pid": 71954,
+          "workingSetKB": 39056,
+          "peakWorkingSetKB": 47328,
+          "privateKB": null,
+          "cpuPercent": 0
+        },
+        {
+          "type": "Tab",
+          "pid": 71956,
+          "workingSetKB": 115536,
+          "peakWorkingSetKB": 147424,
+          "privateKB": null,
+          "cpuPercent": 1.0250446877079447
+        }
+      ],
+      "totalWorkingSetMB": 365,
+      "rendererJsHeapMB": 9.5
+    }
+  ],
+  "long_tasks": {
+    "count": 0,
+    "over_200ms": [],
+    "max_ms": 0
+  },
+  "frame_gaps_over_100ms": {
+    "count": 0,
+    "over_200ms": [],
+    "max_ms": 0,
+    "first_10": []
+  },
+  "gc": {
+    "forced_via_devtools_protocol": true,
+    "error": null
+  },
+  "populate": {
+    "max_ms": 178.5,
+    "p95_ms": 178.5,
+    "median_ms": 83.4,
+    "over_2000ms": [],
+    "first_12": [
+      {
+        "runId": "run-big-events",
+        "ms": 178.5
+      },
+      {
+        "runId": "run-diff-2000",
+        "ms": 83.4
+      },
+      {
+        "runId": "run-unknown-fields",
+        "ms": 80.9
+      },
+      {
+        "runId": "run-incomplete-context",
+        "ms": 96.4
+      },
+      {
+        "runId": "run-avail-unreadable",
+        "ms": 76.2
+      }
+    ]
+  },
+  "memory_flatness_MB": {
+    "working_set_pre_gc": {
+      "idle": 399,
+      "after_cycles": 474,
+      "idle_after": 365
+    },
+    "working_set_post_gc": {
+      "idle": 400,
+      "after_cycles": 459,
+      "idle_after": 365
+    },
+    "renderer_js_heap_post_gc": {
+      "idle": 9.5,
+      "after_cycles": 9.5,
+      "idle_after": 9.5
+    }
+  },
+  "keyboard_only_selection": {
+    "focusedRole": "listbox",
+    "selectedPos": "4",
+    "heading": "Fixture goal 112: add an audit log to module 0 and cover it with tests",
+    "after_tab": {
+      "tag": "BUTTON",
+      "text": "Load more",
+      "focusVisible": true,
+      "outlineStyle": "solid",
+      "outlineWidth": "3px"
+    }
+  },
+  "accessibility_snapshot": {
+    "controls": 52,
+    "unnamed": [],
+    "roles": {
+      "region": 1,
+      "listbox": 2,
+      "option": 30,
+      "tablist": 2,
+      "tab": 7,
+      "tabpanel": 5,
+      "status": 1,
+      "alert": 0,
+      "group": 1,
+      "searchbox": 1
+    },
+    "headings": 3
+  },
+  "chromium_accessibility_tree": {
+    "available": true,
+    "nodes": 1155,
+    "interactive_controls": 74,
+    "unnamed_interactive": [],
+    "roles": {
+      "region": 4,
+      "button": 12,
+      "status": 1,
+      "tablist": 2,
+      "tabpanel": 2,
+      "listbox": 3,
+      "heading": 3,
+      "group": 2,
+      "tab": 7,
+      "option": 50,
+      "searchbox": 1,
+      "table": 1,
+      "row": 4,
+      "cell": 15,
+      "columnheader": 5
+    },
+    "selected_option_names": [
+      "20261004T080338586000Z-15c60b52 (acquired 2026-10-04T08:03:38.586000Z)",
+      "● SUCCESS 2026-09-28 10:00:00 FIXTURE: 2,000-line recorded diff"
+    ],
+    "sample_names": [
+      "button: Acquire new snapshot",
+      "button: Refresh displayed snapshot",
+      "combobox: Displayed snapshot",
+      "button: Hide drawer",
+      "listbox: Recorded runs",
+      "button: Load more",
+      "listbox: Recorded events in recorded order",
+      "tab: Diff",
+      "tab: Why",
+      "listbox: Diff of src/large_module.py",
+      "option: 20261004T080338586000Z-15c60b52 (acquired 2026-10-04T08:03:38.586000Z)",
+      "option: 20261004T093000000000Z-f1c70001 (acquired 2026-10-04T09:30:00.014000Z)"
+    ]
+  },
+  "resize": {
+    "narrow_800px": {
+      "width": 800,
+      "narrowToggleDisplay": "flex",
+      "inspectorDisplay": "none",
+      "columns": "296.586px 692.031px",
+      "horizontalOverflow": true
+    },
+    "wide_1400px": {
+      "width": 1400,
+      "narrowToggleDisplay": "none",
+      "inspectorDisplay": "block",
+      "columns": "308px 672px 420px"
+    }
+  },
+  "ps_cross_check": {
+    "rss_total_MB": 461,
+    "rows": [
+      "71950 174304 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele",
+      "71953 116352 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele",
+      "71954 39056 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/elec",
+      "71956 141984 /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/node_modules/ele"
+    ]
+  },
+  "pids_for_cross_check": [
+    "Browser:71950",
+    "GPU:71953",
+    "Utility:71954",
+    "Tab:71956"
+  ]
+}

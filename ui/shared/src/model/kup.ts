@@ -5,9 +5,10 @@
 import type { Section as KupSection, RunDetail as KupRunDetail, Envelope } from '@kriya-ui/kup';
 export type {
   Availability, Capabilities, HistoryList, RunSummary, RunEvent, ContextItem, TokenAccounting, ContextRecord,
-  AttributionRecord, Comparison, Prompt, WorkspaceStatus, KupError, KupRequest, KupEnvelope, Envelope,
+  AttributionRecord, Comparison, Prompt, WorkspaceStatus, KupError, KupRequest, KupEnvelope, Envelope, Consistency,
+  SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune,
 } from '@kriya-ui/kup';
-export { KUP_SCHEMA_VERSION, AVAILABILITY_STATES, KUP_ERROR_CODES } from '@kriya-ui/kup';
+export { KUP_SCHEMA_VERSION, AVAILABILITY_STATES, KUP_ERROR_CODES, CONSISTENCY_KINDS, SNAPSHOT_ID_RE } from '@kriya-ui/kup';
 import type { ContextRecord, AttributionRecord, Comparison, RunEvent, RunSummary } from '@kriya-ui/kup';
 
 export type KupErrorCode = (typeof import('@kriya-ui/kup').KUP_ERROR_CODES)[number] | 'HOST_ERROR';

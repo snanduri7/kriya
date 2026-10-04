@@ -40,11 +40,12 @@ describe('every special fixture renders in the browser test host', () => {
     it(`renders ${id} with all panels`, { timeout: 30000 }, async () => {
       const host = new BrowserFixtureHost('', null);
       render(<App host={host} />);
-      await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(0));
+      fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+      await waitFor(() => expect(screen.getAllByRole('option', { selected: undefined }).filter((o) => o.classList.contains('vrow')).length).toBeGreaterThan(0), { timeout: 10000 });
       // The runs column is virtualized (only ~16 rows exist in the DOM), so reach the wanted run through the filter.
       fireEvent.change(screen.getByRole('searchbox'), { target: { value: summaryGoal(id) } });
-      await waitFor(() => expect(screen.getAllByRole('option').length).toBe(1));
-      const target = screen.getAllByRole('option')[0]!;
+      await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(1));
+      const target = screen.getAllByRole('option').filter((o) => o.classList.contains('vrow'))[0]!;
       const t0 = performance.now();
       fireEvent.click(target);
       await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(summaryGoal(id)), { timeout: 10000 });
@@ -56,19 +57,21 @@ describe('every special fixture renders in the browser test host', () => {
   }
   it('unknown status and unknown fields are shown literally', async () => {
     render(<App host={new BrowserFixtureHost('', null)} />);
-    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBeGreaterThan(0), { timeout: 10000 });
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'FIXTURE: unknown event fields' } });
-    await waitFor(() => expect(screen.getAllByRole('option').length).toBe(1));
-    fireEvent.click(screen.getAllByRole('option')[0]!);
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(1));
+    fireEvent.click(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow'))[0]!);
     await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('unknown event fields'));
     expect(screen.getAllByText('PARTIALLY_SETTLED_v9').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2 unknown fields/).length).toBeGreaterThan(0);
   });
   for (const code of index().errors) {
-    it(`error envelope ${code} is shown as a typed, non-current list`, async () => {
+    it(`error envelope ${code} is shown typed and no run is rendered`, async () => {
       render(<App host={new BrowserFixtureHost('', code)} />);
-      await waitFor(() => expect(screen.getAllByText(new RegExp(code)).length).toBeGreaterThan(0));
-      expect(screen.queryAllByRole('option').length).toBe(0);
+      fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+      await waitFor(() => expect(screen.getAllByText(new RegExp(code)).length).toBeGreaterThan(0), { timeout: 10000 });
+      expect(screen.queryAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(0);
     });
   }
 });

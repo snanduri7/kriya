@@ -45,6 +45,8 @@ export async function runSoak(win: BrowserWindow, outDir: string, opts: SoakOpti
   const t0 = Date.now();
   const samples: SoakSample[] = [];
   const errors: { at_s: number; runId: string; message: string }[] = [];
+  // Gate C-1: nothing is read until a snapshot is pinned; the measurement acquires one explicitly first.
+  await js('window.__kriyaDriver ? window.__kriyaDriver.acquire() : null');
   let runIds: string[] = [];
   for (let i = 0; i < 100 && runIds.length === 0; i++) { runIds = (await js('window.__kriyaDriver ? window.__kriyaDriver.listRunIds() : []')) as string[]; if (!runIds.length) await sleep(200); }
   if (!runIds.length) throw new Error('soak: the fixture list did not load');

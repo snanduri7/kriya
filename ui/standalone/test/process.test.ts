@@ -7,20 +7,21 @@ import { checkEnvelope } from '@kriya-ui/shared/src/model/normalize';
 
 const FAKE = join(__dirname, '..', 'fake-kriya', 'fake_kriya.mjs');
 const GEN = join(__dirname, '..', '..', 'fixtures', 'generated');
+const SID = '20261004T093000000000Z-f1c70001';
 const run = (argv: string[], env: Record<string, string> = {}, limits = {}) => runKriya({ executable: process.execPath, argv: [FAKE, ...argv], nodeScript: true, env: { KRIYA_FAKE_FIXTURES: GEN, ...env }, limits });
 
 describe('kriya process runner (P-31, P-32) against the fixture stand-in', () => {
   it('fixtures exist', () => { expect(existsSync(join(GEN, 'index.json'))).toBe(true); });
   it('limits are 60 s, 8 MiB stdout, 1 MiB stderr', () => { expect(PROCESS_LIMITS).toEqual({ timeoutMs: 60000, stdoutMaxBytes: 8388608, stderrMaxBytes: 1048576 }); });
   it('answers every operation with a valid v1 envelope', async () => {
-    for (const req of [{ operation: 'capabilities' }, { operation: 'history.list', limit: 5 }, { operation: 'history.detail', run_id: 'run-diff-2000' }, { operation: 'history.prompt', run_id: 'run-diff-2000' }, { operation: 'workspace.status', workspace: '/tmp/ws' }] as const) {
+    for (const req of [{ operation: 'capabilities' }, { operation: 'snapshot.list' }, { operation: 'history.list', snapshot_id: SID, limit: 5 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'history.prompt', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'workspace.status', workspace: '/tmp/ws' }] as const) {
       const out = await run(buildKriyaArgv(req));
       expect(out.kind, req.operation).toBe('json');
       expect(checkEnvelope(out.json).ok).toBe(true);
     }
   });
   it('the >4 MiB detail passes under the 8 MiB limit', async () => {
-    const out = await run(buildKriyaArgv({ operation: 'history.detail', run_id: 'run-big-events' }));
+    const out = await run(buildKriyaArgv({ operation: 'history.detail', snapshot_id: SID, run_id: 'run-big-events' }));
     expect(out.kind).toBe('json'); expect(out.stdoutBytes).toBeGreaterThan(4 * 1024 * 1024);
   });
   it('oversized stdout is RESPONSE_TOO_LARGE, never partial data', async () => {
