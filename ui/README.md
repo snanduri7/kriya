@@ -10,7 +10,7 @@ imported by `kriya/` (P-34).
 | `shared/` | host-independent React/TypeScript panels, selection reducers, normalization and availability rules. Every host capability goes through `HostAdapter` (P-R1). No Electron or Node import, enforced by ESLint (`no-restricted-imports`) AND `scripts/check-shared-deps.mjs` |
 | `test-host/` | plain-browser host with a fake `HostAdapter` over the generated fixtures; renders every panel in CI (P-R3) |
 | `standalone/` | Electron shell (gate A-1 hardening); the only process spawner; fixture `kriya` stand-in while D-9 holds |
-| `fixtures/` | deterministic synthetic KUP fixtures (`node fixtures/generate.mjs` -> `fixtures/generated/`, git-ignored) |
+| `fixtures/` | deterministic synthetic KUP fixtures (`node fixtures/generate.mjs` -> `fixtures/generated/`, git-ignored). `fixtures/serializer/run_events.json` (committed) is produced by Kriya's OWN serializer through the KUP adapter (`npm run fixtures:serializer`, `.newvenv`; `fixtures:serializer:check` detects drift) and is the shape every synthetic event follows |
 | `spikes/a1_zero_write/` | Phase A1 zero-write SQLite measurement (Python, `.newvenv`) |
 
 ```
@@ -24,3 +24,15 @@ npm run dev -w @kriya-ui/test-host                                             #
 
 Matrix protection (D-9): the Electron shell talks only to `standalone/fake-kriya/fake_kriya.mjs` unless
 `KRIYA_UI_ALLOW_REAL_KRIYA=1` is set and a kriya executable is configured. Do not set it before the owner lifts D-9.
+
+Child environment of the real `kriya` (owner policy 2026-10-04; `standalone/src/main/child_env.ts`, exact copy in
+`tests/_kup_fixtures.py::host_child_env`): fixed `PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`, fixed
+`PYTHONDONTWRITEBYTECODE=1`, the operator's `HOME`, and `KRIYA_STATE_DIR` only when the operator set it to an absolute
+path. Nothing else is passed (no `PYTHONPATH`/`PYTHONHOME`, no `KRIYA_TRUST_FILE`, no credentials, no config-path
+variable); configuration discovery stays Kriya's own (working directory, then install directory), so the GUI's child
+inherits the Electron process's working directory for `kriya.yaml` discovery.
+
+Snapshot integrity (gate C-2 + 08 review F-4): **digest verified at pin; metadata checked per query.** The UI requests
+`snapshot.verify <id>` for exactly the snapshot it is about to display (after an acquisition, or on a user's choice) and
+never pins on a failure; later queries check size/mtime only. `?scenario=verify_corrupt` on the browser test host and
+`KRIYA_FAKE_BEHAVIOR=verify_corrupt` on the stand-in exercise the refusal.

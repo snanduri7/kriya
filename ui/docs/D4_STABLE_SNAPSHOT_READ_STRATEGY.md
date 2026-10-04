@@ -81,9 +81,13 @@ main file, a checkpoint, or anything under the workspace.**
 - The KUP commands read `<state dir>/kup-snapshots/<current>/traces.snapshot.db` with the A1 read candidate (`mode=ro`,
   `temp_store=MEMORY`). MEASURED (`backup_probe`): zero denials under `(deny file-write*)`, no file in the snapshot
   directory changed. The rollback-journal snapshot is the C01 state; D-4 is satisfied literally, not by exception.
-- "Current" snapshot = the newest published directory whose manifest `source` equals the resolved store path and whose
-  digest verifies. Inspection NEVER acquires; with no snapshot it returns the typed `SNAPSHOT_MISSING` and the host
-  offers acquisition.
+- There is no implicit "current" snapshot (gate C-2): a host pins the id it acquired or the user chose. **Integrity
+  guarantee, stated precisely (08 review F-4): digest verified at pin; metadata checked per query.** The host requests
+  `snapshot.verify <id>` (SHA-256 of exactly that snapshot) before anything of it is displayed and never pins on a
+  failure or on an answer naming another id; every later query of the pinned snapshot checks only size and mtime against
+  the manifest. A later modification that preserves both is caught by the next explicit verification, not per query - no
+  stronger protection is claimed. Inspection NEVER acquires; with no snapshot it returns the typed `SNAPSHOT_MISSING`
+  and the host offers acquisition.
 
 ## 6. Freshness labels (KUP envelope, provisional fields made concrete)
 
