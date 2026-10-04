@@ -1,0 +1,7 @@
+[1mTIMESTAMP            | STATUS     | CATEGORY               | KIND                   | ATTEMPTS | DURATION   | GOAL                                    [0m
+-------------------------------------------------------------------------------------------------------------------------------------------------
+2026-09-25 10:00:00  | [32msuccess   [0m |                        |                        | 1        | 25.23s     | Goal number 24                          
+2026-09-24 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 3        | 24.23s     | Goal number 23                          
+2026-09-23 10:00:00  | [32msuccess   [0m |                        |                        | 2        | 23.23s     | Goal number 22                          
+
+Showing 3 of 25 recorded runs. Use -n/--limit or --all to see more.
