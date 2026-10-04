@@ -1,0 +1,116 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:30:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": null,
+  "source_metadata_now": null,
+  "source_metadata_changed": null
+ },
+ "data": {
+  "run": {
+   "run_id": "run-right-unavailable",
+   "timestamp": "2026-09-30 10:00:00",
+   "goal": "add an audit log",
+   "duration_sec": 40.5,
+   "attempts": 2,
+   "status": "FAILED",
+   "failure_category": "quality_gate_failed",
+   "files_modified": "src/a.py,src/b.py"
+  },
+  "fields": {
+   "files_modified": {
+    "availability": "recorded",
+    "provenance": "runs.files_modified (comma-joined, raw)",
+    "reason": null,
+    "data": "src/a.py,src/b.py"
+   }
+  },
+  "run_events": {
+   "availability": "not_recorded",
+   "provenance": "runs.run_events",
+   "reason": "column is NULL in the stored row",
+   "data": null
+  },
+  "evidence_records": {
+   "availability": "recorded",
+   "provenance": "runs.evidence_records",
+   "reason": null,
+   "data": []
+  },
+  "gate_outcomes": {
+   "availability": "unreadable",
+   "provenance": "runs.gate_outcomes",
+   "reason": "stored text is not valid JSON",
+   "data": null
+  },
+  "model_hops": {
+   "availability": "recorded",
+   "provenance": "runs.model_hops",
+   "reason": null,
+   "data": []
+  },
+  "generation_metrics": {
+   "availability": "recorded",
+   "provenance": "runs.generation_metrics",
+   "reason": null,
+   "data": {
+    "wall_ms": 40500
+   }
+  },
+  "failure_report": {
+   "availability": "recorded",
+   "provenance": "runs.failure_report",
+   "reason": null,
+   "data": [
+    {
+     "failure_type": "compile_error",
+     "category": "quality_gate_failed"
+    }
+   ]
+  },
+  "context": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "no context record is stored",
+   "data": null
+  },
+  "attribution": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the baseline persists failure categories, not causal attribution",
+   "data": null
+  },
+  "diagnostics": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "no diagnostics record is persisted",
+   "data": null
+  },
+  "comparisons": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row stores modified paths, not before/after text",
+   "data": null
+  },
+  "output": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "Developer output is not persisted",
+   "data": null
+  }
+ },
+ "error": null
+}
