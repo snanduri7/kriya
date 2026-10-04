@@ -58,6 +58,7 @@ export function TrustStrip({ capabilities, list, status, detail, workspacePath, 
     <header className="trust" role="region" aria-label="Trust strip: provenance and scope">
       {item('History store', source?.trace_database ?? 'unknown (no response yet)')}
       {item('Displayed snapshot', snapshot.pinnedId ?? 'none', snapshot.pinnedId ? (snapshot.pinnedBy === 'acquired' ? 'acquired by this session' : 'chosen from the published list') : undefined)}
+      {item('Snapshot integrity', snapshot.verification ? `digest verified at pin (${snapshot.verification.verified_at}); metadata checked per query` : 'none pinned', snapshot.verification?.sha256 ? `sha256 ${snapshot.verification.sha256.slice(0, 16)}…` : undefined)}
       {item('Snapshot', label.headline, label.metadata === 'change_detected' ? 'source metadata change detected' : label.metadata === 'no_change_detected' ? 'no metadata change detected (not a freshness guarantee)' : undefined)}
       {item('Workspace', workspacePath ?? 'none selected', runActive)}
       {item('Kriya', identity, capabilities.current ? undefined : capabilities.error ? `unverified: ${capabilities.error.code}` : 'unverified')}

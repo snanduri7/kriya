@@ -15,9 +15,9 @@ public class KupRequest {
     private String workspace;
     private Boolean verify;
     private Long keep;
+    private String snapshotid;
     private String cursor;
     private Long limit;
-    private String snapshotid;
     private String runid;
 
     @JsonProperty("operation")
@@ -43,6 +43,11 @@ public class KupRequest {
     @JsonProperty("keep")
     public void setKeep(Long value) { this.keep = value; }
 
+    @JsonProperty("snapshot_id")
+    public String getSnapshotid() { return snapshotid; }
+    @JsonProperty("snapshot_id")
+    public void setSnapshotid(String value) { this.snapshotid = value; }
+
     @JsonProperty("cursor")
     public String getCursor() { return cursor; }
     @JsonProperty("cursor")
@@ -52,11 +57,6 @@ public class KupRequest {
     public Long getLimit() { return limit; }
     @JsonProperty("limit")
     public void setLimit(Long value) { this.limit = value; }
-
-    @JsonProperty("snapshot_id")
-    public String getSnapshotid() { return snapshotid; }
-    @JsonProperty("snapshot_id")
-    public void setSnapshotid(String value) { this.snapshotid = value; }
 
     @JsonProperty("run_id")
     public String getRunid() { return runid; }

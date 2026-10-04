@@ -5,22 +5,29 @@
  * - switching the pinned snapshot invalidates prior responses and cursors (the caller bumps request generations and
  *   clears the list/detail/prompt slots);
  * - labels: "snapshot acquired at …" and "source metadata change detected"; metadata equality is never shown as
- *   unchanged/current/latest, and the snapshot never implies live run status.
+ *   unchanged/current/latest, and the snapshot never implies live run status;
+ * - digest verified at pin (08 review F-4): a pin carries the verification Kriya performed on exactly that id before
+ *   anything of it was displayed; later queries check size/mtime only (the guarantee is stated in those words).
  */
 import type { Consistency, SnapshotSummary } from '../model/kup';
+
+/** What Kriya verified when the snapshot was pinned (snapshot.verify on exactly the pinned id). */
+export interface PinVerification { verified_at: string; sha256: string | null }
 
 export interface SnapshotSession {
   pinnedId: string | null;
   /** How the pin was established: acquired by this session, or chosen from the published list. */
   pinnedBy: 'acquired' | 'chosen' | null;
+  /** Digest verification performed at pin time for pinnedId; null when nothing is pinned. */
+  verification: PinVerification | null;
   available: SnapshotSummary[];
 }
 
-export const initialSnapshotSession: SnapshotSession = { pinnedId: null, pinnedBy: null, available: [] };
+export const initialSnapshotSession: SnapshotSession = { pinnedId: null, pinnedBy: null, verification: null, available: [] };
 
 export type SnapshotAction =
-  | { type: 'acquired'; summary: SnapshotSummary }
-  | { type: 'choose'; snapshotId: string }
+  | { type: 'acquired'; summary: SnapshotSummary; verification: PinVerification }
+  | { type: 'choose'; snapshotId: string; verification: PinVerification }
   | { type: 'listed'; snapshots: SnapshotSummary[] }
   | { type: 'unavailable' };
 
@@ -29,16 +36,16 @@ export function snapshotReducer(state: SnapshotSession, action: SnapshotAction):
   switch (action.type) {
     case 'acquired': {
       const available = [action.summary, ...state.available.filter((s) => s.snapshot_id !== action.summary.snapshot_id)];
-      return { state: { pinnedId: action.summary.snapshot_id, pinnedBy: 'acquired', available }, pinChanged: action.summary.snapshot_id !== state.pinnedId };
+      return { state: { pinnedId: action.summary.snapshot_id, pinnedBy: 'acquired', verification: action.verification, available }, pinChanged: action.summary.snapshot_id !== state.pinnedId };
     }
     case 'choose':
       if (!state.available.some((s) => s.snapshot_id === action.snapshotId)) return { state, pinChanged: false };
-      return { state: { ...state, pinnedId: action.snapshotId, pinnedBy: 'chosen' }, pinChanged: action.snapshotId !== state.pinnedId };
+      return { state: { ...state, pinnedId: action.snapshotId, pinnedBy: 'chosen', verification: action.verification }, pinChanged: action.snapshotId !== state.pinnedId };
     case 'listed':
       // Listing never moves the pin (gate C-2): it only updates what the user may choose from.
       return { state: { ...state, available: action.snapshots }, pinChanged: false };
     case 'unavailable':
-      return { state: { ...state, pinnedId: null, pinnedBy: null }, pinChanged: state.pinnedId !== null };
+      return { state: { ...state, pinnedId: null, pinnedBy: null, verification: null }, pinChanged: state.pinnedId !== null };
     default:
       return { state, pinChanged: false };
   }

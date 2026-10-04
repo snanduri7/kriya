@@ -14,6 +14,8 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       return request.verify ? ['traces', '--json', '--snapshots', '--verify'] : ['traces', '--json', '--snapshots'];
     case 'snapshot.prune':
       return request.keep !== undefined ? ['traces', '--json', '--snapshot-prune', '--keep', String(request.keep)] : ['traces', '--json', '--snapshot-prune'];
+    case 'snapshot.verify':
+      return ['traces', '--json', '--snapshot-verify', request.snapshot_id];
     case 'history.list': {
       const limit = request.limit ?? LIMITS.listDefault;
       if (!Number.isInteger(limit) || limit < 1 || limit > LIMITS.listMax) throw new Error('limit outside the grammar');
@@ -40,6 +42,7 @@ export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['traces', '--json', '--snapshot'],
   ['traces', '--json', '--snapshots'],
   ['traces', '--json', '--snapshot-prune'],
+  ['traces', '--json', '--snapshot-verify'],
   ['traces', '--json', '--snapshot-id'],
   ['runs', 'status', '--workspace'],
 ];

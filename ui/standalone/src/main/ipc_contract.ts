@@ -41,6 +41,7 @@ export type KupRequest =
   | { operation: 'snapshot.acquire'; workspace?: string }
   | { operation: 'snapshot.list'; verify?: boolean }
   | { operation: 'snapshot.prune'; keep?: number }
+  | { operation: 'snapshot.verify'; snapshot_id: string }
   | { operation: 'history.list'; snapshot_id: string; limit?: number; cursor?: string }
   | { operation: 'history.detail'; snapshot_id: string; run_id: string }
   | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
@@ -93,6 +94,11 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       if (!keys.every((k) => ['operation', 'keep'].includes(k))) return { ok: false, message: 'snapshot.prune accepts only keep' };
       if ('keep' in v && (typeof v.keep !== 'number' || !Number.isInteger(v.keep) || v.keep < 0 || v.keep > 1000)) return { ok: false, message: 'keep must be an integer in 0..1000' };
       return { ok: true, value: 'keep' in v ? { operation: 'snapshot.prune', keep: v.keep as number } : { operation: 'snapshot.prune' } };
+    }
+    case 'snapshot.verify': {
+      if (keys.join() !== 'operation,snapshot_id') return { ok: false, message: 'snapshot.verify takes exactly snapshot_id' };
+      const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid;
+      return { ok: true, value: { operation: 'snapshot.verify', snapshot_id: sid.value } };
     }
     case 'history.list': {
       if (!keys.every((k) => ['operation', 'snapshot_id', 'limit', 'cursor'].includes(k))) return { ok: false, message: 'history.list accepts only snapshot_id, limit and cursor' };

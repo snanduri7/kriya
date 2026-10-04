@@ -233,7 +233,8 @@
             "workspace.status",
             "snapshot.acquire",
             "snapshot.list",
-            "snapshot.prune"
+            "snapshot.prune",
+            "snapshot.verify"
           ]
         },
         "request_id": {

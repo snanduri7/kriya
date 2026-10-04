@@ -94,6 +94,22 @@
           ],
           "properties": {
             "operation": {
+              "const": "snapshot.verify"
+            },
+            "snapshot_id": {
+              "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "snapshot_id"
+          ],
+          "properties": {
+            "operation": {
               "const": "history.list"
             },
             "snapshot_id": {

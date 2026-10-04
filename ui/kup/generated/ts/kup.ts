@@ -41,7 +41,8 @@ export interface Envelope {
     | 'workspace.status'
     | 'snapshot.acquire'
     | 'snapshot.list'
-    | 'snapshot.prune';
+    | 'snapshot.prune'
+    | 'snapshot.verify';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -445,6 +446,18 @@ export interface SnapshotPrune {
   [k: string]: unknown;
 }
 
+// ---- SnapshotVerify (snapshot.schema.json#/$defs/SnapshotVerify) ----
+export interface SnapshotVerify {
+  snapshot_id: SnapshotId;
+  digest_verified: true;
+  sha256: string | null;
+  size: number | null;
+  verified_at: string;
+  duration_ms: number;
+  guarantee?: string;
+  [k: string]: unknown;
+}
+
 // ---- KupRequest (host-contract.schema.json#/$defs/KupRequest) ----
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
@@ -467,6 +480,10 @@ export type KupRequest =
   | {
       operation: 'snapshot.prune';
       keep?: number;
+    }
+  | {
+      operation: 'snapshot.verify';
+      snapshot_id: string;
     }
   | {
       operation: 'history.list';

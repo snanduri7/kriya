@@ -17,6 +17,7 @@ export const validateSnapshotSummary: ((value: unknown) => boolean) & { errors?:
 export const validateSnapshotAcquireResult: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateSnapshotList: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateSnapshotPrune: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateSnapshotVerify: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateKupRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateOpenInIdeRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateOpenInIdeResult: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };

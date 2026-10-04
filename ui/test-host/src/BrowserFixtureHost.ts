@@ -4,7 +4,8 @@ import type { HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, Open
  * Fake HostAdapter for the plain-browser test host (P-R3). Answers KUP requests from the generated fixture files;
  * "open in IDE" and settings are simulated (a browser page has no process authority, by design - P-31).
  * `?scenario=<ERROR_CODE>` makes history.list answer with that fixture error envelope; `?scenario=schema2` returns
- * a schema_version 2 envelope; `?scenario=garbage` returns non-JSON.
+ * a schema_version 2 envelope; `?scenario=garbage` returns non-JSON; `?scenario=verify_corrupt` makes every
+ * snapshot.verify answer SNAPSHOT_CORRUPT (so nothing can be pinned).
  */
 export class BrowserFixtureHost implements HostAdapter {
   private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', kriyaExecutable: null };
@@ -32,7 +33,10 @@ export class BrowserFixtureHost implements HostAdapter {
   }
 
   async query(request: KupRequest): Promise<KupEnvelope> {
-    if (request.operation === 'history.list' && this.scenario) {
+    if (request.operation === 'snapshot.verify' && this.scenario === 'verify_corrupt') {
+      return { schema_version: 1, operation: 'snapshot.verify', request_id: 'fixture', observed_at: new Date().toISOString(), source: null, consistency: null, data: null, error: { code: 'SNAPSHOT_CORRUPT', message: 'snapshot digest differs from manifest', snapshot_id: request.snapshot_id } } as unknown as KupEnvelope;
+    }
+    if (request.operation === 'history.list' && this.scenario && this.scenario !== 'verify_corrupt') {
       if (this.scenario === 'schema2') return { ...(await this.load('history.list.page1.json') as KupEnvelope), schema_version: 2 } as unknown as KupEnvelope;
       if (this.scenario === 'garbage') return 'not json at all' as unknown as KupEnvelope;
       return this.load(`errors/${this.scenario}.json`) as Promise<KupEnvelope>;
@@ -54,6 +58,13 @@ export class BrowserFixtureHost implements HostAdapter {
         return this.pinned({ ...base, data: { ...snap, orphans_removed: [], pruned, backup_steps: 1, duration_ms: 14 } } as KupEnvelope, snap);
       }
       case 'snapshot.prune': { const keep = request.keep ?? 3; const removed = snaps.splice(keep).map((s) => s.snapshot_id as string); return { ...((await this.load('snapshot.prune.json')) as KupEnvelope), data: { removed, orphans_removed: [], kept: snaps.map((s) => s.snapshot_id) } } as KupEnvelope; }
+      case 'snapshot.verify': {
+        const s = find(request.snapshot_id); if (!s) return unavailable('snapshot.verify', request.snapshot_id);
+        const env = (await this.load('snapshot.verify.json')) as KupEnvelope<Record<string, unknown>>;
+        const data = (env.data ?? {}) as Record<string, unknown>;
+        const source = env.source as Record<string, unknown> | null;
+        return { ...env, observed_at: new Date().toISOString(), source: source ? { ...source, snapshot_id: s.snapshot_id as string } : source, data: { ...data, snapshot_id: s.snapshot_id, sha256: String(s.snapshot_id).slice(-8).repeat(8), size: s.size ?? null, verified_at: new Date().toISOString() } } as unknown as KupEnvelope;
+      }
       case 'history.list': { const s = find(request.snapshot_id); if (!s) return unavailable('history.list', request.snapshot_id); return this.pinned((await this.load(request.cursor ? `history.list.cursor.${request.cursor}.json` : 'history.list.page1.json')) as KupEnvelope, s); }
       case 'history.detail': { const s = find(request.snapshot_id); if (!s) return unavailable('history.detail', request.snapshot_id); return this.pinned((await this.load(`history.detail.${encodeURIComponent(request.run_id)}.json`)) as KupEnvelope, s); }
       case 'history.prompt': { const s = find(request.snapshot_id); if (!s) return unavailable('history.prompt', request.snapshot_id); return this.pinned((await this.load(`history.prompt.${encodeURIComponent(request.run_id)}.json`)) as KupEnvelope, s); }

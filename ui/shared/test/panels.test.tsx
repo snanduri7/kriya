@@ -84,6 +84,73 @@ describe('events exactly as Kriya serializes them reach every consumer (08 revie
   });
 });
 
+describe('digest verified at pin; metadata checked per query (08 review F-4)', () => {
+  it('after an acquisition the exact new id is verified BEFORE any history read; the strip states the guarantee in those words', async () => {
+    const host = await renderAndSelect(detailFor('r1', 'recorded'));
+    const ops = host.calls.map((c) => c.operation);
+    const verifyCall = host.calls.find((c) => c.operation === 'snapshot.verify') as { snapshot_id: string } | undefined;
+    expect(verifyCall).toBeDefined();
+    const acquiredId = verifyCall?.snapshot_id ?? '';
+    expect(acquiredId).toMatch(/^\d{8}T\d{12}Z-[0-9a-f]{8}$/);
+    expect(ops.indexOf('snapshot.verify')).toBeGreaterThan(ops.indexOf('snapshot.acquire'));
+    expect(ops.indexOf('snapshot.verify')).toBeLessThan(ops.indexOf('history.list'));
+    for (const c of host.calls.filter((c) => c.operation.startsWith('history.'))) expect((c as { snapshot_id: string }).snapshot_id).toBe(acquiredId);
+    const strip = screen.getByRole('region', { name: /trust strip/i });
+    expect(strip).toHaveTextContent('digest verified at pin (2026-10-04T09:31:00.000000Z); metadata checked per query');
+    expect(strip).toHaveTextContent(/sha256 [0-9a-f]{16}…/);
+    expect(strip.textContent).not.toMatch(/protected against|tamper-proof|guaranteed unchanged/i);
+    // a refresh re-reads under the pin without re-verifying: the guarantee is per pin, not per query
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh displayed snapshot' }));
+    await waitFor(() => expect(host.calls.filter((c) => c.operation === 'history.list').length).toBeGreaterThanOrEqual(2));
+    expect(host.calls.filter((c) => c.operation === 'snapshot.verify').length).toBe(1);
+  });
+  it('a chosen snapshot that fails verification is never pinned or read; the failure is shown typed', async () => {
+    const host = new FakeHost(withSnapshots((req) => {
+      switch (req.operation) {
+        case 'capabilities': return env('capabilities', { kup_versions: [1], operations: [], identity: {}, limits: {}, features: {} });
+        case 'history.list': return env('history.list', { runs: [run('r1')], next_cursor: null });
+        default: return env(req.operation, null);
+      }
+    }, [snapshotSummary(SNAP_ID_OLD, true), snapshotSummary()], [SNAP_ID_OLD]));
+    render(<App host={host} />);
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(1));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Displayed snapshot' }), { target: { value: SNAP_ID_OLD } });
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Snapshot state' })).toHaveTextContent(/snapshot not displayed: digest verification failed: SNAPSHOT_CORRUPT/));
+    expect(host.calls.filter((c) => c.operation === 'snapshot.verify').map((c) => (c as { snapshot_id: string }).snapshot_id)).toEqual([SNAP_ID_OLD]);
+    expect(host.calls.some((c) => c.operation.startsWith('history.'))).toBe(false);
+    expect(screen.queryByText('goal of r1')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('none pinned');
+    // the other snapshot verifies and is displayed
+    fireEvent.change(screen.getByRole('combobox', { name: 'Displayed snapshot' }), { target: { value: '20261004T093000000000Z-f1c70001' } });
+    await waitFor(() => expect(screen.getByText('goal of r1')).toBeInTheDocument());
+    expect((host.calls.filter((c) => c.operation === 'history.list').at(-1) as { snapshot_id: string }).snapshot_id).toBe('20261004T093000000000Z-f1c70001');
+  });
+  it('a verification answer that names another snapshot does not pin: the binding is to the exact selected id', async () => {
+    const host = new FakeHost(withSnapshots((req) => {
+      switch (req.operation) {
+        case 'capabilities': return env('capabilities', { kup_versions: [1], operations: [], identity: {}, limits: {}, features: {} });
+        case 'history.list': return env('history.list', { runs: [run('r1')], next_cursor: null });
+        default: return env(req.operation, null);
+      }
+    }, [snapshotSummary(SNAP_ID_OLD, true), snapshotSummary()], [], [SNAP_ID_OLD]));
+    render(<App host={host} />);
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(1));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Displayed snapshot' }), { target: { value: SNAP_ID_OLD } });
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Snapshot state' })).toHaveTextContent(/not displayed: the verification answer did not confirm this exact snapshot/));
+    expect(host.calls.some((c) => c.operation.startsWith('history.'))).toBe(false);
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('none pinned');
+  });
+  it('an acquired snapshot that fails verification is not pinned either: nothing of it is read', async () => {
+    const host = new FakeHost(withSnapshots((req) => (req.operation === 'capabilities' ? env('capabilities', { kup_versions: [1], operations: [], identity: {}, limits: {}, features: {} }) : env(req.operation, null)), [], ['20261004T100000000001Z-acc00001']));
+    render(<App host={host} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Acquire new snapshot' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Snapshot state' })).toHaveTextContent(/digest verification failed: SNAPSHOT_CORRUPT/));
+    expect(host.calls.some((c) => c.operation.startsWith('history.'))).toBe(false);
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('none pinned');
+  });
+});
+
 describe('every panel renders with a fake host (P-R3)', () => {
   it('trust strip, runs, timeline, inspector tabs and drawer all render recorded data', async () => {
     const host = await renderAndSelect(detailFor('r1', 'recorded'));

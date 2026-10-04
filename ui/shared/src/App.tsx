@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { HostAdapter, OpenInIdeResult } from './host/HostAdapter';
-import type { Capabilities, HistoryList, KupEnvelope, KupRequest, Prompt, RunDetail, RunSummary, SnapshotAcquireResult, SnapshotList, WorkspaceStatus } from './model/kup';
+import type { Capabilities, HistoryList, KupEnvelope, KupRequest, Prompt, RunDetail, RunSummary, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus } from './model/kup';
 import { checkEnvelope, normalizeDetail } from './model/normalize';
 import { isRecorded } from './model/availability';
 import { GenerationCounter, applyFailure, applyResponse, emptySlot, startRequest, type Slot, type SlotState } from './state/requests';
 import { initialSelection, selectionReducer } from './state/selection';
-import { freshnessLabel, initialSnapshotSession, snapshotReducer, type SnapshotSession } from './state/snapshot';
+import { freshnessLabel, initialSnapshotSession, snapshotReducer, type PinVerification, type SnapshotAction, type SnapshotSession } from './state/snapshot';
 import { Drawer } from './panels/Drawer';
 import { Inspector } from './panels/Inspector';
 import { RunsColumn } from './panels/RunsColumn';
@@ -35,11 +35,13 @@ interface Slots {
   status: SlotState<KupEnvelope<WorkspaceStatus>>;
   snapshots: SlotState<KupEnvelope<SnapshotList>>;
   acquire: SlotState<KupEnvelope<SnapshotAcquireResult>>;
+  verify: SlotState<KupEnvelope<SnapshotVerify>>;
 }
 
 export function App({ host, exposeDriver }: AppProps) {
   const [selection, dispatch] = useReducer(selectionReducer, initialSelection);
-  const [slots, setSlots] = useState<Slots>({ capabilities: emptySlot(), list: emptySlot(), detail: emptySlot(), prompt: emptySlot(), status: emptySlot(), snapshots: emptySlot(), acquire: emptySlot() });
+  const [slots, setSlots] = useState<Slots>({ capabilities: emptySlot(), list: emptySlot(), detail: emptySlot(), prompt: emptySlot(), status: emptySlot(), snapshots: emptySlot(), acquire: emptySlot(), verify: emptySlot() });
+  const [pinRefusal, setPinRefusal] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [snapshot, setSnapshot] = useState<SnapshotSession>(initialSnapshotSession);
   const snapshotRef = useRef<SnapshotSession>(initialSnapshotSession);
@@ -116,25 +118,41 @@ export function App({ host, exposeDriver }: AppProps) {
     ]);
   }, [request, listSnapshots, loadList, workspacePath]);
 
-  /** "Acquire new snapshot": the one explicit acquisition request; on success the session pins the returned id. */
-  const acquire = useCallback(async () => {
-    await request<SnapshotAcquireResult>('acquire', { operation: 'snapshot.acquire', ...(workspacePath ? { workspace: workspacePath } : {}) }, (env) => {
-      if (!env.data) return;
-      const result = snapshotReducer(snapshotRef.current, { type: 'acquired', summary: env.data });
+  /** Digest verified at pin (08 review F-4): Kriya verifies the SHA-256 of EXACTLY `snapshotId` before anything of it is
+   * displayed; a failed verification, or an answer naming another id, leaves the pin unchanged. Every later query of
+   * the pinned snapshot checks size/mtime only - that is the whole guarantee, stated as such in the trust strip. */
+  const verifyAndPin = useCallback(async (snapshotId: string, pin: (verification: PinVerification) => SnapshotAction): Promise<boolean> => {
+    let pinned = false;
+    setPinRefusal(null);
+    await request<SnapshotVerify>('verify', { operation: 'snapshot.verify', snapshot_id: snapshotId }, (env) => {
+      if (!env.data || env.data.snapshot_id !== snapshotId || env.data.digest_verified !== true) {
+        setPinRefusal(`snapshot ${snapshotId} not displayed: the verification answer did not confirm this exact snapshot`);
+        return;
+      }
+      const result = snapshotReducer(snapshotRef.current, pin({ verified_at: env.data.verified_at, sha256: env.data.sha256 ?? null }));
       snapshotRef.current = result.state;
       setSnapshot(result.state);
       if (result.pinChanged) invalidateForNewPin();
+      pinned = true;
     });
-    await Promise.all([listSnapshots(), loadList()]);
-  }, [request, workspacePath, invalidateForNewPin, listSnapshots, loadList]);
+    return pinned;
+  }, [request, invalidateForNewPin]);
 
-  /** A user-chosen switch to another published snapshot: invalidates prior responses and cursors (gate C-2). */
+  /** "Acquire new snapshot": the one explicit acquisition request; on success the returned id is verified, then pinned. */
+  const acquire = useCallback(async () => {
+    let acquired: SnapshotAcquireResult | null = null;
+    await request<SnapshotAcquireResult>('acquire', { operation: 'snapshot.acquire', ...(workspacePath ? { workspace: workspacePath } : {}) }, (env) => { acquired = env.data; });
+    const summary = acquired as SnapshotAcquireResult | null;
+    if (summary) await verifyAndPin(summary.snapshot_id, (verification) => ({ type: 'acquired', summary, verification }));
+    await Promise.all([listSnapshots(), loadList()]);
+  }, [request, workspacePath, verifyAndPin, listSnapshots, loadList]);
+
+  /** A user-chosen switch to another published snapshot: verified first, then it invalidates prior responses and
+   * cursors (gate C-2); a snapshot that fails verification is never displayed. */
   const chooseSnapshot = useCallback((snapshotId: string) => {
-    const result = snapshotReducer(snapshotRef.current, { type: 'choose', snapshotId });
-    snapshotRef.current = result.state;
-    setSnapshot(result.state);
-    if (result.pinChanged) { invalidateForNewPin(); void loadList(); }
-  }, [invalidateForNewPin, loadList]);
+    if (!snapshotRef.current.available.some((s) => s.snapshot_id === snapshotId)) return;
+    void verifyAndPin(snapshotId, (verification) => ({ type: 'choose', snapshotId, verification })).then((ok) => { if (ok) void loadList(); });
+  }, [verifyAndPin, loadList]);
 
   useEffect(() => { void host.getSetting('workspacePath').then((w) => setWorkspacePath(w ?? null)); }, [host]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -193,7 +211,7 @@ export function App({ host, exposeDriver }: AppProps) {
             {snapshot.available.map((s) => <option key={s.snapshot_id} value={s.snapshot_id}>{s.snapshot_id} (acquired {s.acquisition_completed_at ?? '?'})</option>)}
           </select>
         </label>
-        <span className="muted" role="status" aria-label="Snapshot state" aria-live="polite">{slots.acquire.pending ? 'acquiring…' : slots.acquire.error ? `acquisition failed: ${slots.acquire.error.code} - ${sanitizeText(slots.acquire.error.message)}` : slots.snapshots.error ? `snapshot list failed: ${slots.snapshots.error.code} - ${sanitizeText(slots.snapshots.error.message)}` : slots.list.pending ? 'reading snapshot…' : slots.list.error ? `snapshot read failed: ${slots.list.error.code} - ${sanitizeText(slots.list.error.message)}` : snapshot.pinnedId ? `${label.headline}; ${label.metadataText}` : 'no snapshot displayed: acquire one, or choose a published snapshot'}</span>
+        <span className="muted" role="status" aria-label="Snapshot state" aria-live="polite">{slots.acquire.pending ? 'acquiring…' : slots.acquire.error ? `acquisition failed: ${slots.acquire.error.code} - ${sanitizeText(slots.acquire.error.message)}` : slots.verify.pending ? 'verifying snapshot digest…' : slots.verify.error ? `snapshot not displayed: digest verification failed: ${slots.verify.error.code} - ${sanitizeText(slots.verify.error.message)}` : pinRefusal ? sanitizeText(pinRefusal) : slots.snapshots.error ? `snapshot list failed: ${slots.snapshots.error.code} - ${sanitizeText(slots.snapshots.error.message)}` : slots.list.pending ? 'reading snapshot…' : slots.list.error ? `snapshot read failed: ${slots.list.error.code} - ${sanitizeText(slots.list.error.message)}` : snapshot.pinnedId ? `${label.headline}; ${label.metadataText}` : 'no snapshot displayed: acquire one, or choose a published snapshot'}</span>
         <span className="narrow-only">
           <button type="button" className="small" aria-pressed={narrowPane === 'timeline'} onClick={() => setNarrowPane('timeline')}>Timeline</button>
           <button type="button" className="small" aria-pressed={narrowPane === 'inspector'} onClick={() => setNarrowPane('inspector')}>Inspector</button>

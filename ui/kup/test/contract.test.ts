@@ -91,6 +91,12 @@ describe('host contract (gate A-2 P-R2) matches the Electron host validators', (
     expect(validate.kupRequest({ operation: 'snapshot.acquire', workspace: '/w' }).ok).toBe(true);
     expect(validate.kupRequest({ operation: 'snapshot.list', verify: true }).ok).toBe(true);
     expect(validate.kupRequest({ operation: 'snapshot.prune', keep: 0 }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'snapshot.verify', snapshot_id: SID }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'snapshot.verify' }).ok).toBe(false);
+    expect(validate.kupRequest({ operation: 'snapshot.verify', snapshot_id: SID, keep: 1 }).ok).toBe(false);
+    // the verification payload names exactly one snapshot and is only ever "verified": a false flag is not a valid answer
+    expect(validate.snapshotVerify(read('snapshot.verify.json').data).ok).toBe(true);
+    expect(validate.snapshotVerify({ ...(read('snapshot.verify.json').data as object), digest_verified: false }).ok).toBe(false);
     // history reads are PINNED: no snapshot_id, or a malformed one, is refused (gate C-2)
     expect(validate.kupRequest({ operation: 'history.list', limit: 5 }).ok).toBe(false);
     expect(validate.kupRequest({ operation: 'history.detail', run_id: 'r1' }).ok).toBe(false);

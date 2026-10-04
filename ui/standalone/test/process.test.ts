@@ -14,7 +14,7 @@ describe('kriya process runner (P-31, P-32) against the fixture stand-in', () =>
   it('fixtures exist', () => { expect(existsSync(join(GEN, 'index.json'))).toBe(true); });
   it('limits are 60 s, 8 MiB stdout, 1 MiB stderr', () => { expect(PROCESS_LIMITS).toEqual({ timeoutMs: 60000, stdoutMaxBytes: 8388608, stderrMaxBytes: 1048576 }); });
   it('answers every operation with a valid v1 envelope', async () => {
-    for (const req of [{ operation: 'capabilities' }, { operation: 'snapshot.list' }, { operation: 'history.list', snapshot_id: SID, limit: 5 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'history.prompt', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'workspace.status', workspace: '/tmp/ws' }] as const) {
+    for (const req of [{ operation: 'capabilities' }, { operation: 'snapshot.list' }, { operation: 'snapshot.verify', snapshot_id: SID }, { operation: 'history.list', snapshot_id: SID, limit: 5 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'history.prompt', snapshot_id: SID, run_id: 'run-diff-2000' }, { operation: 'workspace.status', workspace: '/tmp/ws' }] as const) {
       const out = await run(buildKriyaArgv(req));
       expect(out.kind, req.operation).toBe('json');
       expect(checkEnvelope(out.json).ok).toBe(true);
@@ -39,6 +39,15 @@ describe('kriya process runner (P-31, P-32) against the fixture stand-in', () =>
   it('a schema_version 2 answer is refused by the shared envelope check (P-27)', async () => {
     const out = await run(buildKriyaArgv({ operation: 'capabilities' }), { KRIYA_FAKE_BEHAVIOR: 'schema2' });
     const c = checkEnvelope(out.json); expect(c.ok).toBe(false); if (!c.ok) expect(c.code).toBe('UNSUPPORTED_SCHEMA_VERSION');
+  });
+  it('snapshot.verify names exactly the requested id; the corrupt behaviour is the typed SNAPSHOT_CORRUPT with that id', async () => {
+    const ok = await run(buildKriyaArgv({ operation: 'snapshot.verify', snapshot_id: SID }));
+    expect(ok.kind).toBe('json'); expect((ok.json as { data: { snapshot_id: string; digest_verified: boolean } }).data).toMatchObject({ snapshot_id: SID, digest_verified: true });
+    const bad = await run(buildKriyaArgv({ operation: 'snapshot.verify', snapshot_id: SID }), { KRIYA_FAKE_BEHAVIOR: 'verify_corrupt' });
+    expect((bad.json as { data: unknown; error: { code: string; snapshot_id: string } }).error).toMatchObject({ code: 'SNAPSHOT_CORRUPT', snapshot_id: SID });
+    expect((bad.json as { data: unknown }).data).toBeNull();
+    const unknown = await run(buildKriyaArgv({ operation: 'snapshot.verify', snapshot_id: '20260101T000000000000Z-00000000' }));
+    expect((unknown.json as { error: { code: string } }).error.code).toBe('SNAPSHOT_UNAVAILABLE');
   });
   it('argv outside the grammar is refused before any spawn', async () => {
     const out = await runKriya({ executable: process.execPath, argv: [FAKE, 'generate', 'goal'], nodeScript: true });

@@ -14,6 +14,12 @@ describe('KUP request validation (P-25, P-31)', () => {
     expect(validateKupRequest({ operation: 'snapshot.acquire' }).ok).toBe(true);
     expect(validateKupRequest({ operation: 'snapshot.list', verify: true }).ok).toBe(true);
     expect(validateKupRequest({ operation: 'snapshot.prune', keep: 2 }).ok).toBe(true);
+    // digest verified at pin (F-4): exactly one snapshot id, nothing else
+    expect(validateKupRequest({ operation: 'snapshot.verify', snapshot_id: SID }).ok).toBe(true);
+    expect(validateKupRequest({ operation: 'snapshot.verify' }).ok).toBe(false);
+    expect(validateKupRequest({ operation: 'snapshot.verify', snapshot_id: 'latest' }).ok).toBe(false);
+    expect(validateKupRequest({ operation: 'snapshot.verify', snapshot_id: SID, verify: true }).ok).toBe(false);
+    for (const bad of INJECTIONS) expect(validateKupRequest({ operation: 'snapshot.verify', snapshot_id: bad }).ok, `verify ${JSON.stringify(bad)}`).toBe(false);
     // pinned reads (gate C-2): no snapshot_id, 'latest', or a malformed id is refused
     expect(validateKupRequest({ operation: 'history.list', limit: 5 }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'history.detail', run_id: 'r1' }).ok).toBe(false);
@@ -58,6 +64,7 @@ describe('argv builder (the only command-line source)', () => {
     expect(buildKriyaArgv({ operation: 'snapshot.acquire', workspace: '/w' })).toEqual(['traces', '--json', '--snapshot', '--workspace', '/w']);
     expect(buildKriyaArgv({ operation: 'snapshot.list', verify: true })).toEqual(['traces', '--json', '--snapshots', '--verify']);
     expect(buildKriyaArgv({ operation: 'snapshot.prune', keep: 0 })).toEqual(['traces', '--json', '--snapshot-prune', '--keep', '0']);
+    expect(buildKriyaArgv({ operation: 'snapshot.verify', snapshot_id: SID })).toEqual(['traces', '--json', '--snapshot-verify', SID]);
     expect(buildKriyaArgv({ operation: 'history.list', snapshot_id: SID })).toEqual(['traces', '--json', '--snapshot-id', SID, '-n', String(LIMITS.listDefault)]);
     expect(buildKriyaArgv({ operation: 'history.list', snapshot_id: SID, limit: 7, cursor: 'abc' })).toEqual(['traces', '--json', '--snapshot-id', SID, '-n', '7', '--cursor', 'abc']);
     expect(buildKriyaArgv({ operation: 'history.detail', snapshot_id: SID, run_id: 'r1' })).toEqual(['traces', '--json', '--snapshot-id', SID, '--run-id', 'r1']);
@@ -65,9 +72,9 @@ describe('argv builder (the only command-line source)', () => {
     expect(buildKriyaArgv({ operation: 'workspace.status', workspace: '/w' })).toEqual(['runs', 'status', '--workspace', '/w', '--json', '--kup-version', '1']);
   });
   it('every built argv is allowlisted; anything else is not', () => {
-    for (const r of [{ operation: 'capabilities' }, { operation: 'snapshot.acquire' }, { operation: 'snapshot.list' }, { operation: 'snapshot.prune' }, { operation: 'history.list', snapshot_id: SID, limit: 3 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'x' }, { operation: 'workspace.status', workspace: '/w' }] as const) expect(argvIsAllowed(buildKriyaArgv(r))).toBe(true);
-    for (const bad of [['generate', 'goal'], ['fix'], ['traces', '--migrate-legacy'], ['traces', '--all'], ['traces', '--json', '-n', '5'], ['traces', '--json', '--run-id', 'r'], ['runs', 'resume'], [], ['sh', '-c', 'traces']]) expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
-    expect(ALLOWED_ARGV_PREFIXES.length).toBe(6);
+    for (const r of [{ operation: 'capabilities' }, { operation: 'snapshot.acquire' }, { operation: 'snapshot.list' }, { operation: 'snapshot.prune' }, { operation: 'snapshot.verify', snapshot_id: SID }, { operation: 'history.list', snapshot_id: SID, limit: 3 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'x' }, { operation: 'workspace.status', workspace: '/w' }] as const) expect(argvIsAllowed(buildKriyaArgv(r))).toBe(true);
+    for (const bad of [['generate', 'goal'], ['fix'], ['traces', '--migrate-legacy'], ['traces', '--all'], ['traces', '--json', '-n', '5'], ['traces', '--json', '--run-id', 'r'], ['traces', '--json', '--verify'], ['runs', 'resume'], [], ['sh', '-c', 'traces']]) expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
+    expect(ALLOWED_ARGV_PREFIXES.length).toBe(7);
   });
   it('a run_id can never become an option: the validator rejects leading dashes before argv is built', () => {
     expect(validateKupRequest({ operation: 'history.detail', snapshot_id: SID, run_id: '--all' }).ok).toBe(false);

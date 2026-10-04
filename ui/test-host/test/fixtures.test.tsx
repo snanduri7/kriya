@@ -79,6 +79,13 @@ describe('every special fixture renders in the browser test host', () => {
     expect(list).not.toHaveTextContent('(unnamed event)');
     expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('qwen2.5-coder:14b / QUALIFIED');
   });
+  it('a snapshot that fails digest verification at pin is never displayed (?scenario=verify_corrupt)', async () => {
+    render(<App host={new BrowserFixtureHost('', 'verify_corrupt')} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Snapshot state' })).toHaveTextContent(/digest verification failed: SNAPSHOT_CORRUPT/), { timeout: 10000 });
+    expect(screen.queryAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(0);
+    expect(screen.getByRole('region', { name: /trust strip/i })).toHaveTextContent('none pinned');
+  });
   for (const code of index().errors) {
     it(`error envelope ${code} is shown typed and no run is rendered`, async () => {
       render(<App host={new BrowserFixtureHost('', code)} />);

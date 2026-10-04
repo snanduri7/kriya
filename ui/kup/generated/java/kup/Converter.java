@@ -30,6 +30,7 @@
 //     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
 //     SnapshotList data = Converter.SnapshotListFromJsonString(jsonString);
 //     SnapshotPrune data = Converter.SnapshotPruneFromJsonString(jsonString);
+//     SnapshotVerify data = Converter.SnapshotVerifyFromJsonString(jsonString);
 //     KupRequest data = Converter.KupRequestFromJsonString(jsonString);
 //     OpenInIdeRequest data = Converter.OpenInIdeRequestFromJsonString(jsonString);
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
@@ -234,6 +235,14 @@ public class Converter {
 
     public static String SnapshotPruneToJsonString(SnapshotPrune obj) throws JsonProcessingException {
         return getSnapshotPruneObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SnapshotVerify SnapshotVerifyFromJsonString(String json) throws IOException {
+        return getSnapshotVerifyObjectReader().readValue(json);
+    }
+
+    public static String SnapshotVerifyToJsonString(SnapshotVerify obj) throws JsonProcessingException {
+        return getSnapshotVerifyObjectWriter().writeValueAsString(obj);
     }
 
     public static KupRequest KupRequestFromJsonString(String json) throws IOException {
@@ -824,6 +833,37 @@ public class Converter {
     private static ObjectWriter getSnapshotPruneObjectWriter() {
         if (SnapshotPruneWriter == null) instantiateSnapshotPruneMapper();
         return SnapshotPruneWriter;
+    }
+
+    private static ObjectReader SnapshotVerifyReader;
+    private static ObjectWriter SnapshotVerifyWriter;
+
+    private static void instantiateSnapshotVerifyMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SnapshotVerifyReader = mapper.readerFor(SnapshotVerify.class);
+        SnapshotVerifyWriter = mapper.writerFor(SnapshotVerify.class);
+    }
+
+    private static ObjectReader getSnapshotVerifyObjectReader() {
+        if (SnapshotVerifyReader == null) instantiateSnapshotVerifyMapper();
+        return SnapshotVerifyReader;
+    }
+
+    private static ObjectWriter getSnapshotVerifyObjectWriter() {
+        if (SnapshotVerifyWriter == null) instantiateSnapshotVerifyMapper();
+        return SnapshotVerifyWriter;
     }
 
     private static ObjectReader KupRequestReader;

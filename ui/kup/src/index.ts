@@ -4,12 +4,12 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
 export const KUP_SCHEMA_VERSION = 1 as const;
-export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune'] as const;
+export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify'] as const;
 /** Closed vocabulary (gate). HOST_ERROR is minted by a host for transport failures. */
 export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'HOST_ERROR'] as const;
 export const CONSISTENCY_KINDS = ['snapshot_copy', 'live_observation', 'not_applicable'] as const;
@@ -52,6 +52,7 @@ export const validate = {
   snapshotAcquireResult: (x: unknown) => run<SnapshotAcquireResult>('validateSnapshotAcquireResult', x),
   snapshotList: (x: unknown) => run<SnapshotList>('validateSnapshotList', x),
   snapshotPrune: (x: unknown) => run<SnapshotPrune>('validateSnapshotPrune', x),
+  snapshotVerify: (x: unknown) => run<SnapshotVerify>('validateSnapshotVerify', x),
 };
 
 /** Validate the payload of an envelope by its operation (the envelope itself must already be valid). */
@@ -65,6 +66,7 @@ export function validateData(operation: string, data: unknown): Validation<unkno
     case 'snapshot.acquire': return validate.snapshotAcquireResult(data);
     case 'snapshot.list': return validate.snapshotList(data);
     case 'snapshot.prune': return validate.snapshotPrune(data);
+    case 'snapshot.verify': return validate.snapshotVerify(data);
     default: return { ok: false, errors: [`unknown operation ${operation}`] };
   }
 }

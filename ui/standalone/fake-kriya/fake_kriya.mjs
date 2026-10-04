@@ -5,7 +5,8 @@
  * list/prune. Answers from ui/fixtures/generated; snapshot ids acquired at runtime live in KRIYA_FAKE_STATE (a JSON
  * file the host owns), so "Acquire new snapshot" produces a new id and retention keeps the newest three.
  * Never touches Kriya state. Behaviours for the shell's limit tests via KRIYA_FAKE_BEHAVIOR: slow, huge, garbage,
- * schema2, error:<CODE>, exit3.
+ * schema2, error:<CODE>, exit3, verify_corrupt (snapshot.verify answers SNAPSHOT_CORRUPT), echoenv (prints the
+ * process environment as JSON - for the child-environment policy test only).
  */
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -50,6 +51,7 @@ function parse(argv) {
   if (rest[0] === '--snapshot') { if (rest.length === 1) return { op: 'snapshot.acquire' }; if (rest[1] === '--workspace' && rest.length === 3) return { op: 'snapshot.acquire', workspace: rest[2] }; return null; }
   if (rest[0] === '--snapshots') { if (rest.length === 1) return { op: 'snapshot.list' }; if (rest[1] === '--verify' && rest.length === 2) return { op: 'snapshot.list', verify: true }; return null; }
   if (rest[0] === '--snapshot-prune') { if (rest.length === 1) return { op: 'snapshot.prune' }; if (rest[1] === '--keep' && rest.length === 3) return { op: 'snapshot.prune', keep: Number(rest[2]) }; return null; }
+  if (rest[0] === '--snapshot-verify') return typeof rest[1] === 'string' && rest.length === 2 ? { op: 'snapshot.verify', sid: rest[1] } : null;
   if (rest[0] === '--snapshot-id' && typeof rest[1] === 'string') {
     const sid = rest[1]; const tail = rest.slice(2);
     if (tail[0] === '-n') { const n = Number(tail[1]); if (!Number.isInteger(n) || n < 1 || n > 200) return null; if (tail.length === 2) return { op: 'history.list', sid, n }; if (tail[2] === '--cursor' && tail.length === 4) return { op: 'history.list', sid, n, cursor: tail[3] }; return null; }
@@ -61,7 +63,8 @@ function parse(argv) {
 const req = parse(args);
 if (!req) fail(`usage error: argv outside the KUP grammar: ${JSON.stringify(args)}`);
 if (behavior === 'slow') await new Promise((r) => setTimeout(r, Number(process.env.KRIYA_FAKE_SLEEP_MS ?? 70_000)));
-if (behavior === 'huge') emitRaw('{"schema_version":1,"pad":"' + 'x'.repeat(Number(process.env.KRIYA_FAKE_HUGE_BYTES ?? 9 * 1024 * 1024)) + '"}', 0);
+if (behavior === 'echoenv') emitRaw(JSON.stringify(process.env), 0);
+else if (behavior === 'huge') emitRaw('{"schema_version":1,"pad":"' + 'x'.repeat(Number(process.env.KRIYA_FAKE_HUGE_BYTES ?? 9 * 1024 * 1024)) + '"}', 0);
 else if (behavior === 'garbage') emitRaw('Traceback (most recent call last): not json', 1);
 else if (behavior === 'exit3') { process.stderr.write('fake-kriya: simulated failure\n'); process.exit(3); }
 else if (behavior.startsWith('error:')) emit(errorEnvelope(req.op, behavior.slice(6), `fixture error ${behavior.slice(6)}`));
@@ -91,6 +94,14 @@ else {
     case 'snapshot.prune': {
       const keep = req.keep ?? RETAIN; const removed = state.snapshots.slice(keep).map((s) => s.snapshot_id); state.snapshots = state.snapshots.slice(0, keep); writeState(state);
       out = load('snapshot.prune.json'); out.data = { removed, orphans_removed: [], kept: state.snapshots.map((s) => s.snapshot_id) }; break;
+    }
+    case 'snapshot.verify': {
+      // digest verified at pin: exactly the named snapshot; a corrupt one is the typed error with the id, never data
+      const snap = find(req.sid);
+      if (!snap) out = pinnedOrError('snapshot.verify', req.sid);
+      else if (behavior === 'verify_corrupt') out = errorEnvelope('snapshot.verify', 'SNAPSHOT_CORRUPT', `snapshot digest ${snap.snapshot_id.slice(-8)} differs from manifest`, { snapshot_id: snap.snapshot_id });
+      else { out = { ...load('snapshot.verify.json'), observed_at: now(), source: sourceFor(snap) }; out.data = { ...out.data, snapshot_id: snap.snapshot_id, sha256: snap.snapshot_id.slice(-8).repeat(8), size: snap.size, verified_at: now() }; }
+      break;
     }
     case 'history.list': {
       out = pinnedOrError('history.list', req.sid) ?? withSnapshot(load(req.cursor ? `history.list.cursor.${req.cursor}.json` : 'history.list.page1.json') ?? errorEnvelope('history.list', 'INVALID_REQUEST', 'cursor is not an opaque token issued by this protocol'), find(req.sid));

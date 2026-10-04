@@ -1,6 +1,6 @@
 /** Request generations (P-32): a response is applied only if its generation is still current for its slot;
  * a failed refresh clears the slot's "current" status instead of leaving stale data looking fresh. */
-export type Slot = 'capabilities' | 'list' | 'detail' | 'prompt' | 'status' | 'snapshots' | 'acquire';
+export type Slot = 'capabilities' | 'list' | 'detail' | 'prompt' | 'status' | 'snapshots' | 'acquire' | 'verify';
 
 export interface SlotState<T> {
   generation: number;

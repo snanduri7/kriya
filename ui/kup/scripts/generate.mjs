@@ -46,6 +46,7 @@ const TYPES = [
   ['SnapshotAcquireResult', 'snapshot.schema.json', '#/$defs/SnapshotAcquireResult'],
   ['SnapshotList', 'snapshot.schema.json', '#/$defs/SnapshotList'],
   ['SnapshotPrune', 'snapshot.schema.json', '#/$defs/SnapshotPrune'],
+  ['SnapshotVerify', 'snapshot.schema.json', '#/$defs/SnapshotVerify'],
   ['KupRequest', 'host-contract.schema.json', '#/$defs/KupRequest'],
   ['OpenInIdeRequest', 'host-contract.schema.json', '#/$defs/OpenInIdeRequest'],
   ['OpenInIdeResult', 'host-contract.schema.json', '#/$defs/OpenInIdeResult'],
