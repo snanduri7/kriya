@@ -4,6 +4,7 @@
  * Returns a typed outcome; never partial data.
  */
 import { spawn } from 'node:child_process';
+import { KRIYA_CHILD_PATH } from './child_env';
 import { argvIsAllowed } from './kriya_argv';
 
 export const PROCESS_LIMITS = { timeoutMs: 60_000, stdoutMaxBytes: 8 * 1024 * 1024, stderrMaxBytes: 1024 * 1024 } as const;
@@ -24,7 +25,7 @@ export interface SpawnOptions {
   executable: string;
   argv: readonly string[];
   cwd?: string;
-  env?: NodeJS.ProcessEnv; // ONLY what the caller passes; never ambient process.env by default
+  env?: NodeJS.ProcessEnv; // ONLY what the caller passes (the real kriya: child_env.ts; the stand-in: main.ts fakeEnv); never ambient process.env
   limits?: Partial<typeof PROCESS_LIMITS>;
   /** Used for the fixture kriya: run a script with Electron's own binary as Node. */
   nodeScript?: boolean;
@@ -37,7 +38,7 @@ export function runKriya(opts: SpawnOptions): Promise<RunOutcome> {
   }
   const started = Date.now();
   return new Promise((resolve) => {
-    const env: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin', ...(opts.env ?? {}) };
+    const env: NodeJS.ProcessEnv = { PATH: KRIYA_CHILD_PATH, ...(opts.env ?? {}) };
     if (opts.nodeScript) env.ELECTRON_RUN_AS_NODE = '1';
     const child = spawn(opts.executable, [...opts.argv], { stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true, cwd: opts.cwd, env });
     const out: Buffer[] = []; let outBytes = 0; let errBytes = 0; const err: Buffer[] = [];

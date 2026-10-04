@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runKriya, PROCESS_LIMITS } from '../src/main/kriya_process';
 import { buildKriyaArgv } from '../src/main/kriya_argv';
+import { KRIYA_CHILD_ENV_KEYS, buildKriyaChildEnv } from '../src/main/child_env';
 import { checkEnvelope } from '@kriya-ui/shared/src/model/normalize';
 
 const FAKE = join(__dirname, '..', 'fake-kriya', 'fake_kriya.mjs');
@@ -52,6 +53,21 @@ describe('kriya process runner (P-31, P-32) against the fixture stand-in', () =>
   it('argv outside the grammar is refused before any spawn', async () => {
     const out = await runKriya({ executable: process.execPath, argv: [FAKE, 'generate', 'goal'], nodeScript: true });
     expect(out.kind).toBe('error'); expect(out.message).toContain('allowlisted'); expect(out.durationMs).toBe(0);
+  });
+  it('a real spawn under the child environment policy sees exactly that policy (plus the stand-in knobs), never the parent environment', async () => {
+    process.env.KRIYA_UI_TEST_LEAK = 'leak';
+    const policy = buildKriyaChildEnv({ HOME: '/Users/op', PATH: '/evil', PYTHONPATH: '/evil/site', KRIYA_TRUST_FILE: '/t', OPENAI_API_KEY: 'x', KRIYA_STATE_DIR: '/Volumes/work/state' });
+    expect(policy.ok).toBe(true);
+    if (!policy.ok) return;
+    // echoenv makes the stand-in print its process environment (test aid only); the fixture knobs are the stand-in's own
+    const out = await runKriya({ executable: process.execPath, argv: [FAKE, ...buildKriyaArgv({ operation: 'capabilities' })], nodeScript: true, env: { ...policy.env, KRIYA_FAKE_FIXTURES: GEN, KRIYA_FAKE_BEHAVIOR: 'echoenv' } });
+    expect(out.kind).toBe('json');
+    const seen = out.json as Record<string, string>;
+    // __CF_USER_TEXT_ENCODING is injected by macOS into every new process whatever its parent passes (OS artifact, not an inherited variable).
+    const policyKeys = Object.keys(seen).filter((k) => !['KRIYA_FAKE_FIXTURES', 'KRIYA_FAKE_BEHAVIOR', 'ELECTRON_RUN_AS_NODE', '__CF_USER_TEXT_ENCODING'].includes(k)).sort();
+    expect(policyKeys).toEqual([...KRIYA_CHILD_ENV_KEYS].sort());
+    expect(seen.PATH).toBe('/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin'); expect(seen.PYTHONDONTWRITEBYTECODE).toBe('1'); expect(seen.HOME).toBe('/Users/op'); expect(seen.KRIYA_STATE_DIR).toBe('/Volumes/work/state');
+    for (const k of ['KRIYA_UI_TEST_LEAK', 'PYTHONPATH', 'KRIYA_TRUST_FILE', 'OPENAI_API_KEY', 'SHELL', 'TMPDIR', 'LANG']) expect(seen).not.toHaveProperty(k);
   });
   it('the environment is minimal: the child does not inherit the parent environment', async () => {
     process.env.KRIYA_UI_TEST_LEAK = 'leak';

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
+import { buildKriyaChildEnv } from './child_env';
 import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
@@ -55,9 +56,16 @@ function registerIpc() {
     const argv = buildKriyaArgv(v.value);
     const configured = settings.get('kriyaExecutable');
     const useReal = ALLOW_REAL && configured && existsSync(configured);
-    const outcome = useReal
-      ? await runKriya({ executable: configured, argv })
-      : await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv() });
+    let outcome;
+    if (useReal) {
+      // The real child gets exactly the owner's environment policy (child_env.ts): fixed PATH, fixed
+      // PYTHONDONTWRITEBYTECODE=1, the operator's HOME, an absolute operator KRIYA_STATE_DIR if set - nothing else.
+      const childEnv = buildKriyaChildEnv(process.env);
+      if (!childEnv.ok) return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${childEnv.message}`);
+      outcome = await runKriya({ executable: configured, argv, env: childEnv.env });
+    } else {
+      outcome = await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv() });
+    }
     if (outcome.kind === 'json') return outcome.json;
     return errorEnvelope(v.value.operation, outcome.code ?? 'HOST_ERROR', `${outcome.message ?? 'unknown'}${outcome.stderrTail ? ` | stderr: ${outcome.stderrTail.slice(-300)}` : ''}`);
   });

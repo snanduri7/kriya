@@ -56,4 +56,11 @@ describe('gate A-1 hardening settings (every one checked)', () => {
     expect(mainTs).toContain("process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1'");
     expect(mainTs).toContain('fake_kriya.mjs');
   });
+  it('the real kriya is launched only with the child environment policy (child_env.ts), never with the host environment', () => {
+    expect(mainTs).toContain('buildKriyaChildEnv(process.env)');
+    expect(mainTs).not.toMatch(/env:\s*process\.env|\.\.\.process\.env/);
+    const runner = read(join(MAIN, 'kriya_process.ts'));
+    expect(runner).not.toMatch(/\.\.\.process\.env/);
+    expect(runner).toContain('KRIYA_CHILD_PATH');
+  });
 });
