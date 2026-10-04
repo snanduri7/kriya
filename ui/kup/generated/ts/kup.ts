@@ -3,11 +3,45 @@
 
 // ---- Envelope (common.schema.json#/$defs/Envelope) ----
 /**
+ * Closed KUP error-code vocabulary (gate). HOST_ERROR is minted by a host for transport failures; every other code comes from Kriya.
+ */
+export type ErrorCode =
+  | 'UNSUPPORTED_SCHEMA_VERSION'
+  | 'INVALID_RESPONSE'
+  | 'INVALID_REQUEST'
+  | 'STORE_BUSY'
+  | 'READ_ONLY_UNAVAILABLE'
+  | 'RESPONSE_TOO_LARGE'
+  | 'CONFIG_AUTHORITY_REFUSED'
+  | 'CONFIG_LOAD_FAILED'
+  | 'SNAPSHOT_MISSING'
+  | 'SNAPSHOT_UNAVAILABLE'
+  | 'SNAPSHOT_FAILED'
+  | 'SNAPSHOT_TOO_LARGE'
+  | 'SNAPSHOT_CORRUPT'
+  | 'ACQUISITION_IN_PROGRESS'
+  | 'ACQUISITION_REFUSED_RUN_ACTIVE'
+  | 'HOST_ERROR';
+/**
+ * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
+ */
+export type DatabaseState =
+  'missing' | 'hot_journal' | 'locked' | 'readonly_directory' | 'unreadable' | 'not_a_database';
+
+/**
  * Every KUP response. On error, data is null and source/consistency may be null (resolution may have failed before they were known).
  */
 export interface Envelope {
   schema_version: 1;
-  operation: 'capabilities' | 'history.list' | 'history.detail' | 'history.prompt' | 'workspace.status';
+  operation:
+    | 'capabilities'
+    | 'history.list'
+    | 'history.detail'
+    | 'history.prompt'
+    | 'workspace.status'
+    | 'snapshot.acquire'
+    | 'snapshot.list'
+    | 'snapshot.prune';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -39,37 +73,65 @@ export interface Source {
    */
   state_directory: string;
   /**
-   * Absolute path of the trace database read.
+   * Absolute path of the live trace database (acquisition reads it; inspection never does).
    */
   trace_database: string;
+  /**
+   * The published snapshot a history response was read from.
+   */
+  snapshot_directory?: string;
+  snapshot_id?: string;
   [k: string]: unknown;
 }
+/**
+ * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities.
+ */
 export interface Consistency {
+  kind: 'snapshot_copy' | 'live_observation' | 'not_applicable';
+  live_stream: false;
+  snapshot_id?: string;
   /**
-   * PROVISIONAL (owner instruction 2026-10-04): the read-consistency model. Expected values include sqlite_transaction_snapshot; the final vocabulary depends on the D-4 decision (A1 measured that WAL stores need a write-denying boundary or a sidecar exception to be readable).
+   * UTC, when acquisition began (the read transaction opened shortly after).
    */
-  kind: string;
+  acquisition_started_at?: string | null;
   /**
-   * Always false in M1 (manual refresh, P-32).
+   * UTC, when the snapshot was published. Neither timestamp identifies an exact commit boundary.
    */
-  live_stream: boolean;
+  acquisition_completed_at?: string | null;
+  source_metadata_at_acquisition?: SourceMetadata | null;
+  source_metadata_now?: SourceMetadata | null;
+  /**
+   * true supports 'source metadata change detected'; false or null support nothing about contents, freshness or quiescence, and never skip a requested acquisition.
+   */
+  source_metadata_changed?: boolean | null;
+  [k: string]: unknown;
+}
+/**
+ * Observed by stat() only: size, mtime_ns, inode and side-file sizes. Equality of two observations does NOT establish unchanged contents (gate C-3).
+ */
+export interface SourceMetadata {
+  size?: number;
+  mtime_ns?: number;
+  inode?: number;
+  wal_size?: number | null;
+  shm_size?: number | null;
+  journal_size?: number | null;
+  error?: string;
   [k: string]: unknown;
 }
 export interface KupError {
-  /**
-   * Usually one of ErrorCode; kept open so a newer Kriya can add codes without breaking an older host (P-27).
-   */
-  code: string;
+  code: ErrorCode;
   message: string;
-  /**
-   * PROVISIONAL: the store state that produced STORE_BUSY/READ_ONLY_UNAVAILABLE (e.g. the A1 case id). Not final until the D-4 topic closes.
-   */
-  database_state?: string | null;
+  database_state?: DatabaseState | null;
+  snapshot_id?: string | null;
+  reason?: string | null;
   [k: string]: unknown;
 }
 
 // ---- KupError (common.schema.json#/$defs/KupError) ----
-
+/**
+ * Closed KUP error-code vocabulary (gate). HOST_ERROR is minted by a host for transport failures; every other code comes from Kriya.
+ */
 // ---- Section (common.schema.json#/$defs/Section) ----
 /**
  * Availability of an optional panel section (P-24). A host treats any value outside this list as unknown, never as success.
@@ -86,7 +148,7 @@ export interface Section {
    */
   provenance?: string | null;
   /**
-   * Why the section is not recorded/unreadable/excluded/unsupported. PROVISIONAL free text in v1 (owner instruction 2026-10-04): database-state reasons will be typed once the D-4 topic is decided.
+   * Why the section is not recorded/unreadable/excluded/unsupported (free text from Kriya).
    */
   reason?: string | null;
   /**
@@ -321,25 +383,90 @@ export interface WorkspaceStatus {
   [k: string]: unknown;
 }
 
+// ---- Consistency (common.schema.json#/$defs/Consistency) ----
+/**
+ * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities.
+ */
+// ---- SnapshotSummary (snapshot.schema.json#/$defs/SnapshotSummary) ----
+export type SnapshotId = string;
+
+export interface SnapshotSummary {
+  snapshot_id: SnapshotId;
+  acquisition_started_at: string | null;
+  acquisition_completed_at: string | null;
+  source: string | null;
+  source_metadata_at_acquisition: SourceMetadata | null;
+  source_metadata_now: SourceMetadata | null;
+  source_metadata_changed: boolean | null;
+  rows: number | null;
+  size: number | null;
+  sqlite_version: string | null;
+  digest_verified?: boolean;
+  [k: string]: unknown;
+}
+/**
+ * Observed by stat() only: size, mtime_ns, inode and side-file sizes. Equality of two observations does NOT establish unchanged contents (gate C-3).
+ */
+// ---- SnapshotAcquireResult (snapshot.schema.json#/$defs/SnapshotAcquireResult) ----
+export type SnapshotAcquireResult = SnapshotSummary & {
+  orphans_removed: string[];
+  pruned: string[];
+  backup_steps: number;
+  duration_ms: number;
+  [k: string]: unknown;
+};
+// ---- SnapshotList (snapshot.schema.json#/$defs/SnapshotList) ----
+export interface SnapshotList {
+  snapshot_directory: string;
+  snapshots: SnapshotSummary[];
+  retain: number;
+  [k: string]: unknown;
+}
+// ---- SnapshotPrune (snapshot.schema.json#/$defs/SnapshotPrune) ----
+export interface SnapshotPrune {
+  removed: string[];
+  orphans_removed: string[];
+  kept: string[];
+  [k: string]: unknown;
+}
+
 // ---- KupRequest (host-contract.schema.json#/$defs/KupRequest) ----
 /**
- * Exactly the P-25 grammar. run_id and cursor are opaque values validated by the host (no leading dash, bounded length, restricted alphabet).
+ * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
  */
 export type KupRequest =
   | {
       operation: 'capabilities';
     }
   | {
+      operation: 'snapshot.acquire';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace?: string;
+    }
+  | {
+      operation: 'snapshot.list';
+      verify?: boolean;
+    }
+  | {
+      operation: 'snapshot.prune';
+      keep?: number;
+    }
+  | {
       operation: 'history.list';
+      snapshot_id: string;
       limit?: number;
       cursor?: string;
     }
   | {
       operation: 'history.detail';
+      snapshot_id: string;
       run_id: RunId;
     }
   | {
       operation: 'history.prompt';
+      snapshot_id: string;
       run_id: RunId;
     }
   | {
@@ -385,7 +512,7 @@ export interface HostInfo {
 
 // ---- HostMessages (host-contract.schema.json#/$defs/Messages) ----
 /**
- * Exactly the P-25 grammar. run_id and cursor are opaque values validated by the host (no leading dash, bounded length, restricted alphabet).
+ * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
  */
 export type SettingKey = 'editor' | 'kriyaExecutable' | 'workspacePath';
 export type SettingValue = string | null;

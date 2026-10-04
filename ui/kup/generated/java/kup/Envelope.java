@@ -18,7 +18,7 @@ public class Envelope {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private ConsistencyClass consistency;
+    private Consistency consistency;
     private Data data;
     private KupError error;
     private String observedAt;
@@ -28,9 +28,9 @@ public class Envelope {
     private SourceClass source;
 
     @JsonProperty("consistency")
-    public ConsistencyClass getConsistency() { return consistency; }
+    public Consistency getConsistency() { return consistency; }
     @JsonProperty("consistency")
-    public void setConsistency(ConsistencyClass value) { this.consistency = value; }
+    public void setConsistency(Consistency value) { this.consistency = value; }
 
     /**
      * Operation payload, or null on error.

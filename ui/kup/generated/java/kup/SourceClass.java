@@ -12,8 +12,23 @@ public class SourceClass {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
+    private String snapshotDirectory;
+    private String snapshotid;
     private String stateDirectory;
     private String traceDatabase;
+
+    /**
+     * The published snapshot a history response was read from.
+     */
+    @JsonProperty("snapshot_directory")
+    public String getSnapshotDirectory() { return snapshotDirectory; }
+    @JsonProperty("snapshot_directory")
+    public void setSnapshotDirectory(String value) { this.snapshotDirectory = value; }
+
+    @JsonProperty("snapshot_id")
+    public String getSnapshotid() { return snapshotid; }
+    @JsonProperty("snapshot_id")
+    public void setSnapshotid(String value) { this.snapshotid = value; }
 
     /**
      * Absolute path, as resolved by Kriya (SEC-009 / state_paths).
@@ -24,7 +39,7 @@ public class SourceClass {
     public void setStateDirectory(String value) { this.stateDirectory = value; }
 
     /**
-     * Absolute path of the trace database read.
+     * Absolute path of the live trace database (acquisition reads it; inspection never does).
      */
     @JsonProperty("trace_database")
     public String getTraceDatabase() { return traceDatabase; }

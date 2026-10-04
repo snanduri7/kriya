@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, WORKSPACE_STATUS;
+    CAPABILITIES, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
@@ -15,6 +15,9 @@ public enum Operation {
             case HISTORY_DETAIL: return "history.detail";
             case HISTORY_LIST: return "history.list";
             case HISTORY_PROMPT: return "history.prompt";
+            case SNAPSHOT_ACQUIRE: return "snapshot.acquire";
+            case SNAPSHOT_LIST: return "snapshot.list";
+            case SNAPSHOT_PRUNE: return "snapshot.prune";
             case WORKSPACE_STATUS: return "workspace.status";
         }
         return null;
@@ -26,6 +29,9 @@ public enum Operation {
         if (value.equals("history.detail")) return HISTORY_DETAIL;
         if (value.equals("history.list")) return HISTORY_LIST;
         if (value.equals("history.prompt")) return HISTORY_PROMPT;
+        if (value.equals("snapshot.acquire")) return SNAPSHOT_ACQUIRE;
+        if (value.equals("snapshot.list")) return SNAPSHOT_LIST;
+        if (value.equals("snapshot.prune")) return SNAPSHOT_PRUNE;
         if (value.equals("workspace.status")) return WORKSPACE_STATUS;
         throw new IOException("Cannot deserialize Operation");
     }

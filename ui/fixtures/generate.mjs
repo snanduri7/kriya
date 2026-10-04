@@ -18,7 +18,18 @@ const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return see
 const pick = (xs) => xs[Math.floor(rand() * xs.length)];
 const OBSERVED = '2026-10-04T09:30:00Z';
 const SOURCE = { state_directory: '/fixture/.kriya/state', trace_database: '/fixture/.kriya/state/traces.db' };
-const envelope = (operation, data, error = null) => ({ schema_version: 1, operation, request_id: 'fixture', observed_at: OBSERVED, source: error ? null : SOURCE, consistency: error ? null : { kind: 'sqlite_transaction_snapshot', live_stream: false }, data: error ? null : data, error });
+// Snapshot identities (gate C-2/C-3): history fixtures are served under a pinned snapshot id; the fake kriya and the
+// browser host mint further ids at runtime for "Acquire new snapshot".
+const META = (size, wal) => ({ size, mtime_ns: 1759561200000000000 + size, inode: 7781234, wal_size: wal, shm_size: wal === null ? null : 32768, journal_size: null });
+export const SNAPSHOTS = [
+  { snapshot_id: '20261004T093000000000Z-f1c70001', acquisition_started_at: '2026-10-04T09:30:00.000000Z', acquisition_completed_at: '2026-10-04T09:30:00.014000Z', source: SOURCE.trace_database, source_metadata_at_acquisition: META(2969600, null), source_metadata_now: META(2969600, null), source_metadata_changed: false, rows: 120, size: 2969600, sqlite_version: '3.53.4' },
+  { snapshot_id: '20261004T083000000000Z-f1c70000', acquisition_started_at: '2026-10-04T08:30:00.000000Z', acquisition_completed_at: '2026-10-04T08:30:00.012000Z', source: SOURCE.trace_database, source_metadata_at_acquisition: META(2850000, 4120), source_metadata_now: META(2969600, null), source_metadata_changed: true, rows: 118, size: 2850000, sqlite_version: '3.53.4' },
+];
+const SNAP = SNAPSHOTS[0];
+const snapshotConsistency = (snap = SNAP) => ({ kind: 'snapshot_copy', live_stream: false, snapshot_id: snap.snapshot_id, acquisition_started_at: snap.acquisition_started_at, acquisition_completed_at: snap.acquisition_completed_at, source_metadata_at_acquisition: snap.source_metadata_at_acquisition, source_metadata_now: snap.source_metadata_now, source_metadata_changed: snap.source_metadata_changed });
+const consistencyFor = (operation) => operation === 'capabilities' ? { kind: 'not_applicable', live_stream: false } : operation.startsWith('history.') || operation === 'snapshot.acquire' ? snapshotConsistency() : { kind: 'live_observation', live_stream: false };
+const sourceFor = (operation) => operation.startsWith('history.') ? { ...SOURCE, snapshot_directory: `${SOURCE.state_directory}/kup-snapshots/${SNAP.snapshot_id}`, snapshot_id: SNAP.snapshot_id } : operation === 'workspace.status' ? null : SOURCE;
+const envelope = (operation, data, error = null) => ({ schema_version: 1, operation, request_id: 'fixture', observed_at: OBSERVED, source: error ? null : sourceFor(operation), consistency: error ? null : consistencyFor(operation), data: error ? null : data, error });
 const sec = (availability, data, reason = null, provenance = 'fixture:trace_row') => ({ availability, provenance, reason: availability === 'recorded' ? reason : (reason ?? `fixture ${availability}`), data: availability === 'recorded' ? data : null });
 const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj));
 
@@ -92,12 +103,19 @@ pages.forEach((page, n) => {
   write(`history.list.page${n + 1}.json`, envelope('history.list', { runs: page, next_cursor: next }));
   if (next) write(`history.list.cursor.${next}.json`, envelope('history.list', { runs: pages[n + 1], next_cursor: n + 2 < pages.length ? Buffer.from(JSON.stringify([pages[n + 1].at(-1).timestamp, pages[n + 1].at(-1).run_id])).toString('base64') : null }));
 });
-write('capabilities.json', envelope('capabilities', { kup_versions: [1], operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status'], identity: { kriya_version: '0.1.0+fixture', commit: 'fixture0000000000000000000000000000000000', provenance: 'fixture' }, limits: { list_default: 50, list_max: 200, max_response_bytes: 8 * 1024 * 1024 }, features: { prompt: true, comparisons: 'fixture_only', attribution: 'fixture_only' } }));
+write('capabilities.json', envelope('capabilities', { kup_versions: [1], operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune'], identity: { kriya_version: '0.1.0+fixture', commit: 'fixture0000000000000000000000000000000000', provenance: 'fixture', implementation: 'kriya-kup/1', sqlite_version: '3.53.4' }, limits: { list_default: 50, list_max: 200, max_response_bytes: 8 * 1024 * 1024, max_snapshot_bytes: 536870912, retain_snapshots: 3, acquisition_deadline_seconds: 45 }, features: { snapshot: true, prompt: true, comparisons: 'fixture_only', attribution: 'fixture_only' } }));
+write('snapshot.list.json', envelope('snapshot.list', { snapshot_directory: `${SOURCE.state_directory}/kup-snapshots`, snapshots: SNAPSHOTS, retain: 3 }));
+write('snapshot.acquire.json', envelope('snapshot.acquire', { ...SNAP, orphans_removed: [], pruned: [], backup_steps: 1, duration_ms: 14.0 }));
+write('snapshot.prune.json', envelope('snapshot.prune', { removed: [SNAPSHOTS[1].snapshot_id], orphans_removed: [], kept: [SNAP.snapshot_id] }));
 write('workspace.status.json', envelope('workspace.status', { workspace: '/fixture/workspace', run_active: false, status: 'NO_RECOVERY_REQUIRED', exit_code: 0, assessment: { reason: 'fixture', checkpoints: 0 } }));
-for (const [code, message] of [['UNSUPPORTED_SCHEMA_VERSION', 'the host requested KUP 1; this Kriya speaks 3'], ['INVALID_RESPONSE', 'response was not a KUP envelope'], ['STORE_BUSY', 'a hot rollback journal needs recovery (SQLITE_READONLY_ROLLBACK)'], ['READ_ONLY_UNAVAILABLE', 'WAL store cannot be read without creating -wal/-shm (A1 C03)'], ['RESPONSE_TOO_LARGE', 'history.detail exceeds 8 MiB; use --include-prompt only on demand'], ['CONFIG_AUTHORITY_REFUSED', 'kriya.yaml sets mcp.* without an approval (SEC-009)']]) {
-  write(`errors/${code}.json`, envelope('history.list', null, { code, message }));
-}
-write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt'], pages: pages.length, errors: ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED'] });
+const ERRORS = [['UNSUPPORTED_SCHEMA_VERSION', 'the host requested KUP 1; this Kriya speaks 3', null], ['INVALID_RESPONSE', 'response was not a KUP envelope', null], ['INVALID_REQUEST', 'snapshot_id is required: history is read from a published snapshot only', null],
+  ['STORE_BUSY', 'the store has a hot rollback journal; acquisition never recovers another writer\'s transaction', 'hot_journal'], ['READ_ONLY_UNAVAILABLE', 'no trace database exists at the resolved store path', 'missing'],
+  ['RESPONSE_TOO_LARGE', 'the response would exceed 8388608 bytes', null], ['CONFIG_AUTHORITY_REFUSED', 'Configuration-authority denied (SEC-009)', null], ['CONFIG_LOAD_FAILED', 'paths.state must be an absolute path', null],
+  ['SNAPSHOT_MISSING', 'no published snapshot exists; acquire one first', null], ['SNAPSHOT_UNAVAILABLE', 'snapshot 20260101T000000000000Z-00000000 is not published (pruned or never existed)', null],
+  ['SNAPSHOT_FAILED', 'insufficient free space', null], ['SNAPSHOT_TOO_LARGE', 'the store image is 600000000 bytes; the per-snapshot bound is 536870912 bytes', null], ['SNAPSHOT_CORRUPT', 'snapshot file size or mtime differs from its manifest', null],
+  ['ACQUISITION_IN_PROGRESS', 'another acquisition or prune holds the snapshot directory', null], ['ACQUISITION_REFUSED_RUN_ACTIVE', 'a run is active for the selected workspace; acquisition is refused by policy', null]];
+for (const [code, message, database_state] of ERRORS) write(`errors/${code}.json`, envelope(code.startsWith('ACQUISITION') || code.startsWith('SNAPSHOT_F') || code.startsWith('SNAPSHOT_T') || code === 'STORE_BUSY' || code === 'READ_ONLY_UNAVAILABLE' ? 'snapshot.acquire' : 'history.list', null, { code, message, database_state, snapshot_id: null, reason: null }));
+write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt'], pages: pages.length, errors: ERRORS.map(([c]) => c), snapshots: SNAPSHOTS.map((s) => s.snapshot_id) });
 import { statSync } from 'node:fs';
 const bigBytes = statSync(join(out, 'history.detail.run-big-events.json')).size;
 console.log(`fixtures: ${RUNS.length} runs, ${pages.length} pages, big-events detail = ${(bigBytes / 1048576).toFixed(2)} MiB -> ${out}`);

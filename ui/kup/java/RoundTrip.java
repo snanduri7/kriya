@@ -23,7 +23,8 @@ public class RoundTrip {
             JsonNode back = mapper.valueToTree(env);
             Class<?> dataClass = name.startsWith("capabilities") ? kup.Capabilities.class : name.startsWith("history.list") ? kup.HistoryList.class
                 : name.startsWith("history.detail") ? kup.RunDetail.class : name.startsWith("history.prompt") ? kup.Prompt.class
-                : name.startsWith("workspace.status") ? kup.WorkspaceStatus.class : null;
+                : name.startsWith("workspace.status") ? kup.WorkspaceStatus.class : name.startsWith("snapshot.acquire") ? kup.SnapshotAcquireResult.class
+                : name.startsWith("snapshot.list") ? kup.SnapshotList.class : name.startsWith("snapshot.prune") ? kup.SnapshotPrune.class : null;
             if (dataClass != null && !original.get("data").isNull()) {
                 Object data = mapper.treeToValue(original.get("data"), dataClass);
                 JsonNode dataBack = mapper.valueToTree(data);

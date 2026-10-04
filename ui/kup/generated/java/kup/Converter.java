@@ -25,6 +25,11 @@
 //     Comparison data = Converter.ComparisonFromJsonString(jsonString);
 //     Prompt data = Converter.PromptFromJsonString(jsonString);
 //     WorkspaceStatus data = Converter.WorkspaceStatusFromJsonString(jsonString);
+//     Consistency data = Converter.ConsistencyFromJsonString(jsonString);
+//     SnapshotSummary data = Converter.SnapshotSummaryFromJsonString(jsonString);
+//     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
+//     SnapshotList data = Converter.SnapshotListFromJsonString(jsonString);
+//     SnapshotPrune data = Converter.SnapshotPruneFromJsonString(jsonString);
 //     KupRequest data = Converter.KupRequestFromJsonString(jsonString);
 //     OpenInIdeRequest data = Converter.OpenInIdeRequestFromJsonString(jsonString);
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
@@ -189,6 +194,46 @@ public class Converter {
 
     public static String WorkspaceStatusToJsonString(WorkspaceStatus obj) throws JsonProcessingException {
         return getWorkspaceStatusObjectWriter().writeValueAsString(obj);
+    }
+
+    public static Consistency ConsistencyFromJsonString(String json) throws IOException {
+        return getConsistencyObjectReader().readValue(json);
+    }
+
+    public static String ConsistencyToJsonString(Consistency obj) throws JsonProcessingException {
+        return getConsistencyObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SnapshotSummary SnapshotSummaryFromJsonString(String json) throws IOException {
+        return getSnapshotSummaryObjectReader().readValue(json);
+    }
+
+    public static String SnapshotSummaryToJsonString(SnapshotSummary obj) throws JsonProcessingException {
+        return getSnapshotSummaryObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SnapshotAcquireResult SnapshotAcquireResultFromJsonString(String json) throws IOException {
+        return getSnapshotAcquireResultObjectReader().readValue(json);
+    }
+
+    public static String SnapshotAcquireResultToJsonString(SnapshotAcquireResult obj) throws JsonProcessingException {
+        return getSnapshotAcquireResultObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SnapshotList SnapshotListFromJsonString(String json) throws IOException {
+        return getSnapshotListObjectReader().readValue(json);
+    }
+
+    public static String SnapshotListToJsonString(SnapshotList obj) throws JsonProcessingException {
+        return getSnapshotListObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SnapshotPrune SnapshotPruneFromJsonString(String json) throws IOException {
+        return getSnapshotPruneObjectReader().readValue(json);
+    }
+
+    public static String SnapshotPruneToJsonString(SnapshotPrune obj) throws JsonProcessingException {
+        return getSnapshotPruneObjectWriter().writeValueAsString(obj);
     }
 
     public static KupRequest KupRequestFromJsonString(String json) throws IOException {
@@ -624,6 +669,161 @@ public class Converter {
     private static ObjectWriter getWorkspaceStatusObjectWriter() {
         if (WorkspaceStatusWriter == null) instantiateWorkspaceStatusMapper();
         return WorkspaceStatusWriter;
+    }
+
+    private static ObjectReader ConsistencyReader;
+    private static ObjectWriter ConsistencyWriter;
+
+    private static void instantiateConsistencyMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ConsistencyReader = mapper.readerFor(Consistency.class);
+        ConsistencyWriter = mapper.writerFor(Consistency.class);
+    }
+
+    private static ObjectReader getConsistencyObjectReader() {
+        if (ConsistencyReader == null) instantiateConsistencyMapper();
+        return ConsistencyReader;
+    }
+
+    private static ObjectWriter getConsistencyObjectWriter() {
+        if (ConsistencyWriter == null) instantiateConsistencyMapper();
+        return ConsistencyWriter;
+    }
+
+    private static ObjectReader SnapshotSummaryReader;
+    private static ObjectWriter SnapshotSummaryWriter;
+
+    private static void instantiateSnapshotSummaryMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SnapshotSummaryReader = mapper.readerFor(SnapshotSummary.class);
+        SnapshotSummaryWriter = mapper.writerFor(SnapshotSummary.class);
+    }
+
+    private static ObjectReader getSnapshotSummaryObjectReader() {
+        if (SnapshotSummaryReader == null) instantiateSnapshotSummaryMapper();
+        return SnapshotSummaryReader;
+    }
+
+    private static ObjectWriter getSnapshotSummaryObjectWriter() {
+        if (SnapshotSummaryWriter == null) instantiateSnapshotSummaryMapper();
+        return SnapshotSummaryWriter;
+    }
+
+    private static ObjectReader SnapshotAcquireResultReader;
+    private static ObjectWriter SnapshotAcquireResultWriter;
+
+    private static void instantiateSnapshotAcquireResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SnapshotAcquireResultReader = mapper.readerFor(SnapshotAcquireResult.class);
+        SnapshotAcquireResultWriter = mapper.writerFor(SnapshotAcquireResult.class);
+    }
+
+    private static ObjectReader getSnapshotAcquireResultObjectReader() {
+        if (SnapshotAcquireResultReader == null) instantiateSnapshotAcquireResultMapper();
+        return SnapshotAcquireResultReader;
+    }
+
+    private static ObjectWriter getSnapshotAcquireResultObjectWriter() {
+        if (SnapshotAcquireResultWriter == null) instantiateSnapshotAcquireResultMapper();
+        return SnapshotAcquireResultWriter;
+    }
+
+    private static ObjectReader SnapshotListReader;
+    private static ObjectWriter SnapshotListWriter;
+
+    private static void instantiateSnapshotListMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SnapshotListReader = mapper.readerFor(SnapshotList.class);
+        SnapshotListWriter = mapper.writerFor(SnapshotList.class);
+    }
+
+    private static ObjectReader getSnapshotListObjectReader() {
+        if (SnapshotListReader == null) instantiateSnapshotListMapper();
+        return SnapshotListReader;
+    }
+
+    private static ObjectWriter getSnapshotListObjectWriter() {
+        if (SnapshotListWriter == null) instantiateSnapshotListMapper();
+        return SnapshotListWriter;
+    }
+
+    private static ObjectReader SnapshotPruneReader;
+    private static ObjectWriter SnapshotPruneWriter;
+
+    private static void instantiateSnapshotPruneMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SnapshotPruneReader = mapper.readerFor(SnapshotPrune.class);
+        SnapshotPruneWriter = mapper.writerFor(SnapshotPrune.class);
+    }
+
+    private static ObjectReader getSnapshotPruneObjectReader() {
+        if (SnapshotPruneReader == null) instantiateSnapshotPruneMapper();
+        return SnapshotPruneReader;
+    }
+
+    private static ObjectWriter getSnapshotPruneObjectWriter() {
+        if (SnapshotPruneWriter == null) instantiateSnapshotPruneMapper();
+        return SnapshotPruneWriter;
     }
 
     private static ObjectReader KupRequestReader;

@@ -4,60 +4,340 @@
   "title": "HostAdapter message contract",
   "description": "The typed allowlist of messages between the shared UI and ANY host (gate A-2 P-R2). A host (Electron preload, a browser test page, a future IDE plugin) implements exactly these; nothing else crosses the boundary. Requests are validated by the host before use (06 Phase E); responses are KUP envelopes or the typed results below.",
   "$defs": {
-    "EditorId": { "type": "string", "enum": ["vscode", "intellij", "eclipse"] },
-    "SettingKey": { "type": "string", "enum": ["editor", "kriyaExecutable", "workspacePath"] },
-    "KupRequest": {
-      "description": "Exactly the P-25 grammar. run_id and cursor are opaque values validated by the host (no leading dash, bounded length, restricted alphabet).",
-      "oneOf": [
-        { "type": "object", "required": ["operation"], "properties": { "operation": { "const": "capabilities" } }, "additionalProperties": false },
-        { "type": "object", "required": ["operation"], "properties": { "operation": { "const": "history.list" }, "limit": { "type": "integer", "minimum": 1, "maximum": 200 }, "cursor": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[A-Za-z0-9][A-Za-z0-9+/=_-]*$" } }, "additionalProperties": false },
-        { "type": "object", "required": ["operation", "run_id"], "properties": { "operation": { "const": "history.detail" }, "run_id": { "$ref": "#/$defs/RunId" } }, "additionalProperties": false },
-        { "type": "object", "required": ["operation", "run_id"], "properties": { "operation": { "const": "history.prompt" }, "run_id": { "$ref": "#/$defs/RunId" } }, "additionalProperties": false },
-        { "type": "object", "required": ["operation", "workspace"], "properties": { "operation": { "const": "workspace.status" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } }, "additionalProperties": false }
+    "EditorId": {
+      "type": "string",
+      "enum": [
+        "vscode",
+        "intellij",
+        "eclipse"
       ]
     },
-    "RunId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "SettingKey": {
+      "type": "string",
+      "enum": [
+        "editor",
+        "kriyaExecutable",
+        "workspacePath"
+      ]
+    },
+    "KupRequest": {
+      "description": "Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "const": "capabilities"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "const": "snapshot.acquire"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "const": "snapshot.list"
+            },
+            "verify": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "const": "snapshot.prune"
+            },
+            "keep": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "snapshot_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "history.list"
+            },
+            "snapshot_id": {
+              "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "cursor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9+/=_-]*$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "snapshot_id",
+            "run_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "history.detail"
+            },
+            "snapshot_id": {
+              "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "snapshot_id",
+            "run_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "history.prompt"
+            },
+            "snapshot_id": {
+              "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "workspace"
+          ],
+          "properties": {
+            "operation": {
+              "const": "workspace.status"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
     "OpenInIdeRequest": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
-        "path": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000-\\u001F]+$", "description": "A path from recorded data (no control characters); the host opens it only if it is an existing regular file inside the selected workspace." },
-        "line": { "type": "integer", "minimum": 1, "maximum": 10000000 }
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001F]+$",
+          "description": "A path from recorded data (no control characters); the host opens it only if it is an existing regular file inside the selected workspace."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        }
       },
       "additionalProperties": false
     },
     "OpenInIdeResult": {
       "type": "object",
-      "required": ["ok", "editor", "verified", "message"],
+      "required": [
+        "ok",
+        "editor",
+        "verified",
+        "message"
+      ],
       "properties": {
-        "ok": { "type": "boolean" },
-        "editor": { "$ref": "#/$defs/EditorId" },
-        "verified": { "type": "boolean", "description": "false = the host knows this editor's command form is unverified on this machine." },
-        "message": { "type": "string" }
+        "ok": {
+          "type": "boolean"
+        },
+        "editor": {
+          "$ref": "#/$defs/EditorId"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "false = the host knows this editor's command form is unverified on this machine."
+        },
+        "message": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "HostInfo": {
       "type": "object",
-      "required": ["kind", "hostVersion", "fixtureMode"],
+      "required": [
+        "kind",
+        "hostVersion",
+        "fixtureMode"
+      ],
       "properties": {
-        "kind": { "type": "string" },
-        "hostVersion": { "type": "string" },
-        "fixtureMode": { "type": "boolean", "description": "true while the host answers from fixtures (D-9)." }
+        "kind": {
+          "type": "string"
+        },
+        "hostVersion": {
+          "type": "string"
+        },
+        "fixtureMode": {
+          "type": "boolean",
+          "description": "true while the host answers from fixtures (D-9)."
+        }
       },
       "additionalProperties": false
     },
-    "SettingValue": { "type": ["string", "null"] },
+    "SettingValue": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "Messages": {
       "description": "The six messages. Each entry documents request and response shapes; the wire channel names are host-specific (Electron: kriya:kup:query etc.).",
       "type": "object",
       "properties": {
-        "query": { "type": "object", "properties": { "request": { "$ref": "#/$defs/KupRequest" }, "response": { "$ref": "common.schema.json#/$defs/Envelope" } } },
-        "openInIde": { "type": "object", "properties": { "request": { "$ref": "#/$defs/OpenInIdeRequest" }, "response": { "$ref": "#/$defs/OpenInIdeResult" } } },
-        "copyToClipboard": { "type": "object", "properties": { "request": { "type": "string", "maxLength": 8388608 }, "response": { "type": "null" } } },
-        "getSetting": { "type": "object", "properties": { "request": { "$ref": "#/$defs/SettingKey" }, "response": { "$ref": "#/$defs/SettingValue" } } },
-        "setSetting": { "type": "object", "properties": { "request": { "type": "object", "required": ["key", "value"], "properties": { "key": { "$ref": "#/$defs/SettingKey" }, "value": { "$ref": "#/$defs/SettingValue" } }, "additionalProperties": false }, "response": { "type": "null" } } },
-        "hostInfo": { "type": "object", "properties": { "request": { "type": "null" }, "response": { "$ref": "#/$defs/HostInfo" } } }
+        "query": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/KupRequest"
+            },
+            "response": {
+              "$ref": "common.schema.json#/$defs/Envelope"
+            }
+          }
+        },
+        "openInIde": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/OpenInIdeRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/OpenInIdeResult"
+            }
+          }
+        },
+        "copyToClipboard": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "string",
+              "maxLength": 8388608
+            },
+            "response": {
+              "type": "null"
+            }
+          }
+        },
+        "getSetting": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/SettingKey"
+            },
+            "response": {
+              "$ref": "#/$defs/SettingValue"
+            }
+          }
+        },
+        "setSetting": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "object",
+              "required": [
+                "key",
+                "value"
+              ],
+              "properties": {
+                "key": {
+                  "$ref": "#/$defs/SettingKey"
+                },
+                "value": {
+                  "$ref": "#/$defs/SettingValue"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "type": "null"
+            }
+          }
+        },
+        "hostInfo": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "null"
+            },
+            "response": {
+              "$ref": "#/$defs/HostInfo"
+            }
+          }
+        }
       },
       "additionalProperties": false
     }

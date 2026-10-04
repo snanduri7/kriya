@@ -5,21 +5,43 @@ package kup;
 import com.fasterxml.jackson.annotation.*;
 
 /**
- * Exactly the P-25 grammar. run_id and cursor are opaque values validated by the host (no
- * leading dash, bounded length, restricted alphabet).
+ * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id
+ * (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id
+ * are opaque values the host validates before use.
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public class KupRequest {
     private Operation operation;
+    private String workspace;
+    private Boolean verify;
+    private Long keep;
     private String cursor;
     private Long limit;
+    private String snapshotid;
     private String runid;
-    private String workspace;
 
     @JsonProperty("operation")
     public Operation getOperation() { return operation; }
     @JsonProperty("operation")
     public void setOperation(Operation value) { this.operation = value; }
+
+    /**
+     * Absolute path without control characters.
+     */
+    @JsonProperty("workspace")
+    public String getWorkspace() { return workspace; }
+    @JsonProperty("workspace")
+    public void setWorkspace(String value) { this.workspace = value; }
+
+    @JsonProperty("verify")
+    public Boolean getVerify() { return verify; }
+    @JsonProperty("verify")
+    public void setVerify(Boolean value) { this.verify = value; }
+
+    @JsonProperty("keep")
+    public Long getKeep() { return keep; }
+    @JsonProperty("keep")
+    public void setKeep(Long value) { this.keep = value; }
 
     @JsonProperty("cursor")
     public String getCursor() { return cursor; }
@@ -31,16 +53,13 @@ public class KupRequest {
     @JsonProperty("limit")
     public void setLimit(Long value) { this.limit = value; }
 
+    @JsonProperty("snapshot_id")
+    public String getSnapshotid() { return snapshotid; }
+    @JsonProperty("snapshot_id")
+    public void setSnapshotid(String value) { this.snapshotid = value; }
+
     @JsonProperty("run_id")
     public String getRunid() { return runid; }
     @JsonProperty("run_id")
     public void setRunid(String value) { this.runid = value; }
-
-    /**
-     * Absolute path without control characters.
-     */
-    @JsonProperty("workspace")
-    public String getWorkspace() { return workspace; }
-    @JsonProperty("workspace")
-    public void setWorkspace(String value) { this.workspace = value; }
 }

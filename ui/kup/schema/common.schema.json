@@ -2,77 +2,347 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kriya.local/kup/v1/common.schema.json",
   "title": "KUP v1 common definitions",
-  "description": "Kriya UI Protocol v1 (P-24). Shared definitions for the envelope, availability sections and errors. Unknown properties are allowed everywhere a Kriya record is carried: the contract never silently discards recorded detail.",
+  "description": "Kriya UI Protocol v1 (P-24; finalized under handover/GUI-D4-READ-STRATEGY/03_GATE.md). Shared definitions for the envelope, availability sections, errors and the snapshot consistency block. Unknown properties are allowed wherever a Kriya record is carried: the contract never silently discards recorded detail.",
   "$defs": {
     "Availability": {
       "description": "Availability of an optional panel section (P-24). A host treats any value outside this list as unknown, never as success.",
       "type": "string",
-      "enum": ["recorded", "not_recorded", "unreadable", "excluded", "unsupported"]
+      "enum": [
+        "recorded",
+        "not_recorded",
+        "unreadable",
+        "excluded",
+        "unsupported"
+      ]
     },
     "Section": {
       "description": "An optional panel section: availability first; data only when recorded (D-5: nothing is reconstructed).",
       "type": "object",
-      "required": ["availability"],
+      "required": [
+        "availability"
+      ],
       "properties": {
-        "availability": { "$ref": "#/$defs/Availability" },
-        "provenance": { "type": ["string", "null"], "description": "Which persisted record the data comes from (e.g. runs.run_events)." },
-        "reason": { "type": ["string", "null"], "description": "Why the section is not recorded/unreadable/excluded/unsupported. PROVISIONAL free text in v1 (owner instruction 2026-10-04): database-state reasons will be typed once the D-4 topic is decided." },
-        "data": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Present and non-null only when availability is recorded." }
+        "availability": {
+          "$ref": "#/$defs/Availability"
+        },
+        "provenance": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Which persisted record the data comes from (e.g. runs.run_events)."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the section is not recorded/unreadable/excluded/unsupported (free text from Kriya)."
+        },
+        "data": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "description": "Present and non-null only when availability is recorded."
+        }
       },
       "additionalProperties": true
     },
     "ErrorCode": {
-      "description": "Typed KUP error codes (06 Phase B). A host may receive other codes from a newer Kriya and must show them literally.",
+      "description": "Closed KUP error-code vocabulary (gate). HOST_ERROR is minted by a host for transport failures; every other code comes from Kriya.",
       "type": "string",
-      "enum": ["UNSUPPORTED_SCHEMA_VERSION", "INVALID_RESPONSE", "STORE_BUSY", "READ_ONLY_UNAVAILABLE", "RESPONSE_TOO_LARGE", "CONFIG_AUTHORITY_REFUSED"]
+      "enum": [
+        "UNSUPPORTED_SCHEMA_VERSION",
+        "INVALID_RESPONSE",
+        "INVALID_REQUEST",
+        "STORE_BUSY",
+        "READ_ONLY_UNAVAILABLE",
+        "RESPONSE_TOO_LARGE",
+        "CONFIG_AUTHORITY_REFUSED",
+        "CONFIG_LOAD_FAILED",
+        "SNAPSHOT_MISSING",
+        "SNAPSHOT_UNAVAILABLE",
+        "SNAPSHOT_FAILED",
+        "SNAPSHOT_TOO_LARGE",
+        "SNAPSHOT_CORRUPT",
+        "ACQUISITION_IN_PROGRESS",
+        "ACQUISITION_REFUSED_RUN_ACTIVE",
+        "HOST_ERROR"
+      ]
     },
     "KupError": {
       "type": "object",
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
-        "code": { "type": "string", "description": "Usually one of ErrorCode; kept open so a newer Kriya can add codes without breaking an older host (P-27)." },
-        "message": { "type": "string" },
-        "database_state": { "type": ["string", "null"], "description": "PROVISIONAL: the store state that produced STORE_BUSY/READ_ONLY_UNAVAILABLE (e.g. the A1 case id). Not final until the D-4 topic closes." }
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "database_state": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DatabaseState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": true
     },
     "Source": {
       "type": "object",
-      "required": ["state_directory", "trace_database"],
+      "required": [
+        "state_directory",
+        "trace_database"
+      ],
       "properties": {
-        "state_directory": { "type": "string", "description": "Absolute path, as resolved by Kriya (SEC-009 / state_paths)." },
-        "trace_database": { "type": "string", "description": "Absolute path of the trace database read." }
+        "state_directory": {
+          "type": "string",
+          "description": "Absolute path, as resolved by Kriya (SEC-009 / state_paths)."
+        },
+        "trace_database": {
+          "type": "string",
+          "description": "Absolute path of the live trace database (acquisition reads it; inspection never does)."
+        },
+        "snapshot_directory": {
+          "type": "string",
+          "description": "The published snapshot a history response was read from."
+        },
+        "snapshot_id": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     },
     "Consistency": {
+      "description": "gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities.",
       "type": "object",
-      "required": ["kind", "live_stream"],
+      "required": [
+        "kind",
+        "live_stream"
+      ],
       "properties": {
-        "kind": { "type": "string", "description": "PROVISIONAL (owner instruction 2026-10-04): the read-consistency model. Expected values include sqlite_transaction_snapshot; the final vocabulary depends on the D-4 decision (A1 measured that WAL stores need a write-denying boundary or a sidecar exception to be readable)." },
-        "live_stream": { "type": "boolean", "description": "Always false in M1 (manual refresh, P-32)." }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "snapshot_copy",
+            "live_observation",
+            "not_applicable"
+          ]
+        },
+        "live_stream": {
+          "type": "boolean",
+          "const": false
+        },
+        "snapshot_id": {
+          "type": "string"
+        },
+        "acquisition_started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "UTC, when acquisition began (the read transaction opened shortly after)."
+        },
+        "acquisition_completed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "UTC, when the snapshot was published. Neither timestamp identifies an exact commit boundary."
+        },
+        "source_metadata_at_acquisition": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SourceMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_metadata_now": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SourceMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_metadata_changed": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "true supports 'source metadata change detected'; false or null support nothing about contents, freshness or quiescence, and never skip a requested acquisition."
+        }
       },
       "additionalProperties": true
     },
     "Envelope": {
       "description": "Every KUP response. On error, data is null and source/consistency may be null (resolution may have failed before they were known).",
       "type": "object",
-      "required": ["schema_version", "operation", "request_id", "observed_at", "source", "consistency", "data", "error"],
+      "required": [
+        "schema_version",
+        "operation",
+        "request_id",
+        "observed_at",
+        "source",
+        "consistency",
+        "data",
+        "error"
+      ],
       "properties": {
-        "schema_version": { "type": "integer", "const": 1 },
-        "operation": { "type": "string", "enum": ["capabilities", "history.list", "history.detail", "history.prompt", "workspace.status"] },
-        "request_id": { "type": "string", "description": "Opaque, client-chosen; echoed verbatim." },
-        "observed_at": { "type": "string", "description": "UTC observation time set by Kriya (ISO 8601)." },
-        "source": { "oneOf": [{ "$ref": "#/$defs/Source" }, { "type": "null" }] },
-        "consistency": { "oneOf": [{ "$ref": "#/$defs/Consistency" }, { "type": "null" }] },
-        "data": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "Operation payload, or null on error." },
-        "error": { "oneOf": [{ "$ref": "#/$defs/KupError" }, { "type": "null" }] }
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "capabilities",
+            "history.list",
+            "history.detail",
+            "history.prompt",
+            "workspace.status",
+            "snapshot.acquire",
+            "snapshot.list",
+            "snapshot.prune"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "description": "Opaque, client-chosen; echoed verbatim."
+        },
+        "observed_at": {
+          "type": "string",
+          "description": "UTC observation time set by Kriya (ISO 8601)."
+        },
+        "source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Source"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consistency": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Consistency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "description": "Operation payload, or null on error."
+        },
+        "error": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/KupError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
       "additionalProperties": true
     },
     "StoredText": {
       "description": "A stored TEXT column in recorded form: the raw string (JSON text stays JSON text), or null when NULL in the row.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "DatabaseState": {
+      "description": "Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.",
+      "type": "string",
+      "enum": [
+        "missing",
+        "hot_journal",
+        "locked",
+        "readonly_directory",
+        "unreadable",
+        "not_a_database"
+      ]
+    },
+    "SourceMetadata": {
+      "description": "Observed by stat() only: size, mtime_ns, inode and side-file sizes. Equality of two observations does NOT establish unchanged contents (gate C-3).",
+      "type": "object",
+      "properties": {
+        "size": {
+          "type": "integer"
+        },
+        "mtime_ns": {
+          "type": "integer"
+        },
+        "inode": {
+          "type": "integer"
+        },
+        "wal_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shm_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "journal_size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

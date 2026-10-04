@@ -12,30 +12,34 @@ public class KupError {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private String code;
-    private String databaseState;
+    private Code code;
+    private DatabaseStateEnum databaseState;
     private String message;
+    private String reason;
+    private String snapshotid;
 
-    /**
-     * Usually one of ErrorCode; kept open so a newer Kriya can add codes without breaking an
-     * older host (P-27).
-     */
     @JsonProperty("code")
-    public String getCode() { return code; }
+    public Code getCode() { return code; }
     @JsonProperty("code")
-    public void setCode(String value) { this.code = value; }
+    public void setCode(Code value) { this.code = value; }
 
-    /**
-     * PROVISIONAL: the store state that produced STORE_BUSY/READ_ONLY_UNAVAILABLE (e.g. the A1
-     * case id). Not final until the D-4 topic closes.
-     */
     @JsonProperty("database_state")
-    public String getDatabaseState() { return databaseState; }
+    public DatabaseStateEnum getDatabaseState() { return databaseState; }
     @JsonProperty("database_state")
-    public void setDatabaseState(String value) { this.databaseState = value; }
+    public void setDatabaseState(DatabaseStateEnum value) { this.databaseState = value; }
 
     @JsonProperty("message")
     public String getMessage() { return message; }
     @JsonProperty("message")
     public void setMessage(String value) { this.message = value; }
+
+    @JsonProperty("reason")
+    public String getReason() { return reason; }
+    @JsonProperty("reason")
+    public void setReason(String value) { this.reason = value; }
+
+    @JsonProperty("snapshot_id")
+    public String getSnapshotid() { return snapshotid; }
+    @JsonProperty("snapshot_id")
+    public void setSnapshotid(String value) { this.snapshotid = value; }
 }

@@ -45,9 +45,7 @@ public class Section {
     public void setProvenance(String value) { this.provenance = value; }
 
     /**
-     * Why the section is not recorded/unreadable/excluded/unsupported. PROVISIONAL free text in
-     * v1 (owner instruction 2026-10-04): database-state reasons will be typed once the D-4
-     * topic is decided.
+     * Why the section is not recorded/unreadable/excluded/unsupported (free text from Kriya).
      */
     @JsonProperty("reason")
     public String getReason() { return reason; }
