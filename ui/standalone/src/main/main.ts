@@ -13,10 +13,12 @@ import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSe
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
 import { runMeasurement } from './measure';
+import { DEFAULT_SOAK, runSoak } from './soak';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
 import { SettingsStore } from './settings';
 
 const MEASURE = process.env.KRIYA_UI_MEASURE === '1';
+const SOAK = process.env.KRIYA_UI_SOAK === '1';
 const ALLOW_REAL = process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1';
 const FAKE_KRIYA = join(__dirname, '..', '..', 'fake-kriya', 'fake_kriya.mjs');
 const RENDERER_INDEX = join(__dirname, '..', 'renderer', 'index.html');
@@ -27,6 +29,14 @@ let ownedWebContentsId: number | null = null;
 
 function errorEnvelope(operation: string, code: string, message: string) {
   return { schema_version: 1, operation, request_id: `host-${Date.now()}`, observed_at: new Date().toISOString(), source: null, consistency: null, data: null, error: { code, message } };
+}
+
+/** Only the two fixture knobs reach the stand-in; never the ambient environment (P-31). */
+function fakeEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (process.env.KRIYA_FAKE_BEHAVIOR) env.KRIYA_FAKE_BEHAVIOR = process.env.KRIYA_FAKE_BEHAVIOR;
+  if (process.env.KRIYA_FAKE_FIXTURES) env.KRIYA_FAKE_FIXTURES = process.env.KRIYA_FAKE_FIXTURES;
+  return env;
 }
 
 function fromOwnedRenderer(event: IpcMainInvokeEvent): boolean { return ownedWebContentsId !== null && event.sender.id === ownedWebContentsId; }
@@ -46,7 +56,7 @@ function registerIpc() {
     const useReal = ALLOW_REAL && configured && existsSync(configured);
     const outcome = useReal
       ? await runKriya({ executable: configured, argv })
-      : await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: process.env.KRIYA_FAKE_BEHAVIOR ? { KRIYA_FAKE_BEHAVIOR: process.env.KRIYA_FAKE_BEHAVIOR } : {} });
+      : await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv() });
     if (outcome.kind === 'json') return outcome.json;
     return errorEnvelope(v.value.operation, outcome.code ?? 'HOST_ERROR', `${outcome.message ?? 'unknown'}${outcome.stderrTail ? ` | stderr: ${outcome.stderrTail.slice(-300)}` : ''}`);
   });
@@ -96,7 +106,7 @@ function hardenSession() {
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 900, title: 'Kriya run inspector',
-    webPreferences: { ...WEB_PREFERENCES, preload: join(__dirname, 'preload.js'), additionalArguments: MEASURE ? ['--kriya-ui-measure'] : [] },
+    webPreferences: { ...WEB_PREFERENCES, preload: join(__dirname, 'preload.js'), additionalArguments: MEASURE || SOAK ? ['--kriya-ui-measure'] : [] },
   });
   ownedWebContentsId = win.webContents.id;
   if (MEASURE) {
@@ -121,7 +131,17 @@ app.whenReady().then(async () => {
   hardenSession();
   registerIpc();
   const win = createWindow();
-  if (MEASURE) {
+  if (SOAK) {
+    try {
+      const n = (k: string, d: number) => Number(process.env[k] ?? d);
+      const file = await runSoak(win, join(__dirname, '..', '..', 'measurements'), { seconds: n('KRIYA_UI_SOAK_SECONDS', DEFAULT_SOAK.seconds), minSelections: n('KRIYA_UI_SOAK_MIN_SELECTIONS', DEFAULT_SOAK.minSelections), sampleSeconds: n('KRIYA_UI_SOAK_SAMPLE_SECONDS', DEFAULT_SOAK.sampleSeconds), warmupSeconds: n('KRIYA_UI_SOAK_WARMUP_SECONDS', DEFAULT_SOAK.warmupSeconds), ceilingMB: n('KRIYA_UI_SOAK_CEILING_MB', DEFAULT_SOAK.ceilingMB) });
+      process.stdout.write(`soak written: ${file}\n`);
+      app.exit(0);
+    } catch (e) {
+      process.stderr.write(`soak failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
+      app.exit(1);
+    }
+  } else if (MEASURE) {
     try {
       const file = await runMeasurement(win, join(__dirname, '..', '..', 'measurements'), Number(process.env.KRIYA_UI_MEASURE_CYCLES ?? 100));
       process.stdout.write(`measurement written: ${file}\n`);
