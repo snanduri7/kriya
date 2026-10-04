@@ -13,6 +13,12 @@ describe('selection reducer (P-23)', () => {
     s = selectionReducer(s, { type: 'selectRun', runId: 'r2' });
     expect(s).toMatchObject({ runId: 'r2', attempt: null, eventIndex: null, comparisonPath: null, inspectorTab: 'gates' });
   });
+  it('narrowing to an attempt drops the event selection; widening back to all events keeps it', () => {
+    const picked = selectionReducer({ ...initialSelection, runId: 'r1', eventIndex: 3 }, { type: 'selectAttempt', attempt: 'attempt 2' });
+    expect(picked).toMatchObject({ attempt: 'attempt 2', eventIndex: null });
+    const widened = selectionReducer({ ...picked, eventIndex: 5 }, { type: 'selectAttempt', attempt: null });
+    expect(widened).toMatchObject({ attempt: null, eventIndex: 5 });
+  });
   it('selecting the same run is a no-op (keeps the event selection)', () => {
     const s1 = selectionReducer({ ...initialSelection, runId: 'r1', eventIndex: 2 }, { type: 'selectRun', runId: 'r1' });
     expect(s1.eventIndex).toBe(2);

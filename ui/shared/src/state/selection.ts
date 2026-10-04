@@ -41,7 +41,9 @@ export function selectionReducer(state: Selection, action: SelectionAction): Sel
       if (action.runId === state.runId) return state;
       return { ...state, runId: action.runId, attempt: null, eventIndex: null, comparisonPath: null };
     case 'selectAttempt':
-      return { ...state, attempt: action.attempt, eventIndex: null };
+      // Narrowing to one attempt may hide the selected event, so the event selection is dropped; widening back to
+      // "all events" hides nothing, so the selected event (an index into the recorded list) stays selected.
+      return { ...state, attempt: action.attempt, eventIndex: action.attempt === null ? state.eventIndex : null };
     case 'selectEvent':
       return { ...state, eventIndex: action.eventIndex };
     case 'selectComparison':

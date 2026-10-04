@@ -80,3 +80,7 @@ tr.omitted td { color: var(--muted); text-decoration: line-through; } tr.omitted
 .settings-field p { margin: 6px 0; }
 .settings-input { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-input input, .settings-input select { flex: 1; min-width: 180px; font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+.event-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.event-filter .filter { flex: 1; min-width: 220px; }
+.event-filter input[type="search"] { width: 100%; box-sizing: border-box; }
+.event-filter select { margin-left: 4px; }
