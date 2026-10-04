@@ -1,0 +1,441 @@
+{
+ "measured_at": "2026-10-04T12:40:02",
+ "python": "3.14.6",
+ "sqlite": "3.53.4",
+ "work": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1",
+ "results": [
+  {
+   "case": "C02_rollback_hot_journal",
+   "description": "rollback journal with a HOT -journal left by a crashed writer",
+   "acquisition": {
+    "steps": [
+     "connect_ro",
+     "no_ckpt_on_close"
+    ],
+    "ok": false,
+    "error": "attempt to write a readonly database",
+    "sqlite_errorname": "SQLITE_READONLY_ROLLBACK",
+    "elapsed_ms": 25.0
+   },
+   "source_side_changes": [],
+   "inspection": null
+  },
+  {
+   "case": "C03_wal_clean",
+   "description": "WAL mode, closed cleanly, no -wal/-shm",
+   "acquisition": {
+    "steps": [
+     "connect_ro",
+     "no_ckpt_on_close",
+     "source_journal_mode_read",
+     "backup_one_step",
+     "closed"
+    ],
+    "journal_mode_source": "wal",
+    "journal_mode_dest": "delete",
+    "quick_check": "ok",
+    "rows": 120,
+    "ok": true,
+    "elapsed_ms": 12.4
+   },
+   "source_side_changes": [
+    {
+     "file": "traces.db-shm",
+     "change": "created"
+    },
+    {
+     "file": "traces.db-wal",
+     "change": "created"
+    }
+   ],
+   "inspection": {
+    "command": [
+     "/usr/bin/sandbox-exec",
+     "-f",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/deny.sb",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "-B",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/spikes/a1_zero_write/reader.py",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C03_wal_clean/snapshot/traces.snapshot.db",
+     "--timeout",
+     "2.0"
+    ],
+    "pid": 49710,
+    "returncode": 0,
+    "elapsed_ms": 89.9,
+    "report": {
+     "pid": 49710,
+     "python": "3.14.6",
+     "executable": "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "sqlite_version": "3.53.4",
+     "uri": "file:///private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C03_wal_clean/snapshot/traces.snapshot.db?mode=ro",
+     "steps": [
+      {
+       "step": "connect",
+       "result": "connected",
+       "ok": true,
+       "elapsed_ms": 0.3
+      },
+      {
+       "step": "pragma_temp_store_memory",
+       "result": [],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "pragma_journal_mode_read",
+       "result": "delete",
+       "ok": true,
+       "elapsed_ms": 0.1
+      },
+      {
+       "step": "capabilities_tables",
+       "result": [
+        "milestone_plans",
+        "runs"
+       ],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "count",
+       "result": 120,
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "history_list_page1",
+       "result": {
+        "rows": 50,
+        "first_run_id": "run-00111"
+       },
+       "ok": true,
+       "elapsed_ms": 1.1
+      },
+      {
+       "step": "history_list_page2_cursor",
+       "result": {
+        "rows": 50
+       },
+       "ok": true,
+       "elapsed_ms": 0.5
+      },
+      {
+       "step": "history_detail",
+       "result": {
+        "found": true,
+        "run_events_bytes": 21280
+       },
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "history_prompt",
+       "result": {
+        "found": true,
+        "prompt_bytes": 1300
+       },
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "close",
+       "result": "closed",
+       "ok": true,
+       "elapsed_ms": 0.1
+      }
+     ]
+    },
+    "stderr": "",
+    "raw_stdout_tail": [],
+    "snapshot_inventory_changes": [],
+    "sha256": "7a6c2cab95a40502",
+    "denials": [],
+    "outcome": "READ_OK",
+    "store_write_attempted": false
+   }
+  },
+  {
+   "case": "C04_wal_sidecars_orphaned",
+   "description": "WAL mode with -wal and -shm left by a writer that exited without checkpoint",
+   "acquisition": {
+    "steps": [
+     "connect_ro",
+     "no_ckpt_on_close",
+     "source_journal_mode_read",
+     "backup_one_step",
+     "closed"
+    ],
+    "journal_mode_source": "wal",
+    "journal_mode_dest": "delete",
+    "quick_check": "ok",
+    "rows": 121,
+    "ok": true,
+    "elapsed_ms": 12.6
+   },
+   "source_side_changes": [
+    {
+     "file": "traces.db-shm",
+     "change": "modified",
+     "fields": [
+      "mtime_ns",
+      "sha256"
+     ]
+    }
+   ],
+   "inspection": {
+    "command": [
+     "/usr/bin/sandbox-exec",
+     "-f",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/deny.sb",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "-B",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/spikes/a1_zero_write/reader.py",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C04_wal_sidecars_orphaned/snapshot/traces.snapshot.db",
+     "--timeout",
+     "2.0"
+    ],
+    "pid": 49712,
+    "returncode": 0,
+    "elapsed_ms": 87.4,
+    "report": {
+     "pid": 49712,
+     "python": "3.14.6",
+     "executable": "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "sqlite_version": "3.53.4",
+     "uri": "file:///private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C04_wal_sidecars_orphaned/snapshot/traces.snapshot.db?mode=ro",
+     "steps": [
+      {
+       "step": "connect",
+       "result": "connected",
+       "ok": true,
+       "elapsed_ms": 0.2
+      },
+      {
+       "step": "pragma_temp_store_memory",
+       "result": [],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "pragma_journal_mode_read",
+       "result": "delete",
+       "ok": true,
+       "elapsed_ms": 0.1
+      },
+      {
+       "step": "capabilities_tables",
+       "result": [
+        "milestone_plans",
+        "runs"
+       ],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "count",
+       "result": 121,
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "history_list_page1",
+       "result": {
+        "rows": 50,
+        "first_run_id": "run-wal-tail"
+       },
+       "ok": true,
+       "elapsed_ms": 1.3
+      },
+      {
+       "step": "history_list_page2_cursor",
+       "result": {
+        "rows": 50
+       },
+       "ok": true,
+       "elapsed_ms": 0.6
+      },
+      {
+       "step": "history_detail",
+       "result": {
+        "found": true,
+        "run_events_bytes": 0
+       },
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "history_prompt",
+       "result": {
+        "found": true,
+        "prompt_bytes": 0
+       },
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "close",
+       "result": "closed",
+       "ok": true,
+       "elapsed_ms": 0.1
+      }
+     ]
+    },
+    "stderr": "",
+    "raw_stdout_tail": [],
+    "snapshot_inventory_changes": [],
+    "sha256": "afb2a5d4c8b7f8a5",
+    "denials": [],
+    "outcome": "READ_OK",
+    "store_write_attempted": false
+   }
+  },
+  {
+   "case": "C05_wal_active_writer",
+   "description": "WAL mode with an active fixture writer process (outside the sandbox) committing every 20 ms",
+   "acquisition": {
+    "steps": [
+     "connect_ro",
+     "no_ckpt_on_close",
+     "source_journal_mode_read",
+     "backup_one_step",
+     "closed"
+    ],
+    "journal_mode_source": "wal",
+    "journal_mode_dest": "delete",
+    "quick_check": "ok",
+    "rows": 121,
+    "ok": true,
+    "elapsed_ms": 14.0
+   },
+   "source_side_changes": [
+    {
+     "file": "traces.db-shm",
+     "change": "modified",
+     "fields": [
+      "sha256"
+     ]
+    }
+   ],
+   "inspection": {
+    "command": [
+     "/usr/bin/sandbox-exec",
+     "-f",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/deny.sb",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "-B",
+     "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/ui/spikes/a1_zero_write/reader.py",
+     "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C05_wal_active_writer/snapshot/traces.snapshot.db",
+     "--timeout",
+     "2.0"
+    ],
+    "pid": 49724,
+    "returncode": 0,
+    "elapsed_ms": 89.6,
+    "report": {
+     "pid": 49724,
+     "python": "3.14.6",
+     "executable": "/Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2/.newvenv/bin/python",
+     "sqlite_version": "3.53.4",
+     "uri": "file:///private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-AntiGravity-Kriya-By-Antigraviry-tmp-kriya-demo1-attribution-fix-2/a478e174-0526-44c6-81bb-1b17b2251c0e/scratchpad/a1work/backup1/C05_wal_active_writer/snapshot/traces.snapshot.db?mode=ro",
+     "steps": [
+      {
+       "step": "connect",
+       "result": "connected",
+       "ok": true,
+       "elapsed_ms": 0.3
+      },
+      {
+       "step": "pragma_temp_store_memory",
+       "result": [],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "pragma_journal_mode_read",
+       "result": "delete",
+       "ok": true,
+       "elapsed_ms": 0.1
+      },
+      {
+       "step": "capabilities_tables",
+       "result": [
+        "milestone_plans",
+        "runs"
+       ],
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "count",
+       "result": 121,
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "history_list_page1",
+       "result": {
+        "rows": 50,
+        "first_run_id": "run-00111"
+       },
+       "ok": true,
+       "elapsed_ms": 1.2
+      },
+      {
+       "step": "history_list_page2_cursor",
+       "result": {
+        "rows": 50
+       },
+       "ok": true,
+       "elapsed_ms": 0.6
+      },
+      {
+       "step": "history_detail",
+       "result": {
+        "found": true,
+        "run_events_bytes": 21280
+       },
+       "ok": true,
+       "elapsed_ms": 0.1
+      },
+      {
+       "step": "history_prompt",
+       "result": {
+        "found": true,
+        "prompt_bytes": 1300
+       },
+       "ok": true,
+       "elapsed_ms": 0.0
+      },
+      {
+       "step": "close",
+       "result": "closed",
+       "ok": true,
+       "elapsed_ms": 0.1
+      }
+     ]
+    },
+    "stderr": "",
+    "raw_stdout_tail": [],
+    "snapshot_inventory_changes": [],
+    "sha256": "2a3a08c995f6331e",
+    "denials": [],
+    "outcome": "READ_OK",
+    "store_write_attempted": false
+   }
+  },
+  {
+   "case": "C09_missing_store",
+   "description": "store path does not exist (deleted before open / never created)",
+   "acquisition": {
+    "steps": [],
+    "ok": false,
+    "error": "unable to open database file",
+    "sqlite_errorname": "SQLITE_CANTOPEN",
+    "elapsed_ms": 0.1
+   },
+   "source_side_changes": [],
+   "inspection": null
+  }
+ ]
+}
