@@ -225,3 +225,13 @@ working directory, and Kriya discovers `kriya.yaml` (and classifies it under SEC
   settings, and `HOME` is the default until then.
 
 **Kriya-side merge candidates, in order:** `db96b12`, `f4bd13f`, `f4688ea`, `8065005`, `f876f49`, `b531404`.
+
+## 8. Post-matrix validation (2026-10-04, owner stated the 80-run matrix complete)
+
+See `POST_MATRIX_READINESS.md`: which restrictions expired (D-9's trigger) and which remain owner-gated (real-store release under
+03_GATE C-6, the main-repository merge, the full suite in the owner's terminal, never push); the read-only completion evidence
+(80/80 runs, `MATRIX_COMPLETE`, analysis and review manifests); the full UI check, drift check and Java round trip (all green, 209
+tests, round-trip 270 files, 0 failures); the ordered `KUP:` merge candidates `db96b12`, `f4bd13f`, `f4688ea`, `8065005`,
+`f876f49`, `b531404` (each verified to touch no `ui/` path); and the first-real-store acceptance procedure (preparation only).
+Later GUI-C batches: `b83ebe3`/`725d690` report tool, `1bac658` compare tool, `745b975` evidence checker, `6e387fa` gate shapes,
+`c34f464` evidence fidelity, `b150cc6` accessibility hardening (`A11Y_MANUAL_CHECKLIST.md`, pending a human run).
