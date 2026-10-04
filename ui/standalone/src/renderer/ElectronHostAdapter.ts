@@ -21,6 +21,9 @@ export class ElectronHostAdapter implements HostAdapter {
   openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult> { return this.bridge.openInIde(request) as Promise<OpenInIdeResult>; }
   copyToClipboard(text: string): Promise<void> { return this.bridge.copyToClipboard(text); }
   getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined> { return this.bridge.getSetting(key) as Promise<HostSettings[K] | undefined>; }
-  setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void> { return this.bridge.setSetting(key, value); }
+  async setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void> {
+    await this.bridge.setSetting(key, value);
+    this.info = (await this.bridge.hostInfo()) as HostInfo;
+  }
   hostInfo(): HostInfo { return this.info; }
 }

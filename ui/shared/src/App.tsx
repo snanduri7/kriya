@@ -12,6 +12,7 @@ import { RunsColumn } from './panels/RunsColumn';
 import { Timeline } from './panels/Timeline';
 import { TrustStrip } from './panels/TrustStrip';
 import { sanitizeText } from './render/sanitize';
+import { SettingsPanel } from './panels/SettingsPanel';
 
 /** Driver a host may use to automate the UI (measurements). Exposed only when the host asks for it. */
 export interface AppDriver {
@@ -39,6 +40,21 @@ interface Slots {
 }
 
 export function App({ host, exposeDriver }: AppProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [session, setSession] = useState(0);
+  const sessionRoot = useRef<HTMLDivElement>(null);
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    // Wait until the underlying view is no longer inert before returning keyboard focus.
+    requestAnimationFrame(() => sessionRoot.current?.querySelector<HTMLButtonElement>('[data-settings-button]')?.focus());
+  };
+  return <>
+    <div ref={sessionRoot} className="settings-session" inert={settingsOpen}><AppView key={session} host={host} exposeDriver={exposeDriver} onOpenSettings={() => setSettingsOpen(true)} /></div>
+    {settingsOpen ? <SettingsPanel host={host} onClose={closeSettings} onSaved={(key) => { if (key !== 'editor') setSession((n) => n + 1); }} /> : null}
+  </>;
+}
+
+function AppView({ host, exposeDriver, onOpenSettings }: AppProps & { onOpenSettings: () => void }) {
   const [selection, dispatch] = useReducer(selectionReducer, initialSelection);
   const [slots, setSlots] = useState<Slots>({ capabilities: emptySlot(), list: emptySlot(), detail: emptySlot(), prompt: emptySlot(), status: emptySlot(), snapshots: emptySlot(), acquire: emptySlot(), verify: emptySlot() });
   const [pinRefusal, setPinRefusal] = useState<string | null>(null);
@@ -203,6 +219,7 @@ export function App({ host, exposeDriver }: AppProps) {
     <div className="app">
       <TrustStrip capabilities={slots.capabilities} list={slots.list} status={slots.status} detail={detail} workspacePath={workspacePath} info={info} snapshot={snapshot} label={label} />
       <div className="toolbar">
+        <button data-settings-button type="button" onClick={onOpenSettings} disabled={Object.values(slots).some((s) => s.pending)}>Settings</button>
         <button type="button" onClick={() => void acquire()} disabled={slots.acquire.pending} title="Explicit acquisition: Kriya copies the live store into a new published snapshot and this session pins it">Acquire new snapshot</button>
         <button type="button" onClick={() => void refresh()} disabled={slots.list.pending || !snapshot.pinnedId} title="Re-read the displayed snapshot and the live observations; never acquires">Refresh displayed snapshot</button>
         <label className="muted">displayed snapshot
