@@ -112,7 +112,11 @@ describe('host contract (gate A-2 P-R2) matches the Electron host validators', (
     expect(validate.openInIdeRequest({ path: '/w/a.py', line: 7 }).ok).toBe(true);
     expect(validate.openInIdeRequest({ path: '/w/a.py', line: 0 }).ok).toBe(false);
     expect(validate.openInIdeRequest({ path: '/w/a.py', cmd: 'x' }).ok).toBe(false);
-    expect(validate.hostInfo({ kind: 'electron', hostVersion: '0.0.1', fixtureMode: true }).ok).toBe(true);
-    expect(validate.hostInfo({ kind: 'electron', hostVersion: '0.0.1', fixtureMode: true, extra: 1 }).ok).toBe(false);
+    const info = { kind: 'electron', hostVersion: '0.0.1', fixtureMode: true, configDirectory: '/Users/op', configDirectorySource: 'default_home', configDirectoryProblem: null };
+    expect(validate.hostInfo(info).ok).toBe(true);
+    expect(validate.hostInfo({ ...info, configDirectory: null, configDirectorySource: 'invalid', configDirectoryProblem: 'not a directory' }).ok).toBe(true);
+    expect(validate.hostInfo({ ...info, extra: 1 }).ok).toBe(false);
+    expect(validate.hostInfo({ kind: 'electron', hostVersion: '0.0.1', fixtureMode: true }).ok).toBe(false); // the configuration directory is always reported (F-5)
+    expect(validate.hostInfo({ ...info, configDirectorySource: 'cwd' }).ok).toBe(false);
   });
 });

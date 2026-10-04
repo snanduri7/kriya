@@ -6,9 +6,35 @@ import com.fasterxml.jackson.annotation.*;
 
 @JsonIgnoreProperties(ignoreUnknown = false)
 public class HostInfo {
+    private String configDirectory;
+    private String configDirectoryProblem;
+    private ConfigDirectorySource configDirectorySource;
     private boolean fixtureMode;
     private String hostVersion;
     private String kind;
+
+    /**
+     * The validated directory every kriya child runs in (kriya.yaml discovery, SEC-009
+     * classification); null when invalid. Independent of the recovery workspace (08 review F-5).
+     */
+    @JsonProperty("configDirectory")
+    public String getConfigDirectory() { return configDirectory; }
+    @JsonProperty("configDirectory")
+    public void setConfigDirectory(String value) { this.configDirectory = value; }
+
+    /**
+     * Why the configuration directory is unusable (then every KUP call is a typed HOST_ERROR
+     * until it is fixed).
+     */
+    @JsonProperty("configDirectoryProblem")
+    public String getConfigDirectoryProblem() { return configDirectoryProblem; }
+    @JsonProperty("configDirectoryProblem")
+    public void setConfigDirectoryProblem(String value) { this.configDirectoryProblem = value; }
+
+    @JsonProperty("configDirectorySource")
+    public ConfigDirectorySource getConfigDirectorySource() { return configDirectorySource; }
+    @JsonProperty("configDirectorySource")
+    public void setConfigDirectorySource(ConfigDirectorySource value) { this.configDirectorySource = value; }
 
     /**
      * true while the host answers from fixtures (D-9).

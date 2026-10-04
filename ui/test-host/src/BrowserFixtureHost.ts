@@ -8,7 +8,7 @@ import type { HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, Open
  * snapshot.verify answer SNAPSHOT_CORRUPT (so nothing can be pinned).
  */
 export class BrowserFixtureHost implements HostAdapter {
-  private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', kriyaExecutable: null };
+  private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', kriyaExecutable: null, configDirectory: null };
   /** In-memory snapshot store: the fixture snapshots plus ids "acquired" in this page (gate C-2 semantics). */
   private snapshots: Record<string, unknown>[] | null = null;
   private acquired = 0;
@@ -82,5 +82,5 @@ export class BrowserFixtureHost implements HostAdapter {
 
   async getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined> { return this.settings[key] as HostSettings[K] | undefined; }
   async setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void> { this.settings[key] = value; }
-  hostInfo(): HostInfo { return { kind: 'browser-test', hostVersion: '0.0.1', fixtureMode: true }; }
+  hostInfo(): HostInfo { return { kind: 'browser-test', hostVersion: '0.0.1', fixtureMode: true, configDirectory: '/fixture/home', configDirectorySource: 'default_home', configDirectoryProblem: null }; }
 }

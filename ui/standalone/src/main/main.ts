@@ -6,10 +6,10 @@
  */
 import { app, BrowserWindow, clipboard, ipcMain, session, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
-import { buildKriyaChildEnv } from './child_env';
+import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
 import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
@@ -43,11 +43,16 @@ function fakeEnv(): Record<string, string> {
 
 function fromOwnedRenderer(event: IpcMainInvokeEvent): boolean { return ownedWebContentsId !== null && event.sender.id === ownedWebContentsId; }
 
+const isDirectory = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
+/** The explicit configuration directory (F-5): every kriya child runs with this cwd; Electron's own cwd is never used. */
+function configDirectory() { return resolveConfigDirectory(settings.get('configDirectory'), process.env, isDirectory); }
+
 function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.hostInfo, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     const real = ALLOW_REAL && !!settings.get('kriyaExecutable');
-    return { kind: 'electron', hostVersion: HOST_VERSION, fixtureMode: !real };
+    const dir = configDirectory();
+    return { kind: 'electron', hostVersion: HOST_VERSION, fixtureMode: !real, configDirectory: dir.ok ? dir.directory : null, configDirectorySource: dir.ok ? dir.source : 'invalid', configDirectoryProblem: dir.ok ? null : dir.message };
   });
   ipcMain.handle(IPC_CHANNELS.query, async (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
@@ -56,15 +61,19 @@ function registerIpc() {
     const argv = buildKriyaArgv(v.value);
     const configured = settings.get('kriyaExecutable');
     const useReal = ALLOW_REAL && configured && existsSync(configured);
+    // F-5: the child's working directory is the validated configuration directory, in BOTH modes; a missing or invalid
+    // one is a typed refusal, never a fallback to Electron's own launch directory.
+    const dir = configDirectory();
+    if (!dir.ok) return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${dir.message}`);
     let outcome;
     if (useReal) {
       // The real child gets exactly the owner's environment policy (child_env.ts): fixed PATH, fixed
       // PYTHONDONTWRITEBYTECODE=1, the operator's HOME, an absolute operator KRIYA_STATE_DIR if set - nothing else.
       const childEnv = buildKriyaChildEnv(process.env);
       if (!childEnv.ok) return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${childEnv.message}`);
-      outcome = await runKriya({ executable: configured, argv, env: childEnv.env });
+      outcome = await runKriya({ executable: configured, argv, env: childEnv.env, cwd: dir.directory });
     } else {
-      outcome = await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv() });
+      outcome = await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv(), cwd: dir.directory });
     }
     if (outcome.kind === 'json') return outcome.json;
     return errorEnvelope(v.value.operation, outcome.code ?? 'HOST_ERROR', `${outcome.message ?? 'unknown'}${outcome.stderrTail ? ` | stderr: ${outcome.stderrTail.slice(-300)}` : ''}`);

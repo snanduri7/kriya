@@ -12,5 +12,9 @@ describe('host settings store', () => {
     s.set('editor', 'intellij'); s.set('workspacePath', '/w');
     const again = new SettingsStore(f);
     expect(again.get('editor')).toBe('intellij'); expect(again.get('workspacePath')).toBe('/w'); expect(again.get('kriyaExecutable')).toBeNull();
+    expect(again.get('configDirectory')).toBeNull(); // default: the operator's HOME, resolved by the main process
+    again.set('configDirectory', '/Volumes/work/project');
+    expect(new SettingsStore(f).get('configDirectory')).toBe('/Volumes/work/project');
+    expect(new SettingsStore(f).get('workspacePath')).toBe('/w'); // independent settings
   });
 });

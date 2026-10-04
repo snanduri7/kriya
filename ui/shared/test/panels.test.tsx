@@ -151,6 +151,24 @@ describe('digest verified at pin; metadata checked per query (08 review F-4)', (
   });
 });
 
+describe('the configuration directory is explicit and visible, distinct from the recovery workspace (08 review F-5)', () => {
+  it('the strip shows the configuration directory with its source and the workspace as the recovery-assessment input', async () => {
+    await renderAndSelect(detailFor('r1', 'recorded'));
+    const strip = screen.getByRole('region', { name: /trust strip/i });
+    expect(strip).toHaveTextContent('Configuration directory/fixture/home');
+    expect(strip).toHaveTextContent('default: operator HOME; kriya.yaml is discovered here (child working directory); independent of the workspace');
+    expect(strip).toHaveTextContent('Workspace (recovery assessment)/fixture/workspace');
+  });
+  it('an invalid configuration directory is shown as such, with the host\'s reason', async () => {
+    const host = hostWith(detailFor('r1', 'recorded'));
+    host.info = { ...host.info, configDirectory: null, configDirectorySource: 'invalid', configDirectoryProblem: 'the configDirectory setting is not an existing directory: /gone' };
+    render(<App host={host} />);
+    const strip = await screen.findByRole('region', { name: /trust strip/i });
+    expect(strip).toHaveTextContent('Configuration directoryinvalid');
+    expect(strip).toHaveTextContent('/gone - every Kriya call is refused until the configDirectory setting is fixed');
+  });
+});
+
 describe('every panel renders with a fake host (P-R3)', () => {
   it('trust strip, runs, timeline, inspector tabs and drawer all render recorded data', async () => {
     const host = await renderAndSelect(detailFor('r1', 'recorded'));

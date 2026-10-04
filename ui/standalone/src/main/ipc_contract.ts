@@ -16,7 +16,7 @@ export const ALLOWED_CHANNELS: readonly IpcChannel[] = Object.values(IPC_CHANNEL
 
 export const EDITOR_IDS = ['vscode', 'intellij', 'eclipse'] as const;
 export type EditorId = (typeof EDITOR_IDS)[number];
-export const SETTING_KEYS = ['editor', 'kriyaExecutable', 'workspacePath'] as const;
+export const SETTING_KEYS = ['editor', 'kriyaExecutable', 'workspacePath', 'configDirectory'] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
 export const LIMITS = {
@@ -148,5 +148,7 @@ export function validateSettingValue(key: SettingKey, v: unknown): ValidationRes
   if (v === null) return key === 'editor' ? { ok: false, message: 'editor cannot be null' } : { ok: true, value: null };
   if (typeof v !== 'string' || v.length > LIMITS.pathMax || v.includes('\0')) return { ok: false, message: 'setting value must be a string' };
   if (key === 'editor' && !(EDITOR_IDS as readonly string[]).includes(v)) return { ok: false, message: `editor must be one of ${EDITOR_IDS.join(', ')}` };
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if ((key === 'configDirectory' || key === 'workspacePath') && (!v.startsWith('/') || /[\u0000-\u001f]/.test(v))) return { ok: false, message: `${key} must be an absolute path without control characters` };
   return { ok: true, value: v };
 }

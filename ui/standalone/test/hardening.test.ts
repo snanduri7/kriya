@@ -63,4 +63,10 @@ describe('gate A-1 hardening settings (every one checked)', () => {
     expect(runner).not.toMatch(/\.\.\.process\.env/);
     expect(runner).toContain('KRIYA_CHILD_PATH');
   });
+  it('every kriya child runs in the validated configuration directory, never in Electron\'s own working directory (F-5)', () => {
+    expect((mainTs.match(/cwd: dir\.directory/g) ?? []).length).toBe(2); // the real child and the stand-in alike
+    expect(mainTs).toContain("resolveConfigDirectory(settings.get('configDirectory'), process.env, isDirectory)");
+    expect(mainTs).not.toMatch(/process\.cwd\(\)/);
+    expect(mainTs).toContain('configDirectorySource');
+  });
 });

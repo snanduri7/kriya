@@ -64,6 +64,7 @@ const req = parse(args);
 if (!req) fail(`usage error: argv outside the KUP grammar: ${JSON.stringify(args)}`);
 if (behavior === 'slow') await new Promise((r) => setTimeout(r, Number(process.env.KRIYA_FAKE_SLEEP_MS ?? 70_000)));
 if (behavior === 'echoenv') emitRaw(JSON.stringify(process.env), 0);
+else if (behavior === 'echocwd') emitRaw(JSON.stringify({ cwd: process.cwd() }), 0);
 else if (behavior === 'huge') emitRaw('{"schema_version":1,"pad":"' + 'x'.repeat(Number(process.env.KRIYA_FAKE_HUGE_BYTES ?? 9 * 1024 * 1024)) + '"}', 0);
 else if (behavior === 'garbage') emitRaw('Traceback (most recent call last): not json', 1);
 else if (behavior === 'exit3') { process.stderr.write('fake-kriya: simulated failure\n'); process.exit(3); }

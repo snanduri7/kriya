@@ -3,8 +3,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EDITOR_IDS, type EditorId, type SettingKey } from './ipc_contract';
 
-export interface Settings { editor: EditorId; kriyaExecutable: string | null; workspacePath: string | null }
-export const DEFAULT_SETTINGS: Settings = { editor: 'vscode', kriyaExecutable: null, workspacePath: null };
+/** configDirectory: the child's working directory for every kriya call (kriya.yaml discovery); null = operator HOME.
+ * Independent of workspacePath, which is the recovery-assessment workspace passed as an explicit argument. */
+export interface Settings { editor: EditorId; kriyaExecutable: string | null; workspacePath: string | null; configDirectory: string | null }
+export const DEFAULT_SETTINGS: Settings = { editor: 'vscode', kriyaExecutable: null, workspacePath: null, configDirectory: null };
 
 export class SettingsStore {
   private cache: Settings | null = null;
@@ -17,6 +19,7 @@ export class SettingsStore {
         editor: (EDITOR_IDS as readonly string[]).includes(String(raw.editor)) ? (raw.editor as EditorId) : DEFAULT_SETTINGS.editor,
         kriyaExecutable: typeof raw.kriyaExecutable === 'string' ? raw.kriyaExecutable : null,
         workspacePath: typeof raw.workspacePath === 'string' ? raw.workspacePath : null,
+        configDirectory: typeof raw.configDirectory === 'string' ? raw.configDirectory : null,
       };
     } catch { this.cache = { ...DEFAULT_SETTINGS }; }
     return this.cache;

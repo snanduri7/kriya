@@ -4,6 +4,7 @@ import { isRecorded } from '../model/availability';
 import { eventDetails } from '../model/normalize';
 import { sanitizeText } from '../render/sanitize';
 import type { FreshnessLabel, SnapshotSession } from '../state/snapshot';
+import type { HostInfo } from '../host/HostAdapter';
 
 export interface TrustStripProps {
   capabilities: SlotState<KupEnvelope<Capabilities>>;
@@ -11,8 +12,7 @@ export interface TrustStripProps {
   status: SlotState<KupEnvelope<WorkspaceStatus>>;
   detail: RunDetail | null;
   workspacePath: string | null;
-  hostKind: string;
-  fixtureMode: boolean;
+  info: HostInfo;
   snapshot: SnapshotSession;
   label: FreshnessLabel;
 }
@@ -41,7 +41,11 @@ export function recordedModelFacts(detail: RunDetail | null): { model: string; q
   return { model, qualification };
 }
 
-export function TrustStrip({ capabilities, list, status, detail, workspacePath, hostKind, fixtureMode, snapshot, label }: TrustStripProps) {
+export function TrustStrip({ capabilities, list, status, detail, workspacePath, info, snapshot, label }: TrustStripProps) {
+  const { kind: hostKind, fixtureMode } = info;
+  const configDirNote = info.configDirectorySource === 'setting' ? 'set explicitly; kriya.yaml is discovered here (child working directory); independent of the workspace'
+    : info.configDirectorySource === 'default_home' ? 'default: operator HOME; kriya.yaml is discovered here (child working directory); independent of the workspace'
+      : `invalid: ${info.configDirectoryProblem ?? 'unknown problem'} - every Kriya call is refused until the configDirectory setting is fixed`;
   const caps = capabilities.value?.data ?? null;
   const source = list.value?.source ?? null;
   const facts = recordedModelFacts(detail);
@@ -60,7 +64,8 @@ export function TrustStrip({ capabilities, list, status, detail, workspacePath, 
       {item('Displayed snapshot', snapshot.pinnedId ?? 'none', snapshot.pinnedId ? (snapshot.pinnedBy === 'acquired' ? 'acquired by this session' : 'chosen from the published list') : undefined)}
       {item('Snapshot integrity', snapshot.verification ? `digest verified at pin (${snapshot.verification.verified_at}); metadata checked per query` : 'none pinned', snapshot.verification?.sha256 ? `sha256 ${snapshot.verification.sha256.slice(0, 16)}…` : undefined)}
       {item('Snapshot', label.headline, label.metadata === 'change_detected' ? 'source metadata change detected' : label.metadata === 'no_change_detected' ? 'no metadata change detected (not a freshness guarantee)' : undefined)}
-      {item('Workspace', workspacePath ?? 'none selected', runActive)}
+      {item('Configuration directory', info.configDirectory ?? 'invalid', configDirNote)}
+      {item('Workspace (recovery assessment)', workspacePath ?? 'none selected', runActive)}
       {item('Kriya', identity, capabilities.current ? undefined : capabilities.error ? `unverified: ${capabilities.error.code}` : 'unverified')}
       {item('Model / qualification', `${facts.model} / ${facts.qualification}`, detail ? 'recorded in the snapshot for the selected run (historical, not live status)' : undefined)}
       {item('Observed', list.observedAt ?? 'never', list.error ? `last read failed: ${list.error.code}` : list.current ? 'read of the displayed snapshot succeeded' : undefined)}

@@ -13,7 +13,10 @@ export type EditorId = 'vscode' | 'intellij' | 'eclipse';
 export interface HostSettings {
   editor: EditorId;
   kriyaExecutable: string | null;
+  /** The recovery-assessment workspace: travels only as an explicit argument (workspace.status, snapshot.acquire). */
   workspacePath: string | null;
+  /** The configuration directory: the child's working directory for every kriya call (kriya.yaml discovery); null = HOME. */
+  configDirectory: string | null;
 }
 
 export interface OpenInIdeRequest {
@@ -32,6 +35,10 @@ export interface HostInfo {
   kind: string; // 'electron' | 'browser-test' | ...
   hostVersion: string;
   fixtureMode: boolean;
+  /** The validated configuration directory kriya runs in (08 review F-5), or null when invalid; shown in the trust strip. */
+  configDirectory: string | null;
+  configDirectorySource: 'setting' | 'default_home' | 'invalid';
+  configDirectoryProblem: string | null;
 }
 
 export interface HostAdapter {

@@ -1,4 +1,4 @@
-import type { HostAdapter, HostSettings, OpenInIdeRequest, OpenInIdeResult } from '../src/host/HostAdapter';
+import type { HostAdapter, HostInfo, HostSettings, OpenInIdeRequest, OpenInIdeResult } from '../src/host/HostAdapter';
 import type { KupEnvelope, KupRequest } from '../src/model/kup';
 
 /** In-memory HostAdapter for tests: answers from a map of canned envelopes. */
@@ -6,14 +6,15 @@ export class FakeHost implements HostAdapter {
   calls: KupRequest[] = [];
   opened: OpenInIdeRequest[] = [];
   clipboard: string[] = [];
-  settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace' };
+  settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', configDirectory: null };
+  info: HostInfo = { kind: 'fake-test', hostVersion: '0', fixtureMode: true, configDirectory: '/fixture/home', configDirectorySource: 'default_home', configDirectoryProblem: null };
   constructor(private responses: (req: KupRequest) => KupEnvelope | Promise<KupEnvelope> | unknown) {}
   async query(request: KupRequest): Promise<KupEnvelope> { this.calls.push(request); return (await this.responses(request)) as KupEnvelope; }
   async openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult> { this.opened.push(request); return { ok: true, editor: 'vscode', verified: true, message: `fake open ${request.path}` }; }
   async copyToClipboard(text: string) { this.clipboard.push(text); }
   async getSetting<K extends keyof HostSettings>(key: K) { return this.settings[key] as HostSettings[K] | undefined; }
   async setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]) { this.settings[key] = value; }
-  hostInfo() { return { kind: 'fake-test', hostVersion: '0', fixtureMode: true }; }
+  hostInfo() { return this.info; }
 }
 
 export const SNAP_ID = '20261004T093000000000Z-f1c70001';

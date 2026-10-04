@@ -17,7 +17,8 @@
       "enum": [
         "editor",
         "kriyaExecutable",
-        "workspacePath"
+        "workspacePath",
+        "configDirectory"
       ]
     },
     "KupRequest": {
@@ -248,7 +249,10 @@
       "required": [
         "kind",
         "hostVersion",
-        "fixtureMode"
+        "fixtureMode",
+        "configDirectory",
+        "configDirectorySource",
+        "configDirectoryProblem"
       ],
       "properties": {
         "kind": {
@@ -260,6 +264,28 @@
         "fixtureMode": {
           "type": "boolean",
           "description": "true while the host answers from fixtures (D-9)."
+        },
+        "configDirectory": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The validated directory every kriya child runs in (kriya.yaml discovery, SEC-009 classification); null when invalid. Independent of the recovery workspace (08 review F-5)."
+        },
+        "configDirectorySource": {
+          "type": "string",
+          "enum": [
+            "setting",
+            "default_home",
+            "invalid"
+          ]
+        },
+        "configDirectoryProblem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the configuration directory is unusable (then every KUP call is a typed HOST_ERROR until it is fixed)."
         }
       },
       "additionalProperties": false

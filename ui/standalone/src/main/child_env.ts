@@ -31,3 +31,25 @@ export function buildKriyaChildEnv(operator: Readonly<Record<string, string | un
   }
   return { ok: true, env };
 }
+
+/**
+ * The CONFIGURATION DIRECTORY (08 review F-5, addendum 3): the child's working directory for EVERY kriya call, so
+ * `kriya.yaml` discovery and SEC-009 classification happen in one explicit, visible place - never in Electron's own
+ * launch directory (`/` from Finder, the shell's directory from a terminal). It is a host setting (`configDirectory`,
+ * null = the operator's HOME), independent of the recovery workspace (`workspacePath`, which only ever travels as an
+ * explicit argument: `runs status --workspace`, `traces --snapshot --workspace`). Changing one never changes the other.
+ */
+export type ConfigDirectorySource = 'setting' | 'default_home';
+export type ConfigDirectoryResult =
+  | { ok: true; directory: string; source: ConfigDirectorySource }
+  | { ok: false; message: string };
+
+export function resolveConfigDirectory(setting: string | null | undefined, operator: Readonly<Record<string, string | undefined>>, isDirectory: (path: string) => boolean): ConfigDirectoryResult {
+  const source: ConfigDirectorySource = typeof setting === 'string' ? 'setting' : 'default_home';
+  const candidate = source === 'setting' ? (setting as string) : operator.HOME;
+  const label = source === 'setting' ? 'the configDirectory setting' : 'the default configuration directory (HOME)';
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (typeof candidate !== 'string' || !candidate.startsWith('/') || /[\u0000-\u001f]/.test(candidate)) return { ok: false, message: `${label} must be an absolute path without control characters (got ${JSON.stringify(candidate ?? null)})` };
+  if (!isDirectory(candidate)) return { ok: false, message: `${label} is not an existing directory: ${candidate}` };
+  return { ok: true, directory: candidate, source };
+}

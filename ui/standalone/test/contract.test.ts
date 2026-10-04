@@ -54,6 +54,11 @@ describe('KUP request validation (P-25, P-31)', () => {
     expect(validateSettingValue('editor', 'vim').ok).toBe(false);
     expect(validateSettingValue('editor', 'intellij').ok).toBe(true);
     expect(validateSettingValue('workspacePath', null).ok).toBe(true);
+    // the configuration directory setting (F-5): absolute path or null (= operator HOME)
+    expect(validateSettingValue('configDirectory', '/Volumes/work/project').ok).toBe(true);
+    expect(validateSettingValue('configDirectory', null).ok).toBe(true);
+    for (const bad of ['relative', '', '/a\nb', '~/x']) expect(validateSettingValue('configDirectory', bad).ok, bad).toBe(false);
+    expect(validateSettingValue('workspacePath', 'relative').ok).toBe(false);
   });
 });
 

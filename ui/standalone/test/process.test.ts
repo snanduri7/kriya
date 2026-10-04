@@ -69,6 +69,22 @@ describe('kriya process runner (P-31, P-32) against the fixture stand-in', () =>
     expect(seen.PATH).toBe('/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin'); expect(seen.PYTHONDONTWRITEBYTECODE).toBe('1'); expect(seen.HOME).toBe('/Users/op'); expect(seen.KRIYA_STATE_DIR).toBe('/Volumes/work/state');
     for (const k of ['KRIYA_UI_TEST_LEAK', 'PYTHONPATH', 'KRIYA_TRUST_FILE', 'OPENAI_API_KEY', 'SHELL', 'TMPDIR', 'LANG']) expect(seen).not.toHaveProperty(k);
   });
+  it('the child runs in the explicit cwd it is given, whatever directory the host itself was started from (F-5)', async () => {
+    const { mkdtempSync, realpathSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), 'kriya-ui-config-')));
+    const before = process.cwd();
+    const seen: string[] = [];
+    try {
+      for (const launchedFrom of ['/', realpathSync(tmpdir())]) {
+        process.chdir(launchedFrom);
+        const out = await runKriya({ executable: process.execPath, argv: [FAKE, ...buildKriyaArgv({ operation: 'capabilities' })], nodeScript: true, env: { KRIYA_FAKE_FIXTURES: GEN, KRIYA_FAKE_BEHAVIOR: 'echocwd' }, cwd: configDir });
+        expect(out.kind).toBe('json');
+        seen.push(realpathSync((out.json as { cwd: string }).cwd));
+      }
+    } finally { process.chdir(before); }
+    expect(seen).toEqual([configDir, configDir]);
+  });
   it('the environment is minimal: the child does not inherit the parent environment', async () => {
     process.env.KRIYA_UI_TEST_LEAK = 'leak';
     const out = await run(buildKriyaArgv({ operation: 'capabilities' }), { KRIYA_FAKE_BEHAVIOR: 'garbage' });

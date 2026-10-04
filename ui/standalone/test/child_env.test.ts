@@ -1,6 +1,6 @@
 /** The child environment policy for the real kriya (08 review F-1/F-2; owner decision 2026-10-04). */
 import { describe, expect, it } from 'vitest';
-import { KRIYA_CHILD_ENV_KEYS, KRIYA_CHILD_PATH, buildKriyaChildEnv } from '../src/main/child_env';
+import { KRIYA_CHILD_ENV_KEYS, KRIYA_CHILD_PATH, buildKriyaChildEnv, resolveConfigDirectory } from '../src/main/child_env';
 
 const HOSTILE = {
   HOME: '/Users/op', PATH: '/evil/bin:/usr/bin', PYTHONDONTWRITEBYTECODE: '0', PYTHONPATH: '/evil/site', PYTHONHOME: '/evil/py',
@@ -39,5 +39,30 @@ describe('buildKriyaChildEnv', () => {
       const r = buildKriyaChildEnv({ HOME: '/Users/op', PYTHONDONTWRITEBYTECODE: v });
       expect(r.ok && r.env.PYTHONDONTWRITEBYTECODE).toBe('1');
     }
+  });
+});
+
+describe('resolveConfigDirectory (08 review F-5): the explicit, validated working directory of every kriya child', () => {
+  const dirs = new Set(['/Users/op', '/Volumes/work/project']);
+  const isDir = (p: string) => dirs.has(p);
+  it('a setting wins over HOME; null falls back to the operator HOME; both must exist and be absolute', () => {
+    expect(resolveConfigDirectory('/Volumes/work/project', { HOME: '/Users/op' }, isDir)).toEqual({ ok: true, directory: '/Volumes/work/project', source: 'setting' });
+    expect(resolveConfigDirectory(null, { HOME: '/Users/op' }, isDir)).toEqual({ ok: true, directory: '/Users/op', source: 'default_home' });
+    expect(resolveConfigDirectory(undefined, { HOME: '/Users/op' }, isDir)).toEqual({ ok: true, directory: '/Users/op', source: 'default_home' });
+  });
+  it('never falls back to the process working directory: an invalid setting or HOME is a typed refusal', () => {
+    for (const bad of ['relative/dir', '', '/does/not/exist', '/Users/op\n', '~/x']) {
+      const r = resolveConfigDirectory(bad, { HOME: '/Users/op' }, isDir);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.message).toContain('configDirectory setting');
+    }
+    for (const home of [undefined, '', 'relative', '/nope']) {
+      const r = resolveConfigDirectory(null, { HOME: home }, isDir);
+      expect(r.ok, String(home)).toBe(false);
+      if (!r.ok) expect(r.message).toContain('default configuration directory');
+    }
+  });
+  it('the recovery workspace never influences the configuration directory (separate inputs, no coupling)', () => {
+    expect(resolveConfigDirectory(null, { HOME: '/Users/op', KRIYA_WORKSPACE: '/Volumes/work/project' }, isDir)).toEqual({ ok: true, directory: '/Users/op', source: 'default_home' });
   });
 });

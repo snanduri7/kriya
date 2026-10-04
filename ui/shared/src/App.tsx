@@ -201,7 +201,7 @@ export function App({ host, exposeDriver }: AppProps) {
 
   return (
     <div className="app">
-      <TrustStrip capabilities={slots.capabilities} list={slots.list} status={slots.status} detail={detail} workspacePath={workspacePath} hostKind={info.kind} fixtureMode={info.fixtureMode} snapshot={snapshot} label={label} />
+      <TrustStrip capabilities={slots.capabilities} list={slots.list} status={slots.status} detail={detail} workspacePath={workspacePath} info={info} snapshot={snapshot} label={label} />
       <div className="toolbar">
         <button type="button" onClick={() => void acquire()} disabled={slots.acquire.pending} title="Explicit acquisition: Kriya copies the live store into a new published snapshot and this session pins it">Acquire new snapshot</button>
         <button type="button" onClick={() => void refresh()} disabled={slots.list.pending || !snapshot.pinnedId} title="Re-read the displayed snapshot and the live observations; never acquires">Refresh displayed snapshot</button>

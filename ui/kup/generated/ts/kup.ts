@@ -540,13 +540,22 @@ export interface HostInfo {
    * true while the host answers from fixtures (D-9).
    */
   fixtureMode: boolean;
+  /**
+   * The validated directory every kriya child runs in (kriya.yaml discovery, SEC-009 classification); null when invalid. Independent of the recovery workspace (08 review F-5).
+   */
+  configDirectory: string | null;
+  configDirectorySource: 'setting' | 'default_home' | 'invalid';
+  /**
+   * Why the configuration directory is unusable (then every KUP call is a typed HOST_ERROR until it is fixed).
+   */
+  configDirectoryProblem: string | null;
 }
 
 // ---- HostMessages (host-contract.schema.json#/$defs/Messages) ----
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
  */
-export type SettingKey = 'editor' | 'kriyaExecutable' | 'workspacePath';
+export type SettingKey = 'editor' | 'kriyaExecutable' | 'workspacePath' | 'configDirectory';
 export type SettingValue = string | null;
 
 /**
