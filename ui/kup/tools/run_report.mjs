@@ -34,9 +34,22 @@ export const DETAIL_SECTIONS = ['run_events', 'evidence_records', 'gate_outcomes
 const DETAIL_KEYS = new Set(['run', 'fields', ...DETAIL_SECTIONS]);
 const SUMMARY_KEYS = new Set(['run_id', 'timestamp', 'goal', 'duration_sec', 'attempts', 'status', 'failure_category', 'files_modified', 'milestone_group_id', 'milestone_index', 'milestone_total']);
 
+/** developer.prompt_composition fields, EXACTLY as kriya/workflow/prompt_composition.py documents them. Anything not
+ * listed here is reported as "unknown (uninterpreted)" - a name ending in _tokens proves nothing about its meaning. */
+export const PROMPT_COMPOSITION_FIELDS = Object.freeze({
+  estimated_by_kriya: Object.freeze(['t0_member_tokens', 't0_header_tokens', 'sibling_signatures_tokens', 't1_tokens', 't2_tokens', 't3_tokens', 'skills_tokens', 'code_context_tokens', 'prefix_shared_tokens']), // estimate_tokens (len/4); prefix_shared_tokens = prefix_shared_chars // 4
+  provider_reported: Object.freeze(['prompt_tokens_reported']),
+  provider_timing: Object.freeze(['prefill_seconds', 'load_seconds']), // from the provider's prompt_eval_ms / load_ms
+  recorded_other: Object.freeze(['prefix_break']), // Kriya's prefix-reuse observation (where the prompt first differed)
+  note: Object.freeze(['token_counts']),
+});
+
 // ---- helpers -------------------------------------------------------------------------------------------------------
 export const pointer = (...parts) => (parts.length ? '/' + parts.map((p) => String(p).replace(/~/g, '~0').replace(/\//g, '~1')).join('/') : '');
-const fact = (file, ptr, value) => ({ value, source: { file, pointer: ptr } });
+/** A fact: the recorded value and where it came from. `absent: true` marks a field that is MISSING from the record
+ * (the pointer then names the field that was looked up), as opposed to a field recorded as null. */
+const fact = (file, ptr, value, absent = false) => ({ value: absent ? null : value, source: absent ? { file, pointer: ptr, absent: true } : { file, pointer: ptr } });
+const field = (file, base, obj, k) => fact(file, `${base}${pointer(k)}`, obj[k], !(k in obj));
 const validatorErrors = (v) => (v.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message ?? ''}`.trim());
 const isObj = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 export function stableStringify(value, indent = 2) {
@@ -91,7 +104,7 @@ export function analyzeFile(file, text) {
 }
 
 function summaryOf(file, base, r, envelope) {
-  const f = (k) => fact(file, `${base}${pointer(k)}`, r[k] === undefined ? null : r[k]);
+  const f = (k) => field(file, base, r, k);
   return {
     run_id: f('run_id'), status_as_recorded: f('status'), failure_category: f('failure_category'), attempts: f('attempts'), duration_sec: f('duration_sec'),
     timestamp_as_stored: f('timestamp'), goal: f('goal'), files_modified_raw: f('files_modified'),
@@ -103,7 +116,7 @@ function summaryOf(file, base, r, envelope) {
 
 function sectionOf(file, base, section) {
   const recorded = section.availability === 'recorded';
-  return { availability: fact(file, `${base}${pointer('availability')}`, section.availability), provenance: fact(file, `${base}${pointer('provenance')}`, section.provenance ?? null), reason: fact(file, `${base}${pointer('reason')}`, section.reason ?? null), recorded, data_pointer: recorded ? `${base}${pointer('data')}` : null };
+  return { availability: field(file, base, section, 'availability'), provenance: field(file, base, section, 'provenance'), reason: field(file, base, section, 'reason'), recorded, data_pointer: recorded ? `${base}${pointer('data')}` : null };
 }
 
 function analyzeDetail(file, data, envelope, diag) {
@@ -125,29 +138,36 @@ function analyzeDetail(file, data, envelope, diag) {
         if (!isObj(e)) { diag('error', base, 'event is not an object'); out.events.push({ index: i, malformed: true, raw: fact(file, base, e) }); return; }
         const valid = validators.validateRunEvent(e);
         if (!valid) for (const m of validatorErrors(validators.validateRunEvent)) diag('error', base, `event does not match the serializer shape (kind, created_at required): ${m}`);
-        const f = (k) => fact(file, `${base}${pointer(k)}`, e[k] === undefined ? null : e[k]);
+        const f = (k) => field(file, base, e, k);
         const createdAtUtc = utcOf(e.created_at);
         if (typeof e.created_at === 'number' && createdAtUtc === null) diag('warning', `${base}${pointer('created_at')}`, 'created_at is a number outside the representable date range');
-        out.events.push({ index: i, malformed: !valid, kind: f('kind'), attempt: f('attempt'), source: f('source'), authority: f('authority'), message: f('message'), failure_type: f('failure_type'), operation: f('operation'), created_at: f('created_at'), created_at_utc: createdAtUtc, details_pointer: `${base}${pointer('details')}`, unknown_fields: unknownKeys(e, new Set(EVENT_KEYS)).map((k) => f(k)) });
+        out.events.push({ index: i, malformed: !valid, record: fact(file, base, undefined, false), kind: f('kind'), attempt: f('attempt'), source: f('source'), authority: f('authority'), message: f('message'), failure_type: f('failure_type'), operation: f('operation'), created_at: f('created_at'), created_at_utc: createdAtUtc, details_pointer: `${base}${pointer('details')}`, unknown_fields: unknownKeys(e, new Set(EVENT_KEYS)).map((k) => f(k)) });
+        delete out.events[out.events.length - 1].record.value; // the pointer to the event object itself (no value copied)
         const key = typeof e.attempt === 'number' ? String(e.attempt) : 'not recorded';
         perAttempt.set(key, (perAttempt.get(key) ?? 0) + 1);
         if (e.failure_type !== null && e.failure_type !== undefined) out.failures.events_with_failure_type.push({ index: i, kind: f('kind'), attempt: f('attempt'), failure_type: f('failure_type'), message: f('message') });
         const d = isObj(e.details) ? e.details : null;
         if (e.kind === 'context.known_target_package' && d) {
           const dp = (...k) => `${base}${pointer('details', ...k)}`;
-          out.context.packages.push({ event_index: i, attempt: f('attempt'), known_target_files: fact(file, dp('known_target_files'), d.known_target_files ?? null), unit_count: fact(file, dp('unit_count'), d.unit_count ?? null), package_hash: fact(file, dp('package_hash'), d.package_hash ?? null), member_hint_paths: fact(file, dp('member_hint_paths'), d.member_hint_paths ?? null) });
-          if (Array.isArray(d.tiers)) d.tiers.forEach((t, j) => out.context.tiers.push({ event_index: i, attempt: f('attempt'), path: fact(file, dp('tiers', j, 'path'), isObj(t) ? t.path ?? null : null), member_id: fact(file, dp('tiers', j, 'member_id'), isObj(t) ? t.member_id ?? null : null), tier: fact(file, dp('tiers', j, 'tier'), isObj(t) ? t.tier ?? null : null), raw: isObj(t) ? undefined : fact(file, dp('tiers', j), t) }));
-          else if (d.tiers !== undefined) diag('warning', dp('tiers'), 'details.tiers is not a list; shown raw');
-          if (Array.isArray(d.omitted)) d.omitted.forEach((o, j) => out.context.omissions.push({ event_index: i, attempt: f('attempt'), path: fact(file, dp('omitted', j, 'path'), isObj(o) ? o.path ?? null : null), reason: fact(file, dp('omitted', j, 'reason'), isObj(o) ? o.reason ?? null : null), raw: isObj(o) ? undefined : fact(file, dp('omitted', j), o) }));
+          const dbase = `${base}${pointer('details')}`;
+          const df = (k) => field(file, dbase, d, k);
+          out.context.packages.push({ event_index: i, attempt: f('attempt'), known_target_files: df('known_target_files'), unit_count: df('unit_count'), package_hash: df('package_hash'), member_hint_paths: df('member_hint_paths') });
+          const entry = (list, j, k) => (isObj(list[j]) ? field(file, `${dbase}${pointer(k === 'path' || k === 'member_id' || k === 'tier' ? 'tiers' : 'omitted', j)}`, list[j], k) : null);
+          if (Array.isArray(d.tiers)) d.tiers.forEach((t, j) => out.context.tiers.push(isObj(t) ? { event_index: i, attempt: f('attempt'), path: entry(d.tiers, j, 'path'), member_id: entry(d.tiers, j, 'member_id'), tier: entry(d.tiers, j, 'tier') } : { event_index: i, attempt: f('attempt'), path: null, member_id: null, tier: null, raw: fact(file, `${dbase}${pointer('tiers', j)}`, t) }));
+          else if ('tiers' in d) diag('warning', `${dbase}${pointer('tiers')}`, 'details.tiers is not a list; not interpreted');
+          if (Array.isArray(d.omitted)) d.omitted.forEach((o, j) => out.context.omissions.push(isObj(o) ? { event_index: i, attempt: f('attempt'), path: field(file, `${dbase}${pointer('omitted', j)}`, o, 'path'), reason: field(file, `${dbase}${pointer('omitted', j)}`, o, 'reason') } : { event_index: i, attempt: f('attempt'), path: null, reason: null, raw: fact(file, `${dbase}${pointer('omitted', j)}`, o) }));
+          else if ('omitted' in d) diag('warning', `${dbase}${pointer('omitted')}`, 'details.omitted is not a list; not interpreted');
         }
         if (e.kind === 'developer.prompt_composition' && d) {
-          const dp = (k) => `${base}${pointer('details', k)}`;
-          const estimated = {}; const other = {};
-          for (const k of Object.keys(d).sort()) {
-            if (k === 'prompt_tokens_reported' || k === 'token_counts') continue;
-            if (k.endsWith('_tokens')) estimated[k] = fact(file, dp(k), d[k]); else other[k] = fact(file, dp(k), d[k]);
-          }
-          out.token_accounting.prompt_compositions.push({ event_index: i, attempt: f('attempt'), provider_reported: { prompt_tokens_reported: fact(file, dp('prompt_tokens_reported'), d.prompt_tokens_reported ?? null) }, estimated_by_kriya: estimated, other_recorded: other, token_counts_note: fact(file, dp('token_counts'), d.token_counts ?? null) });
+          const dbase = `${base}${pointer('details')}`;
+          const df = (k) => field(file, dbase, d, k);
+          const PC = PROMPT_COMPOSITION_FIELDS;
+          const pick = (names) => Object.fromEntries(names.filter((k) => k in d).map((k) => [k, df(k)]));
+          const known = new Set([...PC.estimated_by_kriya, ...PC.provider_reported, ...PC.provider_timing, ...PC.recorded_other, ...PC.note]);
+          const unknown = Object.fromEntries(Object.keys(d).filter((k) => !known.has(k)).sort().map((k) => [k, df(k)]));
+          const missing = [...PC.estimated_by_kriya, ...PC.provider_reported].filter((k) => !(k in d));
+          if (missing.length) diag('info', dbase, `developer.prompt_composition lacks documented field(s) ${missing.join(', ')}: reported as not recorded`);
+          out.token_accounting.prompt_compositions.push({ event_index: i, attempt: f('attempt'), provider_reported: { prompt_tokens_reported: df('prompt_tokens_reported') }, estimated_by_kriya: pick(PC.estimated_by_kriya), provider_timing: pick(PC.provider_timing), recorded_other: pick(PC.recorded_other), unknown_uninterpreted: unknown, token_counts_note: df('token_counts') });
         }
       });
       out.attempts_in_events = Object.fromEntries([...perAttempt.entries()].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true })));
@@ -155,13 +175,13 @@ function analyzeDetail(file, data, envelope, diag) {
   }
   if (sections.context.recorded && isObj(data.context.data)) {
     const c = data.context.data; const cp = (...k) => pointer('data', 'context', 'data', ...k);
-    out.context.section_items = Array.isArray(c.items) ? c.items.map((it, j) => ({ path: fact(file, cp('items', j, 'path'), isObj(it) ? it.path ?? null : null), tier: fact(file, cp('items', j, 'tier'), isObj(it) ? it.tier ?? null : null), member_ids: fact(file, cp('items', j, 'member_ids'), isObj(it) ? it.member_ids ?? null : null), omitted: fact(file, cp('items', j, 'omitted'), isObj(it) ? it.omitted ?? null : null), omission_reason: fact(file, cp('items', j, 'omission_reason'), isObj(it) ? it.omission_reason ?? null : null) })) : null;
-    if (isObj(c.tokens)) out.token_accounting.context_section_tokens = { estimated: fact(file, cp('tokens', 'estimated'), c.tokens.estimated ?? null), provider_reported: fact(file, cp('tokens', 'provider_reported'), c.tokens.provider_reported ?? null) };
+    out.context.section_items = Array.isArray(c.items) ? c.items.map((it, j) => (isObj(it) ? Object.fromEntries(['path', 'tier', 'member_ids', 'omitted', 'omission_reason'].map((k) => [k, field(file, cp('items', j), it, k)])) : { path: null, tier: null, member_ids: null, omitted: null, omission_reason: null, raw: fact(file, cp('items', j), it) })) : null;
+    out.token_accounting.context_section_tokens = isObj(c.tokens) ? { estimated: field(file, cp('tokens'), c.tokens, 'estimated'), provider_reported: field(file, cp('tokens'), c.tokens, 'provider_reported') } : { tokens: field(file, cp(), c, 'tokens') }; // null/absent tokens stay visible as not recorded
   }
   if (sections.generation_metrics.recorded) out.token_accounting.generation_metrics_as_recorded = fact(file, pointer('data', 'generation_metrics', 'data'), data.generation_metrics.data);
   if (sections.gate_outcomes.recorded) {
     const g = data.gate_outcomes.data;
-    out.gates = Array.isArray(g) ? g.map((o, j) => { const b = pointer('data', 'gate_outcomes', 'data', j); const f = (k) => fact(file, `${b}${pointer(k)}`, isObj(o) ? (o[k] === undefined ? null : o[k]) : null); return { index: j, attempt: f('attempt'), gate: fact(file, `${b}${pointer(isObj(o) && o.gate !== undefined ? 'gate' : 'name')}`, isObj(o) ? o.gate ?? o.name ?? null : null), passed: f('passed'), reason_code: f('reason_code'), raw: fact(file, b, o) }; }) : [];
+    out.gates = Array.isArray(g) ? g.map((o, j) => { const b = pointer('data', 'gate_outcomes', 'data', j); const f = (k) => (isObj(o) ? field(file, b, o, k) : fact(file, `${b}${pointer(k)}`, null, true)); return { index: j, attempt: f('attempt'), gate: isObj(o) && 'gate' in o ? f('gate') : f('name'), passed: f('passed'), reason_code: f('reason_code'), raw: fact(file, b, o) }; }) : [];
     if (!Array.isArray(g)) diag('warning', pointer('data', 'gate_outcomes', 'data'), 'gate_outcomes is recorded but not a list; shown raw');
   }
   if (sections.failure_report.recorded) out.failures.failure_report = fact(file, pointer('data', 'failure_report', 'data'), data.failure_report.data);
@@ -181,9 +201,15 @@ export function buildReport(files) {
   };
 }
 
-const show = (f) => f && f.value !== undefined && f.value !== null ? (typeof f.value === 'string' ? f.value : JSON.stringify(f.value)) : 'not recorded';
-const src = (f) => f ? `\`${f.source.file}#${f.source.pointer || '/'}\`` : '';
-const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+const show = (f) => (f && f.value !== undefined && f.value !== null ? (typeof f.value === 'string' ? f.value : JSON.stringify(f.value)) : f && f.source && f.source.absent ? 'not recorded (field absent)' : 'not recorded');
+const src = (f) => (f ? `\`${cell(f.source.file)}#${cell(f.source.pointer || '/')}\`` : '');
+/** Recorded text inside a Markdown table cell: never structure, never markup, never raw control characters. */
+export const cell = (s) => String(s)
+  .replace(/\\/g, '\\\\') // recorded backslashes first, so every escape added below is unambiguous
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is made visible
+  .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  .replace(/\|/g, '\\|').replace(/\r?\n|\r/g, '\\n').replace(/\t/g, '\\t')
+  .replace(/[`*<>\[\]]/g, (c) => `\\${c}`);
 export function renderMarkdown(report) {
   const L = [];
   L.push(`# ${TOOL} ${TOOL_VERSION}`, '', `> ${LABEL}`, '', '## Inputs (as supplied, in order)', '', '| file | bytes | sha256 | operation | schema_version | status |', '|---|---|---|---|---|---|');
@@ -216,28 +242,30 @@ export function renderMarkdown(report) {
       for (const e of run.events) {
         if (e.raw) { L.push(`| ${e.index + 1} | (malformed, see Diagnostics) | | | | | | ${src(e.raw)} |`); continue; }
         const label = e.malformed && e.kind.value === null ? '(malformed, see Diagnostics)' : `${cell(show(e.kind))}${e.malformed ? ' (malformed)' : ''}`;
-        L.push(`| ${e.index + 1} | ${label} | ${cell(show(e.attempt))} | ${cell(show(e.source))} / ${cell(show(e.authority))} | ${e.created_at_utc ?? 'not recorded'} | ${cell(show(e.failure_type))} | ${e.unknown_fields.length ? e.unknown_fields.map((f) => f.source.pointer.split('/').pop()).join(', ') : '-'} | ${src(e.kind)} |`);
+        L.push(`| ${e.index + 1} | ${label} | ${cell(show(e.attempt))} | ${cell(show(e.source))} / ${cell(show(e.authority))} | ${e.created_at_utc ?? 'not recorded'} | ${cell(show(e.failure_type))} | ${e.unknown_fields.length ? cell(e.unknown_fields.map((f) => f.source.pointer.split('/').pop()).join(', ')) : '-'} | ${src(e.record)} |`);
       }
     }
     L.push('', '### Context tiers and omissions (from context.known_target_package events and the context section)');
     if (!run.context.tiers.length && !run.context.omissions.length && !run.context.section_items) L.push('', 'not recorded');
     else {
-      if (run.context.tiers.length) { L.push('', '| event # | attempt | path | member_id | tier | source |', '|---|---|---|---|---|---|'); for (const t of run.context.tiers) L.push(`| ${t.event_index + 1} | ${cell(show(t.attempt))} | ${cell(show(t.path))} | ${cell(show(t.member_id))} | ${cell(show(t.tier))} | ${src(t.tier)} |`); }
-      if (run.context.omissions.length) { L.push('', '| event # | attempt | omitted path | recorded reason | source |', '|---|---|---|---|---|'); for (const o of run.context.omissions) L.push(`| ${o.event_index + 1} | ${cell(show(o.attempt))} | ${cell(show(o.path))} | ${cell(show(o.reason))} | ${src(o.reason)} |`); }
+      if (run.context.tiers.length) { L.push('', '| event # | attempt | path | member_id | tier | source |', '|---|---|---|---|---|---|'); for (const t of run.context.tiers) L.push(t.raw ? `| ${t.event_index + 1} | ${cell(show(t.attempt))} | (not an object: ${cell(show(t.raw))}) | | | ${src(t.raw)} |` : `| ${t.event_index + 1} | ${cell(show(t.attempt))} | ${cell(show(t.path))} | ${cell(show(t.member_id))} | ${cell(show(t.tier))} | ${src(t.tier)} |`); }
+      if (run.context.omissions.length) { L.push('', '| event # | attempt | omitted path | recorded reason | source |', '|---|---|---|---|---|'); for (const o of run.context.omissions) L.push(o.raw ? `| ${o.event_index + 1} | ${cell(show(o.attempt))} | (not an object: ${cell(show(o.raw))}) | | ${src(o.raw)} |` : `| ${o.event_index + 1} | ${cell(show(o.attempt))} | ${cell(show(o.path))} | ${cell(show(o.reason))} | ${src(o.reason)} |`); }
       for (const p of run.context.packages) L.push('', `Package (event #${p.event_index + 1}): known_target_files=${cell(show(p.known_target_files))}, unit_count=${cell(show(p.unit_count))}, package_hash=${cell(show(p.package_hash))}, member_hint_paths=${cell(show(p.member_hint_paths))} (${src(p.package_hash)})`);
-      if (run.context.section_items) { L.push('', '| context section item | tier | member_ids | omitted | omission_reason | source |', '|---|---|---|---|---|---|'); for (const it of run.context.section_items) L.push(`| ${cell(show(it.path))} | ${cell(show(it.tier))} | ${cell(show(it.member_ids))} | ${cell(show(it.omitted))} | ${cell(show(it.omission_reason))} | ${src(it.path)} |`); }
+      if (run.context.section_items) { L.push('', '| context section item | tier | member_ids | omitted | omission_reason | source |', '|---|---|---|---|---|---|'); for (const it of run.context.section_items) L.push(it.raw ? `| (not an object: ${cell(show(it.raw))}) | | | | | ${src(it.raw)} |` : `| ${cell(show(it.path))} | ${cell(show(it.tier))} | ${cell(show(it.member_ids))} | ${cell(show(it.omitted))} | ${cell(show(it.omission_reason))} | ${src(it.path)} |`); }
     }
     L.push('', '### Token accounting (provider-reported and Kriya estimates kept apart)');
     const ta = run.token_accounting;
     if (!ta.prompt_compositions.length && !ta.context_section_tokens && !ta.generation_metrics_as_recorded) L.push('', 'not recorded');
     for (const pc of ta.prompt_compositions) {
-      L.push('', `developer.prompt_composition, event #${pc.event_index + 1}, attempt ${cell(show(pc.attempt))}:`, '', '| kind | field | value | source |', '|---|---|---|---|');
-      L.push(`| provider-reported | prompt_tokens_reported | ${cell(show(pc.provider_reported.prompt_tokens_reported))} | ${src(pc.provider_reported.prompt_tokens_reported)} |`);
-      for (const [k, f] of Object.entries(pc.estimated_by_kriya)) L.push(`| estimated (Kriya) | ${k} | ${cell(show(f))} | ${src(f)} |`);
-      for (const [k, f] of Object.entries(pc.other_recorded)) L.push(`| other recorded | ${k} | ${cell(show(f))} | ${src(f)} |`);
+      L.push('', `developer.prompt_composition, event #${pc.event_index + 1}, attempt ${cell(show(pc.attempt))} (field meanings per kriya/workflow/prompt_composition.py):`, '', '| classification | field | value | source |', '|---|---|---|---|');
+      L.push(`| provider-reported count | prompt_tokens_reported | ${cell(show(pc.provider_reported.prompt_tokens_reported))} | ${src(pc.provider_reported.prompt_tokens_reported)} |`);
+      for (const [k, f] of Object.entries(pc.estimated_by_kriya)) L.push(`| estimated by Kriya (len/4) | ${cell(k)} | ${cell(show(f))} | ${src(f)} |`);
+      for (const [k, f] of Object.entries(pc.provider_timing)) L.push(`| provider-reported timing | ${cell(k)} | ${cell(show(f))} | ${src(f)} |`);
+      for (const [k, f] of Object.entries(pc.recorded_other)) L.push(`| recorded (prefix reuse) | ${cell(k)} | ${cell(show(f))} | ${src(f)} |`);
+      for (const [k, f] of Object.entries(pc.unknown_uninterpreted)) L.push(`| unknown field (uninterpreted) | ${cell(k)} | ${cell(show(f))} | ${src(f)} |`);
       L.push(`| recorded note | token_counts | ${cell(show(pc.token_counts_note))} | ${src(pc.token_counts_note)} |`);
     }
-    if (ta.context_section_tokens) L.push('', `Context section tokens: estimated=${cell(show(ta.context_section_tokens.estimated))} (${src(ta.context_section_tokens.estimated)}); provider_reported=${cell(show(ta.context_section_tokens.provider_reported))} (${src(ta.context_section_tokens.provider_reported)})`);
+    if (ta.context_section_tokens) L.push('', ta.context_section_tokens.tokens ? `Context section tokens: ${cell(show(ta.context_section_tokens.tokens))} (${src(ta.context_section_tokens.tokens)})` : `Context section tokens: estimated=${cell(show(ta.context_section_tokens.estimated))} (${src(ta.context_section_tokens.estimated)}); provider_reported=${cell(show(ta.context_section_tokens.provider_reported))} (${src(ta.context_section_tokens.provider_reported)})`);
     if (ta.generation_metrics_as_recorded) L.push('', `generation_metrics as recorded (keys not interpreted): ${cell(show(ta.generation_metrics_as_recorded))} (${src(ta.generation_metrics_as_recorded)})`);
     L.push('', '### Gates');
     if (!run.gates) L.push('', 'not recorded');

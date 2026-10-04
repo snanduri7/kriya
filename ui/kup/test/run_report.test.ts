@@ -75,8 +75,9 @@ describe('a serializer-produced run record (RunEvent.to_dict through the KUP ada
     expect(md).toContain(LABEL);
     expect(md).toContain('status (literal; not mapped to success or failure) | SUCCESS |');
     expect(md).toContain(`\`${SERIALIZER}#/data/run_events/data/0/details/tiers/0/tier\``);
-    expect(md).toContain('| provider-reported | prompt_tokens_reported | 4190 |');
-    expect(md).toContain('| estimated (Kriya) | skills_tokens |');
+    expect(md).toContain('| provider-reported count | prompt_tokens_reported | 4190 |');
+    expect(md).toContain('| estimated by Kriya (len/4) | skills_tokens |');
+    expect(md).toContain('| provider-reported timing | prefill_seconds | 1.83 |');
     expect(md).toContain('not current state');
     expect(md).not.toMatch(/\b(root cause|caused by|because|therefore|succeeded|is current)\b/i); // observations only, no causal or status inference
   });
@@ -180,5 +181,106 @@ describe('CLI: explicit output location, no overwrite without --overwrite, input
     let code = 0; let err = '';
     try { execFileSync(process.execPath, [TOOL, join(GEN, SERIALIZER)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { code = (e as { status: number }).status; err = String((e as { stderr: string }).stderr); }
     expect(code).toBe(2); expect(err).toContain('--out <dir>');
+  });
+});
+
+// ---- quality pass (fixture-only): explicit token mapping, escaping, pointer validity ----------------------------------
+// @ts-expect-error - plain ESM tool
+import { PROMPT_COMPOSITION_FIELDS, cell } from '../tools/run_report.mjs';
+
+const QA_FILE = 'unknown_token_fields_and_escaping.json';
+const qaText = readFileSync(join(__dirname, 'fixtures', 'run_report', QA_FILE), 'utf8');
+
+/** RFC 6901 resolution against the original document; returns { found, value }. */
+function resolve(doc: unknown, ptr: string): { found: boolean; value?: unknown } {
+  if (ptr === '') return { found: true, value: doc };
+  let cur: unknown = doc;
+  for (const raw of ptr.split('/').slice(1)) {
+    const key = raw.replace(/~1/g, '/').replace(/~0/g, '~');
+    if (Array.isArray(cur)) { const i = Number(key); if (!Number.isInteger(i) || i < 0 || i >= cur.length) return { found: false }; cur = cur[i]; }
+    else if (typeof cur === 'object' && cur !== null) { if (!(key in (cur as object))) return { found: false }; cur = (cur as Record<string, unknown>)[key]; }
+    else return { found: false };
+  }
+  return { found: true, value: cur };
+}
+const walkSourced = (x: unknown, out: { value?: unknown; source: { file: string; pointer: string; absent?: boolean } }[] = []) => {
+  if (Array.isArray(x)) x.forEach((v) => walkSourced(v, out));
+  else if (typeof x === 'object' && x !== null) {
+    const o = x as Record<string, unknown>;
+    if ('source' in o && typeof (o.source as Record<string, unknown>)?.pointer === 'string' && 'file' in (o.source as object)) out.push(o as never);
+    else Object.values(o).forEach((v) => walkSourced(v, out));
+  }
+  return out;
+};
+
+describe('token classification follows kriya/workflow/prompt_composition.py exactly', () => {
+  it('the explicit mapping is the documented field set', () => {
+    expect([...PROMPT_COMPOSITION_FIELDS.estimated_by_kriya]).toEqual(['t0_member_tokens', 't0_header_tokens', 'sibling_signatures_tokens', 't1_tokens', 't2_tokens', 't3_tokens', 'skills_tokens', 'code_context_tokens', 'prefix_shared_tokens']);
+    expect([...PROMPT_COMPOSITION_FIELDS.provider_reported]).toEqual(['prompt_tokens_reported']);
+    expect([...PROMPT_COMPOSITION_FIELDS.provider_timing]).toEqual(['prefill_seconds', 'load_seconds']);
+    expect([...PROMPT_COMPOSITION_FIELDS.recorded_other]).toEqual(['prefix_break']);
+  });
+  it('an unknown *_tokens field is reported uninterpreted, never as an estimate or a provider count; missing documented fields stay not recorded', () => {
+    const r = buildReport([{ file: QA_FILE, text: qaText }]) as Report;
+    const [pc1, pc2] = r.runs[0]!.token_accounting.prompt_compositions;
+    expect(Object.keys(pc1.unknown_uninterpreted).sort()).toEqual(['futuristic_count', 'mystery_tokens']);
+    expect(Object.keys(pc1.estimated_by_kriya)).not.toContain('mystery_tokens');
+    expect(pc1.estimated_by_kriya.prefix_shared_tokens.value).toBeNull(); // recorded as null, not absent
+    expect(pc1.estimated_by_kriya.prefix_shared_tokens.source.absent).toBeUndefined();
+    expect(pc1.provider_timing.load_seconds.value).toBeNull();
+    expect(Object.keys(pc2.estimated_by_kriya)).toEqual(['skills_tokens']); // only what the record has
+    expect(pc2.provider_reported.prompt_tokens_reported.value).toBe(81);
+    expect(r.diagnostics.some((d) => d.pointer === '/data/run_events/data/2/details' && /lacks documented field/.test(d.message) && /t0_member_tokens/.test(d.message))).toBe(true);
+    const md = renderMarkdown(r);
+    expect(md).toContain('| unknown field (uninterpreted) | mystery_tokens | 9 |');
+    expect(md).not.toMatch(/estimated by Kriya \(len\/4\) \| mystery_tokens/);
+    expect(md).toContain('generation_metrics as recorded (keys not interpreted): {"wall_ms":1234,"custom_tokens":7}');
+  });
+});
+
+describe('Markdown cells and source pointers', () => {
+  it('escapes pipes, newlines, tabs, backslashes, markup, backticks and control characters in recorded text', () => {
+    expect(cell('a|b')).toBe('a\\|b');
+    expect(cell('line\nbreak\r\nagain\ttab')).toBe('line\\nbreak\\nagain\\ttab');
+    expect(cell('<b>x</b> `t` *e* [l]')).toBe('\\<b\\>x\\</b\\> \\`t\\` \\*e\\* \\[l\\]');
+    expect(cell('back\\slash')).toBe('back\\\\slash');
+    expect(cell('bell\u0007 del\u007f')).toBe('bell\\u0007 del\\u007f');
+    const md: string = renderMarkdown(buildReport([{ file: QA_FILE, text: qaText }]) as Report);
+    expect(md).toContain('| status (literal; not mapped to success or failure) | PART\\|IAL |');
+    expect(md).toContain('QA \\| goal with \\<b\\>markup\\</b\\>, \\`tick\\`, line\\nbreak, tab\\t and \\u0007 bell');
+    expect(md).toContain('| 1 | 1 | compile | false | COMPILE\\|FAILED |');
+    expect(md).toContain('| 1 | 1 | src/odd\\|name.py | A.run | member_exact |');
+    expect(md).toContain('(not an object: not-an-object)');
+    // every table row has the same number of cells as its header (no row broken by recorded text)
+    const tables = md.split('\n\n').filter((b) => b.startsWith('|'));
+    for (const t of tables) { const rows = t.split('\n').filter((l) => l.startsWith('|')); const n = (rows[0]!.match(/(?<!\\)\|/g) ?? []).length; for (const row of rows) expect((row.match(/(?<!\\)\|/g) ?? []).length, row).toBe(n); }
+    expect(md.split('\n').some((l) => /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(l))).toBe(false);
+  });
+  it('every fact resolves to the original JSON field with the same value; absent fields are marked and really absent', () => {
+    for (const file of [SERIALIZER, 'history.detail.run-incomplete-context.json', 'history.detail.run-unknown-fields.json', 'history.detail.run-avail-unreadable.json', 'history.list.page1.json', 'errors/STORE_BUSY.json']) {
+      const text = read(file); const doc = JSON.parse(text);
+      const facts = walkSourced(buildReport([{ file, text }]));
+      expect(facts.length).toBeGreaterThan(0);
+      for (const f of facts) {
+        expect(f.source.file).toBe(file);
+        const res = resolve(doc, f.source.pointer);
+        if (f.source.absent) { expect(res.found, `${f.source.pointer} should be absent`).toBe(false); expect(resolve(doc, f.source.pointer.replace(/\/[^/]*$/, '')).found, `parent of ${f.source.pointer}`).toBe(true); expect(f.value).toBeNull(); }
+        else { expect(res.found, f.source.pointer).toBe(true); if ('value' in f) expect(f.value, f.source.pointer).toEqual(res.value); }
+      }
+    }
+    const qa = JSON.parse(qaText);
+    const facts = walkSourced(buildReport([{ file: QA_FILE, text: qaText }]));
+    for (const f of facts) { const res = resolve(qa, f.source.pointer); if (f.source.absent) expect(res.found).toBe(false); else { expect(res.found, f.source.pointer).toBe(true); if ('value' in f) expect(f.value).toEqual(res.value); } }
+    const legacy = (buildReport([{ file: QA_FILE, text: qaText }]) as Report).runs[0]!.events[4];
+    expect(legacy.record.source.pointer).toBe('/data/run_events/data/4');
+    expect(legacy.kind.source).toEqual({ file: QA_FILE, pointer: '/data/run_events/data/4/kind', absent: true });
+  });
+  it('recorded order is kept and the output is deterministic across runs and input order changes only where supplied order changes', () => {
+    const a = buildReport([{ file: QA_FILE, text: qaText }, input(SERIALIZER)]) as Report;
+    const b = buildReport([{ file: QA_FILE, text: qaText }, input(SERIALIZER)]) as Report;
+    expect(stableStringify(a)).toBe(stableStringify(b));
+    expect(a.runs.map((r) => r.run_id.value)).toEqual(['run-qa-tokens', 'run-serializer-events']);
+    expect(a.runs[0]!.events.map((e: any) => e.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(a.runs[0]!.gates.map((g: any) => g.index)).toEqual([0, 1, 2]);
   });
 });

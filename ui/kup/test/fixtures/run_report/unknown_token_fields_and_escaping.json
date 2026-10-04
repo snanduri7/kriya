@@ -1,0 +1,245 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:30:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": null,
+  "source_metadata_now": null,
+  "source_metadata_changed": null
+ },
+ "data": {
+  "run": {
+   "run_id": "run-qa-tokens",
+   "timestamp": "2026-09-30 10:00:00",
+   "goal": "QA | goal with <b>markup</b>, `tick`, line\nbreak, tab\t and \u0007 bell",
+   "duration_sec": 1.5,
+   "attempts": 2,
+   "status": "PART|IAL",
+   "failure_category": null,
+   "files_modified": "a|b.py,c.py",
+   "novel_run_field": "kept"
+  },
+  "fields": {
+   "files_modified": {
+    "availability": "recorded",
+    "provenance": "runs.files_modified (comma-joined, raw)",
+    "reason": null,
+    "data": "a|b.py,c.py"
+   }
+  },
+  "run_events": {
+   "availability": "recorded",
+   "provenance": "runs.run_events",
+   "reason": null,
+   "data": [
+    {
+     "kind": "context.known_target_package",
+     "attempt": 1,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture context.known_target_package",
+     "failure_type": null,
+     "operation": null,
+     "details": {
+      "known_target_files": [
+       "src/a.py"
+      ],
+      "unit_count": 1,
+      "tiers": [
+       {
+        "path": "src/odd|name.py",
+        "member_id": "A.run",
+        "tier": "member_exact"
+       },
+       "not-an-object"
+      ],
+      "omitted": [
+       {
+        "path": "src/big.py",
+        "reason": "budget_exhausted"
+       }
+      ],
+      "package_hash": "sha256:abababababababababababababababababababababababababababababababab",
+      "member_hint_paths": []
+     },
+     "created_at": 1791097201
+    },
+    {
+     "kind": "developer.prompt_composition",
+     "attempt": 1,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture developer.prompt_composition",
+     "failure_type": null,
+     "operation": null,
+     "details": {
+      "t0_member_tokens": 10,
+      "t0_header_tokens": 0,
+      "sibling_signatures_tokens": 0,
+      "t1_tokens": 0,
+      "t2_tokens": 0,
+      "t3_tokens": 0,
+      "skills_tokens": 5,
+      "code_context_tokens": 40,
+      "prefix_shared_tokens": null,
+      "prompt_tokens_reported": 77,
+      "prefill_seconds": 0.5,
+      "load_seconds": null,
+      "prefix_break": "goal",
+      "mystery_tokens": 9,
+      "futuristic_count": 3,
+      "token_counts": "estimated (len/4) per section; total as reported by the provider"
+     },
+     "created_at": 1791097201
+    },
+    {
+     "kind": "developer.prompt_composition",
+     "attempt": 2,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture developer.prompt_composition",
+     "failure_type": null,
+     "operation": null,
+     "details": {
+      "skills_tokens": 6,
+      "prompt_tokens_reported": 81,
+      "token_counts": "estimated (len/4) per section; total as reported by the provider"
+     },
+     "created_at": 1791097202
+    },
+    {
+     "kind": "candidate_gates.passed",
+     "attempt": 2,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture candidate_gates.passed",
+     "failure_type": "none|literal",
+     "operation": null,
+     "details": "details as plain text | with pipe",
+     "created_at": 1791097202,
+     "severity_v9": "novel"
+    },
+    {
+     "event": "legacy.shape",
+     "at": "2026-09-30 10:00:03",
+     "payload": {
+      "k": 1
+     }
+    }
+   ]
+  },
+  "evidence_records": {
+   "availability": "recorded",
+   "provenance": "runs.evidence_records",
+   "reason": null,
+   "data": []
+  },
+  "gate_outcomes": {
+   "availability": "recorded",
+   "provenance": "runs.gate_outcomes",
+   "reason": null,
+   "data": [
+    {
+     "attempt": 1,
+     "gate": "compile",
+     "passed": false,
+     "reason_code": "COMPILE|FAILED"
+    },
+    {
+     "attempt": 2,
+     "name": "tests",
+     "passed": true
+    },
+    "not-an-object"
+   ]
+  },
+  "model_hops": {
+   "availability": "not_recorded",
+   "provenance": "runs.model_hops",
+   "reason": "column is NULL in the stored row",
+   "data": null
+  },
+  "generation_metrics": {
+   "availability": "recorded",
+   "provenance": "runs.generation_metrics",
+   "reason": null,
+   "data": {
+    "wall_ms": 1234,
+    "custom_tokens": 7
+   }
+  },
+  "failure_report": {
+   "availability": "recorded",
+   "provenance": "runs.failure_report",
+   "reason": null,
+   "data": [
+    {
+     "failure_type": "compile_error",
+     "category": "quality_gate_failed"
+    }
+   ]
+  },
+  "context": {
+   "availability": "recorded",
+   "provenance": "run_events:context.known_target_package",
+   "reason": "token accounting was not recorded",
+   "data": {
+    "items": [
+     {
+      "path": "src/a.py",
+      "tier": "full"
+     },
+     {
+      "path": "src/b.py",
+      "omitted": true
+     },
+     "not-an-object"
+    ],
+    "tokens": null
+   }
+  },
+  "attribution": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the baseline persists failure categories, not causal attribution",
+   "data": null
+  },
+  "diagnostics": {
+   "availability": "unreadable",
+   "provenance": "fixture",
+   "reason": "fixture unreadable",
+   "data": null
+  },
+  "comparisons": {
+   "availability": "excluded",
+   "provenance": "fixture",
+   "reason": "fixture excluded",
+   "data": null
+  },
+  "output": {
+   "availability": "unsupported",
+   "provenance": "fixture",
+   "reason": "fixture unsupported",
+   "data": null
+  },
+  "novel_top_level_section": {
+   "availability": "recorded",
+   "data": {
+    "hello": "future"
+   }
+  }
+ },
+ "error": null
+}
