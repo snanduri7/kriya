@@ -1,0 +1,7 @@
+{
+  "name": "@kriya-ui/kup",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Kriya UI Protocol (KUP) v1: JSON Schema, generated TypeScript types, host contract schema. Phase B. Phase A holds only the placeholder.",
+  "type": "module"
+}
