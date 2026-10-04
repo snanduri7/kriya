@@ -45,11 +45,15 @@ export function App({ host, exposeDriver }: AppProps) {
   const sessionRoot = useRef<HTMLDivElement>(null);
   const closeSettings = () => {
     setSettingsOpen(false);
-    // Wait until the underlying view is no longer inert before returning keyboard focus.
-    requestAnimationFrame(() => sessionRoot.current?.querySelector<HTMLButtonElement>('[data-settings-button]')?.focus());
+    // Wait until the underlying view is no longer inert before returning keyboard focus to the opener; if the opener cannot take
+    // focus (it is disabled while a request is pending), focus the session root rather than letting focus fall to <body>.
+    requestAnimationFrame(() => {
+      const opener = sessionRoot.current?.querySelector<HTMLButtonElement>('[data-settings-button]');
+      if (opener && !opener.disabled) opener.focus(); else sessionRoot.current?.focus();
+    });
   };
   return <>
-    <div ref={sessionRoot} className="settings-session" inert={settingsOpen}><AppView key={session} host={host} exposeDriver={exposeDriver} onOpenSettings={() => setSettingsOpen(true)} /></div>
+    <div ref={sessionRoot} className="settings-session" tabIndex={-1} inert={settingsOpen}><AppView key={session} host={host} exposeDriver={exposeDriver} onOpenSettings={() => setSettingsOpen(true)} /></div>
     {settingsOpen ? <SettingsPanel host={host} onClose={closeSettings} onSaved={(key) => { if (key !== 'editor') setSession((n) => n + 1); }} /> : null}
   </>;
 }
@@ -229,7 +233,7 @@ function AppView({ host, exposeDriver, onOpenSettings }: AppProps & { onOpenSett
           </select>
         </label>
         <span className="muted" role="status" aria-label="Snapshot state" aria-live="polite">{slots.acquire.pending ? 'acquiring…' : slots.acquire.error ? `acquisition failed: ${slots.acquire.error.code} - ${sanitizeText(slots.acquire.error.message)}` : slots.verify.pending ? 'verifying snapshot digest…' : slots.verify.error ? `snapshot not displayed: digest verification failed: ${slots.verify.error.code} - ${sanitizeText(slots.verify.error.message)}` : pinRefusal ? sanitizeText(pinRefusal) : slots.snapshots.error ? `snapshot list failed: ${slots.snapshots.error.code} - ${sanitizeText(slots.snapshots.error.message)}` : slots.list.pending ? 'reading snapshot…' : slots.list.error ? `snapshot read failed: ${slots.list.error.code} - ${sanitizeText(slots.list.error.message)}` : snapshot.pinnedId ? `${label.headline}; ${label.metadataText}` : 'no snapshot displayed: acquire one, or choose a published snapshot'}</span>
-        <span className="narrow-only">
+        <span className="narrow-only" role="group" aria-label="Visible pane">
           <button type="button" className="small" aria-pressed={narrowPane === 'timeline'} onClick={() => setNarrowPane('timeline')}>Timeline</button>
           <button type="button" className="small" aria-pressed={narrowPane === 'inspector'} onClick={() => setNarrowPane('inspector')}>Inspector</button>
         </span>

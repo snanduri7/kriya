@@ -9,7 +9,7 @@ export function Recorded<T>({ section, title, children }: { section: Section<T> 
   }
   const reason = sectionReason(section);
   return (
-    <div className={`availability availability-${section?.availability ?? 'not_recorded'}`} role="status">
+    <div className={`availability availability-${section?.availability ?? 'not_recorded'}`} role="note">
       <span className="availability-title">{title}:</span> <strong>{availabilityLabel(section)}</strong>
       {reason ? <span className="availability-reason"> - {reason}</span> : null}
     </div>

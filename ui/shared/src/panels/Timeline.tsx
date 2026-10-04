@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RunDetail, RunEvent } from '../model/kup';
 import { isRecorded } from '../model/availability';
 import { eventsByAttempt, formatEventTime, unknownEventKeys } from '../model/normalize';
@@ -48,13 +48,21 @@ export function Timeline({ detail, pending, error, attempt, eventIndex, onSelect
   const selectedHidden = eventIndex !== null && selectedPos < 0 ? events[eventIndex] ?? null : null;
   const filterActive = attempt !== null || authority !== null || query.trim() !== '';
   const clearFilter = () => { setQuery(''); setAuthority(null); if (attempt !== null) onSelectAttempt(null); };
+  const root = useRef<HTMLElement>(null);
+  // Clearing from the "selected event hidden" notice removes that notice (and its button) from the DOM, so focus is moved
+  // deliberately to the events list, where the still-selected event is the active option - never left on <body>.
+  const clearFilterAndFocusList = () => { clearFilter(); requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[role="listbox"]')?.focus()); };
+  // The visible count updates on every keystroke; the live region announces it once typing has paused (not every render).
+  const summary = `${visible.length} of ${events.length} recorded events shown${filterActive ? ' (filtered; recorded order kept)' : ''}`;
+  const [announced, setAnnounced] = useState(summary);
+  useEffect(() => { const t = setTimeout(() => setAnnounced(summary), 350); return () => clearTimeout(t); }, [summary]);
 
   if (!detail) {
     return <section className="timeline" aria-label="Timeline"><div className="placeholder">{pending ? 'loading run…' : error ? `could not load run: ${error.code} - ${sanitizeText(error.message)}` : 'select a run'}</div></section>;
   }
   const r = detail.run;
   return (
-    <section className="timeline" aria-label="Timeline">
+    <section className="timeline" aria-label="Timeline" ref={root}>
       <div className="run-header">
         <h2 className="goal">{sanitizeText(r.goal ?? '(no goal recorded)')}</h2>
         <dl className="facts">
@@ -80,7 +88,7 @@ export function Timeline({ detail, pending, error, attempt, eventIndex, onSelect
             <div className="event-filter" role="group" aria-label="Event filter">
               <label className="filter">
                 <span className="sr-only">Search recorded events</span>
-                <input type="search" placeholder="Search kind, source, message, recorded details" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search recorded events" />
+                <input type="search" placeholder="Search kind, source, message, recorded details" value={query} onChange={(e) => setQuery(e.target.value)} />
               </label>
               <label className="muted">authority
                 <select aria-label="Filter by authority" value={authority ?? ''} onChange={(e) => setAuthority(e.target.value === '' ? null : e.target.value)}>
@@ -89,12 +97,13 @@ export function Timeline({ detail, pending, error, attempt, eventIndex, onSelect
                 </select>
               </label>
               <button type="button" className="small" onClick={clearFilter} disabled={!filterActive}>Clear filter</button>
-              <span className="muted" role="status" aria-label="Event filter result" aria-live="polite">{visible.length} of {events.length} recorded events shown{filterActive ? ' (filtered; recorded order kept)' : ''}</span>
+              <span className="muted filter-count" aria-hidden="true">{summary}</span>
+              <span className="sr-only" role="status" aria-label="Event filter result">{announced}</span>
             </div>
             {selectedHidden ? (
-              <div className="warn" aria-label="Selected event hidden">
+              <div className="warn">
                 selected event #{(eventIndex ?? 0) + 1} ({sanitizeText(selectedHidden.kind || '(unnamed event)')}) is hidden by the current filter; it stays selected and its evidence stays shown.
-                <button type="button" className="small" onClick={clearFilter}>Clear filter to show the selected event</button>
+                <button type="button" className="small" onClick={clearFilterAndFocusList}>Clear filter to show the selected event</button>
               </div>
             ) : null}
             <VirtualList

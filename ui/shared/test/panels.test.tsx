@@ -230,7 +230,7 @@ describe('every panel renders with a fake host (P-R3)', () => {
       expect(screen.queryByText('omitted target')).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('tab', { name: /^Output/ }));
       expect(screen.queryByText(/model said hi/)).not.toBeInTheDocument();
-      expect(screen.getAllByRole('status').some((el) => el.textContent?.includes(`Model output: ${label}`))).toBe(true);
+      expect(screen.getAllByRole('note').some((el) => el.textContent?.includes(`Model output: ${label}`))).toBe(true); // a static statement, not a live region
     });
   }
 

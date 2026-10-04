@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 export interface VirtualListProps<T> {
   items: readonly T[];
@@ -16,6 +16,7 @@ export interface VirtualListProps<T> {
 /** Fixed-row-height virtualized listbox with full keyboard navigation (P-21, P-35). No dependencies. */
 export function VirtualList<T>({ items, rowHeight, height, selectedIndex, onSelect, renderRow, getKey, ariaLabel, emptyText = 'nothing recorded', overscan = 6 }: VirtualListProps<T>) {
   const ref = useRef<HTMLDivElement>(null);
+  const id = useId();
   const [scrollTop, setScrollTop] = useState(0);
   const total = items.length * rowHeight;
   const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
@@ -49,6 +50,7 @@ export function VirtualList<T>({ items, rowHeight, height, selectedIndex, onSele
     rows.push(
       <div
         key={getKey(item, i)}
+        id={`${id}-${i}`}
         role="option"
         aria-selected={selected}
         aria-posinset={i + 1}
@@ -67,7 +69,7 @@ export function VirtualList<T>({ items, rowHeight, height, selectedIndex, onSele
       ref={ref}
       role="listbox"
       aria-label={ariaLabel}
-      aria-activedescendant={undefined}
+      aria-activedescendant={selectedIndex !== null && selectedIndex >= first && selectedIndex < last ? `${id}-${selectedIndex}` : undefined}
       tabIndex={0}
       className="vlist"
       style={{ height }}

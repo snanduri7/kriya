@@ -18,7 +18,7 @@ input[type=search] { font: inherit; width: 100%; box-sizing: border-box; padding
 .trust { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .trust-item { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .trust-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
-.trust-value { font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trust-value { font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-width: 60ch; overflow-wrap: anywhere; } /* recorded paths wrap; nothing is clipped behind a hover-only title */
 .trust-extra { font-size: 11px; border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; }
 .toolbar { display: flex; gap: 10px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--line); }
 .narrow-only { display: none; }

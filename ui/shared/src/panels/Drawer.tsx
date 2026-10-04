@@ -109,7 +109,7 @@ export function Drawer({ detail, open, tab, comparisonPath, onTab, onToggle, onS
             </div>
           </TabPanel>
         </>
-      ) : null}
+      ) : DRAWER_TABS.map((k) => <TabPanel key={k} idPrefix="drawer" tabKey={k} active={false}>{null}</TabPanel>)}
     </section>
   );
 }

@@ -55,11 +55,11 @@ describe('eventMatchesQuery searches only recorded fields', () => {
 describe('timeline search and filters', () => {
   it('searching narrows to matching events in recorded order with original numbering and honest counts', async () => {
     await open(detailWith(EVENTS));
-    expect(result()).toHaveTextContent('4 of 4 recorded events shown');
+    await waitFor(() => expect(result()).toHaveTextContent('4 of 4 recorded events shown'));
     search('model');
     expect(shown().map((t) => t.slice(0, 2))).toEqual(['#3', '#4']); // original indices, recorded order
     expect(shown()[0]).toContain('model.transition'); expect(shown()[1]).toContain('model.role_metrics');
-    expect(result()).toHaveTextContent('2 of 4 recorded events shown (filtered; recorded order kept)');
+    await waitFor(() => expect(result()).toHaveTextContent('2 of 4 recorded events shown (filtered; recorded order kept)'));
     search('budget_exhausted'); // present only inside recorded details of the context package
     expect(shown()).toHaveLength(1); expect(shown()[0]).toContain('#1'); expect(shown()[0]).toContain('context.known_target_package');
     search('metrics of this run'); // message text
@@ -69,14 +69,14 @@ describe('timeline search and filters', () => {
     await open(detailWith(EVENTS));
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter by authority' }), { target: { value: 'auxiliary' } });
     expect(shown()).toHaveLength(1); expect(shown()[0]).toContain('model.role_metrics');
-    expect(result()).toHaveTextContent('1 of 4 recorded events shown');
+    await waitFor(() => expect(result()).toHaveTextContent('1 of 4 recorded events shown'));
     search('context');
     expect(rows()).toHaveLength(0);
     expect(list()).toHaveTextContent('no recorded events match the filter (4 recorded, all hidden by the filter)');
     expect(screen.getByRole('button', { name: /^all events \(4\)$/ })).toHaveAttribute('aria-pressed', 'true'); // totals untouched
     fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
     expect(shown()).toHaveLength(4);
-    expect(result()).toHaveTextContent('4 of 4 recorded events shown');
+    await waitFor(() => expect(result()).toHaveTextContent('4 of 4 recorded events shown'));
     // attempt chip + search
     fireEvent.click(screen.getByRole('button', { name: /^attempt 2/ }));
     search('transition');
@@ -110,7 +110,7 @@ describe('timeline search and filters', () => {
   });
   it('an empty recorded list is "no events recorded", never "hidden by the filter"', async () => {
     await open(detailWith([]));
-    expect(result()).toHaveTextContent('0 of 0 recorded events shown');
+    await waitFor(() => expect(result()).toHaveTextContent('0 of 0 recorded events shown'));
     expect(list()).toHaveTextContent('no events recorded for this selection');
     expect(screen.getByRole('button', { name: 'Clear filter' })).toBeDisabled();
   });
