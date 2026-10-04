@@ -239,21 +239,37 @@ describe('malformed and unsupported inputs', () => {
 });
 
 describe('unknown fields and the generated fixtures', () => {
-  it('unknown fields are preserved: every pointer resolves to the untouched value, nothing becomes a structural error, and the evidence_id linkage of the fixtures is reported as unresolved, not resolved', () => {
+  it('unknown fields are preserved: every pointer resolves to the untouched value and nothing becomes a structural error', () => {
     const name = 'history.detail.run-unknown-fields.json';
     const doc = JSON.parse(readFileSync(join(GEN, name), 'utf8'));
     const r = check(input(GEN, name));
-    expect(ruleIds(r)).toEqual(['EVC-REF-001', 'EVC-REF-003', 'EVC-UNK-001']);
+    expect(ruleIds(r)).toEqual(['EVC-REF-003', 'EVC-UNK-001']); // attribution is not persisted by this Kriya version, so no reference exists
     expect(r.coverage.inputs[0]!.unknown_fields).toBe(121);
     for (const d of only(r, 'EVC-UNK-001')) for (const p of [d.pointer, ...d.related.map((x) => x.pointer)]) expect(resolvePointer(doc, p).found, p).toBe(true);
     expect(only(r, 'EVC-UNK-001').find((d) => d.pointer.endsWith('severity_v9'))!.observed).toEqual({ kind: 'value', value: 'novel' });
-    expect(one(r, 'EVC-REF-001').explanation).toContain('a field named evidence_id in a fixture is not a documented target');
+  });
+  it('the NEGATIVE fixture keeps the invented evidence_id linkage: unresolved references (with the repeat named) and the invented field preserved, never matched', () => {
+    const r = check(input(GEN, 'history.detail.run-negative-evidence-links.json'));
+    expect(ruleIds(r)).toEqual(['EVC-REF-001', 'EVC-REF-003', 'EVC-UNK-001']);
+    const ref = one(r, 'EVC-REF-001');
+    expect(ref).toMatchObject({ classification: 'unresolved_reference', observed: { value: ['ev-negative-1', 'ev-negative-1', 'ev-negative-2'] }, related: [{ pointer: '/data/evidence_records/availability', observed: { value: 'recorded' } }] });
+    expect(ref.explanation).toContain('a field named evidence_id in a fixture is not a documented target; repeated within the list: "ev-negative-1"');
+    expect(one(r, 'EVC-UNK-001')).toMatchObject({ pointer: '/data/evidence_records/data/0/evidence_id', observed: { value: 'ev-negative-1' } }); // present and equal to a reference, still never resolved
+    expect(r.summary.exit_code).toBe(1);
+  });
+  it('an absent, empty or null evidence_ids list is not a reference; a non-string entry is counted, not interpreted', () => {
+    const withAttribution = (file: string, data: unknown) => variant('clean.detail.json', file, (d) => { d.data.attribution = { availability: 'recorded', provenance: 'fixture', reason: null, data }; });
+    expect(ruleIds(check(withAttribution('absent.json', { cause: 'x' })))).toEqual(['EVC-REF-003']);
+    expect(ruleIds(check(withAttribution('empty.json', { cause: 'x', evidence_ids: [] })))).toEqual(['EVC-REF-003']);
+    expect(ruleIds(check(withAttribution('null.json', { cause: 'x', evidence_ids: null })))).toEqual(['EVC-REF-003']);
+    const mixed = check(withAttribution('mixed.json', { cause: 'x', evidence_ids: ['a', 7, 'a'] }));
+    expect(one(mixed, 'EVC-REF-001').explanation).toContain('repeated within the list: "a"; 1 entry is not a string');
   });
   it('the serializer-produced run record (events and gates), listing, verify, acquire, page and the corrected workspace status validate without any identity, section, event, gate or token diagnostic', () => {
     const r = check(...['history.detail.run-serializer-events.json', 'snapshot.list.json', 'snapshot.verify.json', 'snapshot.acquire.json', 'history.list.page1.json', 'workspace.status.json', 'capabilities.json'].map((n) => input(GEN, n)));
-    expect(ruleIds(r)).toEqual(['EVC-REF-001']); // the only remaining diagnostic is the documented fixture evidence_ids linkage
+    expect(r.diagnostics).toEqual([]); // serializer-derived evidence, gates, events and the corrected workspace status: nothing to report
+    expect(r.summary.exit_code).toBe(0);
     expect(r.coverage.inputs.find((i) => i.file === 'workspace.status.json')).toMatchObject({ status: 'checked', diagnostics: 0 }); // status CLEAN / exit_code 0 / RecoveryAssessment.to_dict shape
-    expect(r.coverage.inputs[0]!.diagnostics).toBe(1);
     expect(r.coverage.snapshots.find((s) => s.snapshot_id === S1)).toMatchObject({ resolution: 'listed', listed_in: ['snapshot.list.json'] });
   });
 });

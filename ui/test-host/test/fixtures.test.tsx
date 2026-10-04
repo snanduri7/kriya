@@ -3,7 +3,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App, checkEnvelope } from '@kriya-ui/shared';
 import { BrowserFixtureHost } from '../src/BrowserFixtureHost';
 
@@ -67,6 +67,34 @@ describe('every special fixture renders in the browser test host', () => {
     const panel = screen.getByRole('tabpanel');
     for (const text of ['compile · failure', 'test_selection · failure', 'targeted_test · success', 'run_verification · failure', 'goal_spec_compliance · success', 'status UNAVAILABLE', 'VERIFIER_REQUEST_REFUSED', 'graded_by process_exit · deterministic_result PASS', "src/mod1/a.py:12:5: error: name 'audit' is not defined"]) expect(panel).toHaveTextContent(text);
     for (const absent of ['result not recorded', 'unknown fields preserved', 'conflicting result fields', 'type not recorded']) expect(panel).not.toHaveTextContent(absent);
+  });
+  it('attribution: the serializer run says not recorded with Kriya\'s reason; the demonstration shows an empty list; the NEGATIVE fixture shows unresolved references, never a link', { timeout: 30000 }, async () => {
+    const open = async (goalFragment: string) => {
+      // the runs column is the first listbox and search box in DOM order; once a run is open the timeline adds its own virtualized options and filter
+      const runRows = () => within(screen.getAllByRole('listbox')[0]!).getAllByRole('option').filter((o) => o.classList.contains('vrow'));
+      fireEvent.change(screen.getAllByRole('searchbox')[0]!, { target: { value: goalFragment } });
+      await waitFor(() => expect(runRows().length).toBe(1));
+      fireEvent.click(runRows()[0]!);
+      await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(goalFragment), { timeout: 10000 });
+      fireEvent.click(screen.getByRole('tab', { name: /^Why/ }));
+      return document.querySelector('.why') as HTMLElement;
+    };
+    render(<App host={new BrowserFixtureHost('', null)} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBeGreaterThan(0), { timeout: 10000 });
+    const serializer = await open('exactly as Kriya serializes');
+    expect(serializer).toHaveTextContent('Recorded causal attribution: not recorded - the baseline persists failure categories, not causal attribution');
+    expect(serializer).not.toHaveTextContent('unresolved reference');
+    const demo = await open('synthetic demonstration');
+    expect(demo).toHaveTextContent('none recorded (empty list)');
+    expect(demo).not.toHaveTextContent('unresolved reference');
+    const negative = await open('NEGATIVE CASE');
+    const refs = within(negative).getByRole('list', { name: 'Evidence references' });
+    expect(within(refs).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['ev-negative-1 — unresolved reference', 'ev-negative-1 — unresolved reference', 'ev-negative-2 — unresolved reference']);
+    expect(negative).toHaveTextContent('Repeated within the list: ev-negative-1');
+    expect(negative).not.toHaveTextContent(/\bresolved\b/); // never "resolved" on its own; only "unresolved reference"
+    fireEvent.click(screen.getByRole('tab', { name: /^Evidence/ }));
+    expect(document.getElementById('insp-panel-evidence')).toHaveTextContent('unknown fields preserved: evidence_id'); // the inspector's Evidence tab panel (inactive panels are rendered hidden): the invented field stays visible, never read as a link
   });
   it('unknown status and unknown fields are shown literally', async () => {
     render(<App host={new BrowserFixtureHost('', null)} />);

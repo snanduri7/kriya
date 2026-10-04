@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { availabilityLabel, isRecorded } from '../src/model/availability';
-import { checkEnvelope, eventsByAttempt, formatEventTime, gateOutcomeView, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
+import { attributionEvidenceRefs, checkEnvelope, eventsByAttempt, formatEventTime, gateOutcomeView, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
 import { AVAILABILITY_STATES } from '../src/model/kup';
 import { sanitizeText } from '../src/render/sanitize';
 import { diffLines } from '../src/render/diff';
@@ -69,6 +69,17 @@ describe('gate outcomes (writer shape: attempt, type, success, output)', () => {
     expect(gateOutcomeView({ attempt: 2, type: 't', success: 'yes', output: 'FAILED everywhere' })).toMatchObject({ result: 'not_boolean', success: 'yes' });
     expect(gateOutcomeView({ attempt: 3, type: 'goal_spec_compliance', success: true, output: 'x', status: 'UNAVAILABLE', reason_code: 'VERIFIER_REQUEST_REFUSED', graded_by: 'process_exit', deterministic_result: 'PASS', egress: { capability: 'denied' } })).toMatchObject({ result: 'success', status: 'UNAVAILABLE', reason_code: 'VERIFIER_REQUEST_REFUSED', graded_by: 'process_exit', deterministic_result: 'PASS', unknownKeys: [] });
     expect(gateOutcomeView('not an object')).toMatchObject({ record: null, result: 'not_recorded' });
+  });
+});
+
+describe('attribution evidence references (no namespace exists: never resolvable)', () => {
+  it('distinguishes absent, null, empty, not-a-list and listed; lists repeats and non-strings; is never resolvable', () => {
+    expect(attributionEvidenceRefs({ cause: 'x' })).toMatchObject({ state: 'absent', ids: [], resolvable: false });
+    expect(attributionEvidenceRefs({ evidence_ids: null })).toMatchObject({ state: 'null', ids: [] });
+    expect(attributionEvidenceRefs({ evidence_ids: [] })).toMatchObject({ state: 'empty', ids: [] });
+    expect(attributionEvidenceRefs({ evidence_ids: 'ev1' })).toMatchObject({ state: 'not_a_list', ids: [] });
+    expect(attributionEvidenceRefs({ evidence_ids: ['ev1', 'ev2', 'ev1', 7] })).toEqual({ state: 'listed', ids: ['ev1', 'ev2', 'ev1'], repeated: ['ev1'], nonStrings: 1, resolvable: false });
+    expect(attributionEvidenceRefs(null)).toMatchObject({ state: 'absent' });
   });
 });
 

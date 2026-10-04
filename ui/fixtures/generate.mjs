@@ -17,6 +17,9 @@ const SERIALIZER = JSON.parse(readFileSync(join(here, 'serializer', 'run_events.
 // gate_outcomes in the shapes Kriya's writers record (fixtures/serializer_gates.py, committed): Failure.to_gate_outcome for
 // every failed gate, dict literals (attempt, type, success, output + per-site fields) for successful ones.
 const SERIALIZER_GATES = JSON.parse(readFileSync(join(here, 'serializer', 'gate_outcomes.json'), 'utf8'));
+// evidence_records as EvidenceRecord.to_dict records them (fixtures/serializer_evidence.py, committed): kind, source, attempt,
+// payload, sensitivity, created_at - NO identifier. attribution_section is what the adapter serializes: not persisted.
+const SERIALIZER_EVIDENCE = JSON.parse(readFileSync(join(here, 'serializer', 'evidence_records.json'), 'utf8'));
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'errors'), { recursive: true });
 
@@ -76,13 +79,14 @@ function addRun(id, over = {}, detailOver = {}, opts = {}) {
     run: summary,
     fields: { files_modified: sec('recorded', summary.files_modified, null, 'runs.files_modified (comma-joined, raw)') },
     run_events: sec(av, evs, null, 'runs.run_events'),
-    evidence_records: sec(av, [{ evidence_id: `ev-${id}-1`, revision: 'sha256:' + 'ab'.repeat(32), kind: 'gate_output' }], null, 'runs.evidence_records'),
+    evidence_records: sec(av, SERIALIZER_EVIDENCE.evidence_records, null, SERIALIZER_EVIDENCE.section.provenance),
     gate_outcomes: sec(av, SERIALIZER_GATES.gate_outcomes, null, SERIALIZER_GATES.section.provenance),
     model_hops: sec(av, [{ from: 'qwen2.5-coder:7b', to: 'qwen2.5-coder:14b', attempt: 2, reason: 'quality_gate_failed' }], null, 'runs.model_hops'),
     generation_metrics: sec(av, { prompt_tokens_estimated: 4260, prompt_tokens_provider: 4190, output_tokens: 812, wall_ms: 61230 }, null, 'runs.generation_metrics'),
     failure_report: sec(av, summary.failure_category ? [{ failure_type: 'compile_error', category: summary.failure_category, attribution_tier: 'locator' }] : [], null, 'runs.failure_report'),
     context: sec(av, { items: [{ path: `src/mod${i % 7}/a.py`, tier: 'member_exact', member_ids: [`Mod${i % 7}.run`, `Mod${i % 7}.__init__`] }, { path: `src/mod${i % 7}/b.py`, tier: 'skeleton', member_ids: [] }, { path: 'src/big.py', tier: null, omitted: true, omission_reason: 'budget_exhausted' }], tokens: { estimated: { total: 4260, known_target: 1400 }, provider_reported: { prompt: 4190 } }, package_hash: 'sha256:' + 'cd'.repeat(32) }, null, 'run_events:context.known_target_package'),
-    attribution: sec(av === 'recorded' && i % 2 === 0 ? 'recorded' : av === 'recorded' ? 'not_recorded' : av, { first_incorrect_state: 'CONTEXT', cause: 'the target member was omitted from the Developer request', category: 'CONTEXT', evidence_ids: [`ev-${id}-1`] }, av === 'recorded' && i % 2 ? 'baseline persists failure categories, not causal attribution (P-30)' : null, 'fixture:attribution'),
+    // this Kriya version persists no attribution record: ordinary runs carry the adapter's own not_persisted section verbatim
+    attribution: av === 'recorded' ? SERIALIZER_EVIDENCE.attribution_section : sec(av, null, SERIALIZER_EVIDENCE.attribution_section.reason, SERIALIZER_EVIDENCE.attribution_section.provenance),
     diagnostics: sec(av === 'recorded' ? 'not_recorded' : av, null, 'no diagnostics record persisted for this run (P-30)'),
     comparisons: sec(av === 'recorded' && i % 2 === 0 ? 'recorded' : av === 'recorded' ? 'not_recorded' : av, [{ path: `src/mod${i % 7}/a.py`, before: { text: 'def run():\n    return 1\n', provenance: 'fixture:commit_evidence', revision: 'r1' }, after: { text: 'def run():\n    audit("run")\n    return 1\n', provenance: 'fixture:commit_evidence', revision: 'r2' } }], av === 'recorded' && i % 2 ? 'trace stores modified paths, not before/after text (P-30)' : null, 'fixture:commit_evidence'),
     output: sec(av === 'recorded' ? 'not_recorded' : av, null, 'Developer output is not persisted by the baseline (P-30)'),
@@ -107,6 +111,15 @@ for (const a of AVAIL) addRun(`run-avail-${a}`, { goal: `FIXTURE: every section 
 addRun('run-no-events', { goal: 'FIXTURE: a trace row with an empty event list', timestamp: '2026-09-20 12:00:00' }, {}, { eventCount: 0 });
 addRun('run-no-prompt', { goal: 'FIXTURE: prompt column empty', timestamp: '2026-09-20 12:00:00' }, {}, { noPrompt: true });
 for (let i = RUNS.length; i < 120; i++) addRun(`run-${String(i).padStart(4, '0')}`);
+// SYNTHETIC DEMONSTRATION of the attribution panel: a recorded chain with an EMPTY evidence list - no identifier is invented, because no
+// namespace exists for one (EvidenceRecord carries no id; AttributionRecord.evidence_ids has no defined namespace).
+addRun('run-attribution-demo', { goal: 'FIXTURE (synthetic demonstration): a recorded attribution chain with an empty evidence list', timestamp: '2026-09-20 12:00:00' },
+  { attribution: sec('recorded', { first_incorrect_state: 'CONTEXT', cause: 'the target member was omitted from the Developer request', category: 'CONTEXT', evidence_ids: [] }, null, 'fixture:attribution (synthetic demonstration; this Kriya version persists no attribution record)') });
+// NEGATIVE CASE: invented evidence identifiers and an attribution that references them (one repeated). Unsupported by the contract and by
+// every production writer; the UI must show the references as unresolved and the evidence checker must report EVC-REF-001.
+addRun('run-negative-evidence-links', { goal: 'FIXTURE (NEGATIVE CASE): invented evidence_id linkage - unsupported; expect unresolved references and EVC-REF-001', timestamp: '2026-09-20 12:00:00' },
+  { evidence_records: sec('recorded', [{ ...SERIALIZER_EVIDENCE.evidence_records[1], evidence_id: 'ev-negative-1' }], null, 'fixture:NEGATIVE CASE (evidence_id is not a serializer field)'),
+    attribution: sec('recorded', { first_incorrect_state: 'CONTEXT', cause: 'fixture', category: 'CONTEXT', evidence_ids: ['ev-negative-1', 'ev-negative-1', 'ev-negative-2'] }, null, 'fixture:NEGATIVE CASE (evidence_ids have no namespace to resolve in)') });
 
 // Pagination: ordered by (timestamp DESC, run_id DESC), pages of 50, cursor = base64 of the last (timestamp, run_id).
 const ordered = [...RUNS].sort((a, b) => (a.timestamp === b.timestamp ? (a.run_id < b.run_id ? 1 : -1) : a.timestamp < b.timestamp ? 1 : -1));
@@ -135,7 +148,7 @@ const ERRORS = [['UNSUPPORTED_SCHEMA_VERSION', 'the host requested KUP 1; this K
   ['SNAPSHOT_FAILED', 'insufficient free space', null], ['SNAPSHOT_TOO_LARGE', 'the store image is 600000000 bytes; the per-snapshot bound is 536870912 bytes', null], ['SNAPSHOT_CORRUPT', 'snapshot file size or mtime differs from its manifest', null],
   ['ACQUISITION_IN_PROGRESS', 'another acquisition or prune holds the snapshot directory', null], ['ACQUISITION_REFUSED_RUN_ACTIVE', 'a run is active for the selected workspace; acquisition is refused by policy', null]];
 for (const [code, message, database_state] of ERRORS) write(`errors/${code}.json`, envelope(code.startsWith('ACQUISITION') || code.startsWith('SNAPSHOT_F') || code.startsWith('SNAPSHOT_T') || code === 'STORE_BUSY' || code === 'READ_ONLY_UNAVAILABLE' ? 'snapshot.acquire' : 'history.list', null, { code, message, database_state, snapshot_id: null, reason: null }));
-write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', 'run-serializer-events', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt'], pages: pages.length, errors: ERRORS.map(([c]) => c), snapshots: SNAPSHOTS.map((s) => s.snapshot_id) });
+write('index.json', { generated_at: 'deterministic', runs: ordered.map((r) => r.run_id), specials: ['run-diff-2000', 'run-big-events', 'run-unknown-fields', 'run-incomplete-context', 'run-serializer-events', ...AVAIL.map((a) => `run-avail-${a}`), 'run-no-events', 'run-no-prompt', 'run-attribution-demo', 'run-negative-evidence-links'], pages: pages.length, errors: ERRORS.map(([c]) => c), snapshots: SNAPSHOTS.map((s) => s.snapshot_id) });
 import { statSync } from 'node:fs';
 const bigBytes = statSync(join(out, 'history.detail.run-big-events.json')).size;
 console.log(`fixtures: ${RUNS.length} runs, ${pages.length} pages, big-events detail = ${(bigBytes / 1048576).toFixed(2)} MiB -> ${out}`);

@@ -55,6 +55,7 @@ const B = Object.freeze({
   runEvents: 'kriya/workflow/run_events.py (RunEvent.to_dict; EventAuthority = authoritative | advisory | auxiliary)',
   promptComposition: 'kriya/workflow/prompt_composition.py (token counts: non-negative integers, len//4 or provider-reported; prefill/load: seconds; prefix_break; token_counts note)',
   evidence: 'kriya/workflow/evidence.py::EvidenceRecord.to_dict (kind, source, attempt, payload, sensitivity, created_at: no identifier field)',
+  evidenceKeys: 'kriya/workflow/evidence.py::EvidenceRecord.to_dict keys (kind, source, attempt, payload, sensitivity, created_at); writers state.py::record_failure and workflow.py active_skills',
   gates: 'gate_outcomes writer inventory (ui/fixtures/serializer_gates.py; ui/docs/GATE_OUTCOME_SHAPES.md): Failure.to_gate_outcome and every successful-gate literal record attempt, type, success (boolean), output; KUP defines no gate record',
   recovery: 'kriya/control/recovery.py (STATUS_CLEAN = "CLEAN", STATUS_RUN_ACTIVE = "RUN_ACTIVE")',
   compat: 'KUP compatibility policy: additionalProperties true on every record; unknown fields and values are preserved and shown literally, never interpreted or discarded',
@@ -85,7 +86,7 @@ export const RULES = Object.freeze({
   'EVC-EVT-002': rule('structural_error', 'malformed_input', 'created_at is outside the representable epoch-seconds range', [B.runEvent], 'run events with numeric created_at', 'the file'),
   'EVC-EVT-003': rule('informational', 'incomplete_coverage', 'authority outside the EventAuthority vocabulary (shown literally, never interpreted)', [B.runEvents, B.runEvent], 'run events', 'the file'),
   'EVC-TOK-001': rule('structural_error', 'malformed_input', 'documented developer.prompt_composition field has an undocumented type or domain (counts: non-negative integer or null; seconds: non-negative number or null; prefix_break and token_counts: string or null)', [B.promptComposition], 'developer.prompt_composition events', 'the file'),
-  'EVC-UNK-001': rule('informational', 'incomplete_coverage', 'field outside the documented shape: preserved and uninterpreted', [B.compat], 'envelope, source, consistency, run rows, run detail, sections, run events, prompt_composition details, snapshot summaries', 'the file'),
+  'EVC-UNK-001': rule('informational', 'incomplete_coverage', 'field outside the documented shape: preserved and uninterpreted', [B.compat, B.evidenceKeys], 'envelope, source, consistency, run rows, run detail, sections, run events, gate records, evidence records, prompt_composition details, snapshot summaries', 'the file'),
   'EVC-REF-001': rule('unresolved_reference', 'incomplete_coverage', 'attribution.evidence_ids cannot be resolved from supplied inputs: the contract defines no namespace and this Kriya version persists no evidence identifier', [B.attribution, B.evidence], 'history.detail with a recorded attribution carrying evidence_ids', 'the file'),
   'EVC-REF-002': rule('unresolved_reference', 'incomplete_coverage', 'snapshot id not present in the supplied listing of its snapshot directory (a listing is a point-in-time observation: pruned later or acquired after; not proof that Kriya lost it)', [B.store, B.acquire], 'history.*, snapshot.acquire, snapshot.verify with a supplied snapshot.list of the same directory', 'the referencing file plus a snapshot.list'),
   'EVC-REF-003': rule('informational', 'incomplete_coverage', 'snapshot id cannot be resolved from supplied inputs (no snapshot.list of its directory was supplied, or the directory is not recorded)', [B.store], 'history.*, snapshot.acquire, snapshot.verify', 'the referencing file'),
@@ -335,11 +336,17 @@ function checkDetail(ctx, data) {
   }
   if (sectionAvailability(data.run_events) === 'recorded' && Array.isArray(data.run_events.data)) checkEvents(ctx, data.run_events.data);
   if (sectionAvailability(data.gate_outcomes) === 'recorded' && Array.isArray(data.gate_outcomes.data)) checkGates(ctx, data.gate_outcomes.data);
+  if (sectionAvailability(data.evidence_records) === 'recorded' && Array.isArray(data.evidence_records.data)) data.evidence_records.data.forEach((r, i) => unknown(ctx, 'evidence_record', pointer('data', 'evidence_records', 'data', i), r, EVIDENCE_RECORD_KEYS));
   if (sectionAvailability(data.attribution) === 'recorded' && isObj(data.attribution.data) && Array.isArray(data.attribution.data.evidence_ids) && data.attribution.data.evidence_ids.length) {
-    diag(ctx, 'EVC-REF-001', pointer('data', 'attribution', 'data', 'evidence_ids'), { related: [{ pointer: pointer('data', 'evidence_records', 'availability') }], explanation: `cannot resolve from supplied inputs: ${data.attribution.data.evidence_ids.length} evidence id(s) are recorded, but the KUP contract defines no namespace they resolve in and this Kriya version persists no evidence identifier (EvidenceRecord.to_dict); a field named evidence_id in a fixture is not a documented target` });
+    const ids = data.attribution.data.evidence_ids;
+    const strings = ids.filter((x) => typeof x === 'string');
+    const repeated = [...new Set(strings.filter((x, i) => strings.indexOf(x) !== i))].sort(sortStr);
+    const extra = `${repeated.length ? `; repeated within the list: ${repeated.map((x) => JSON.stringify(x)).join(', ')}` : ''}${strings.length !== ids.length ? `; ${ids.length - strings.length} entr${ids.length - strings.length === 1 ? 'y is' : 'ies are'} not a string` : ''}`;
+    diag(ctx, 'EVC-REF-001', pointer('data', 'attribution', 'data', 'evidence_ids'), { related: [{ pointer: pointer('data', 'evidence_records', 'availability') }], explanation: `cannot resolve from supplied inputs: ${ids.length} evidence id(s) are recorded, but the KUP contract defines no namespace they resolve in and this Kriya version persists no evidence identifier (EvidenceRecord.to_dict); a field named evidence_id in a fixture is not a documented target${extra}` });
   }
 }
 const KNOWN_GATE_KEYS = new Set([...GATE_OUTCOME_KEYS.common, ...GATE_OUTCOME_KEYS.optional]);
+const EVIDENCE_RECORD_KEYS = new Set(['kind', 'source', 'attempt', 'payload', 'sensitivity', 'created_at']); // EvidenceRecord.to_dict; no identifier
 function checkGates(ctx, list) {
   list.forEach((o, i) => {
     const base = pointer('data', 'gate_outcomes', 'data', i);

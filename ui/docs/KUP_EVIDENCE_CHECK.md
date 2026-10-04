@@ -51,12 +51,15 @@ schema enums, prompt text, digests against files, `member_ids`.
 
 ## Findings established while building it (MEASURED / TRACED against this checkout)
 
-1. **`attribution.evidence_ids` has no documented target.** The KUP schema documents it as an array of strings and
-   defines no namespace; `kriya/workflow/evidence.py::EvidenceRecord.to_dict` serializes `kind, source, attempt,
-   payload, sensitivity, created_at` and no identifier, and `kriya/kup/inspect.py::history_detail` persists no
-   attribution at all. The `evidence_records[*].evidence_id` fields in `ui/fixtures/generate.mjs` are fixture-invented.
-   The checker therefore reports every recorded `evidence_ids` as `EVC-REF-001` "cannot resolve from supplied inputs"
-   and never matches them against fixture `evidence_id` fields.
+1. **`attribution.evidence_ids` has no documented target** (contract fact, unchanged; fixtures corrected in the
+   evidence-fidelity batch, 2026-10-04). The KUP schema documents it as an array of strings and defines no namespace;
+   `kriya/workflow/evidence.py::EvidenceRecord.to_dict` serializes `kind, source, attempt, payload, sensitivity,
+   created_at` and no identifier (writers: `state.py::record_failure`, `workflow.py` active_skills), and
+   `kriya/kup/inspect.py::history_detail` returns attribution as not persisted. Ordinary fixtures now carry
+   serializer-derived evidence records (`fixtures/serializer_evidence.py`) and the adapter's own not-persisted attribution
+   section; the invented `evidence_id` linkage survives only in the labelled NEGATIVE fixture
+   `run-negative-evidence-links`, where the checker reports `EVC-REF-001` (repeat named) and `EVC-UNK-001` for the
+   invented field, and never matches them. See `FIXTURE_FIDELITY.md`.
 2. **Gate outcome shape** (RESOLVED in the contract-alignment batch, 2026-10-04; inventory in `GATE_OUTCOME_SHAPES.md`).
    Every production writer records `attempt, type, success (boolean), output`; `Failure.to_gate_outcome` adds the
    attribution fields, successful literals add per-site fields. The fixture generator used to emit `gate, passed,

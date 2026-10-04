@@ -3,7 +3,7 @@ import type { HostAdapter, OpenInIdeResult } from '../host/HostAdapter';
 import type { SlotState } from '../state/requests';
 import { INSPECTOR_TABS, type InspectorTab } from '../state/selection';
 import { isRecorded } from '../model/availability';
-import { GATE_RESULT_LABEL, formatEventTime, gateOutcomeView, unknownEventKeys } from '../model/normalize';
+import { EVIDENCE_RECORD_KEYS, GATE_RESULT_LABEL, formatEventTime, gateOutcomeView, unknownEventKeys } from '../model/normalize';
 import { safeStringify, sanitizeText } from '../render/sanitize';
 import { AvailabilityBadge, Recorded } from './Availability';
 import { Payload } from './Payload';
@@ -119,7 +119,17 @@ export function Inspector({ detail, selectedEvent, tab, onTab, prompt, onLoadPro
               </div>
             ) : <div className="muted">select an event in the timeline</div>}
             <h3>Evidence records</h3>
-            <Recorded section={detail.evidence_records} title="Evidence records">{(ev) => <Payload value={ev} label="evidence_records" onCopy={copy} />}</Recorded>
+            <Recorded section={detail.evidence_records} title="Evidence records">{(ev) => (
+              <div>
+                <ul className="plain">
+                  {ev.slice(0, 200).map((r, i) => { const o = (typeof r === 'object' && r !== null ? r : {}) as Record<string, unknown>; const extra = Object.keys(o).filter((k) => !(EVIDENCE_RECORD_KEYS as readonly string[]).includes(k)).sort(); return (
+                    <li key={i} className="mono small">#{i + 1} {sanitizeText(String(o.kind ?? 'kind not recorded'))} · {sanitizeText(String(o.source ?? 'source not recorded'))} · attempt {String(o.attempt ?? '?')} · {formatEventTime(o.created_at)}{extra.length ? <span className="warn"> · unknown fields preserved: {extra.map(sanitizeText).join(', ')}</span> : null}</li>
+                  ); })}
+                </ul>
+                <p className="muted small">Evidence records carry no identifier (EvidenceRecord.to_dict: kind, source, attempt, payload, sensitivity, created_at); attribution evidence references are never linked to them. Record order is the recorded order.</p>
+                <Payload value={ev} label="evidence_records" onCopy={copy} />
+              </div>
+            )}</Recorded>
             <h3>Generation metrics</h3>
             <Recorded section={detail.generation_metrics} title="Generation metrics">{(m) => <Payload value={m} label="generation_metrics" onCopy={copy} />}</Recorded>
           </TabPanel>

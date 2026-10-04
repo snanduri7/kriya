@@ -4,6 +4,7 @@ import type { HostAdapter, OpenInIdeResult } from '../host/HostAdapter';
 import { DRAWER_TABS, type DrawerTab } from '../state/selection';
 import { isRecorded } from '../model/availability';
 import { diffLines } from '../render/diff';
+import { EVIDENCE_REFS_LABEL, attributionEvidenceRefs } from '../model/normalize';
 import { sanitizeText } from '../render/sanitize';
 import { Recorded } from './Availability';
 import { Payload } from './Payload';
@@ -88,9 +89,20 @@ export function Drawer({ detail, open, tab, comparisonPath, onTab, onToggle, onS
                     <dt>First incorrect state</dt><dd>{sanitizeText(a.first_incorrect_state ?? 'not recorded')}</dd>
                     <dt>Cause</dt><dd>{sanitizeText(a.cause ?? 'not recorded')}</dd>
                     <dt>Classification (display vocabulary, as recorded)</dt><dd>{sanitizeText(a.category ?? 'not recorded')}</dd>
-                    <dt>Evidence</dt><dd className="mono">{a.evidence_ids?.length ? sanitizeText(a.evidence_ids.join(', ')) : 'none recorded'}</dd>
+                    <dt>Evidence references</dt>
+                    <dd className="mono">{(() => { const refs = attributionEvidenceRefs(a); return refs.state !== 'listed' ? EVIDENCE_REFS_LABEL[refs.state] : (
+                      <div>
+                        <ul className="plain" aria-label="Evidence references">
+                          {refs.ids.map((id, i) => <li key={i}>{sanitizeText(id)} — unresolved reference</li>)}
+                        </ul>
+                        <div className="muted small">{refs.ids.length} reference{refs.ids.length === 1 ? '' : 's'}: no identifier namespace is defined for evidence_ids, and recorded evidence records carry no identifier (EvidenceRecord.to_dict), so none resolves to a record; nothing here is verified attribution.{refs.repeated.length ? ` Repeated within the list: ${sanitizeText(refs.repeated.join(', '))}.` : ''}{refs.nonStrings ? ` ${refs.nonStrings} entr${refs.nonStrings === 1 ? 'y is' : 'ies are'} not a string (see the record below).` : ''}</div>
+                      </div>
+                    ); })()}</dd>
                   </dl>
                 )}
+              </Recorded>
+              <Recorded section={detail.attribution} title="Recorded attribution (raw)">
+                {(a) => <Payload value={a} label="attribution record" />}
               </Recorded>
               <Recorded section={detail.diagnostics} title="Diagnostics">{(d) => <Payload value={d} label="diagnostics" />}</Recorded>
               <p className="muted">Failure categories are not causal attribution; the chain is shown only where it was recorded (P-23, D-5).</p>

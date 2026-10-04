@@ -16,8 +16,8 @@
     "check:shared-deps": "node scripts/check-shared-deps.mjs",
     "check": "npm run fixtures && npm run check:generated -w @kriya-ui/kup && npm run typecheck && npm run lint && npm run check:shared-deps && npm run test && npm run java:check -w @kriya-ui/kup",
     "fixtures": "node fixtures/generate.mjs",
-    "fixtures:serializer": "../.newvenv/bin/python fixtures/serializer_events.py && ../.newvenv/bin/python fixtures/serializer_gates.py",
-    "fixtures:serializer:check": "../.newvenv/bin/python fixtures/serializer_events.py --check && ../.newvenv/bin/python fixtures/serializer_gates.py --check",
+    "fixtures:serializer": "../.newvenv/bin/python fixtures/serializer_events.py && ../.newvenv/bin/python fixtures/serializer_gates.py && ../.newvenv/bin/python fixtures/serializer_evidence.py",
+    "fixtures:serializer:check": "../.newvenv/bin/python fixtures/serializer_events.py --check && ../.newvenv/bin/python fixtures/serializer_gates.py --check && ../.newvenv/bin/python fixtures/serializer_evidence.py --check",
     "build": "npm run build --workspaces --if-present"
   },
   "devDependencies": {

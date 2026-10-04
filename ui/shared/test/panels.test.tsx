@@ -12,10 +12,10 @@ function detailFor(id: string, avail: Availability, extra: Partial<RunDetail> = 
     run: run(id), fields: {},
     run_events: sec([{ kind: 'context.known_target_package', attempt: 1, source: 'attempt.run_attempt', authority: 'advisory', message: 'package', failure_type: null, operation: null, details: { x: 1 }, created_at: 1759561200.25, novel_field: 'kept' },
       { kind: 'candidate_gates.passed', attempt: 2, source: 'workflow', authority: 'authoritative', message: 'gates', failure_type: null, operation: null, details: 'p', created_at: 1759561260 }]),
-    evidence_records: sec([{ evidence_id: 'ev1' }]), gate_outcomes: sec([{ attempt: 1, type: 'compile', success: false, output: 'a.py:1: error: boom' }, { attempt: 2, type: 'test', success: true, output: 'ok', passed: false }, { attempt: 2, gate: 'legacy', passed: true }]), model_hops: sec([]),
+    evidence_records: sec([{ kind: 'failure', source: 'quality_gate', attempt: 1, payload: { type: 'compile' }, sensitivity: 'local_only', created_at: 1759561201.5 }]), gate_outcomes: sec([{ attempt: 1, type: 'compile', success: false, output: 'a.py:1: error: boom' }, { attempt: 2, type: 'test', success: true, output: 'ok', passed: false }, { attempt: 2, gate: 'legacy', passed: true }]), model_hops: sec([]),
     generation_metrics: sec({ a: 1 }), failure_report: sec([{ failure_type: 'compile', category: 'quality_gate_failed', attribution_tier: 'locator' }]),
     context: sec({ items: [{ path: 'a.py', tier: 'full', member_ids: ['A.f'] }, { path: 'b.py', tier: 'signatures', omitted: true, omission_reason: 'budget_exhausted' }], tokens: { estimated: { total: 100 }, provider_reported: { prompt: 98 } } }),
-    attribution: sec({ first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT', evidence_ids: ['ev1'] }),
+    attribution: sec({ first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT', evidence_ids: ['ev1', 'ev1', 'ev2'] }), // no namespace exists for these: they must render as unresolved
     diagnostics: sec({ note: 'd' }), comparisons: sec([{ path: 'a.py', before: { text: 'a\nb\n', provenance: 'commit_evidence', revision: 'r1' }, after: { text: 'a\nc\n', provenance: 'commit_evidence', revision: 'r2' } }]),
     output: sec('model said hi'), ...extra,
   } as RunDetail;
@@ -201,8 +201,18 @@ describe('every panel renders with a fake host (P-R3)', () => {
     fireEvent.click(within(events).getAllByRole('option')[0]!);
     expect(screen.getByText(/unknown fields preserved: novel_field/)).toBeInTheDocument();
     // Drawer
+    expect(screen.getByText(/#1 failure · quality_gate · attempt 1/)).toBeInTheDocument(); // the serializer's fields, recorded order
+    expect(screen.getByText(/Evidence records carry no identifier/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /^Why/ }));
     expect(screen.getByText('omitted target')).toBeInTheDocument();
+    // attribution evidence references: every id stays visible as an unresolved reference, never linked, never verified
+    const refs = within(screen.getByRole('list', { name: 'Evidence references' })).getAllByRole('listitem');
+    expect(refs.map((li) => li.textContent)).toEqual(['ev1 — unresolved reference', 'ev1 — unresolved reference', 'ev2 — unresolved reference']);
+    expect(screen.getByText(/3 references: no identifier namespace is defined/)).toBeInTheDocument();
+    expect(screen.getByText(/Repeated within the list: ev1\./)).toBeInTheDocument();
+    expect(screen.getByText(/none resolves to a record; nothing here is verified attribution/)).toBeInTheDocument();
+    expect(screen.queryByText(/\bresolved\b/)).not.toBeInTheDocument(); // the word "resolved" never appears on its own
+    expect(screen.getByText(/attribution record: \d+ chars/)).toBeInTheDocument(); // the raw record stays inspectable
     fireEvent.click(screen.getByRole('tab', { name: /^Diff/ }));
     fireEvent.click(screen.getByRole('button', { name: 'a.py' }));
     expect(screen.getByRole('listbox', { name: 'Diff of a.py' })).toHaveTextContent('c');
@@ -221,6 +231,20 @@ describe('every panel renders with a fake host (P-R3)', () => {
       fireEvent.click(screen.getByRole('tab', { name: /^Output/ }));
       expect(screen.queryByText(/model said hi/)).not.toBeInTheDocument();
       expect(screen.getAllByRole('status').some((el) => el.textContent?.includes(`Model output: ${label}`))).toBe(true);
+    });
+  }
+
+  for (const [name, attribution, expected] of [
+    ['absent', { first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT' }, 'not recorded (field absent)'],
+    ['empty', { first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT', evidence_ids: [] }, 'none recorded (empty list)'],
+    ['null', { first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT', evidence_ids: null }, 'recorded as null'],
+  ] as const) {
+    it(`attribution evidence references ${name} are stated as such, never shown as references or as resolved`, async () => {
+      await renderAndSelect(detailFor('r1', 'recorded', { attribution: { availability: 'recorded', data: attribution, reason: null, provenance: 'fixture' } as never }));
+      fireEvent.click(screen.getByRole('tab', { name: /^Why/ }));
+      expect(screen.getByText(expected)).toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'Evidence references' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/unresolved reference/)).not.toBeInTheDocument();
     });
   }
 

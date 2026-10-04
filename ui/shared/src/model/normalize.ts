@@ -82,6 +82,26 @@ export function gateOutcomeView(value: unknown): GateOutcomeView {
   return { record: o, attempt: o.attempt, type: str(o.type), result, success: o.success, output: str(o.output), status: str(o.status), reason_code: str(o.reason_code), graded_by: str(o.graded_by), deterministic_result: str(o.deterministic_result), conflicts, unknownKeys: Object.keys(o).filter((k) => !KNOWN_GATE_KEYS.has(k)).sort() };
 }
 
+/** Keys EvidenceRecord.to_dict records (kriya/workflow/evidence.py): no identifier field exists, so nothing can reference an
+ * evidence record. AttributionRecord.evidence_ids (KUP schema) is an array of strings with NO defined namespace and no production
+ * writer in this Kriya version: every recorded id is an UNRESOLVED reference - shown literally, never linked by array position or
+ * matched against a fixture field, never presented as verified attribution. */
+export const EVIDENCE_RECORD_KEYS = ['kind', 'source', 'attempt', 'payload', 'sensitivity', 'created_at'] as const;
+export type EvidenceRefsState = 'absent' | 'null' | 'empty' | 'listed' | 'not_a_list';
+export interface AttributionEvidenceRefs { state: EvidenceRefsState; ids: string[]; repeated: string[]; nonStrings: number; resolvable: false }
+export function attributionEvidenceRefs(attribution: unknown): AttributionEvidenceRefs {
+  const none = (state: EvidenceRefsState): AttributionEvidenceRefs => ({ state, ids: [], repeated: [], nonStrings: 0, resolvable: false });
+  if (typeof attribution !== 'object' || attribution === null || !('evidence_ids' in attribution)) return none('absent');
+  const raw = (attribution as { evidence_ids: unknown }).evidence_ids;
+  if (raw === null) return none('null');
+  if (!Array.isArray(raw)) return none('not_a_list');
+  if (raw.length === 0) return none('empty');
+  const ids = raw.filter((x): x is string => typeof x === 'string');
+  const repeated = [...new Set(ids.filter((x, i) => ids.indexOf(x) !== i))].sort();
+  return { state: 'listed', ids, repeated, nonStrings: raw.length - ids.length, resolvable: false };
+}
+export const EVIDENCE_REFS_LABEL: Record<Exclude<EvidenceRefsState, 'listed'>, string> = { absent: 'not recorded (field absent)', null: 'recorded as null', empty: 'none recorded (empty list)', not_a_list: 'recorded, but not a list (shown in the record below)' };
+
 /** created_at is recorded as Unix epoch seconds (time.time()); render it as UTC, labelled, never as local time. */
 export function formatEventTime(createdAt: unknown): string {
   if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return 'time not recorded';
