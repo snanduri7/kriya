@@ -76,19 +76,21 @@ validator refused; both now refuse every C0 control character in `workspace` and
   slope in MB/hour over the post-warm-up samples). A 20-second smoke validated the mechanics. The two-hour run was
   started at 10:20 IST on fixtures (a snapshot copy, so nothing regenerated during the run can reach it).
 
-### Soak result (MEASURED; `standalone/measurements/soak-2026-10-04T04-50-09-515Z.json`)
+### Soak result (MEASURED; `standalone/measurements/soak-2026-10-04T04-50-09-515Z.json`; owner-agreed 15-minute warm-up)
 
 Electron 44.5.1, macOS 26.7 arm64, fixtures via the stand-in, window visible, no forced GC. 2 h 0 m 6 s wall time,
 **1,177 selections** (one every 6.12 s, cycling the four heavy fixtures and all 50 page-1 runs), **0 errors**,
-25 samples, `ps` RSS within 3 MB of `app.getAppMetrics()` at every sample.
+25 samples, `ps` RSS within 3 MB of `app.getAppMetrics()` at every sample. The run itself was taken with a 10-minute
+warm-up option; the figures below are recomputed from the raw samples with the agreed 15-minute warm-up (no rerun
+needed - the samples are the evidence; the regression test recomputes them the same way).
 
 | measure | value |
 |---|---|
 | start (idle, before any selection) | 394 MB total working set |
-| end of the 10-minute warm-up | 380 MB |
-| post-warm-up samples (23) | min 354, mean 372, **max 401 MB** |
+| first post-warm-up sample (15 min 19 s) | 385 MB |
+| post-warm-up samples (22) | min 354, **mean 371.86**, **max 401 MB** |
 | **550 MB ceiling after warm-up** | **PASS** (401 MB) |
-| sustained growth (least squares over the 23 post-warm-up samples) | **-7.3 MB per hour** (380 -> 364 MB), i.e. no growth |
+| sustained growth (least squares over the 22 post-warm-up samples) | **-7.14 MB per hour** (385 -> 364 MB), i.e. no growth |
 | per process at the end | Browser 129, GPU 62, Utility 38, renderer 135 MB |
 
 The two transient peaks (401 MB at 51 min, 392 MB at 117 min) are Browser-process excursions of ~30 MB that fall back
@@ -97,24 +99,27 @@ within one sample; the renderer stayed between 127 and 149 MB throughout. Classi
 volumes and a loaded local model are still to be measured after D-9 is lifted), and the development build ran other
 work (npm tests, the Java check) on the same machine during the first 30 minutes.
 
-## Owner decisions and checks
+## Owner-confirmed acceptances (2026-10-04) - distinct from the automated measurements above
 
-- **Decided 2026-10-04 (owner):** the measured idle footprint (393 MB) is ACCEPTED for M1; the **550 MB post-warm-up
-  ceiling is RETAINED as a regression gate.** Bound in code by `standalone/test/memory_ceiling.test.ts`: the soak
-  defaults must keep 550 MB / 2 h / 1,000 selections / 5-minute samples / no forced GC, and the latest committed
-  soak evidence must be complete, under the ceiling and without sustained growth (slope < 10 MB/h; a 60 MB/h ramp is
-  the negative control). Any future soak that breaches the ceiling fails `npm run check`.
+These are decisions and human checks recorded as the owner stated them; they are not measurements by the agent.
+
+| item | status | basis |
+|---|---|---|
+| idle footprint 393 MB | **ACCEPTED by the owner for M1** | measurement `measure-2026-10-04T04-29-17-837Z.json`; the 550 MB post-warm-up ceiling is RETAINED as the regression gate |
+| VoiceOver pass on the Electron app | **ACCEPTED - owner-confirmed** (human check at the machine) | agent evidence was only the Chromium accessibility tree proxy (69 controls, 0 unnamed) |
+| VS Code cursor placement (`code -g file:line`) | **ACCEPTED - owner-confirmed** (human check at the machine) | agent evidence was only `exit 0` on VS Code CLI 1.140.0 |
+| soak warm-up | agreed at **15 minutes** | report and `memory_ceiling.test.ts` recompute from the raw samples with 900 s |
+
+The ceiling is bound in code by `standalone/test/memory_ceiling.test.ts`: the soak defaults must keep 550 MB / 2 h /
+1,000 selections / 5-minute samples / 15-minute warm-up / no forced GC, and the latest committed soak evidence,
+recomputed from its raw samples, must be complete, under the ceiling and without sustained growth (slope < 10 MB/h;
+a 60 MB/h ramp is the negative control). Any future soak that breaches the ceiling fails `npm run check`.
 - **Chromium accessibility tree (MEASURED proxy, `measure-2026-10-04T07-03-56-510Z.json`):** read through the
   DevTools protocol (`Accessibility.getFullAXTree`), which is the tree macOS VoiceOver receives: 1,124 live nodes,
   69 interactive controls, **0 without an accessible name**; roles exposed: 4 regions, 3 listboxes, 47 options,
   2 tablists, 7 tabs, 11 buttons, a searchbox, a table with 5 column headers, 3 headings; the selected option's
   name reads "SUCCESS 2026-09-28 10:00:00 FIXTURE: 2,000-line recorded diff". This shows names and roles exist; it does
   not show how VoiceOver speaks them or whether the reading order is sensible.
-- **Still needs a person at the machine (the agent cannot run VoiceOver or read another app's cursor without
-  assistive access):**
-  1. VoiceOver pass: `cd ui && npm start -w @kriya-ui/standalone`, Cmd+F5, then VO+Right through the trust strip,
-     the Runs listbox (arrow keys change the selection and the timeline header should be announced), the tab lists
-     (Left/Right), and the drawer; report any control announced without a name or any unreachable element.
-  2. VS Code cursor line: run
-     `code -g "$(pwd)/ui/spikes/a1_zero_write/reader.py:42"` and confirm the cursor is on line 42.
-- **D-4 ruling** (WAL stores cannot be read read-only without sidecar writes) before Phase C can start.
+- **D-4 ruling:** unchanged by the owner (no immutable reads, no SHM exceptions); Phase C stays on hold. A stable-
+  snapshot read strategy for the owner's gate decision is in `ui/docs/D4_STABLE_SNAPSHOT_READ_STRATEGY.md`
+  (specification only, not implemented).

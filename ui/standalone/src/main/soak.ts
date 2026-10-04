@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { arch, release } from 'node:os';
 
 export interface SoakOptions { seconds: number; minSelections: number; sampleSeconds: number; warmupSeconds: number; ceilingMB: number }
-export const DEFAULT_SOAK: SoakOptions = { seconds: 7200, minSelections: 1000, sampleSeconds: 300, warmupSeconds: 600, ceilingMB: 550 };
+/** Owner-agreed parameters (2026-10-04): two hours, >= 1,000 selections, 5-minute samples, 15-minute warm-up, 550 MB ceiling. */
+export const DEFAULT_SOAK: SoakOptions = { seconds: 7200, minSelections: 1000, sampleSeconds: 300, warmupSeconds: 900, ceilingMB: 550 };
 
 interface SoakSample { at_s: number; selections: number; totalWorkingSetMB: number; byType: Record<string, number>; psRssTotalMB: number | null; errors: number }
 

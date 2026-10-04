@@ -11,9 +11,9 @@ const latestSoak = () => readdirSync(DIR).filter((f) => f.startsWith('soak-') &&
 
 describe('memory regression ceiling (retained by the owner, 2026-10-04)', () => {
   it('the soak defaults keep the 550 MB ceiling, two hours, 1,000 selections, 5-minute samples, no forced GC', () => {
-    expect(DEFAULT_SOAK).toEqual({ seconds: 7200, minSelections: 1000, sampleSeconds: 300, warmupSeconds: 600, ceilingMB: 550 });
+    expect(DEFAULT_SOAK).toEqual({ seconds: 7200, minSelections: 1000, sampleSeconds: 300, warmupSeconds: 900, ceilingMB: 550 });
   });
-  it('the latest committed soak evidence is complete and under the ceiling with no sustained growth', () => {
+  it('the latest committed soak evidence is complete and under the ceiling with no sustained growth (15-minute warm-up)', () => {
     const file = latestSoak();
     expect(file, 'a committed soak-*.json is required').toBeTruthy();
     const d = JSON.parse(readFileSync(join(DIR, file!), 'utf8'));
@@ -21,12 +21,11 @@ describe('memory regression ceiling (retained by the owner, 2026-10-04)', () => 
     expect(d.forced_gc).toBe(false);
     expect(d.selections).toBeGreaterThanOrEqual(1000);
     expect(d.errors_count).toBe(0);
-    expect(d.options.ceilingMB).toBe(550);
-    expect(d.ceiling_check.pass).toBe(true);
-    expect(d.ceiling_check.max_total_working_set_after_warmup_MB).toBeLessThanOrEqual(550);
-    const post = d.samples.filter((s: { at_s: number }) => s.at_s >= d.options.warmupSeconds);
+    // Recomputed from the raw samples with the AGREED warm-up (DEFAULT_SOAK), never trusted from the file's own summary.
+    const post = d.samples.filter((s: { at_s: number }) => s.at_s >= DEFAULT_SOAK.warmupSeconds) as { at_s: number; totalWorkingSetMB: number }[];
     expect(post.length).toBeGreaterThanOrEqual(12);
-    const slope = slopeMBPerHour(post.map((s: { at_s: number; totalWorkingSetMB: number }) => ({ at_s: s.at_s, mb: s.totalWorkingSetMB })));
+    expect(Math.max(...post.map((s) => s.totalWorkingSetMB))).toBeLessThanOrEqual(DEFAULT_SOAK.ceilingMB);
+    const slope = slopeMBPerHour(post.map((s) => ({ at_s: s.at_s, mb: s.totalWorkingSetMB })));
     expect(slope).not.toBeNull();
     expect(slope!).toBeLessThan(10); // MB per hour: a real leak at this selection rate shows as tens of MB per hour
   });
