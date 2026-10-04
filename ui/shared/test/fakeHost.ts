@@ -20,4 +20,4 @@ export const env = <T,>(operation: string, data: T, over: Partial<KupEnvelope<T>
   schema_version: 1, operation, request_id: 'req', observed_at: '2026-10-04T09:00:00Z',
   source: { state_directory: '/fixture/state', trace_database: '/fixture/state/traces.db' },
   consistency: { kind: 'sqlite_transaction_snapshot', live_stream: false }, data, error: null, ...over,
-});
+} as unknown as KupEnvelope<T>);

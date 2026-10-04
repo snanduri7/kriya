@@ -4,4 +4,4 @@ export const FORBIDDEN_IMPORT_PATTERNS = ['electron', 'electron/*', '@electron/*
 /** One regex over the BARE import specifier (a relative './panels/Inspector' never matches): electron, @electron/*, node:*, every Node built-in. */
 export const FORBIDDEN_IMPORT_REGEX = `^(node:.*|electron(/.*)?|@electron/.*|(${NODE_BUILTINS.join('|')})(/.*)?)$`;
 /** Dependencies ui/shared/package.json may declare (runtime). Anything else fails the check. */
-export const ALLOWED_SHARED_DEPENDENCIES = ['react', 'react-dom'];
+export const ALLOWED_SHARED_DEPENDENCIES = ['@kriya-ui/kup', 'react', 'react-dom']; // kup: generated types + dependency-free validators, host-independent by construction

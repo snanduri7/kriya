@@ -19,7 +19,7 @@ export class BrowserFixtureHost implements HostAdapter {
 
   async query(request: KupRequest): Promise<KupEnvelope> {
     if (request.operation === 'history.list' && this.scenario) {
-      if (this.scenario === 'schema2') return { ...(await this.load('history.list.page1.json') as KupEnvelope), schema_version: 2 };
+      if (this.scenario === 'schema2') return { ...(await this.load('history.list.page1.json') as KupEnvelope), schema_version: 2 } as unknown as KupEnvelope;
       if (this.scenario === 'garbage') return 'not json at all' as unknown as KupEnvelope;
       return this.load(`errors/${this.scenario}.json`) as Promise<KupEnvelope>;
     }

@@ -1,3 +1,4 @@
+import { validate } from '@kriya-ui/kup';
 import { KUP_SCHEMA_VERSION, type KupEnvelope, type RunDetail, type RunEvent, type RunSummary, type Section } from './kup';
 import { missingSection } from './availability';
 
@@ -17,14 +18,10 @@ export function checkEnvelope(value: unknown): EnvelopeCheck {
   if (v.schema_version !== KUP_SCHEMA_VERSION) {
     return { ok: false, code: 'UNSUPPORTED_SCHEMA_VERSION', message: `schema_version ${v.schema_version} is not supported (supported: ${KUP_SCHEMA_VERSION})` };
   }
-  for (const key of ['operation', 'request_id', 'observed_at'] as const) {
-    if (typeof v[key] !== 'string') return { ok: false, code: 'INVALID_RESPONSE', message: `${key} missing` };
-  }
-  if (!('data' in v) || !('error' in v)) return { ok: false, code: 'INVALID_RESPONSE', message: 'data/error missing' };
-  if (v.error !== null && (typeof v.error !== 'object' || typeof (v.error as Record<string, unknown>).code !== 'string')) {
-    return { ok: false, code: 'INVALID_RESPONSE', message: 'error is not a typed error object' };
-  }
-  return { ok: true, envelope: v as unknown as KupEnvelope };
+  // Structural validity comes from the generated schema validator (runtime validation in every host, P-24).
+  const checked = validate.envelope(v);
+  if (!checked.ok) return { ok: false, code: 'INVALID_RESPONSE', message: `envelope does not match KUP v1: ${checked.errors.slice(0, 3).join('; ')}` };
+  return { ok: true, envelope: checked.value as KupEnvelope };
 }
 
 /** Parse a stored JSON TEXT column; a value that is not JSON stays the raw string (stored values verbatim, P-25). */
