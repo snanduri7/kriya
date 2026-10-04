@@ -12,7 +12,7 @@ function detailFor(id: string, avail: Availability, extra: Partial<RunDetail> = 
     run: run(id), fields: {},
     run_events: sec([{ kind: 'context.known_target_package', attempt: 1, source: 'attempt.run_attempt', authority: 'advisory', message: 'package', failure_type: null, operation: null, details: { x: 1 }, created_at: 1759561200.25, novel_field: 'kept' },
       { kind: 'candidate_gates.passed', attempt: 2, source: 'workflow', authority: 'authoritative', message: 'gates', failure_type: null, operation: null, details: 'p', created_at: 1759561260 }]),
-    evidence_records: sec([{ evidence_id: 'ev1' }]), gate_outcomes: sec([{ attempt: 1, gate: 'compile', passed: false }]), model_hops: sec([]),
+    evidence_records: sec([{ evidence_id: 'ev1' }]), gate_outcomes: sec([{ attempt: 1, type: 'compile', success: false, output: 'a.py:1: error: boom' }, { attempt: 2, type: 'test', success: true, output: 'ok', passed: false }, { attempt: 2, gate: 'legacy', passed: true }]), model_hops: sec([]),
     generation_metrics: sec({ a: 1 }), failure_report: sec([{ failure_type: 'compile', category: 'quality_gate_failed', attribution_tier: 'locator' }]),
     context: sec({ items: [{ path: 'a.py', tier: 'full', member_ids: ['A.f'] }, { path: 'b.py', tier: 'signatures', omitted: true, omission_reason: 'budget_exhausted' }], tokens: { estimated: { total: 100 }, provider_reported: { prompt: 98 } } }),
     attribution: sec({ first_incorrect_state: 'CONTEXT', cause: 'omitted target', category: 'CONTEXT', evidence_ids: ['ev1'] }),
@@ -188,7 +188,12 @@ describe('every panel renders with a fake host (P-R3)', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Output/ }));
     expect(screen.getByText(/model said hi/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /^Gates/ }));
-    expect(screen.getByText(/compile · failed/)).toBeInTheDocument();
+    expect(screen.getByText(/compile · failure/)).toBeInTheDocument(); // the writers' fields: type and the success boolean
+    expect(screen.getByText('a.py:1: error: boom')).toBeInTheDocument(); // recorded output, verbatim
+    expect(screen.getByText(/test · result ambiguous \(conflicting fields\)/)).toBeInTheDocument();
+    expect(screen.getByText(/conflicting result fields, not resolved: success=true, passed=false/)).toBeInTheDocument();
+    expect(screen.getByText(/type not recorded · result not recorded/)).toBeInTheDocument(); // legacy record: nothing inferred
+    expect(screen.getByText(/unknown fields preserved: gate, passed/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /^Evidence/ }));
     expect(screen.getByText(/select an event in the timeline/)).toBeInTheDocument();
     // selecting an event routes to Evidence and shows unknown fields

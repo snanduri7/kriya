@@ -19,6 +19,8 @@ type Fact = { value: unknown; source: { file: string; pointer: string } };
 // its `any` return type would collapse to `any`).
 interface Report { tool: string; label: string; runs: Record<string, any>[]; diagnostics: { severity: string; file: string; pointer: string; message: string }[]; inputs: Record<string, any>[]; errors: Record<string, any>[]; run_summaries: Record<string, any>[] }
 
+/** A summarized fact (gate output: length, sha256, head) stands for a recorded string it must describe exactly. */
+const checkValue = (f: any, actual: unknown) => { if (f.summarized) { expect(typeof actual).toBe('string'); expect((actual as string).length).toBe(f.value.length); expect((actual as string).startsWith(f.value.head)).toBe(true); } else if ('value' in f) expect(f.value, f.source.pointer).toEqual(actual); };
 const walkFacts = (x: unknown, out: Fact[] = []): Fact[] => {
   if (Array.isArray(x)) x.forEach((v) => walkFacts(v, out));
   else if (typeof x === 'object' && x !== null) {
@@ -60,8 +62,13 @@ describe('a serializer-produced run record (RunEvent.to_dict through the KUP ada
     expect(pc.token_counts_note.value).toContain('estimated (len/4) per section');
     expect(run.token_accounting.generation_metrics_as_recorded.source.pointer).toBe('/data/generation_metrics/data');
     // gates and failures
-    expect(run.gates.map((g: any) => [g.gate.value, g.passed.value, g.reason_code.value])).toEqual([['compile', false, 'COMPILE_FAILED'], ['compile', true, null], ['tests', true, null]]);
-    expect(run.gates[0].raw.source.pointer).toBe('/data/gate_outcomes/data/0');
+    // gate records as Kriya's writers record them (fixtures/serializer_gates.py): type, the success boolean, output by pointer
+    expect(run.gates.map((g: any) => [g.type.value, g.success.value, g.result])).toEqual([['compile', false, 'failure'], ['compile', true, 'success'], ['test_selection', false, 'failure'], ['test', true, 'success'], ['targeted_test', true, 'success'], ['run_verification', false, 'failure'], ['run_verification', true, 'success'], ['regression_test', true, 'success'], ['goal_spec_compliance', true, 'success'], ['test', false, 'failure']]);
+    expect(run.gates[0].record.source.pointer).toBe('/data/gate_outcomes/data/0');
+    expect(run.gates[0].output).toMatchObject({ summarized: true, value: { length: 63, head: "src/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n" }, source: { pointer: '/data/gate_outcomes/data/0/output' } });
+    expect(run.gates[8]).toMatchObject({ status: { value: 'UNAVAILABLE' }, reason_code: { value: 'VERIFIER_REQUEST_REFUSED' } }); // success true beside status UNAVAILABLE: both shown, neither inferred
+    expect(run.gates[6]).toMatchObject({ graded_by: { value: 'process_exit' }, deterministic_result: { value: 'PASS' } });
+    expect(run.gates.every((g: any) => g.unknown_fields.length === 0 && g.conflicts.length === 0)).toBe(true); // writer-shaped records carry no unknown field
     expect(run.failures.failure_category.value).toBeNull();
     expect(run.failures.events_with_failure_type).toEqual([]);
     // every fact anywhere in the run names this file and a pointer
@@ -248,7 +255,15 @@ describe('Markdown cells and source pointers', () => {
     const md: string = renderMarkdown(buildReport([{ file: QA_FILE, text: qaText }]) as Report);
     expect(md).toContain('| status (literal; not mapped to success or failure) | PART\\|IAL |');
     expect(md).toContain('QA \\| goal with \\<b\\>markup\\</b\\>, \\`tick\\`, line\\nbreak, tab\\t and \\u0007 bell');
-    expect(md).toContain('| 1 | 1 | compile | false | COMPILE\\|FAILED |');
+    expect(md).toContain('| 1 | 1 | compile\\|failed | false | failure | 45 chars; line one \\| pipe \\`tick\\` \\<b\\>markup\\</b\\>\\nline two | - / - | - / - | - |');
+    expect(md).toContain('| 2 | 2 | not recorded (field absent) | not recorded (field absent) | not_recorded | not recorded (field absent) | - / - | - / - | fixture_note, name, passed |'); // legacy record: nothing inferred, fields listed
+    // a non-boolean success is shown literally, never read truthily; a disagreeing legacy passed is ambiguous, never resolved
+    const doc = JSON.parse(qaText); doc.data.gate_outcomes.data[0].success = 'yes'; doc.data.gate_outcomes.data.push({ attempt: 3, type: 'test', success: true, output: 'ok', passed: false });
+    const nb = buildReport([{ file: 'nb.json', text: JSON.stringify(doc) }]) as Report;
+    expect(nb.runs[0]!.gates[0]).toMatchObject({ result: 'not_boolean', success: { value: 'yes' } });
+    expect(nb.runs[0]!.gates[3]).toMatchObject({ result: 'ambiguous', conflicts: [{ value: false, source: { pointer: '/data/gate_outcomes/data/3/passed' } }] });
+    expect(nb.diagnostics.map((d) => d.message)).toEqual(expect.arrayContaining([expect.stringContaining('is not a boolean: shown literally'), expect.stringContaining('conflicting result fields (success and passed): result reported as ambiguous')]));
+    expect(renderMarkdown(nb)).toContain('| 4 | 3 | test | true | ambiguous (conflicting: passed=false) |');
     expect(md).toContain('| 1 | 1 | src/odd\\|name.py | A.run | member_exact |');
     expect(md).toContain('(not an object: not-an-object)');
     // every table row has the same number of cells as its header (no row broken by recorded text)
@@ -265,12 +280,12 @@ describe('Markdown cells and source pointers', () => {
         expect(f.source.file).toBe(file);
         const res = resolve(doc, f.source.pointer);
         if (f.source.absent) { expect(res.found, `${f.source.pointer} should be absent`).toBe(false); expect(resolve(doc, f.source.pointer.replace(/\/[^/]*$/, '')).found, `parent of ${f.source.pointer}`).toBe(true); expect(f.value).toBeNull(); }
-        else { expect(res.found, f.source.pointer).toBe(true); if ('value' in f) expect(f.value, f.source.pointer).toEqual(res.value); }
+        else { expect(res.found, f.source.pointer).toBe(true); checkValue(f, res.value); }
       }
     }
     const qa = JSON.parse(qaText);
     const facts = walkSourced(buildReport([{ file: QA_FILE, text: qaText }]));
-    for (const f of facts) { const res = resolve(qa, f.source.pointer); if (f.source.absent) expect(res.found).toBe(false); else { expect(res.found, f.source.pointer).toBe(true); if ('value' in f) expect(f.value).toEqual(res.value); } }
+    for (const f of facts) { const res = resolve(qa, f.source.pointer); if (f.source.absent) expect(res.found).toBe(false); else { expect(res.found, f.source.pointer).toBe(true); checkValue(f, res.value); } }
     const legacy = (buildReport([{ file: QA_FILE, text: qaText }]) as Report).runs[0]!.events[4];
     expect(legacy.record.source.pointer).toBe('/data/run_events/data/4');
     expect(legacy.kind.source).toEqual({ file: QA_FILE, pointer: '/data/run_events/data/4/kind', absent: true });

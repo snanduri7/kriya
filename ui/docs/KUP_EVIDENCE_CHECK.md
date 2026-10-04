@@ -40,7 +40,7 @@ payload id, consistency kind per operation, `metadata_differs`, workspace `run_a
 version), `EVC-SEC-*` section availability vs data and `fields.<col>` vs `<col>`, `EVC-EVT-*`/`EVC-TOK-*` the
 serializer event shape and the documented `prompt_composition` domains, `EVC-UNK-001` unknown fields (preserved,
 uninterpreted), `EVC-REF-*` documented references, `EVC-DUP-*` duplicate explicit ids in their documented scope,
-`EVC-AMB-*` ambiguity, `EVC-ORD-001` page order (informational: the schema documents no order), `EVC-VER-001`
+`EVC-AMB-*` ambiguity, `EVC-GATE-001`/`EVC-GATE-002` gate records outside the writer inventory (informational) and conflicting result fields (ambiguity), `EVC-ORD-001` page order (informational: the schema documents no order), `EVC-VER-001`
 digest format, `EVC-CONF-*` one scoped identity recorded differently across files, `EVC-INFO-001` the same run in
 different snapshots (progression; never a contradiction).
 
@@ -57,17 +57,18 @@ schema enums, prompt text, digests against files, `member_ids`.
    attribution at all. The `evidence_records[*].evidence_id` fields in `ui/fixtures/generate.mjs` are fixture-invented.
    The checker therefore reports every recorded `evidence_ids` as `EVC-REF-001` "cannot resolve from supplied inputs"
    and never matches them against fixture `evidence_id` fields.
-2. **Gate outcome shape.** `kriya/workflow/failure.py::Failure.to_gate_outcome` (every production `gate_outcomes`
-   entry) serializes `attempt, type, success, output, mode, likely_files, file_locations, failed_content,
-   attempted_edits, self_correction_attempt, attribution_tier, attribution_confidence, attribution_reasoning` (plus
-   `commands`/`steps` at some sites). The fixture generator emits `attempt, gate, passed, reason_code`. KUP defines
-   no gate record, so the checker interprets no gate field. Consumers that read `gate`/`passed`/`reason_code`
-   (`ui/shared/src/panels/Inspector.tsx`, `kup/tools/run_report.mjs`, `kup/tools/run_compare.mjs`) follow the fixture
-   shape and would show real records as "result not recorded"; a serializer-produced gate fixture and a shape review
-   are a separate batch for the owner to schedule.
-3. **Fixture `workspace.status`.** `kriya/kup/cli_ops.py::_workspace_status` records `exit_code` 0 only for status
-   `CLEAN` (3 for `RUN_ACTIVE`, else 1); the generated fixture records status `NO_RECOVERY_REQUIRED` with exit code 0,
-   which `EVC-ID-007` reports. The fixture is synthetic; the finding is about the fixture, not Kriya.
+2. **Gate outcome shape** (RESOLVED in the contract-alignment batch, 2026-10-04; inventory in `GATE_OUTCOME_SHAPES.md`).
+   Every production writer records `attempt, type, success (boolean), output`; `Failure.to_gate_outcome` adds the
+   attribution fields, successful literals add per-site fields. The fixture generator used to emit `gate, passed,
+   reason_code`, which the Inspector, run_report and run_compare read. All three now read the writers' fields (result =
+   `success` only, conflicting result fields reported as ambiguous), the fixtures carry serializer-produced records
+   (`ui/fixtures/serializer_gates.py`), and the checker reports shape coverage as `EVC-GATE-001` (informational) and
+   conflicting result fields as `EVC-GATE-002` (ambiguity). KUP still defines no gate record, so per-type semantics stay
+   uninterpreted.
+3. **Fixture `workspace.status`** (RESOLVED, same batch). `kriya/kup/cli_ops.py::_workspace_status` records `exit_code` 0
+   only for status `CLEAN` (3 for `RUN_ACTIVE`, else 1) and `assessment = RecoveryAssessment.to_dict()`; the generated
+   fixture used to record `NO_RECOVERY_REQUIRED` with exit code 0 and an invented assessment, which `EVC-ID-007` reported.
+   It now records a CLEAN assessment in the serializer's shape and is clean.
 
 ## Limitations
 

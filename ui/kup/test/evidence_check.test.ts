@@ -55,8 +55,8 @@ describe('rule registry and vocabulary', () => {
   });
   it('checks without a documented invariant are listed as not checked, never implemented', () => {
     const text = (UNSUPPORTED_CHECKS as string[]).join('\n');
-    for (const needle of ['cursor is opaque', 'gate_outcomes', 'to_gate_outcome', 'EvidenceRecord.to_dict carries no identifier', 'prompt_rendered', 'never inferred']) expect(text).toContain(needle);
-    expect(Object.keys(RULES)).not.toContain('EVC-GATE-001');
+    for (const needle of ['cursor is opaque', 'gate_outcomes semantics', 'EVC-GATE-001', 'EvidenceRecord.to_dict carries no identifier', 'prompt_rendered', 'never inferred']) expect(text).toContain(needle);
+    expect(Object.keys(RULES)).not.toContain('EVC-GATE-999'); // per-type gate semantics (deterministic_result, status, graded_by) have no rule
   });
   it('metadata_differs is ported exactly: null when a side is missing or carries an error, else any of the six keys differ', () => {
     const m = { size: 1, mtime_ns: 2, inode: 3, wal_size: null, shm_size: null, journal_size: null };
@@ -249,10 +249,11 @@ describe('unknown fields and the generated fixtures', () => {
     expect(only(r, 'EVC-UNK-001').find((d) => d.pointer.endsWith('severity_v9'))!.observed).toEqual({ kind: 'value', value: 'novel' });
     expect(one(r, 'EVC-REF-001').explanation).toContain('a field named evidence_id in a fixture is not a documented target');
   });
-  it('the serializer-produced run record, listing, verify, acquire and page validate without any identity, section, event or token diagnostic; the fixture workspace status trips the documented exit-code rule', () => {
+  it('the serializer-produced run record (events and gates), listing, verify, acquire, page and the corrected workspace status validate without any identity, section, event, gate or token diagnostic', () => {
     const r = check(...['history.detail.run-serializer-events.json', 'snapshot.list.json', 'snapshot.verify.json', 'snapshot.acquire.json', 'history.list.page1.json', 'workspace.status.json', 'capabilities.json'].map((n) => input(GEN, n)));
-    expect(ruleIds(r)).toEqual(['EVC-ID-007', 'EVC-REF-001']);
-    expect(one(r, 'EVC-ID-007')).toMatchObject({ file: 'workspace.status.json', pointer: '/data/exit_code', observed: { value: 0 }, related: [{ pointer: '/data/status', observed: { value: 'NO_RECOVERY_REQUIRED' } }] });
+    expect(ruleIds(r)).toEqual(['EVC-REF-001']); // the only remaining diagnostic is the documented fixture evidence_ids linkage
+    expect(r.coverage.inputs.find((i) => i.file === 'workspace.status.json')).toMatchObject({ status: 'checked', diagnostics: 0 }); // status CLEAN / exit_code 0 / RecoveryAssessment.to_dict shape
+    expect(r.coverage.inputs[0]!.diagnostics).toBe(1);
     expect(r.coverage.snapshots.find((s) => s.snapshot_id === S1)).toMatchObject({ resolution: 'listed', listed_in: ['snapshot.list.json'] });
   });
 });
@@ -294,6 +295,21 @@ describe('every emitted pointer resolves against its input (except marked absent
     expect(one(r, 'EVC-SEC-003')).toMatchObject({ pointer: '/data/model_hops/data', observed: { kind: 'null' } });
     const all = new Set([...Object.keys(RULES)]);
     for (const id of ['EVC-DUP-003', 'EVC-ID-003', 'EVC-ID-007', 'EVC-ID-008', 'EVC-REF-003', 'EVC-SEC-003', 'EVC-VER-001']) expect(all.has(id)).toBe(true);
+  });
+});
+
+describe('gate records (writer inventory: attempt, type, success, output)', () => {
+  it('writer-shaped records are silent; a legacy or malformed record is informational shape coverage; conflicting result fields are an ambiguity, never resolved', () => {
+    const withGates = (file: string, extra: unknown[]) => variant('clean.detail.json', file, (d) => { d.data.gate_outcomes.data.push(...extra); d.data.fields.gate_outcomes.data = JSON.stringify(d.data.gate_outcomes.data); });
+    expect(ruleIds(check(withGates('ok.json', [])))).toEqual(['EVC-REF-003']); // the ten serializer-shaped records raise nothing
+    const r = check(withGates('g.json', [{ attempt: 9, type: 'test', success: true, output: 'ok', passed: false }, { attempt: 9, gate: 'legacy', passed: true }, 'nope', { attempt: 'x', type: 7, success: 'yes', output: null }]));
+    expect(ruleIds(r)).toEqual(['EVC-GATE-001', 'EVC-GATE-002', 'EVC-REF-003', 'EVC-UNK-001']);
+    expect(one(r, 'EVC-GATE-002')).toMatchObject({ classification: 'ambiguity', pointer: '/data/gate_outcomes/data/1/success', observed: { value: true }, related: [{ pointer: '/data/gate_outcomes/data/1/passed', observed: { value: false } }] });
+    expect(only(r, 'EVC-GATE-001').map((d) => [d.pointer, d.classification])).toEqual([['/data/gate_outcomes/data/2', 'informational'], ['/data/gate_outcomes/data/3', 'informational'], ['/data/gate_outcomes/data/4', 'informational']]); // clean.detail holds one writer-shaped record; the appended ones follow
+    expect(only(r, 'EVC-GATE-001')[0]!.explanation).toContain('absent: type, success, output');
+    expect(only(r, 'EVC-GATE-001')[2]!.explanation).toContain('unexpected type: type, success, output, attempt');
+    expect(only(r, 'EVC-UNK-001').map((d) => d.pointer)).toEqual(['/data/gate_outcomes/data/1/passed', '/data/gate_outcomes/data/2/gate']);
+    expect(r.summary.exit_code).toBe(1); // the ambiguity is actionable; shape coverage alone would not be
   });
 });
 

@@ -153,14 +153,39 @@
    "data": [
     {
      "attempt": 1,
-     "gate": "compile",
-     "passed": false,
-     "reason_code": "COMPILE|FAILED"
+     "attempted_edits": [],
+     "attribution_confidence": null,
+     "attribution_kind": "SOURCE_DEFECT",
+     "attribution_reasoning": null,
+     "attribution_tier": null,
+     "authoritative_files": [],
+     "failed_content": {},
+     "file_locations": [
+      {
+       "col": 5,
+       "filepath": "src/mod1/a.py",
+       "line": 12
+      }
+     ],
+     "likely_files": [
+      "src/mod1/a.py"
+     ],
+     "milestone_id": null,
+     "mode": null,
+     "output": "line one | pipe `tick` <b>markup</b>\nline two",
+     "plan_id": null,
+     "planned_files": [],
+     "self_correction_attempt": null,
+     "subtask_id": null,
+     "success": false,
+     "type": "compile|failed",
+     "verification_target": null
     },
     {
      "attempt": 2,
      "name": "tests",
-     "passed": true
+     "passed": true,
+     "fixture_note": "NEGATIVE CASE: no type, no success"
     },
     "not-an-object"
    ]

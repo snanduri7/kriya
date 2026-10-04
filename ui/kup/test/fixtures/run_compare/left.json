@@ -15,9 +15,23 @@
   "snapshot_id": "20261004T093000000000Z-f1c70001",
   "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
   "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
-  "source_metadata_at_acquisition": null,
-  "source_metadata_now": null,
-  "source_metadata_changed": null
+  "source_metadata_at_acquisition": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_now": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_changed": false
  },
  "data": {
   "run": {
@@ -134,20 +148,61 @@
    "data": [
     {
      "attempt": 1,
-     "gate": "compile",
-     "passed": false,
-     "reason_code": "COMPILE_FAILED"
+     "attempted_edits": [],
+     "attribution_confidence": null,
+     "attribution_kind": "SOURCE_DEFECT",
+     "attribution_reasoning": null,
+     "attribution_tier": null,
+     "authoritative_files": [],
+     "failed_content": {},
+     "file_locations": [
+      {
+       "col": 5,
+       "filepath": "src/mod1/a.py",
+       "line": 12
+      }
+     ],
+     "likely_files": [
+      "src/mod1/a.py"
+     ],
+     "milestone_id": null,
+     "mode": null,
+     "output": "src/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n",
+     "plan_id": null,
+     "planned_files": [],
+     "self_correction_attempt": null,
+     "subtask_id": null,
+     "success": false,
+     "type": "compile",
+     "verification_target": null
     },
     {
      "attempt": 2,
-     "gate": "compile",
-     "passed": true
+     "egress": {
+      "allowed": false,
+      "authority_source": "autonomy.shell_network",
+      "capability": "denied",
+      "channel": "compile",
+      "destinations": [],
+      "reason": "contained compile gate runs without network"
+     },
+     "output": "",
+     "success": true,
+     "type": "compile"
     },
     {
      "attempt": 2,
-     "gate": "tests",
-     "passed": false,
-     "reason_code": "TESTS_FAILED"
+     "egress": {
+      "allowed": false,
+      "authority_source": "autonomy.shell_network",
+      "capability": "denied",
+      "channel": "compile",
+      "destinations": [],
+      "reason": "contained compile gate runs without network"
+     },
+     "output": "FAILED tests/test_mod1.py::test_run - AssertionError: expected 1\n1 failed, 2 passed in 0.52s\n",
+     "success": false,
+     "type": "test"
     }
    ]
   },

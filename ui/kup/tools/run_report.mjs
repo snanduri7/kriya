@@ -44,6 +44,30 @@ export const PROMPT_COMPOSITION_FIELDS = Object.freeze({
   note: Object.freeze(['token_counts']),
 });
 
+/** gate_outcomes records EXACTLY as Kriya's writers record them (inventory: ui/fixtures/serializer_gates.py). Every writer -
+ * kriya/workflow/failure.py::Failure.to_gate_outcome for each failed gate, dict literals in attempt.py / workflow.py /
+ * verification_coordinator.py for successful ones - records attempt, type, success (boolean) and output; the optional keys are
+ * the inventoried per-site additions. No writer records `gate`, `passed` or `name`; such fields are unknown, kept, never read. */
+export const GATE_OUTCOME_KEYS = Object.freeze({
+  common: Object.freeze(['attempt', 'type', 'success', 'output']),
+  optional: Object.freeze(['mode', 'likely_files', 'file_locations', 'failed_content', 'attempted_edits', 'self_correction_attempt', 'attribution_tier', 'attribution_confidence', 'attribution_reasoning', 'attribution_kind',
+    'subtask_id', 'plan_id', 'milestone_id', 'planned_files', 'verification_target', 'authoritative_files', 'commands', 'steps', 'managed_service_outcome', 'graded_by', 'deterministic_result', 'runtime_disposition', 'verifier_evidence',
+    'toolchain_identity', 'egress', 'resources', 'runtime_artifacts', 'self_corrected', 'self_correction_turns', 'self_correction_transcript', 'selection_fallback', 'target_test', 'recovered_by', 'deferred_to_future_owner',
+    'status', 'reason_code', 'arbitrated_contradictions', 'planner_only_requirements']),
+});
+const KNOWN_GATE_KEYS = new Set([...GATE_OUTCOME_KEYS.common, ...GATE_OUTCOME_KEYS.optional]);
+export const GATE_RESULTS = Object.freeze(['success', 'failure', 'not_recorded', 'not_boolean', 'ambiguous']);
+/** The recorded result of a gate record: `success` is the only documented result field. Absent -> not_recorded; non-boolean ->
+ * not_boolean (shown literally); a legacy boolean `passed` disagreeing with `success` -> ambiguous (both values reported, never
+ * resolved by choosing one). Nothing is inferred from `output` text. */
+export function classifyGateRecord(o) {
+  if (typeof o !== 'object' || o === null || Array.isArray(o)) return { result: 'not_recorded', conflicts: [] };
+  if (!('success' in o)) return { result: 'not_recorded', conflicts: [] };
+  if (typeof o.success !== 'boolean') return { result: 'not_boolean', conflicts: [] };
+  const conflicts = typeof o.passed === 'boolean' && o.passed !== o.success ? [{ field: 'passed', value: o.passed }] : [];
+  return { result: conflicts.length ? 'ambiguous' : o.success ? 'success' : 'failure', conflicts };
+}
+
 // ---- helpers -------------------------------------------------------------------------------------------------------
 export const pointer = (...parts) => (parts.length ? '/' + parts.map((p) => String(p).replace(/~/g, '~0').replace(/\//g, '~1')).join('/') : '');
 /** A fact: the recorded value and where it came from. `absent: true` marks a field that is MISSING from the record
@@ -181,7 +205,20 @@ function analyzeDetail(file, data, envelope, diag) {
   if (sections.generation_metrics.recorded) out.token_accounting.generation_metrics_as_recorded = fact(file, pointer('data', 'generation_metrics', 'data'), data.generation_metrics.data);
   if (sections.gate_outcomes.recorded) {
     const g = data.gate_outcomes.data;
-    out.gates = Array.isArray(g) ? g.map((o, j) => { const b = pointer('data', 'gate_outcomes', 'data', j); const f = (k) => (isObj(o) ? field(file, b, o, k) : fact(file, `${b}${pointer(k)}`, null, true)); return { index: j, attempt: f('attempt'), gate: isObj(o) && 'gate' in o ? f('gate') : f('name'), passed: f('passed'), reason_code: f('reason_code'), raw: fact(file, b, o) }; }) : [];
+    out.gates = Array.isArray(g) ? g.map((o, j) => {
+      const b = pointer('data', 'gate_outcomes', 'data', j);
+      const record = { source: { file, pointer: b } }; // the record itself, by pointer only (output text is summarized, not copied twice)
+      if (!isObj(o)) { diag('warning', b, 'gate record is not an object; shown raw'); return { index: j, malformed: true, attempt: fact(file, `${b}${pointer('attempt')}`, null, true), type: fact(file, `${b}${pointer('type')}`, null, true), success: fact(file, `${b}${pointer('success')}`, null, true), result: 'not_recorded', conflicts: [], output: fact(file, `${b}${pointer('output')}`, null, true), status: null, reason_code: null, graded_by: null, deterministic_result: null, unknown_fields: [], raw: fact(file, b, o), record }; }
+      const f = (k) => field(file, b, o, k);
+      const opt = (k) => (k in o ? f(k) : null);
+      const cls = classifyGateRecord(o);
+      const output = typeof o.output === 'string' ? { value: { length: o.output.length, sha256: createHash('sha256').update(o.output, 'utf8').digest('hex'), head: o.output.slice(0, 200) }, source: { file, pointer: `${b}${pointer('output')}` }, summarized: true } : f('output');
+      if (!('type' in o) || typeof o.type !== 'string') diag('warning', b, 'gate record has no string `type`: shown as "type not recorded" (every Kriya writer records type)');
+      if (cls.result === 'not_recorded') diag('warning', b, 'gate record has no `success` field: result shown as not recorded (never inferred from output or other fields)');
+      if (cls.result === 'not_boolean') diag('warning', `${b}${pointer('success')}`, 'gate record `success` is not a boolean: shown literally');
+      if (cls.result === 'ambiguous') diag('warning', b, `gate record carries conflicting result fields (success and ${cls.conflicts.map((c) => c.field).join(', ')}): result reported as ambiguous, not resolved`);
+      return { index: j, malformed: false, attempt: f('attempt'), type: f('type'), success: f('success'), result: cls.result, conflicts: cls.conflicts.map((c) => f(c.field)), output, status: opt('status'), reason_code: opt('reason_code'), graded_by: opt('graded_by'), deterministic_result: opt('deterministic_result'), unknown_fields: unknownKeys(o, KNOWN_GATE_KEYS).map((k) => f(k)), raw: null, record };
+    }) : [];
     if (!Array.isArray(g)) diag('warning', pointer('data', 'gate_outcomes', 'data'), 'gate_outcomes is recorded but not a list; shown raw');
   }
   if (sections.failure_report.recorded) out.failures.failure_report = fact(file, pointer('data', 'failure_report', 'data'), data.failure_report.data);
@@ -270,7 +307,15 @@ export function renderMarkdown(report) {
     L.push('', '### Gates');
     if (!run.gates) L.push('', 'not recorded');
     else if (!run.gates.length) L.push('', 'recorded: empty list');
-    else { L.push('', '| # | attempt | gate | passed | reason_code | source |', '|---|---|---|---|---|---|'); for (const g of run.gates) L.push(`| ${g.index + 1} | ${cell(show(g.attempt))} | ${cell(show(g.gate))} | ${cell(show(g.passed))} | ${cell(show(g.reason_code))} | ${src(g.raw)} |`); }
+    else {
+      L.push('', 'Fields as Kriya\'s writers record them (attempt, type, success, output; per-site additions preserved). The result is the recorded `success` boolean only: never inferred from output; conflicting result fields are reported as ambiguous.', '', '| # | attempt | type | success | result | output (length; head) | status / reason_code | graded_by / deterministic_result | unknown fields | source |', '|---|---|---|---|---|---|---|---|---|---|');
+      for (const g of run.gates) {
+        if (g.malformed) { L.push(`| ${g.index + 1} | (not an object: ${cell(show(g.raw))}) | | | | | | | | ${src(g.record)} |`); continue; }
+        const out = g.output.summarized ? `${g.output.value.length} chars; ${cell(g.output.value.head)}${g.output.value.length > 200 ? '…' : ''}` : cell(show(g.output));
+        const conflicts = g.conflicts.length ? ` (conflicting: ${g.conflicts.map((c) => `${c.source.pointer.split('/').pop()}=${cell(show(c))}`).join(', ')})` : '';
+        L.push(`| ${g.index + 1} | ${cell(show(g.attempt))} | ${cell(show(g.type))} | ${cell(show(g.success))} | ${g.result}${conflicts} | ${out} | ${g.status ? cell(show(g.status)) : '-'} / ${g.reason_code ? cell(show(g.reason_code)) : '-'} | ${g.graded_by ? cell(show(g.graded_by)) : '-'} / ${g.deterministic_result ? cell(show(g.deterministic_result)) : '-'} | ${g.unknown_fields.length ? cell(g.unknown_fields.map((f) => f.source.pointer.split('/').pop()).join(', ')) : '-'} | ${src(g.record)} |`);
+      }
+    }
     L.push('', '### Failures (recorded; no causal attribution)');
     L.push('', `failure_category: ${cell(show(run.failures.failure_category))} (${src(run.failures.failure_category)})`);
     L.push(run.failures.failure_report ? `failure_report as recorded: ${cell(show(run.failures.failure_report))} (${src(run.failures.failure_report)})` : 'failure_report: not recorded');

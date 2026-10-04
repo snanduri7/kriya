@@ -3,8 +3,8 @@ import type { HostAdapter, OpenInIdeResult } from '../host/HostAdapter';
 import type { SlotState } from '../state/requests';
 import { INSPECTOR_TABS, type InspectorTab } from '../state/selection';
 import { isRecorded } from '../model/availability';
-import { formatEventTime, unknownEventKeys } from '../model/normalize';
-import { sanitizeText } from '../render/sanitize';
+import { GATE_RESULT_LABEL, formatEventTime, gateOutcomeView, unknownEventKeys } from '../model/normalize';
+import { safeStringify, sanitizeText } from '../render/sanitize';
 import { AvailabilityBadge, Recorded } from './Availability';
 import { Payload } from './Payload';
 import { TabPanel, Tabs } from './Tabs';
@@ -90,10 +90,18 @@ export function Inspector({ detail, selectedEvent, tab, onTab, prompt, onLoadPro
             <Recorded section={detail.gate_outcomes} title="Gate outcomes">
               {(gates) => (
                 <ol className="gates">
-                  {gates.map((g, i) => { const o = (g ?? {}) as Record<string, unknown>; return (
-                    <li key={i} className={o.passed === true ? 'st-success' : o.passed === false ? 'st-failed' : 'st-unknown'}>
-                      <span className="mono">attempt {String(o.attempt ?? '?')}</span> · {sanitizeText(String(o.gate ?? o.name ?? 'gate'))} · {o.passed === true ? 'passed' : o.passed === false ? 'failed' : 'result not recorded'}
-                      {typeof o.reason_code === 'string' ? <span className="badge">{sanitizeText(o.reason_code)}</span> : null}
+                  {gates.map((g, i) => { const v = gateOutcomeView(g); return (
+                    <li key={i} className={v.result === 'success' ? 'st-success' : v.result === 'failure' ? 'st-failed' : 'st-unknown'}>
+                      <div>
+                        <span className="mono">attempt {String(v.attempt ?? '?')}</span> · {v.type === null ? 'type not recorded' : sanitizeText(v.type)} · {GATE_RESULT_LABEL[v.result]}{v.result === 'not_boolean' ? ` (${sanitizeText(safeStringify(v.success))})` : ''}
+                        {v.status ? <span className="badge">status {sanitizeText(v.status)}</span> : null}
+                        {v.reason_code ? <span className="badge">{sanitizeText(v.reason_code)}</span> : null}
+                        {v.graded_by || v.deterministic_result ? <span className="muted small"> graded_by {sanitizeText(v.graded_by ?? 'not recorded')} · deterministic_result {sanitizeText(v.deterministic_result ?? 'not recorded')}</span> : null}
+                      </div>
+                      {v.conflicts.length ? <div className="warn">conflicting result fields, not resolved: success={safeStringify(v.success)}, {v.conflicts.map((c) => `${sanitizeText(c.field)}=${safeStringify(c.value)}`).join(', ')}</div> : null}
+                      {v.unknownKeys.length ? <div className="muted small">unknown fields preserved: {v.unknownKeys.map(sanitizeText).join(', ')}</div> : null}
+                      {v.record === null ? <div className="warn">gate record is not an object; shown raw</div> : null}
+                      {v.record === null ? <Payload value={g} label="gate record" onCopy={copy} /> : v.output === null ? <div className="muted small">output not recorded</div> : <Payload value={v.output} label="output" onCopy={copy} />}
                     </li>
                   ); })}
                 </ol>

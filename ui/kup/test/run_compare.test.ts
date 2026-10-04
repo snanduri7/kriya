@@ -93,7 +93,8 @@ describe('changed records', () => {
     expect(tok('attempt 3 | prompt_tokens_reported')).toMatchObject({ outcome: 'added', difference: null });
     expect(c.tokens.items.some((i: Item) => i.key.includes('mystery_tokens'))).toBe(false); // unknown: never compared
     expect(c.tokens.unknown_uninterpreted).toEqual([expect.objectContaining({ side: 'right', attempt: '1', field: 'mystery_tokens' })]);
-    expect(c.gates.items.map((g: Item) => [g.key, g.outcome])).toEqual([['attempt 1 | compile', 'equal'], ['attempt 2 | compile', 'equal'], ['attempt 2 | tests', 'changed'], ['attempt 3 | tests', 'added']]);
+    expect(c.gates.items.map((g: Item) => [g.key, g.outcome])).toEqual([['attempt 1 | compile', 'equal'], ['attempt 2 | compile', 'equal'], ['attempt 2 | test', 'changed'], ['attempt 3 | test', 'added']]); // key: attempt | type (the writers' field)
+    expect(c.gates.items[2]).toMatchObject({ success: { outcome: 'changed', left: { value: false }, right: { value: true } }, result: { left: 'failure', right: 'success' }, output: { outcome: 'changed' }, result_ambiguous: { left: false, right: false } });
     expect(c.failures.failure_category.outcome).toBe('removed');
     expect(c.failures.failure_report.outcome).toBe('changed');
     expect(c.failures.events_with_failure_type.items.map((i: Item) => [i.key, i.outcome])).toEqual([['attempt 2 | candidate_gates.passed | compile_error', 'removed']]);
@@ -117,7 +118,7 @@ describe('changed records', () => {
     for (const f of facts) {
       const res = resolve(docs[f.source.file], f.source.pointer);
       if (f.source.absent) expect(res.found, f.source.pointer).toBe(false);
-      else { expect(res.found, `${f.source.file}#${f.source.pointer}`).toBe(true); if ('value' in f) expect(f.value, f.source.pointer).toEqual(res.value); }
+      else { expect(res.found, `${f.source.file}#${f.source.pointer}`).toBe(true); if ((f as any).summarized) { expect(typeof res.value).toBe('string'); expect((res.value as string).length).toBe((f.value as { length: number }).length); } else if ('value' in f) expect(f.value, f.source.pointer).toEqual(res.value); }
     }
   });
 });
@@ -135,7 +136,7 @@ describe('unavailable, ambiguous and deterministic', () => {
     expect(outcomes(c.identity).filter(([, o]) => o !== 'equal')).toEqual([['run_id', 'changed']]);
     const md: string = renderMarkdown(compare('left', 'right-unavailable'));
     expect(md).toContain('| run_events | recorded | not_recorded (column is NULL in the stored row) | unavailable |');
-    expect(md).toContain('| gate outcomes | recorded | unreadable (stored text is not valid JSON) | unavailable |');
+    expect(md).toContain('| gate outcomes | recorded | unreadable (stored text is not valid JSON) | - | unavailable |');
   });
   it('a key that repeats on one side is listed as ambiguous with every source and is never matched', () => {
     const c = compare('left', 'right-ambiguous').comparison;
@@ -144,7 +145,10 @@ describe('unavailable, ambiguous and deterministic', () => {
     expect(c.tokens.ambiguous).toEqual([expect.objectContaining({ side: 'right', what: 'developer.prompt_composition', key: 'attempt 1', count: 2 })]);
     expect(c.tokens.items).toEqual([]);
     expect(c.gates.ambiguous).toEqual([expect.objectContaining({ side: 'right', what: 'gate outcome', key: 'attempt 1 | compile', count: 2 })]);
-    expect(c.gates.items.map((g: Item) => [g.key, g.outcome])).toEqual([['attempt 2 | compile', 'removed'], ['attempt 2 | tests', 'equal']]);
+    expect(c.gates.items.map((g: Item) => [g.key, g.outcome])).toEqual([['attempt 2 | compile', 'removed'], ['attempt 2 | test', 'ambiguous']]);
+    // NEGATIVE CASE in right-ambiguous.json: a record whose legacy `passed` contradicts `success` is ambiguous on its side; the item is never resolved
+    expect(c.gates.items[1]).toMatchObject({ result: { left: 'failure', right: 'ambiguous' }, result_ambiguous: { left: false, right: true }, success: { outcome: 'equal' } });
+    expect(renderMarkdown(compare('left', 'right-ambiguous'))).toContain('| false / ambiguous (conflicting result fields) / (no record) / (no record) |');
     expect(c.failures.events_with_failure_type.items.map((i: Item) => [i.key, i.outcome])).toEqual([['attempt 2 | attempt.failed | compile_error', 'added'], ['attempt 2 | candidate_gates.passed | compile_error', 'equal']]);
     const md: string = renderMarkdown(compare('left', 'right-ambiguous'));
     expect(md).toContain('Ambiguous (same key more than once on one side; listed, never matched):');

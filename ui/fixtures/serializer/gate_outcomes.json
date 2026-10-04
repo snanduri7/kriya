@@ -1,0 +1,238 @@
+{
+ "common_keys": [
+  "attempt",
+  "type",
+  "success",
+  "output"
+ ],
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "failed_content": {},
+   "file_locations": [
+    {
+     "col": 5,
+     "filepath": "src/mod1/a.py",
+     "line": 12
+    }
+   ],
+   "likely_files": [
+    "src/mod1/a.py"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "src/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "subtask_id": null,
+   "success": false,
+   "type": "compile",
+   "verification_target": null
+  },
+  {
+   "attempt": 2,
+   "egress": {
+    "allowed": false,
+    "authority_source": "autonomy.shell_network",
+    "capability": "denied",
+    "channel": "compile",
+    "destinations": [],
+    "reason": "contained compile gate runs without network"
+   },
+   "output": "",
+   "success": true,
+   "type": "compile"
+  },
+  {
+   "attempt": 2,
+   "output": "collected 0 items\n",
+   "recovered_by": "full_suite",
+   "success": false,
+   "target_test": "tests/test_mod1.py::test_run",
+   "type": "test_selection"
+  },
+  {
+   "attempt": 2,
+   "egress": {
+    "allowed": false,
+    "authority_source": "autonomy.shell_network",
+    "capability": "denied",
+    "channel": "compile",
+    "destinations": [],
+    "reason": "contained compile gate runs without network"
+   },
+   "output": "============================= 3 passed in 0.41s =============================\n",
+   "selection_fallback": true,
+   "success": true,
+   "type": "test"
+  },
+  {
+   "attempt": 2,
+   "output": "============================= 3 passed in 0.41s =============================\n",
+   "self_corrected": true,
+   "self_correction_transcript": [
+    {
+     "result": "ok",
+     "tool": "inspect_member",
+     "turn": 1
+    },
+    {
+     "result": "resolved",
+     "tool": "repair_with_patch",
+     "turn": 2
+    }
+   ],
+   "self_correction_turns": 2,
+   "success": true,
+   "type": "targeted_test"
+  },
+  {
+   "attempt": 2,
+   "attempted_edits": [],
+   "attribution_confidence": null,
+   "attribution_kind": "SOURCE_DEFECT",
+   "attribution_reasoning": null,
+   "attribution_tier": null,
+   "authoritative_files": [],
+   "commands": [
+    [
+     "python",
+     "-m",
+     "mod1"
+    ]
+   ],
+   "failed_content": {},
+   "file_locations": [],
+   "likely_files": [
+    "src/mod1/a.py"
+   ],
+   "milestone_id": null,
+   "mode": null,
+   "output": "Traceback (most recent call last): ...\n",
+   "plan_id": null,
+   "planned_files": [],
+   "self_correction_attempt": null,
+   "steps": [
+    {
+     "command": [
+      "python",
+      "-m",
+      "mod1"
+     ],
+     "duration_ms": 412,
+     "exit_code": 1
+    }
+   ],
+   "subtask_id": null,
+   "success": false,
+   "type": "run_verification",
+   "verification_target": null
+  },
+  {
+   "attempt": 3,
+   "commands": [
+    [
+     "python",
+     "-m",
+     "mod1"
+    ]
+   ],
+   "deterministic_result": "PASS",
+   "egress": {
+    "allowed": false,
+    "authority_source": "autonomy.shell_network",
+    "capability": "denied",
+    "channel": "compile",
+    "destinations": [],
+    "reason": "contained compile gate runs without network"
+   },
+   "graded_by": "process_exit",
+   "output": "mod1 started\n[Grader reasoning]: exit 0 and the contract markers matched",
+   "runtime_artifacts": [
+    "mod1.log"
+   ],
+   "runtime_disposition": "PASS",
+   "steps": [
+    {
+     "command": [
+      "python",
+      "-m",
+      "mod1"
+     ],
+     "duration_ms": 388,
+     "exit_code": 0
+    }
+   ],
+   "success": true,
+   "type": "run_verification",
+   "verifier_evidence": [
+    {
+     "bytes": 212,
+     "kind": "stdout"
+    }
+   ]
+  },
+  {
+   "attempt": 3,
+   "deferred_to_future_owner": "subtask-7",
+   "egress": {
+    "allowed": false,
+    "authority_source": "autonomy.shell_network",
+    "capability": "denied",
+    "channel": "compile",
+    "destinations": [],
+    "reason": "contained compile gate runs without network"
+   },
+   "output": "============================= 3 passed in 0.41s =============================\n",
+   "success": true,
+   "type": "regression_test"
+  },
+  {
+   "attempt": 3,
+   "output": "spec compliance verifier unavailable: request refused",
+   "reason_code": "VERIFIER_REQUEST_REFUSED",
+   "status": "UNAVAILABLE",
+   "success": true,
+   "type": "goal_spec_compliance"
+  },
+  {
+   "attempt": 3,
+   "egress": {
+    "allowed": false,
+    "authority_source": "autonomy.shell_network",
+    "capability": "denied",
+    "channel": "compile",
+    "destinations": [],
+    "reason": "contained compile gate runs without network"
+   },
+   "output": "FAILED tests/test_mod1.py::test_run - AssertionError: expected 1\n1 failed, 2 passed in 0.52s\n",
+   "success": false,
+   "type": "test"
+  }
+ ],
+ "generated_by": "ui/fixtures/serializer_gates.py: Failure.to_gate_outcome / execution_evidence / runtime_evidence_outcome_fields / EgressDecision.to_dict / VerificationCoordinator._gate + the cited literal writers -> TraceLogger.log_run -> kriya.kup.acquire.acquire_snapshot -> kriya.kup.inspect.history_detail",
+ "section": {
+  "availability": "recorded",
+  "provenance": "runs.gate_outcomes",
+  "reason": null
+ },
+ "writers": [
+  "failure.py::Failure.to_gate_outcome (every failed gate; some sites add commands/steps, graded_by/deterministic_result, managed_service_outcome)",
+  "attempt.py 8800 compile success (+execution_evidence)",
+  "attempt.py 8839 test_selection (success False, target_test, recovered_by)",
+  "attempt.py 8864 test after selection fallback (selection_fallback, +execution_evidence)",
+  "attempt.py 8907 targeted_test self-corrected (self_corrected, self_correction_turns, self_correction_transcript)",
+  "attempt.py 3945 run_verification failure (+commands, steps)",
+  "attempt.py 5553 run_verification graded success (graded_by, commands, steps, deterministic_result, runtime_disposition, verifier_evidence, +execution_evidence)",
+  "workflow.py 5036 regression_test deferred (deferred_to_future_owner, +execution_evidence)",
+  "attempt.py 10210 goal_spec_compliance (status, reason_code, arbitrated_contradictions, planner_only_requirements)",
+  "verification_coordinator.py::VerificationCoordinator._gate (success from the result, +execution_evidence)"
+ ]
+}

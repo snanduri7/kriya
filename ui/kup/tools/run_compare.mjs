@@ -29,7 +29,7 @@ export { stableStringify } from './run_report.mjs';
 export const TOOL = 'kup-run-compare';
 export const TOOL_VERSION = '0.1.0';
 export const LABEL = 'Two caller-selected historical KUP records (Left, Right) compared field by field, as recorded at their acquisition. Not a controlled experiment: a difference is an observation, never a cause, a ranking or a verdict on success. Every value names its input file and JSON pointer; nothing is inferred.';
-export const OUTCOMES = ['equal', 'changed', 'added', 'removed', 'unavailable'];
+export const OUTCOMES = ['equal', 'changed', 'added', 'removed', 'unavailable', 'ambiguous']; // ambiguous: a side's own record is ambiguous (conflicting result fields), so nothing is compared
 /** Units of the numeric fields a difference is computed for (Right minus Left). Anything else is never subtracted. */
 export const NUMERIC_UNITS = Object.freeze({
   attempts: 'attempts (run row count)', duration_sec: 'seconds (run row duration_sec)',
@@ -112,9 +112,16 @@ export function compareRuns(left, right) {
   // ---- gates: (attempt, gate) when unique per side
   if (!(left.sections.gate_outcomes.recorded && right.sections.gate_outcomes.recorded)) out.gates = unavailable('gate outcomes', left, right, 'gate_outcomes');
   else {
-    const m = matchByKey(left.gates, right.gates, (g) => (has(g.gate) ? `attempt ${attemptKey(g.attempt)} | ${g.gate.value}` : null));
-    const item = (key, l, r) => ({ key, passed: compareFacts(key, l?.passed ?? null, r?.passed ?? null), reason_code: compareFacts(key, l?.reason_code ?? null, r?.reason_code ?? null), outcome: l && r ? (same(l.passed.value, r.passed.value) && same(l.reason_code.value, r.reason_code.value) ? 'equal' : 'changed') : l ? 'removed' : 'added', left_source: l?.raw ?? null, right_source: r?.raw ?? null });
-    out.gates = { items: sortItems([...m.matched.map((x) => item(x.key, x.left, x.right)), ...m.onlyLeft.map((x) => item(x.key, x.left, null)), ...m.onlyRight.map((x) => item(x.key, null, x.right))]), ambiguous: m.ambiguous.map((a) => ({ ...a, what: 'gate outcome' })), unkeyed: m.unkeyed };
+    // key: (attempt, type) - the writers' own fields; a record without a string type is unkeyed, a repeated key is ambiguous
+    const m = matchByKey(left.gates, right.gates, (g) => (!g.malformed && has(g.type) ? `attempt ${attemptKey(g.attempt)} | ${g.type.value}` : null));
+    const outputOf = (g) => (g && g.output && g.output.summarized ? { value: { length: g.output.value.length, sha256: g.output.value.sha256 }, source: g.output.source, summarized: true } : g?.output ?? null);
+    const item = (key, l, r) => {
+      const ambiguous = { left: l?.result === 'ambiguous', right: r?.result === 'ambiguous' };
+      const parts = { success: compareFacts(key, l?.success ?? null, r?.success ?? null), output: compareFacts(key, outputOf(l), outputOf(r)), status: compareFacts(key, l?.status ?? null, r?.status ?? null), reason_code: compareFacts(key, l?.reason_code ?? null, r?.reason_code ?? null) };
+      const outcome = ambiguous.left || ambiguous.right ? 'ambiguous' : l && r ? (Object.values(parts).every((p) => p.outcome === 'equal') ? 'equal' : 'changed') : l ? 'removed' : 'added';
+      return { key, ...parts, result: { left: l?.result ?? null, right: r?.result ?? null }, result_ambiguous: ambiguous, outcome, left_source: l?.record ?? null, right_source: r?.record ?? null };
+    };
+    out.gates = { items: sortItems([...m.matched.map((x) => item(x.key, x.left, x.right)), ...m.onlyLeft.map((x) => item(x.key, x.left, null)), ...m.onlyRight.map((x) => item(x.key, null, x.right))]), ambiguous: m.ambiguous.map((a) => ({ ...a, what: 'gate outcome' })), unkeyed: m.unkeyed, note: 'key: attempt | type (the writers\' fields); result = recorded success boolean only; a side whose result is ambiguous (conflicting result fields) makes the item ambiguous, never resolved; output compared by length and sha256 of the recorded text' };
   }
   // ---- failures
   const fr = left.sections.failure_report.recorded && right.sections.failure_report.recorded ? compareFacts('failure_report (whole list; entries carry no identifier)', left.failures.failure_report, right.failures.failure_report) : unavailable('failure_report', left, right, 'failure_report');
@@ -155,7 +162,7 @@ const diffCell = (d) => (d ? `${d.right_minus_left > 0 ? '+' : ''}${d.right_minu
 const row = (it, note = '') => `| ${cell(it.key)} | ${cell(show(it.left))} | ${cell(show(it.right))} | ${it.outcome}${it.both_not_recorded ? ' (both not recorded)' : ''}${note} | ${diffCell(it.difference)} | ${src(it.left)} | ${src(it.right)} |`;
 const HEAD = ['| key | Left (as recorded) | Right (as recorded) | outcome | Right - Left (unit) | Left source | Right source |', '|---|---|---|---|---|---|---|'];
 const unavailableRow = (u) => `| ${cell(u.key)} | ${cell(u.left.availability.value ?? 'n/a')}${has(u.left.reason) ? ` (${cell(u.left.reason.value)})` : ''} | ${cell(u.right.availability.value ?? 'n/a')}${has(u.right.reason) ? ` (${cell(u.right.reason.value)})` : ''} | unavailable | - | ${src(u.left.availability)} | ${src(u.right.availability)} |`;
-const ambiguousRows = (L, list) => { if (!list.length) return; L.push('', 'Ambiguous (same key more than once on one side; listed, never matched):', '', '| side | what | key | occurrences | sources |', '|---|---|---|---|---|'); for (const a of list) L.push(`| ${a.side} | ${cell(a.what)} | ${cell(a.key)} | ${a.count} | ${a.items.map((it) => src(it.raw ?? it.path ?? it.tier ?? it.reason ?? it.attempt ?? it.failure_type ?? it.kind ?? it.provider_reported?.prompt_tokens_reported)).join(' ')} |`); };
+const ambiguousRows = (L, list) => { if (!list.length) return; L.push('', 'Ambiguous (same key more than once on one side; listed, never matched):', '', '| side | what | key | occurrences | sources |', '|---|---|---|---|---|'); for (const a of list) L.push(`| ${a.side} | ${cell(a.what)} | ${cell(a.key)} | ${a.count} | ${a.items.map((it) => src(it.record ?? it.raw ?? it.path ?? it.tier ?? it.reason ?? it.attempt ?? it.failure_type ?? it.kind ?? it.provider_reported?.prompt_tokens_reported)).join(' ')} |`); };
 
 export function renderMarkdown(report) {
   const c = report.comparison;
@@ -184,9 +191,15 @@ export function renderMarkdown(report) {
     if (c.tokens.unknown_uninterpreted.length) { L.push('', 'Unknown prompt_composition fields (uninterpreted, not compared):', '', '| side | attempt | field | value (as recorded) | source |', '|---|---|---|---|---|'); for (const u of c.tokens.unknown_uninterpreted) L.push(`| ${u.side} | ${cell(u.attempt)} | ${cell(u.field)} | ${cell(show(u.fact))} | ${src(u.fact)} |`); }
     L.push('', `generation_metrics as recorded (keys not interpreted; not compared) - Left: ${cell(show(c.tokens.generation_metrics_as_recorded.left))} ${src(c.tokens.generation_metrics_as_recorded.left)}; Right: ${cell(show(c.tokens.generation_metrics_as_recorded.right))} ${src(c.tokens.generation_metrics_as_recorded.right)}`);
   }
-  L.push('', '## Gate outcomes (key: attempt | gate)', '', '| key | Left passed / reason_code | Right passed / reason_code | outcome | Left source | Right source |', '|---|---|---|---|---|---|');
-  if (c.gates.outcome === 'unavailable') { const av = (s) => `${cell(s.availability.value ?? 'n/a')}${has(s.reason) ? ` (${cell(s.reason.value)})` : ''}`; L.push(`| ${cell(c.gates.key)} | ${av(c.gates.left)} | ${av(c.gates.right)} | unavailable | ${src(c.gates.left.availability)} | ${src(c.gates.right.availability)} |`); }
-  else { if (!c.gates.items.length) L.push('| (no gate outcomes recorded on either side) | | | | | |'); for (const g of c.gates.items) L.push(`| ${cell(g.key)} | ${cell(show(g.passed.left))} / ${cell(show(g.reason_code.left))} | ${cell(show(g.passed.right))} / ${cell(show(g.reason_code.right))} | ${g.outcome} | ${src(g.left_source)} | ${src(g.right_source)} |`); ambiguousRows(L, c.gates.ambiguous); }
+  L.push('', '## Gate outcomes (key: attempt | type; result = recorded success boolean, never inferred from output)', '', '| key | Left success / result / status / reason_code | Right success / result / status / reason_code | output (length, sha256 prefix) | outcome | Left source | Right source |', '|---|---|---|---|---|---|---|');
+  if (c.gates.outcome === 'unavailable') { const av = (s) => `${cell(s.availability.value ?? 'n/a')}${has(s.reason) ? ` (${cell(s.reason.value)})` : ''}`; L.push(`| ${cell(c.gates.key)} | ${av(c.gates.left)} | ${av(c.gates.right)} | - | unavailable | ${src(c.gates.left.availability)} | ${src(c.gates.right.availability)} |`); }
+  else {
+    if (!c.gates.items.length) L.push('| (no gate outcomes recorded on either side) | | | | | | |');
+    const side = (g, s) => `${cell(show(g.success[s]))} / ${g.result[s] ?? '(no record)'}${g.result_ambiguous[s] ? ' (conflicting result fields)' : ''} / ${cell(show(g.status[s]))} / ${cell(show(g.reason_code[s]))}`;
+    const outCell = (f) => (has(f) ? `${f.value.length} chars, ${String(f.value.sha256).slice(0, 12)}` : show(f));
+    for (const g of c.gates.items) L.push(`| ${cell(g.key)} | ${side(g, 'left')} | ${side(g, 'right')} | ${cell(outCell(g.output.left))} → ${cell(outCell(g.output.right))} (${g.output.outcome}) | ${g.outcome} | ${src(g.left_source)} | ${src(g.right_source)} |`);
+    ambiguousRows(L, c.gates.ambiguous);
+  }
   L.push('', '## Recorded failures (no causal attribution)', '', ...HEAD, row(c.failures.failure_category));
   L.push(c.failures.failure_report.outcome === 'unavailable' ? unavailableRow(c.failures.failure_report) : row(c.failures.failure_report));
   L.push('', 'Events carrying a failure_type (key: attempt | kind | failure_type):', '', ...HEAD);

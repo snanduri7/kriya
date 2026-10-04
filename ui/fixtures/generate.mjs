@@ -14,6 +14,9 @@ const out = join(here, 'generated');
 // run_events produced by Kriya's OWN serializer through the KUP adapter (fixtures/serializer_events.py, committed):
 // the shape every synthetic event below follows, and the content of the run-serializer-events fixture.
 const SERIALIZER = JSON.parse(readFileSync(join(here, 'serializer', 'run_events.json'), 'utf8'));
+// gate_outcomes in the shapes Kriya's writers record (fixtures/serializer_gates.py, committed): Failure.to_gate_outcome for
+// every failed gate, dict literals (attempt, type, success, output + per-site fields) for successful ones.
+const SERIALIZER_GATES = JSON.parse(readFileSync(join(here, 'serializer', 'gate_outcomes.json'), 'utf8'));
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'errors'), { recursive: true });
 
@@ -74,7 +77,7 @@ function addRun(id, over = {}, detailOver = {}, opts = {}) {
     fields: { files_modified: sec('recorded', summary.files_modified, null, 'runs.files_modified (comma-joined, raw)') },
     run_events: sec(av, evs, null, 'runs.run_events'),
     evidence_records: sec(av, [{ evidence_id: `ev-${id}-1`, revision: 'sha256:' + 'ab'.repeat(32), kind: 'gate_output' }], null, 'runs.evidence_records'),
-    gate_outcomes: sec(av, [{ attempt: 1, gate: 'compile', passed: false, reason_code: 'COMPILE_FAILED' }, { attempt: 2, gate: 'compile', passed: true }, { attempt: 2, gate: 'tests', passed: summary.status === 'SUCCESS' }], null, 'runs.gate_outcomes'),
+    gate_outcomes: sec(av, SERIALIZER_GATES.gate_outcomes, null, SERIALIZER_GATES.section.provenance),
     model_hops: sec(av, [{ from: 'qwen2.5-coder:7b', to: 'qwen2.5-coder:14b', attempt: 2, reason: 'quality_gate_failed' }], null, 'runs.model_hops'),
     generation_metrics: sec(av, { prompt_tokens_estimated: 4260, prompt_tokens_provider: 4190, output_tokens: 812, wall_ms: 61230 }, null, 'runs.generation_metrics'),
     failure_report: sec(av, summary.failure_category ? [{ failure_type: 'compile_error', category: summary.failure_category, attribution_tier: 'locator' }] : [], null, 'runs.failure_report'),
@@ -121,7 +124,10 @@ write('snapshot.acquire.json', envelope('snapshot.acquire', { ...SNAP, orphans_r
 write('snapshot.prune.json', envelope('snapshot.prune', { removed: [SNAPSHOTS[1].snapshot_id], orphans_removed: [], kept: [SNAP.snapshot_id] }));
 // digest verified at pin (08 review F-4): exactly one snapshot's SHA-256; per-query checks stay size/mtime.
 write('snapshot.verify.json', envelope('snapshot.verify', { snapshot_id: SNAP.snapshot_id, digest_verified: true, sha256: SNAP.snapshot_id.slice(-8).repeat(8), size: SNAP.size, verified_at: OBSERVED, duration_ms: 3.1, guarantee: 'digest verified at this request; size and mtime are checked on every later query' }));
-write('workspace.status.json', envelope('workspace.status', { workspace: '/fixture/workspace', run_active: false, status: 'NO_RECOVERY_REQUIRED', exit_code: 0, assessment: { reason: 'fixture', checkpoints: 0 } }));
+// kriya/kup/cli_ops.py::_workspace_status: workspace = assessment.workspace_path, status = assessment.status (recovery.STATUS_*),
+// run_active = status == RUN_ACTIVE, exit_code 0 CLEAN / 3 RUN_ACTIVE / else 1; assessment = RecoveryAssessment.to_dict()
+// (workspace_path, status, run_active (the active run id or null), records, evidence, unreadable_records, evidence_error).
+write('workspace.status.json', envelope('workspace.status', { workspace: '/fixture/workspace', run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: '/fixture/workspace', status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }));
 const ERRORS = [['UNSUPPORTED_SCHEMA_VERSION', 'the host requested KUP 1; this Kriya speaks 3', null], ['INVALID_RESPONSE', 'response was not a KUP envelope', null], ['INVALID_REQUEST', 'snapshot_id is required: history is read from a published snapshot only', null],
   ['STORE_BUSY', 'the store has a hot rollback journal; acquisition never recovers another writer\'s transaction', 'hot_journal'], ['READ_ONLY_UNAVAILABLE', 'no trace database exists at the resolved store path', 'missing'],
   ['RESPONSE_TOO_LARGE', 'the response would exceed 8388608 bytes', null], ['CONFIG_AUTHORITY_REFUSED', 'Configuration-authority denied (SEC-009)', null], ['CONFIG_LOAD_FAILED', 'paths.state must be an absolute path', null],

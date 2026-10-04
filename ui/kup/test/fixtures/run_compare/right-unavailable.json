@@ -15,9 +15,23 @@
   "snapshot_id": "20261004T093000000000Z-f1c70001",
   "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
   "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
-  "source_metadata_at_acquisition": null,
-  "source_metadata_now": null,
-  "source_metadata_changed": null
+  "source_metadata_at_acquisition": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_now": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_changed": false
  },
  "data": {
   "run": {

@@ -43,6 +43,45 @@ export function unknownEventKeys(event: RunEvent): string[] {
   return Object.keys(event).filter((k) => !KNOWN_EVENT_KEYS.has(k)).sort();
 }
 
+/** Keys EVERY production gate-outcome writer records (kriya/workflow/failure.py::Failure.to_gate_outcome for each failed gate;
+ * dict literals in attempt.py, workflow.py and verification_coordinator.py for successful ones): attempt, type, success, output.
+ * The optional keys are the inventoried per-site additions (ui/fixtures/serializer_gates.py). Anything else is unknown: kept and
+ * shown literally, never interpreted. No writer records `gate`, `passed` or `name`. */
+export const GATE_OUTCOME_COMMON_KEYS = ['attempt', 'type', 'success', 'output'] as const;
+export const GATE_OUTCOME_OPTIONAL_KEYS = [
+  'mode', 'likely_files', 'file_locations', 'failed_content', 'attempted_edits', 'self_correction_attempt', 'attribution_tier', 'attribution_confidence', 'attribution_reasoning', 'attribution_kind',
+  'subtask_id', 'plan_id', 'milestone_id', 'planned_files', 'verification_target', 'authoritative_files', // Failure.to_gate_outcome
+  'commands', 'steps', 'managed_service_outcome', 'graded_by', 'deterministic_result', 'runtime_disposition', 'verifier_evidence', // runtime verification sites
+  'toolchain_identity', 'egress', 'resources', 'runtime_artifacts', // execution_evidence
+  'self_corrected', 'self_correction_turns', 'self_correction_transcript', 'selection_fallback', 'target_test', 'recovered_by', 'deferred_to_future_owner',
+  'status', 'reason_code', 'arbitrated_contradictions', 'planner_only_requirements', // goal_spec_compliance
+] as const;
+const KNOWN_GATE_KEYS = new Set<string>([...GATE_OUTCOME_COMMON_KEYS, ...GATE_OUTCOME_OPTIONAL_KEYS]);
+/** The recorded result: `success` is the only documented result field. A record without it is "not recorded"; a non-boolean is
+ * shown literally; a legacy `passed` boolean that disagrees with `success` makes the result ambiguous - never resolved by picking one.
+ * Nothing is ever inferred from `output` text. */
+export type GateResult = 'success' | 'failure' | 'not_recorded' | 'not_boolean' | 'ambiguous';
+export const GATE_RESULT_LABEL: Record<GateResult, string> = { success: 'success', failure: 'failure', not_recorded: 'result not recorded', not_boolean: 'result not a boolean', ambiguous: 'result ambiguous (conflicting fields)' };
+export interface GateOutcomeView {
+  record: Record<string, unknown> | null; attempt: unknown; type: string | null; result: GateResult; success: unknown; output: string | null;
+  status: string | null; reason_code: string | null; graded_by: string | null; deterministic_result: string | null;
+  conflicts: { field: string; value: unknown }[]; unknownKeys: string[];
+}
+export function gateOutcomeView(value: unknown): GateOutcomeView {
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { record: null, attempt: undefined, type: null, result: 'not_recorded', success: undefined, output: null, status: null, reason_code: null, graded_by: null, deterministic_result: null, conflicts: [], unknownKeys: [] };
+  const o = value as Record<string, unknown>;
+  const conflicts: { field: string; value: unknown }[] = [];
+  let result: GateResult;
+  if (!('success' in o)) result = 'not_recorded';
+  else if (typeof o.success !== 'boolean') result = 'not_boolean';
+  else {
+    if (typeof o.passed === 'boolean' && o.passed !== o.success) conflicts.push({ field: 'passed', value: o.passed });
+    result = conflicts.length ? 'ambiguous' : o.success ? 'success' : 'failure';
+  }
+  return { record: o, attempt: o.attempt, type: str(o.type), result, success: o.success, output: str(o.output), status: str(o.status), reason_code: str(o.reason_code), graded_by: str(o.graded_by), deterministic_result: str(o.deterministic_result), conflicts, unknownKeys: Object.keys(o).filter((k) => !KNOWN_GATE_KEYS.has(k)).sort() };
+}
+
 /** created_at is recorded as Unix epoch seconds (time.time()); render it as UTC, labelled, never as local time. */
 export function formatEventTime(createdAt: unknown): string {
   if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) return 'time not recorded';

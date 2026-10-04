@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileS
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as validators from '../generated/validators.mjs';
-import { DETAIL_SECTIONS, EVENT_KEYS, PROMPT_COMPOSITION_FIELDS, cell, pointer, stableStringify, utcOf } from './run_report.mjs';
+import { DETAIL_SECTIONS, EVENT_KEYS, GATE_OUTCOME_KEYS, PROMPT_COMPOSITION_FIELDS, cell, classifyGateRecord, pointer, stableStringify, utcOf } from './run_report.mjs';
 export { cell, pointer, stableStringify } from './run_report.mjs';
 
 export const TOOL = 'kup-evidence-check';
@@ -55,6 +55,7 @@ const B = Object.freeze({
   runEvents: 'kriya/workflow/run_events.py (RunEvent.to_dict; EventAuthority = authoritative | advisory | auxiliary)',
   promptComposition: 'kriya/workflow/prompt_composition.py (token counts: non-negative integers, len//4 or provider-reported; prefill/load: seconds; prefix_break; token_counts note)',
   evidence: 'kriya/workflow/evidence.py::EvidenceRecord.to_dict (kind, source, attempt, payload, sensitivity, created_at: no identifier field)',
+  gates: 'gate_outcomes writer inventory (ui/fixtures/serializer_gates.py; ui/docs/GATE_OUTCOME_SHAPES.md): Failure.to_gate_outcome and every successful-gate literal record attempt, type, success (boolean), output; KUP defines no gate record',
   recovery: 'kriya/control/recovery.py (STATUS_CLEAN = "CLEAN", STATUS_RUN_ACTIVE = "RUN_ACTIVE")',
   compat: 'KUP compatibility policy: additionalProperties true on every record; unknown fields and values are preserved and shown literally, never interpreted or discarded',
 });
@@ -97,13 +98,15 @@ export const RULES = Object.freeze({
   'EVC-VER-001': rule('structural_error', 'malformed_input', 'snapshot.verify sha256 is not a 64-character lowercase hex digest', [B.store, B.acquire], 'snapshot.verify', 'the file'),
   'EVC-CONF-001': rule('consistency_conflict', 'contradiction', 'the same (snapshot_id, run_id) is recorded with different documented run fields (one committed image, one row)', [B.inspect, B.trace], 'history.list rows and history.detail runs of the same snapshot', 'two or more records'),
   'EVC-CONF-002': rule('consistency_conflict', 'contradiction', 'the same snapshot_id is recorded with different manifest facts (acquisition timestamps, source, metadata at acquisition, rows, size, sqlite_version, sha256)', [B.store, B.acquire], 'snapshot.list items, snapshot.acquire, snapshot.verify, history consistency blocks', 'two or more records'),
+  'EVC-GATE-001': rule('informational', 'incomplete_coverage', 'gate record outside the inventoried writer shape (object with attempt, string type, boolean success, string output): no field is interpreted', [B.gates], 'history.detail gate_outcomes items', 'the file'),
+  'EVC-GATE-002': rule('ambiguity', 'contradiction', 'gate record carries conflicting result fields (success and a legacy passed boolean disagree): the result is ambiguous and is never resolved by choosing one', [B.gates], 'history.detail gate_outcomes items', 'the file'),
   'EVC-INFO-001': rule('informational', 'incomplete_coverage', 'the same run_id in different snapshots is recorded with different fields: not a contradiction (the run may have progressed between acquisitions)', [B.inspect], 'history records of different snapshots', 'two or more records'),
 });
 /** Useful checks WITHOUT a documented invariant in this Kriya version: listed, never performed. */
 export const UNSUPPORTED_CHECKS = Object.freeze([
   'history.list next_cursor binding to its snapshot: the cursor is opaque by contract and is not decoded',
   'event attempt numbers against run.attempts: no documented invariant (events record presence per attempt, not completeness)',
-  'gate_outcomes entries: KUP defines no gate record; the serializer shape (kriya/workflow/failure.py::to_gate_outcome: attempt, type, success, output, ...) differs from the fixture shape (gate, passed, reason_code), so no field is interpreted',
+  'gate_outcomes semantics: KUP defines no gate record; the writer inventory (attempt, type, success, output) is checked only as informational shape (EVC-GATE-001) and conflicting result fields as ambiguity (EVC-GATE-002); deterministic_result, graded_by, status and per-type meaning are not interpreted',
   'evidence_records linkage: EvidenceRecord.to_dict carries no identifier, so nothing can reference an evidence record',
   'generation_metrics keys, model_hops entries, failure_report rows against gate_outcomes: undocumented shapes, uninterpreted',
   'chronology or ordering of events from created_at: never inferred',
@@ -331,9 +334,24 @@ function checkDetail(ctx, data) {
     }
   }
   if (sectionAvailability(data.run_events) === 'recorded' && Array.isArray(data.run_events.data)) checkEvents(ctx, data.run_events.data);
+  if (sectionAvailability(data.gate_outcomes) === 'recorded' && Array.isArray(data.gate_outcomes.data)) checkGates(ctx, data.gate_outcomes.data);
   if (sectionAvailability(data.attribution) === 'recorded' && isObj(data.attribution.data) && Array.isArray(data.attribution.data.evidence_ids) && data.attribution.data.evidence_ids.length) {
     diag(ctx, 'EVC-REF-001', pointer('data', 'attribution', 'data', 'evidence_ids'), { related: [{ pointer: pointer('data', 'evidence_records', 'availability') }], explanation: `cannot resolve from supplied inputs: ${data.attribution.data.evidence_ids.length} evidence id(s) are recorded, but the KUP contract defines no namespace they resolve in and this Kriya version persists no evidence identifier (EvidenceRecord.to_dict); a field named evidence_id in a fixture is not a documented target` });
   }
+}
+const KNOWN_GATE_KEYS = new Set([...GATE_OUTCOME_KEYS.common, ...GATE_OUTCOME_KEYS.optional]);
+function checkGates(ctx, list) {
+  list.forEach((o, i) => {
+    const base = pointer('data', 'gate_outcomes', 'data', i);
+    if (!isObj(o)) { diag(ctx, 'EVC-GATE-001', base, { explanation: `gate record is ${typeName(o)}, not an object` }); return; }
+    const missing = GATE_OUTCOME_KEYS.common.filter((k) => !(k in o));
+    const wrong = [['type', 'string'], ['success', 'boolean'], ['output', 'string']].filter(([k, t]) => k in o && typeof o[k] !== t).map(([k]) => k);
+    if (!Number.isInteger(o.attempt) && 'attempt' in o) wrong.push('attempt');
+    if (missing.length || wrong.length) diag(ctx, 'EVC-GATE-001', base, { explanation: `every Kriya writer records attempt (integer), type (string), success (boolean), output (string); ${missing.length ? `absent: ${missing.join(', ')}` : ''}${missing.length && wrong.length ? '; ' : ''}${wrong.length ? `unexpected type: ${wrong.join(', ')}` : ''}; no field of this record is interpreted` });
+    const cls = classifyGateRecord(o);
+    if (cls.result === 'ambiguous') diag(ctx, 'EVC-GATE-002', `${base}${pointer('success')}`, { related: cls.conflicts.map((c) => ({ pointer: `${base}${pointer(c.field)}` })), explanation: 'success and a legacy passed boolean disagree; the result is reported as ambiguous, never resolved by choosing one field' });
+    unknown(ctx, 'gate_outcome', base, o, KNOWN_GATE_KEYS);
+  });
 }
 function checkEvents(ctx, list) {
   list.forEach((e, i) => {

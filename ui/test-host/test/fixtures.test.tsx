@@ -55,6 +55,19 @@ describe('every special fixture renders in the browser test host', () => {
       expect(document.querySelectorAll('[role="tabpanel"]').length).toBeGreaterThan(0);
     });
   }
+  it('production-shaped gate records (fixtures/serializer_gates.py, through the KUP adapter) render with type, recorded success and output', { timeout: 30000 }, async () => {
+    render(<App host={new BrowserFixtureHost('', null)} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBeGreaterThan(0), { timeout: 10000 });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: summaryGoal('run-serializer-events') } });
+    await waitFor(() => expect(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow')).length).toBe(1));
+    fireEvent.click(screen.getAllByRole('option').filter((o) => o.classList.contains('vrow'))[0]!);
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(summaryGoal('run-serializer-events')), { timeout: 10000 });
+    fireEvent.click(screen.getByRole('tab', { name: /^Gates/ }));
+    const panel = screen.getByRole('tabpanel');
+    for (const text of ['compile · failure', 'test_selection · failure', 'targeted_test · success', 'run_verification · failure', 'goal_spec_compliance · success', 'status UNAVAILABLE', 'VERIFIER_REQUEST_REFUSED', 'graded_by process_exit · deterministic_result PASS', "src/mod1/a.py:12:5: error: name 'audit' is not defined"]) expect(panel).toHaveTextContent(text);
+    for (const absent of ['result not recorded', 'unknown fields preserved', 'conflicting result fields', 'type not recorded']) expect(panel).not.toHaveTextContent(absent);
+  });
   it('unknown status and unknown fields are shown literally', async () => {
     render(<App host={new BrowserFixtureHost('', null)} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Acquire new snapshot' }));

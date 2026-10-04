@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { availabilityLabel, isRecorded } from '../src/model/availability';
-import { checkEnvelope, eventsByAttempt, formatEventTime, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
+import { checkEnvelope, eventsByAttempt, formatEventTime, gateOutcomeView, normalizeDetail, parseStoredJson, unknownEventKeys } from '../src/model/normalize';
 import { AVAILABILITY_STATES } from '../src/model/kup';
 import { sanitizeText } from '../src/render/sanitize';
 import { diffLines } from '../src/render/diff';
@@ -57,6 +57,18 @@ describe('stored values (P-25, P-30)', () => {
     expect(d?.comparisons.availability).toBe('not_recorded');
     expect((d as Record<string, unknown>).mystery).toBe(42);
     expect(normalizeDetail({ nope: true })).toBeNull();
+  });
+});
+
+describe('gate outcomes (writer shape: attempt, type, success, output)', () => {
+  it('reads the recorded success boolean only; a disagreeing legacy passed boolean is ambiguous; unknown keys are listed; nothing comes from output text', () => {
+    expect(gateOutcomeView({ attempt: 1, type: 'compile', success: false, output: 'e' })).toMatchObject({ type: 'compile', result: 'failure', output: 'e', unknownKeys: [], conflicts: [] });
+    expect(gateOutcomeView({ attempt: 2, type: 'test', success: true, output: 'ok', passed: false })).toMatchObject({ result: 'ambiguous', conflicts: [{ field: 'passed', value: false }], unknownKeys: ['passed'] });
+    expect(gateOutcomeView({ attempt: 2, type: 'test', success: true, output: 'ok', passed: true })).toMatchObject({ result: 'success', conflicts: [], unknownKeys: ['passed'] }); // an agreeing legacy field is still unknown, not a result
+    expect(gateOutcomeView({ attempt: 2, gate: 'x', passed: true })).toMatchObject({ type: null, result: 'not_recorded', output: null, unknownKeys: ['gate', 'passed'] });
+    expect(gateOutcomeView({ attempt: 2, type: 't', success: 'yes', output: 'FAILED everywhere' })).toMatchObject({ result: 'not_boolean', success: 'yes' });
+    expect(gateOutcomeView({ attempt: 3, type: 'goal_spec_compliance', success: true, output: 'x', status: 'UNAVAILABLE', reason_code: 'VERIFIER_REQUEST_REFUSED', graded_by: 'process_exit', deterministic_result: 'PASS', egress: { capability: 'denied' } })).toMatchObject({ result: 'success', status: 'UNAVAILABLE', reason_code: 'VERIFIER_REQUEST_REFUSED', graded_by: 'process_exit', deterministic_result: 'PASS', unknownKeys: [] });
+    expect(gateOutcomeView('not an object')).toMatchObject({ record: null, result: 'not_recorded' });
   });
 });
 
