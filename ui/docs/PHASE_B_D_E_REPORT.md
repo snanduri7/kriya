@@ -97,9 +97,24 @@ within one sample; the renderer stayed between 127 and 149 MB throughout. Classi
 volumes and a loaded local model are still to be measured after D-9 is lifted), and the development build ran other
 work (npm tests, the Java check) on the same machine during the first 30 minutes.
 
-## Owner checks still outstanding
+## Owner decisions and checks
 
-1. Acceptance of the 393 MB idle memory (gate A-1 estimated 100-300 MB).
-2. VoiceOver pass on the Electron app.
-3. Visual confirmation that `code -g file:7` placed the cursor on line 7.
-4. The D-4 ruling (WAL stores cannot be read read-only without sidecar writes) before Phase C can start.
+- **Decided 2026-10-04 (owner):** the measured idle footprint (393 MB) is ACCEPTED for M1; the **550 MB post-warm-up
+  ceiling is RETAINED as a regression gate.** Bound in code by `standalone/test/memory_ceiling.test.ts`: the soak
+  defaults must keep 550 MB / 2 h / 1,000 selections / 5-minute samples / no forced GC, and the latest committed
+  soak evidence must be complete, under the ceiling and without sustained growth (slope < 10 MB/h; a 60 MB/h ramp is
+  the negative control). Any future soak that breaches the ceiling fails `npm run check`.
+- **Chromium accessibility tree (MEASURED proxy, `measure-2026-10-04T07-03-56-510Z.json`):** read through the
+  DevTools protocol (`Accessibility.getFullAXTree`), which is the tree macOS VoiceOver receives: 1,124 live nodes,
+  69 interactive controls, **0 without an accessible name**; roles exposed: 4 regions, 3 listboxes, 47 options,
+  2 tablists, 7 tabs, 11 buttons, a searchbox, a table with 5 column headers, 3 headings; the selected option's
+  name reads "SUCCESS 2026-09-28 10:00:00 FIXTURE: 2,000-line recorded diff". This shows names and roles exist; it does
+  not show how VoiceOver speaks them or whether the reading order is sensible.
+- **Still needs a person at the machine (the agent cannot run VoiceOver or read another app's cursor without
+  assistive access):**
+  1. VoiceOver pass: `cd ui && npm start -w @kriya-ui/standalone`, Cmd+F5, then VO+Right through the trust strip,
+     the Runs listbox (arrow keys change the selection and the timeline header should be announced), the tab lists
+     (Left/Right), and the drawer; report any control announced without a name or any unreachable element.
+  2. VS Code cursor line: run
+     `code -g "$(pwd)/ui/spikes/a1_zero_write/reader.py:42"` and confirm the cursor is on line 42.
+- **D-4 ruling** (WAL stores cannot be read read-only without sidecar writes) before Phase C can start.

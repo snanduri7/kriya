@@ -77,6 +77,22 @@ export async function runMeasurement(win: BrowserWindow, outDir: string, cycles 
   await js(`document.querySelectorAll('[role=tab]').forEach((t) => { if (t.textContent.startsWith('Diff')) t.click(); }); true`); await sleep(400);
   await js(`const c = document.querySelector('.diff-files .chip'); if (c) c.click(); true`); await sleep(600);
   writeFileSync(join(outDir, `screenshot-wide-${stamp}.png`), (await win.webContents.capturePage()).toPNG());
+  // The Chromium accessibility tree (what VoiceOver receives through the macOS bridge), via the DevTools protocol.
+  // A proxy for a VoiceOver pass, not a replacement for one: it shows names and roles exist, not how they are spoken.
+  let axTree: Record<string, unknown> = { available: false };
+  try {
+    await dbg.sendCommand('Accessibility.enable');
+    const { nodes } = (await dbg.sendCommand('Accessibility.getFullAXTree')) as { nodes: { role?: { value?: string }; name?: { value?: string }; ignored?: boolean; properties?: { name: string; value: { value?: unknown } }[] }[] };
+    const live = nodes.filter((n) => !n.ignored);
+    const interactive = new Set(['button', 'tab', 'listbox', 'option', 'searchbox', 'textbox', 'combobox', 'link', 'checkbox']);
+    const controls = live.filter((n) => interactive.has(String(n.role?.value)));
+    const unnamed = controls.filter((n) => !String(n.name?.value ?? '').trim());
+    const roles: Record<string, number> = {};
+    for (const n of live) { const r = String(n.role?.value ?? 'none'); roles[r] = (roles[r] ?? 0) + 1; }
+    const selectedOptions = live.filter((n) => n.role?.value === 'option' && n.properties?.some((p) => p.name === 'selected' && p.value.value === true)).map((n) => n.name?.value);
+    axTree = { available: true, nodes: live.length, interactive_controls: controls.length, unnamed_interactive: unnamed.map((n) => `${n.role?.value}`), roles: Object.fromEntries(Object.entries(roles).filter(([r]) => ['region', 'listbox', 'option', 'tablist', 'tab', 'tabpanel', 'button', 'searchbox', 'heading', 'table', 'row', 'cell', 'columnheader', 'group', 'status'].includes(r))), selected_option_names: selectedOptions.slice(0, 3), sample_names: controls.slice(0, 12).map((n) => `${n.role?.value}: ${n.name?.value}`) };
+  } catch (e) { axTree = { available: false, error: String(e) }; }
+
   // Resizing: at 800 px wide the inspector becomes a tab beside the timeline (P-21).
   win.setSize(800, 700); await sleep(600);
   writeFileSync(join(outDir, `screenshot-narrow-${stamp}.png`), (await win.webContents.capturePage()).toPNG());
@@ -108,6 +124,7 @@ export async function runMeasurement(win: BrowserWindow, outDir: string, cycles 
     },
     keyboard_only_selection: { ...keyboard, after_tab: tabFocus },
     accessibility_snapshot: a11y,
+    chromium_accessibility_tree: axTree,
     resize: { narrow_800px: narrow, wide_1400px: wide },
     ps_cross_check: { rss_total_MB: psTotalRssMB, rows: psCrossCheck.split('\n') },
     pids_for_cross_check: samples[samples.length - 1]?.processes.map((p) => `${p.type}:${p.pid}`),
