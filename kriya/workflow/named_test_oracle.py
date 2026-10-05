@@ -502,16 +502,13 @@ def judge_named_tests(
         return OracleJudgment(ORACLE_BASE_UNAVAILABLE, f"base revision unreadable: {type(error).__name__}")
     evidence: Dict[str, Any] = {"version": NAMED_TEST_ORACLE_VERSION, "method": CLOSURE_METHOD,
                                 "base_revision": base_revision, "tests": list(named)}
-    not_at_base = [path for path in named if path not in base.modes]
-    if not_at_base:
-        return OracleJudgment(ORACLE_NOT_AT_BASE, "not in the base revision (written by the candidate): "
-                              + ", ".join(not_at_base), evidence)
     surface = OracleSurface(base, candidate_root, named)
     base_digests, candidate_digests = surface.digests()
     changed = changed_surface(base_digests, candidate_digests)
     changed_named = [path for path in changed if path in named]
     if changed_named:
-        return OracleJudgment(ORACLE_NOT_AT_BASE, "changed by the candidate: " + ", ".join(changed_named), evidence)
+        return OracleJudgment(ORACLE_NOT_AT_BASE, "not the base revision's (written or changed by the candidate): "
+                              + ", ".join(changed_named), evidence)
     changed += surface.output_root_writes(modified)
     if changed:
         evidence["changed"] = changed
