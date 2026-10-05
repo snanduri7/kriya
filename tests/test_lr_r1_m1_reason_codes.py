@@ -2,7 +2,8 @@
 REGRESSION_UNATTRIBUTED (design §14 D7; test T11).
 
 Both stops existed only as message text. Their producers now also set
-``GenerationState.environment_failure_code`` = (code, the exact message);
+``GenerationState.stop_reason_evidence`` = StopReasonEvidence(code, the exact message), an
+evidence-only carrier (these stops are not environment failures);
 the message and the stop decision are byte-unchanged, the recovery.decision
 evidence names the code, and no production decision reads it (structural).
 """
@@ -16,7 +17,7 @@ from test_workflow import _minimal_attempt_ctx
 from kriya.core.attempt_evidence import reader, scope
 from kriya.core.state_paths import ENV_STATE_DIR
 from kriya.policy.filesystem import WriteScopeMode
-from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSION_UNATTRIBUTED
+from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSION_UNATTRIBUTED, StopReasonEvidence
 from kriya.workflow.failure import Failure, QualityGateFailure
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
@@ -62,8 +63,8 @@ def test_regression_unattributed_is_typed_beside_its_unchanged_message(tmp_path,
     should_break, decisions = _recorded(tmp_path, monkeypatch, "run-d7-regression", body)
     assert should_break is True
     assert state.environment_failure == message                       # the message is byte-unchanged
-    assert state.environment_failure_code == (REGRESSION_UNATTRIBUTED, message)
-    assert decisions[-1]["environment_failure_reason_code"] == REGRESSION_UNATTRIBUTED
+    assert state.stop_reason_evidence == StopReasonEvidence(REGRESSION_UNATTRIBUTED, message)
+    assert decisions[-1]["stop_reason_code"] == REGRESSION_UNATTRIBUTED
 
 
 def test_no_authorized_repair_target_is_typed_beside_its_unchanged_message(tmp_path, monkeypatch):
@@ -86,8 +87,8 @@ def test_no_authorized_repair_target_is_typed_beside_its_unchanged_message(tmp_p
     should_break, decisions = _recorded(tmp_path, monkeypatch, "run-d7-scope", body)
     assert should_break is True
     assert state.environment_failure.startswith("NO_AUTHORIZED_REPAIR_TARGET: this failure is grounded to ")
-    assert state.environment_failure_code == (NO_AUTHORIZED_REPAIR_TARGET, state.environment_failure)
-    assert decisions[-1]["environment_failure_reason_code"] == NO_AUTHORIZED_REPAIR_TARGET
+    assert state.stop_reason_evidence == StopReasonEvidence(NO_AUTHORIZED_REPAIR_TARGET, state.environment_failure)
+    assert decisions[-1]["stop_reason_code"] == NO_AUTHORIZED_REPAIR_TARGET
 
 
 def test_an_ordinary_failure_carries_no_code(tmp_path, monkeypatch):
@@ -100,28 +101,30 @@ def test_an_ordinary_failure_carries_no_code(tmp_path, monkeypatch):
     async def body():
         return await handle_attempt_failure(state, ctx, exc)
     _should_break, decisions = _recorded(tmp_path, monkeypatch, "run-d7-none", body)
-    assert state.environment_failure_code is None
-    assert decisions[-1]["environment_failure_reason_code"] is None
+    assert state.stop_reason_evidence is None
+    assert decisions[-1]["stop_reason_code"] is None
 
 
 def test_a_code_for_a_replaced_message_is_not_reported():
-    from kriya.workflow.recovery_coordinator import _typed_environment_failure
+    from kriya.workflow.recovery_coordinator import _typed_stop_reason
 
     state = GenerationState()
-    state.environment_failure_code = (REGRESSION_UNATTRIBUTED, "REGRESSION_UNATTRIBUTED: old")
+    state.stop_reason_evidence = StopReasonEvidence(REGRESSION_UNATTRIBUTED, "REGRESSION_UNATTRIBUTED: old")
     state.environment_failure = "CONTAINMENT_SETUP_FAILED: newer stop"
-    assert _typed_environment_failure(state) is None
+    assert _typed_stop_reason(state) is None
     state.environment_failure = "REGRESSION_UNATTRIBUTED: old"
-    assert _typed_environment_failure(state) == REGRESSION_UNATTRIBUTED
+    assert _typed_stop_reason(state) == REGRESSION_UNATTRIBUTED
     state.environment_failure = None
-    assert _typed_environment_failure(state) is None
+    assert _typed_stop_reason(state) is None
 
 
 # -- structural: producers, the recorder and tests only ----------------------------------------
 
 _PRODUCERS = {"kriya/workflow/retry_strategy.py"}
-_RECORDER_READERS = {("kriya/workflow/recovery_coordinator.py", "_typed_environment_failure")}
-_CODE_NAMES = {"NO_AUTHORIZED_REPAIR_TARGET", "REGRESSION_UNATTRIBUTED"}
+_RECORDER_READERS = {("kriya/workflow/recovery_coordinator.py", "_typed_stop_reason")}
+_CODE_NAMES = {"NO_AUTHORIZED_REPAIR_TARGET", "REGRESSION_UNATTRIBUTED", "StopReasonEvidence"}
+# state.py declares the field (its type annotation); it never reads it.
+_DECLARATION = "kriya/workflow/state.py"
 
 
 def _enclosing_functions(tree):
@@ -149,16 +152,18 @@ def test_the_typed_codes_are_read_only_by_the_recorder_and_named_only_by_produce
         tree = ast.parse(path.read_text(encoding="utf-8"))
         parents = _enclosing_functions(tree)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "environment_failure_code":
+            if isinstance(node, ast.Attribute) and node.attr == "stop_reason_evidence":
                 if isinstance(node.ctx, ast.Store):
                     if rel not in _PRODUCERS:
                         violations.append(f"{rel}:{node.lineno} sets the code outside a producer")
                 elif (rel, _function_of(node, parents)) not in _RECORDER_READERS:
                     violations.append(f"{rel}:{node.lineno} reads the code outside the recorder")
-            if isinstance(node, ast.Name) and node.id in _CODE_NAMES and rel not in _PRODUCERS:
+            declares = rel == _DECLARATION and isinstance(node, ast.Name) and node.id == "StopReasonEvidence"
+            if isinstance(node, ast.Name) and node.id in _CODE_NAMES and rel not in _PRODUCERS and not declares:
                 violations.append(f"{rel}:{node.lineno} names {node.id} outside a producer")
             if isinstance(node, ast.ImportFrom) and node.module == "kriya.workflow.diagnosis_codes" \
-                    and rel not in _PRODUCERS:
+                    and rel not in _PRODUCERS and not (rel == _DECLARATION
+                                                       and {a.name for a in node.names} == {"StopReasonEvidence"}):
                 violations.append(f"{rel}:{node.lineno} imports the codes outside a producer")
     assert violations == []
 
@@ -166,12 +171,12 @@ def test_the_typed_codes_are_read_only_by_the_recorder_and_named_only_by_produce
 def test_the_structural_check_catches_a_planted_decision_read(tmp_path):
     """Negative control: the same walk flags a read in a decision function."""
     source = ("def decide(state):\n"
-              "    if state.environment_failure_code:\n"
+              "    if state.stop_reason_evidence:\n"
               "        return 'stop'\n")
     tree = ast.parse(source)
     parents = _enclosing_functions(tree)
     reads = [(_function_of(n, parents)) for n in ast.walk(tree)
-             if isinstance(n, ast.Attribute) and n.attr == "environment_failure_code"
+             if isinstance(n, ast.Attribute) and n.attr == "stop_reason_evidence"
              and not isinstance(n.ctx, ast.Store)]
     assert reads == ["decide"]
     assert ("kriya/workflow/retry_policy.py", "decide") not in _RECORDER_READERS
@@ -191,5 +196,5 @@ def test_another_environment_stop_carries_no_d7_code(tmp_path, monkeypatch):
         return await handle_attempt_failure(state, ctx, exc)
     should_break, decisions = _recorded(tmp_path, monkeypatch, "run-d7-other", body)
     assert should_break is True and state.environment_failure == "TIME_BUDGET_EXHAUSTED: 900s"
-    assert state.environment_failure_code is None
-    assert decisions[-1]["environment_failure_reason_code"] is None
+    assert state.stop_reason_evidence is None
+    assert decisions[-1]["stop_reason_code"] is None

@@ -122,7 +122,7 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     decisions = _of(records, "recovery.decision")
     if decisions:
         answers["Q6"] = _recorded([_brief(r, "failure_type", "action", "retry", "stop_loop", "retry_decision",
-                                          "no_progress_terminated", "environment_failure_reason_code")
+                                          "no_progress_terminated", "stop_reason_code")
                                    for r in decisions])
     elif not diagnoses:
         # A recovery decision follows a recorded failure; none was recorded.
@@ -166,7 +166,7 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
         units=[_brief(r, "outcome", "status", "error_type") for r in units],
         failed_terminal_gates=[_brief(r, "gate") for r in terminal],
         last_recovery_decision=_brief(decisions[-1], "failure_type", "action", "retry",
-                                      "environment_failure_reason_code") if decisions else None,
+                                      "stop_reason_code") if decisions else None,
     )
 
 

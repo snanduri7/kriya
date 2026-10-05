@@ -291,13 +291,13 @@ class RecoveryCoordinator:
         return decision
 
 
-def _typed_environment_failure(state: GenerationState) -> Optional[str]:
-    """The D7 code typing the CURRENT environment_failure, else None (a code
-    set for an earlier, since replaced message is not reported)."""
-    typed = state.environment_failure_code
-    if typed is None or state.environment_failure is None or typed[1] != state.environment_failure:
+def _typed_stop_reason(state: GenerationState) -> Optional[str]:
+    """The D7 code typing the CURRENT stop message, else None (a code set
+    for an earlier, since replaced message is not reported). Evidence only."""
+    typed = state.stop_reason_evidence
+    if typed is None or state.environment_failure is None or typed.message != state.environment_failure:
         return None
-    return typed[0]
+    return typed.code
 
 
 def _record_recovery_decision(state: GenerationState, classified: ClassifiedAttemptFailure,
@@ -328,7 +328,7 @@ def _record_recovery_decision(state: GenerationState, classified: ClassifiedAtte
                 "required_files": list(conflict.get("required_files") or []),
                 "reason_code": conflict.get("reason_code")},
             "environment_failure": state.environment_failure is not None,
-            "environment_failure_reason_code": _typed_environment_failure(state),
+            "stop_reason_code": _typed_stop_reason(state),
         }
     except Exception as error:  # observational: never alters the decision
         logger.warning("Attempt evidence: recovery.decision not built (%s: %s)", type(error).__name__, error)

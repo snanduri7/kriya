@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.architectural_choice import CandidateArchitecturalChange
 from kriya.workflow.context_package import ContextItem
+from kriya.workflow.diagnosis_codes import StopReasonEvidence
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.process_profile import ProcessProfile
@@ -654,10 +655,10 @@ class GenerationState:
     # of code regeneration can ever fix a JVM crashing during its own startup
     # or a missing build/run tool binary.
     environment_failure: Optional[str] = None
-    # LR-R1-M1 D7: (typed reason code, the exact environment_failure text it
-    # types) for the stops that are otherwise text only
-    # (kriya/workflow/diagnosis_codes.py). Read only by the evidence recorder.
-    environment_failure_code: Optional[Tuple[str, str]] = None
+    # LR-R1-M1 D7: evidence-only typed code of a text-only stop
+    # (kriya/workflow/diagnosis_codes.py). Read only by the evidence recorder;
+    # never a decision input (structural test).
+    stop_reason_evidence: Optional[StopReasonEvidence] = None
     # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once per
     # generation run, the first time a PolymorphicValidator confirms the stack
     # is 'java' - toolchain_checked gates that, toolchain_warning persists into
