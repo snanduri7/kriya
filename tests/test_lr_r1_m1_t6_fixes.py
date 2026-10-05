@@ -299,3 +299,69 @@ def test_d_a_failed_tool_subtask_is_the_terminal_condition(tmp_path, monkeypatch
     [execution] = observed.of("tool.execution", unit_id="s0")
     assert execution["payload"]["status"] == "failed" and "echo failed" in execution["payload"]["error"]
     assert observed.explained["Q9"]["terminal_cause"] == {"tool_status": "failed", "unit_outcome": "RETURNED"}
+
+
+# -- E: refused-before-dispatch and no-model-call semantics -----------------------------------
+
+def test_e_a_call_refused_before_dispatch_is_not_a_missing_response(tmp_path, monkeypatch):
+    from _t6_harness import RENAME_GOAL, output_budget_config, rename_responder
+
+    observed = direct_run(tmp_path, monkeypatch, rename_responder, {"calc.py": __import__("_t6_harness").BIG_CALC},
+                          goal=RENAME_GOAL, cfg=output_budget_config(patch_capable=False))
+    first = observed.attempt(1)
+    [request] = first["Q1"]["items"]
+    assert request["dispatched"] is False and request["refusal_type"] == "OutputBudgetUnsatisfiableError"
+    assert first["Q3"] == {"status": "NOT_APPLICABLE",
+                           "reason": "provider_not_dispatched: OutputBudgetUnsatisfiableError"}
+
+
+def test_e_an_undispatched_call_beside_a_dispatched_one_is_listed_as_such(tmp_path, monkeypatch):
+    from _t6_harness import BIG_CALC, RENAME_GOAL, output_budget_config, rename_responder
+
+    observed = direct_run(tmp_path, monkeypatch, rename_responder, {"calc.py": BIG_CALC},
+                          goal=RENAME_GOAL, cfg=output_budget_config(patch_capable=True))
+    q3 = observed.attempt(1)["Q3"]
+    assert q3["status"] == "RECORDED" and len(q3["items"]) == 1
+    [refused] = q3["not_dispatched"]
+    assert refused["refusal_type"] == "OutputBudgetUnsatisfiableError"
+    assert refused["call_seq"] != q3["items"][0]["call_seq"]
+
+
+def test_e_a_dispatched_call_without_its_response_is_missing_evidence(tmp_path, monkeypatch):
+    """Negative control: the provider was called, its response was not
+    recorded - the only case reported as missing."""
+    from kriya.core.attempt_evidence import scope
+    from kriya.core.attempt_evidence.explain import explain_run
+    from kriya.core.state_paths import ENV_STATE_DIR
+    from tests._strict_doubles import strict_config
+
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+
+    class _Context:
+        run_id = "run-lost-response"
+    cfg = strict_config()
+    with scope.run_scope(_Context()):
+        scope.ensure_store(cfg)
+        with scope.unit_scope(cfg, "u1", "direct"):
+            with scope.attempt_scope(lambda: 1):
+                scope.attempt_opened({"mode": "full_set"})
+                with scope.call_scope("developer"):
+                    scope.emit("model.request", {"dispatched": True})
+        scope.close_run(_Context(), lambda: None)
+    q3 = explain_run(str(tmp_path / "state"), "run-lost-response")["attempts"][0]["answers"]["Q3"]
+    assert q3 == {"status": "NOT_RECORDED", "reason": "the provider was called but its response was not recorded"}
+
+
+def test_e_an_attempt_that_made_no_model_call_is_not_applicable(tmp_path, monkeypatch):
+    """The generation budget admission stops the attempt before any call."""
+    cfg = chaos_config()
+    cfg.autonomy.generation_time_budget_seconds = 2
+    from _chaos_harness import CALC_WITH_SUB
+
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES, cfg=cfg)
+    answers = observed.attempt(1)
+    assert [d["type"] for d in answers["Q5"]["diagnoses"]] == ["time_budget_exhausted"]
+    for label in ("Q1", "Q2", "Q3"):
+        assert answers[label]["status"] == "NOT_APPLICABLE" and answers[label]["reason"].startswith("no_model_call")
+    # The model for the call was decided before admission stopped it: a fact.
+    assert answers["Q8"]["status"] == "RECORDED" and answers["Q8"]["items"][0]["phase"] == "call"

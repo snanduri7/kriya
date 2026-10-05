@@ -101,7 +101,7 @@ def test_an_incompatible_fallback_is_explained_with_its_rejection(tmp_path, monk
 
 def test_an_attempt_without_a_model_call_says_so(tmp_path, monkeypatch):
     """The correct answer to Q1-Q3 for an attempt that called no model (an
-    enforce TOOL subtask, a verification-only unit) is NOT_RECORDED with
+    enforce TOOL subtask, a verification-only unit) is NOT_APPLICABLE with
     the no_model_call reason - never a neighbouring attempt's call."""
     from tests._strict_doubles import strict_config
 
@@ -121,7 +121,7 @@ def test_an_attempt_without_a_model_call_says_so(tmp_path, monkeypatch):
         scope.close_run(_Context(), lambda: None)
     answers = _explain("run-no-call")["attempts"][0]["answers"]
     for label in ("Q1", "Q2", "Q3", "Q8"):
-        assert answers[label]["status"] == "NOT_RECORDED" and answers[label]["reason"].startswith("no_model_call")
+        assert answers[label]["status"] == "NOT_APPLICABLE" and answers[label]["reason"].startswith("no_model_call")
     assert answers["Q5"]["status"] == "NOT_APPLICABLE"
 
 

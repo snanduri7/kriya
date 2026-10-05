@@ -88,24 +88,40 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     answers: Dict[str, Any] = {}
     if _of(records, "tool.execution") and not requests:
         return _answer_tool_attempt(next_records)
+    # No model call is a fact Kriya recorded (the attempt ran and called
+    # nothing), so it is NOT_APPLICABLE - never missing evidence.
     answers["Q1"] = _recorded([_brief(r, "model", "dispatched", "wire_reason", "refusal_type", "temperature")
                                for r in requests]) if requests else _absent(
-        NOT_RECORDED, "no_model_call: no model request was made in this attempt")
+        NOT_APPLICABLE, "no_model_call: no model request was made in this attempt")
     snapshots = _of(records, "authority.snapshot")
     if snapshots:
         answers["Q2"] = _recorded([_brief(r, "write_scope_mode", "targets") for r in snapshots])
     else:
-        answers["Q2"] = _absent(NOT_RECORDED, "no_model_call: no Developer request in this attempt"
-                                if not developer_requests else "no authority snapshot was recorded")
+        answers["Q2"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer request in this attempt") \
+            if not developer_requests else _absent(NOT_RECORDED, "no authority snapshot was recorded")
     responses = _of(records, "model.response")
     parses = _of(records, "developer.parse")
+    undispatched = [r for r in requests if (r.get("payload") or {}).get("dispatched") is False]
+    answered = {(r.get("call_seq"), r.get("wire_seq")) for r in responses}
+    unanswered = [r for r in requests if (r.get("payload") or {}).get("dispatched") is True
+                  and (r.get("call_seq"), r.get("wire_seq")) not in answered]
     if responses or parses:
+        extra: Dict[str, Any] = {"parses": [_brief(r, "kind", "path", "reason_code", "call_seq_parsed")
+                                            for r in parses]}
+        if undispatched:
+            extra["not_dispatched"] = [_brief(r, "refusal_type") for r in undispatched]
+        if unanswered:
+            extra["missing_responses"] = [_brief(r, "model") for r in unanswered]
         answers["Q3"] = _recorded(
-            [_brief(r, "finish_reason", "completion_tokens", "error_type", "cancelled") for r in responses],
-            parses=[_brief(r, "kind", "path", "reason_code", "call_seq_parsed") for r in parses])
+            [_brief(r, "finish_reason", "completion_tokens", "error_type", "cancelled") for r in responses], **extra)
+    elif not requests:
+        answers["Q3"] = _absent(NOT_APPLICABLE, "no_model_call: no model response in this attempt")
+    elif not unanswered:
+        # Every request was refused before the provider was ever called.
+        refusals = sorted({(r.get("payload") or {}).get("refusal_type") or "unknown" for r in undispatched})
+        answers["Q3"] = _absent(NOT_APPLICABLE, "provider_not_dispatched: " + ", ".join(refusals))
     else:
-        answers["Q3"] = _absent(NOT_RECORDED, "no_model_call: no model response in this attempt"
-                                if not requests else "no response was recorded for this attempt's requests")
+        answers["Q3"] = _absent(NOT_RECORDED, "the provider was called but its response was not recorded")
     changes = _of(records, "candidate.change")
     parses = _of(records, "developer.parse")
     parse_kinds = {(r.get("payload") or {}).get("kind") for r in parses}
@@ -151,8 +167,8 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         answers["Q8"] = _recorded([_brief(r, "phase", "requested", "selected", "fallback", "requested_rejection",
                                           "newly_rejected") for r in fallbacks])
     else:
-        answers["Q8"] = _absent(NOT_RECORDED, "no_model_call: no Developer call in this attempt"
-                                if not developer_requests else "no model decision was recorded")
+        answers["Q8"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer call in this attempt") \
+            if not developer_requests else _absent(NOT_RECORDED, "no model decision was recorded")
     # An explicit not_recorded record (the legacy importer, invariant I-3)
     # names why a question cannot be answered; it replaces any inferred
     # absence ("no model call") but never evidence that is present.

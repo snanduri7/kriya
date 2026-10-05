@@ -177,3 +177,34 @@ def tool_plan():
                                 "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": [],
                                 "verification": []})
     return EngineeringPlan.model_validate(plan)
+
+
+# -- an output-budget refusal before dispatch (PRD-016) ---------------------------------------
+
+BIG_CALC = "".join(f"def add{i}(a, b):\n    return a + b + {i}\n\n\n" for i in range(120))
+RENAME_GOAL = "Rename add0 to plus0 in calc.py"
+
+
+def output_budget_config(*, patch_capable: bool):
+    """A whole-file rewrite of BIG_CALC needs more output than the hard
+    ceiling allows: the request is refused before dispatch. With a
+    patch-capable edit profile the Developer falls back to an anchored
+    patch in the same attempt (PRD-016)."""
+    cfg = chaos_config()
+    cfg.llm.max_tokens = 1024
+    cfg.llm.context_policy.max_output_tokens = 1024
+    if patch_capable:
+        cfg.llm.capabilities.preferred_edit_protocol = "small_native_tools"
+    return cfg
+
+
+def rename_responder(role, request):
+    from _chaos_harness import benign_roles
+    from _protocol_responses import sentinel
+
+    if role != "developer":
+        return benign_roles(role, request)
+    system = next((m["content"] for m in request.messages if m["role"] == "system"), "")
+    if "MODE: REPAIR." in system or "KRIYA:EDIT" in system:
+        return sentinel("calc.py", analysis="FIX ANALYSIS: rename.", edits=(("def add0(a, b):", "def plus0(a, b):"),))
+    return BIG_CALC.replace("def add0", "def plus0")
