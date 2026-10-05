@@ -29,7 +29,7 @@ LIVE = json.loads((FIXTURES / "live_cases.json").read_text())
 ARRAYFILL_PATH = "src/main/java/org/apache/commons/lang3/ArrayFill.java"
 ARRAYFILL = (FIXTURES / "ArrayFill.java").read_text()
 TREE_PATH = "cssselect2/tree.py"
-TREE = (FIXTURES / "cssselect2_tree.py").read_text()
+TREE = (FIXTURES / "cssselect2_tree.py.txt").read_text()
 # The member units the live request showed exactly (R2-T4 s1: fill(int[], int) and fill(long[], long)).
 MEMBER_UNITS = ((190, 195), (205, 210))
 
