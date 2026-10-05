@@ -486,3 +486,82 @@ def test_g2_an_unrestricted_scope_is_shown_as_recorded(tmp_path, monkeypatch):
     [snapshot] = observed.of("authority.snapshot")
     assert item["authorized_write_scope"] == snapshot["payload"]["authorized_write_scope"]
     assert item["authorized_write_scope"] != [t["path"] for t in item["targets"]]
+
+
+# -- G3: a Developer call that ended without an answer -----------------------------------------
+
+def test_g3_a_deadline_cut_call_has_no_model_answer(tmp_path, monkeypatch):
+    import asyncio
+
+    from _chaos_harness import CALC_WITH_SUB, ChaosRuntime, role_of
+
+    class Slow(ChaosRuntime):
+        async def complete(self, client, request):
+            if role_of(request) == "developer":
+                await asyncio.sleep(30)
+            return await super().complete(client, request)
+    cfg = chaos_config()
+    cfg.autonomy.generation_time_budget_seconds = 3
+    cfg.autonomy.generation_seconds_per_file_estimate = 0
+    cfg.autonomy.generation_gate_reserve_seconds = 0
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES, cfg=cfg, runtime_class=Slow)
+    assert observed.attempt(1)["Q4"] == {"status": "NOT_APPLICABLE", "reason": "no_model_answer: InferenceDeadlineError"}
+
+
+def test_g3_a_call_refused_before_dispatch_has_no_model_answer(tmp_path, monkeypatch):
+    from _t6_harness import BIG_CALC, RENAME_GOAL, output_budget_config, rename_responder
+
+    observed = direct_run(tmp_path, monkeypatch, rename_responder, {"calc.py": BIG_CALC},
+                          goal=RENAME_GOAL, cfg=output_budget_config(patch_capable=False))
+    assert observed.attempt(1)["Q4"] == {"status": "NOT_APPLICABLE",
+                                         "reason": "no_model_answer: OutputBudgetUnsatisfiableError"}
+
+
+def _synthetic_q4(tmp_path, monkeypatch, run_id, calls):
+    """``calls``: per Developer call, None (no response record), or the
+    model.response payload recorded for it."""
+    from kriya.core.attempt_evidence import scope
+    from kriya.core.attempt_evidence.explain import explain_run
+    from kriya.core.state_paths import ENV_STATE_DIR
+    from tests._strict_doubles import strict_config
+
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+
+    class _Context:
+        pass
+    context = _Context()
+    context.run_id = run_id
+    cfg = strict_config()
+    with scope.run_scope(context):
+        scope.ensure_store(cfg)
+        with scope.unit_scope(cfg, "u1", "direct"):
+            with scope.attempt_scope(lambda: 1):
+                scope.attempt_opened({"mode": "full_set"})
+                for response in calls:
+                    with scope.call_scope("developer"), scope.wire_scope():
+                        scope.emit("model.request", {"dispatched": True})
+                        if response is not None:
+                            scope.emit("model.response", response)
+        scope.close_run(context, lambda: None)
+    return explain_run(str(tmp_path / "state"), run_id)["attempts"][0]["answers"]["Q4"]
+
+
+def test_g3_a_cancelled_call_has_no_model_answer(tmp_path, monkeypatch):
+    q4 = _synthetic_q4(tmp_path, monkeypatch, "run-cancelled", [{"cancelled": True, "error_type": "CancelledError"}])
+    assert q4 == {"status": "NOT_APPLICABLE", "reason": "no_model_answer: CANCELLED"}
+
+
+def test_g3_a_missing_response_record_stays_not_recorded(tmp_path, monkeypatch):
+    """Negative control: a dispatched call without its response record is
+    missing evidence, never 'no answer existed'."""
+    q4 = _synthetic_q4(tmp_path, monkeypatch, "run-missing", [{"cancelled": False, "error_type": "InferenceDeadlineError"},
+                                                              None])
+    assert q4["status"] == "NOT_RECORDED"
+
+
+def test_g3_an_answer_that_was_returned_is_never_no_model_answer(tmp_path, monkeypatch):
+    """Negative control: one call errored, another returned an answer that
+    was not parsed - an answer existed, so this is missing evidence."""
+    q4 = _synthetic_q4(tmp_path, monkeypatch, "run-answered",
+                       [{"cancelled": False, "error_type": "InferenceDeadlineError"}, {"finish_reason": "stop"}])
+    assert q4["status"] == "NOT_RECORDED"

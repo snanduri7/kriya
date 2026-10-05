@@ -71,6 +71,35 @@ def _with_authority(item: Dict[str, Any], request: Mapping[str, Any],
     return item
 
 
+def _no_model_answer(developer_requests: List[Mapping[str, Any]],
+                     responses: List[Mapping[str, Any]]) -> Optional[List[str]]:
+    """The typed reasons no Developer answer existed, when every Developer
+    call of the attempt ended without one as recorded: refused before
+    dispatch (its refusal type), or a response that is an error (its type)
+    or a cancellation. None when there was no Developer call, when a
+    dispatched call has no response record (missing evidence), or when any
+    response returned an answer."""
+    if not developer_requests:
+        return None
+    by_wire = {(r.get("call_seq"), r.get("wire_seq")): r.get("payload") or {} for r in responses}
+    reasons = set()
+    for request in developer_requests:
+        payload = request.get("payload") or {}
+        if payload.get("dispatched") is False:
+            reasons.add(payload.get("refusal_type") or "refused_before_dispatch")
+            continue
+        response = by_wire.get((request.get("call_seq"), request.get("wire_seq")))
+        if response is None:
+            return None
+        if response.get("cancelled"):
+            reasons.add("CANCELLED")
+        elif response.get("error_type"):
+            reasons.add(response["error_type"])
+        else:
+            return None
+    return sorted(reasons)
+
+
 def _attempt_key(record: Mapping[str, Any]) -> Optional[AttemptKey]:
     """The attempt a record belongs to: its scope's attempt identity (the
     retry-loop iteration, so failure handling after run_attempt included)."""
@@ -150,6 +179,8 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
                                           "lines_added", "lines_removed") for r in changes])
     elif parses and parse_kinds == {"no_change"}:
         answers["Q4"] = _absent(NOT_APPLICABLE, "model_proposed_no_change")
+    elif not parses and (no_answer := _no_model_answer(developer_requests, responses)):
+        answers["Q4"] = _absent(NOT_APPLICABLE, "no_model_answer: " + ", ".join(no_answer))
     else:
         answers["Q4"] = _absent(NOT_RECORDED, "no candidate was staged or refused in this attempt")
     gates = _of(records, "gate.result")
