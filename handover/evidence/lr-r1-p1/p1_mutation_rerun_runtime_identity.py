@@ -3,7 +3,7 @@ looked for ``alias`` at the record's top level; records keep it under
 ``fingerprint.alias``). The original SURVIVED entry stays in
 p1_mutation_results.json; this corrected mutant's result is
 p1_mutation_rerun_runtime_identity.json."""
-import json
+import json  # noqa: F401 - evidence script kept as run (LR-R1-P1 mutant re-run)
 import os
 import sys
 
