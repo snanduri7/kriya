@@ -57,6 +57,8 @@ export interface FreshnessLabel {
   headline: string; // "snapshot acquired at …" or "no snapshot"
   metadata: 'change_detected' | 'no_change_detected' | 'unknown';
   metadataText: string;
+  /** The stat-level explanation behind metadataText (what was compared and why it can differ without a content change). */
+  metadataDetail: string;
 }
 
 /** Honest labels (gate C-3). */
@@ -64,7 +66,8 @@ export function freshnessLabel(consistency: Consistency | null | undefined, summ
   const acquiredAt = consistency?.acquisition_completed_at ?? summary?.acquisition_completed_at ?? null;
   const changed = consistency?.source_metadata_changed ?? summary?.source_metadata_changed ?? null;
   const headline = acquiredAt ? `snapshot acquired at ${acquiredAt}` : 'no snapshot displayed';
-  if (changed === true) return { headline, metadata: 'change_detected', metadataText: 'source metadata differs since acquisition (stat only: size, mtime, inode or sidecar files; not a content change, not a new run)' };
-  if (changed === false) return { headline, metadata: 'no_change_detected', metadataText: 'no source metadata change detected (not a freshness guarantee)' };
-  return { headline, metadata: 'unknown', metadataText: 'source metadata not observed' };
+  const detail = 'Compared by stat only: size, mtime, inode and the -wal/-shm/-journal sidecar sizes. An acquisition\'s own read connection can create the sidecars, so the first acquisition of a quiet store already differs.';
+  if (changed === true) return { headline, metadata: 'change_detected', metadataText: 'Source metadata differs since acquisition. Metadata alone does not establish a content change or a new run.', metadataDetail: detail };
+  if (changed === false) return { headline, metadata: 'no_change_detected', metadataText: 'no source metadata change detected (not a freshness guarantee)', metadataDetail: detail };
+  return { headline, metadata: 'unknown', metadataText: 'source metadata not observed', metadataDetail: detail };
 }

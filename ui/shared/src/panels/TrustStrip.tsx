@@ -51,11 +51,12 @@ export function TrustStrip({ capabilities, list, status, detail, workspacePath, 
   const facts = recordedModelFacts(detail);
   const identity = caps ? `${caps.identity.kriya_version ?? 'unknown'}${caps.identity.commit ? ` @ ${String(caps.identity.commit).slice(0, 10)}` : ''}` : 'unknown';
   const runActive: string = status.value?.data ? (status.value.data.run_active === null ? 'unknown' : status.value.data.run_active ? 'RUN_ACTIVE' : 'idle') : 'unknown';
-  const item = (label: string, value: string, extra?: string) => (
+  const item = (label: string, value: string, extra?: string, detail?: string) => (
     <div className="trust-item">
       <span className="trust-label">{label}</span>
       <span className="trust-value" title={value}>{sanitizeText(value)}</span>
       {extra ? <span className="trust-extra">{extra}</span> : null}
+      {detail ? <span className="trust-detail muted small">{detail}</span> : null}
     </div>
   );
   return (
@@ -63,7 +64,7 @@ export function TrustStrip({ capabilities, list, status, detail, workspacePath, 
       {item('History store', source?.trace_database ?? 'unknown (no response yet)')}
       {item('Displayed snapshot', snapshot.pinnedId ?? 'none', snapshot.pinnedId ? (snapshot.pinnedBy === 'acquired' ? 'acquired by this session' : 'chosen from the published list') : undefined)}
       {item('Snapshot integrity', snapshot.verification ? `digest verified at pin (${snapshot.verification.verified_at}); metadata checked per query` : 'none pinned', snapshot.verification?.sha256 ? `sha256 ${snapshot.verification.sha256.slice(0, 16)}…` : undefined)}
-      {item('Snapshot', label.headline, label.metadata === 'change_detected' ? 'source metadata differs since acquisition (stat only; not a content change, not a new run)' : label.metadata === 'no_change_detected' ? 'no metadata change detected (not a freshness guarantee)' : undefined)}
+      {item('Snapshot', label.headline, label.metadata === 'unknown' ? undefined : label.metadataText, label.metadata === 'change_detected' ? label.metadataDetail : undefined)}
       {item('Configuration directory', info.configDirectory ?? 'invalid', configDirNote)}
       {item('Workspace (recovery assessment)', workspacePath ?? 'none selected', runActive)}
       {item('Kriya', identity, capabilities.current ? undefined : capabilities.error ? `unverified: ${capabilities.error.code}` : 'unverified')}

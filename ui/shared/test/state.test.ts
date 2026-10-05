@@ -47,7 +47,8 @@ describe('freshness label wording (gate C-3): a metadata difference is a stat ob
   it('changed: says stat only, not a content change, not a new run; unchanged: not a freshness guarantee; null: not observed', () => {
     const changed = freshnessLabel(consistency(true));
     expect(changed.metadata).toBe('change_detected');
-    expect(changed.metadataText).toMatch(/stat only/); expect(changed.metadataText).toMatch(/not a content change/); expect(changed.metadataText).toMatch(/not a new run/);
+    expect(changed.metadataText).toBe('Source metadata differs since acquisition. Metadata alone does not establish a content change or a new run.');
+    expect(changed.metadataDetail).toMatch(/stat only/); expect(changed.metadataDetail).toMatch(/sidecar/); // the detailed explanation stays available
     expect(changed.metadataText).not.toMatch(/\b(content changed|run recorded|store updated|newer run)\b/); // never an affirmative claim
     expect(changed.headline).toBe('snapshot acquired at 2026-10-05T02:02:54.026756Z');
     const same = freshnessLabel(consistency(false));
