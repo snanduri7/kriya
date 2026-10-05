@@ -127,6 +127,18 @@ def _of(records: Iterable[Mapping[str, Any]], kind: str, **payload_match: Any) -
             and all((r.get("payload") or {}).get(k) == v for k, v in payload_match.items())]
 
 
+def _no_candidate_possible(records: List[Mapping[str, Any]]) -> bool:
+    """For an attempt without a Developer call: True when no candidate could
+    have existed - a verification-only attempt (it verifies the workspace,
+    never a candidate) or an attempt in which no validator gate ran. A
+    validator gate in any other attempt ran on a candidate (a deterministic
+    one, e.g. a restoration), so its missing record stays NOT_RECORDED."""
+    opened = _of(records, "attempt.opened")
+    if opened and (opened[0].get("payload") or {}).get("mode") == "verification_only":
+        return True
+    return not _of(records, "gate.result", stage="validator")
+
+
 def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
                     next_records: Optional[List[Mapping[str, Any]]]) -> Dict[str, Any]:
     requests = _of(records, "model.request")
@@ -182,6 +194,10 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         answers["Q4"] = _absent(NOT_APPLICABLE, "model_proposed_no_change")
     elif not parses and (no_answer := _no_model_answer(developer_requests, responses)):
         answers["Q4"] = _absent(NOT_APPLICABLE, "no_model_answer: " + ", ".join(no_answer))
+    elif not developer_requests and not parses and _no_candidate_possible(records):
+        # LR-R1-M1 LV-2: no Developer call and nothing that consumed a
+        # candidate - no candidate can exist, a known fact (not missing evidence).
+        answers["Q4"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer request in this attempt")
     else:
         answers["Q4"] = _absent(NOT_RECORDED, "no candidate was staged or refused in this attempt")
     gates = _of(records, "gate.result")
