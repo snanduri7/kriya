@@ -20,13 +20,13 @@ from _p3_reproducers import (
 from kriya.workflow.file_resolution import find_explanatory_prose_contamination
 
 
-def test_p3a_an_anchor_copied_from_the_whole_file_the_request_carried_is_refused(tmp_path, monkeypatch):
-    """R2-T4 s1 a4: the retry request carries the whole current ArrayFill.java
-    (planned-source section) and the anchor verbatim; it is still refused."""
+def test_p3a_an_anchor_in_exact_current_source_the_request_carried_is_authorized(tmp_path, monkeypatch):
+    """R2-T4 s1 a4 (fixed by P3-A): the retry request carried the whole
+    current ArrayFill.java verbatim (planned-source section, kept by the
+    fit) and the model anchored on it - authorized."""
     reason, sent = anchor_outside_retry(tmp_path, monkeypatch)
-    assert ARRAYFILL in sent and LIVE["r2_t4_a4_outside_search"] in sent   # the model was shown it, exactly
-    assert LIVE["r2_t4_a4_outside_search"] in ARRAYFILL                    # and it is real current source
-    assert reason == "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+    assert ARRAYFILL in sent and LIVE["r2_t4_a4_outside_search"] in sent
+    assert reason is None
 
 
 def test_p3a_negative_control_an_anchor_never_sent_is_refused(tmp_path, monkeypatch):

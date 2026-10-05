@@ -448,6 +448,10 @@ class GenerationState:
     # capability is not progress.
     edit_capabilities: Dict[str, Any] = field(default_factory=dict)
     edit_capabilities_attempt: int = 0
+    # P3-A: per target, the user prompts the invocation that decided its
+    # current capability actually dispatched (as fitted); read only together
+    # with that capability (_current_edit_capability), so never across attempts.
+    edit_capability_sent: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     edit_anchor_loci: Dict[str, List[int]] = field(default_factory=dict)
     edit_failure_capability: Dict[str, Tuple[str, str, Any]] = field(default_factory=dict)
     edit_capability_models: Dict[str, Tuple[str, Optional[str]]] = field(default_factory=dict)

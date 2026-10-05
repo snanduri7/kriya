@@ -1112,12 +1112,17 @@ class DeveloperRequestFit:
     its caller placed in existing_code_context. Capacities are resolved once
     per output budget."""
 
-    def __init__(self, config: Any, binding: Any, sections: Sequence[OptionalSection]) -> None:
+    def __init__(self, config: Any, binding: Any, sections: Sequence[OptionalSection],
+                 fitted: Optional[List[str]] = None) -> None:
         self.config, self.binding, self.sections = config, binding, tuple(sections)
         self._capacities: Dict[Optional[int], RequestCapacity] = {}
+        # P3-A: every user prompt this invocation fitted for dispatch, exactly
+        # as fitted (shared with with_section copies) - what the model was
+        # really shown, read back by the anchor-authority check.
+        self.fitted: List[str] = fitted if fitted is not None else []
 
     def with_section(self, section: OptionalSection) -> "DeveloperRequestFit":
-        return DeveloperRequestFit(self.config, self.binding, self.sections + (section,))
+        return DeveloperRequestFit(self.config, self.binding, self.sections + (section,), self.fitted)
 
     def capacity(self, output_tokens: Optional[int] = None) -> RequestCapacity:
         """The request's capacity when it asks for the binding's own output
@@ -1132,7 +1137,10 @@ class DeveloperRequestFit:
 
     def fit(self, system_prompt: str, prompt: str, *extra: OptionalSection,
             output_tokens: Optional[int] = None) -> Tuple[str, Dict[str, Any]]:
-        return fit_developer_request(self.capacity(output_tokens), system_prompt, prompt, self.sections + extra)
+        fitted, details = fit_developer_request(self.capacity(output_tokens), system_prompt, prompt,
+                                                self.sections + extra)
+        self.fitted.append(fitted)
+        return fitted, details
 
 
 def fenced_reference_section(fenced_reference: str) -> Optional[OptionalSection]:

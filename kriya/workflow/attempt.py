@@ -2668,6 +2668,9 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
         status = capability.anchor_status(edit.get("search", ""), current)
         if status is None:
             continue
+        if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT and _sent_exact_source_covers(
+                state, capability, path, edit.get("search", ""), current):
+            continue
         if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT:
             raise ValueError(
                 f"{status}: Anchor matching failed for edit #{index}: the search block is real source, but not "
@@ -2678,6 +2681,39 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
             f"{status}: Anchor matching failed for edit #{index}: the search block does not occur in the "
             "current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
         )
+
+
+def _sent_exact_source_covers(state: GenerationState, capability: Any, path: str, search: str, current: str) -> bool:
+    """P3-A: an anchor outside the capability's spans is still one the model
+    relied on exact source for when the request this invocation actually
+    dispatched (as fitted) carried, verbatim, the whole current file or a
+    current exact member unit containing it - the byte rule
+    _decide_edit_capabilities applies to mandatory text, applied to what was
+    really sent (optional text the fit trimmed stays unseen). Only the
+    capability's own revision qualifies, and it authorizes this anchor only:
+    the operations offered, the write scope and full-file authority (D1's
+    alone) are untouched."""
+    from kriya.workflow.edit_safety import normalize_whitespace
+
+    sent = state.edit_capability_sent.get(path) or ()
+    revision = content_revision(current)
+    if not sent or revision != capability.revision or not current.strip():
+        return False
+    pieces = [current] if any(current in prompt for prompt in sent) else []
+    pieces.extend(
+        member.content for member in state.known_target_member_items.get(path, ())
+        if member.is_exact and member.content and (not member.revision or member.revision == revision)
+        and any(member.content in prompt for prompt in sent))
+    norm_search = normalize_whitespace(search)
+    if not any(norm_search in normalize_whitespace(piece) for piece in pieces):
+        return False
+    state.record_event(RunEvent(
+        kind="context.anchor_authorized_by_sent_request", attempt=state.attempt_number,
+        source="attempt._authorize_anchors", authority=EventAuthority.AUTHORITATIVE,
+        message=f"anchor in {path} lies in exact current source the dispatched request carried verbatim",
+        details={"path": path, "revision": revision, "capability": capability.digest},
+    ))
+    return True
 
 
 async def _run_developer_generation(
@@ -2703,10 +2739,10 @@ async def _run_developer_generation_as_developer(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
-    _decide_edit_capabilities(state, ctx, kwargs)
+    capabilities = _decide_edit_capabilities(state, ctx, kwargs)
     # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
     # the binding it is sent to, its optional sections shrinking first.
-    kwargs["request_fit"] = DeveloperRequestFit(
+    request_fit = kwargs["request_fit"] = DeveloperRequestFit(
         ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
         kwargs.pop("optional_sections", None) or (),
     )
@@ -2733,6 +2769,9 @@ async def _run_developer_generation_as_developer(
         succeeded = True
         return result
     finally:
+        # P3-A: what this invocation really sent, for the anchor check.
+        for path in capabilities:
+            state.edit_capability_sent[path] = tuple(request_fit.fitted)
         state.drain_budget_expansions(getattr(ctx.developer, "llm", None))
         duration = time.monotonic() - started
         # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
