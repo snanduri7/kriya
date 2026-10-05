@@ -1,0 +1,60 @@
+diff --git a/src/main/java/org/apache/commons/lang3/CharSetUtils.java b/src/main/java/org/apache/commons/lang3/CharSetUtils.java
+index 0feb49a29..0e39f0245 100644
+--- a/src/main/java/org/apache/commons/lang3/CharSetUtils.java
++++ b/src/main/java/org/apache/commons/lang3/CharSetUtils.java
+@@ -68,6 +68,19 @@ public static boolean containsAny(final String str, final String... set) {
+         return false;
+     }
+ 
++    public static boolean containsOnly(final String str, final String... set) {
++        if (isEmpty(str, set)) {
++            return true;
++        }
++        final CharSet chars = CharSet.getInstance(set);
++        for (final char c : str.toCharArray()) {
++            if (!chars.contains(c)) {
++                return false;
++            }
++        }
++        return true;
++    }
++
+     /**
+      * Takes an argument in set-syntax, see evaluateSet,
+      * and returns the number of characters present in the specified string.
+diff --git a/src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java b/src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java
+index ef2be8f4d..41f3b1e25 100644
+--- a/src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java
++++ b/src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java
+@@ -57,6 +57,31 @@ void testContainsAny_StringString() {
+         assertTrue(CharSetUtils.containsAny("hello", "l-p"));
+     }
+ 
++    void testContainsOnly_StringString() {
++        // Test null string
++        assertTrue(CharSetUtils.containsOnly(null, (String) null));
++        assertTrue(CharSetUtils.containsOnly(null, ""));
++
++        // Test empty string
++        assertTrue(CharSetUtils.containsOnly("", (String) null));
++        assertTrue(CharSetUtils.containsOnly("", ""));
++        assertTrue(CharSetUtils.containsOnly("", "a-e"));
++
++        // Test non-empty string with null set
++        assertFalse(CharSetUtils.containsOnly("hello", (String) null));
++        assertFalse(CharSetUtils.containsOnly("hello", ""));
++
++        // Test positive cases
++        assertTrue(CharSetUtils.containsOnly("hello", "a-z"));
++        assertTrue(CharSetUtils.containsOnly("abc", "a-c"));
++        assertTrue(CharSetUtils.containsOnly("123", "0-9"));
++
++        // Test negative cases
++        assertFalse(CharSetUtils.containsOnly("hello", "a-d"));
++        assertFalse(CharSetUtils.containsOnly("abc", "a-b"));
++        assertFalse(CharSetUtils.containsOnly("123", "4-9"));
++    }
++
+     @Test
+     void testContainsAny_StringStringarray() {
+         assertFalse(CharSetUtils.containsAny(null, (String[]) null));

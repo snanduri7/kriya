@@ -1,0 +1,966 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "COMMITTED",
+        "lifecycle_state": "SUCCESS",
+        "model_calls": 15,
+        "seq": 218,
+        "terminal_status": "SUCCESS"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "targeted",
+      "failure_type": "anchored_edit",
+      "progress_classification": "NO_PROGRESS",
+      "retry": true,
+      "seq": 151
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": null,
+      "quality_gates_passed": true,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 75,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 203,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 38,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:c5002c8e260500c37bdfa2a79c14c4ee73c9860d0aa6f9933eaa2208e957fc41",
+                "wire_body": "sha256:fecc3da5e3c7614d143116756435bb6bd41e6b620f668cb8ddd885b4e4d7d0bd"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/springframework/samples/petclinic/model/Owner.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 41,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:d76e8e9f49764441b1033dbb7c106a18c347741b96dd326ec972e291fa6cf15b",
+                "wire_body": "sha256:b1e4513101164365c67176ce1a504c73cee2174b9efe82678a148ab29fe81c76"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 51,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:69964c1486ebb8e40509f454a15b17919c4a775253581c021d469968f18158a6",
+                "wire_body": "sha256:7ac5175c48c191dee30a769ee91a64c30e6992336bed75f7a9f2cbab1bb914cf"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 55,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:36382a04b48d5097a9c50dc41640678b90850324a56b9fe89a17ae2c5cd598ba",
+                "wire_body": "sha256:d2a5812febb4927f4211c0c64c8499a8eec010f3d9fafdcf11eed2d18329a569"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 64,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/springframework/samples/petclinic/model/Owner.java"
+              ],
+              "seq": 38,
+              "targets": [
+                {
+                  "digest": "6ba829b746ab74afc70d5a11b17da6c24f4889a02ab7a4d2ea5ca012e9762639",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    115
+                  ],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "527f9b3a1b32f98b7456e65e1030b4cb06ed80d151226f71418dfa08b6fbb8b2",
+                  "shown_is_exact": true,
+                  "shown_member_id": "Owner.getPet",
+                  "shown_revision": "527f9b3a1b32f98b7456e65e1030b4cb06ed80d151226f71418dfa08b6fbb8b2",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 117,
+                      "start_line": 115,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 137,
+                      "start_line": 125,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 309,
+              "content": {
+                "content": "sha256:0857fe19671c35e50d888c2364bcfc1f0e857d84592baba435b971127213f0f1"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 42,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 134,
+              "content": {
+                "content": "sha256:3727cf45ade41901bd2ee5396150a310c020119af22bb238734d901d125c00cb"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 52,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 84,
+              "content": {
+                "content": "sha256:8a882d6e6a2e4d58ef3891a1f5310fd6003398a46021b3c82e25313fad9107df"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 56,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 434,
+              "content": {
+                "content": "sha256:07e2a4e58b7109510dd9f444d6421b36651382a0643607db836a5683d12fcf94"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 65,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:7e4c24a9a51870b58bba39aea41d0276c7350ee4db94562b8d29998c0b546c60"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+              "seq": 44
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "d875acd4829834a814b8557476966f30cea648710e4c5a8d8e73d3b4edfc11f3",
+              "before_digest": "527f9b3a1b32f98b7456e65e1030b4cb06ed80d151226f71418dfa08b6fbb8b2",
+              "content": {
+                "after": "sha256:d875acd4829834a814b8557476966f30cea648710e4c5a8d8e73d3b4edfc11f3",
+                "before": "sha256:527f9b3a1b32f98b7456e65e1030b4cb06ed80d151226f71418dfa08b6fbb8b2",
+                "diff": "sha256:d4f489e15acbea5ca791d9fb75a1699312c8b4bfc00282660241bce5b9694aa4"
+              },
+              "decision": "STAGED",
+              "lines_added": 12,
+              "lines_removed": 0,
+              "path": "src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+              "seq": 48
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 35
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 100,
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:85857380ba3a8c5dff1bb3810517a2fa7919087b35570abfce46c7458a180442",
+                "wire_body": "sha256:50e488d5bfeffbf99e03c1f6252c8d13678d5b8f52182eba85afee76dfbd6ab1"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 103,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+              ],
+              "seq": 100,
+              "targets": [
+                {
+                  "digest": "6f8c165ed76c954e7c0973913186128bed0d53bf24847964df024e1eaf552988",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_is_exact": true,
+                  "shown_member_id": "OwnerTests.shouldBeCaseInsensitiveSorting",
+                  "shown_revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 41,
+                      "start_line": 15,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 97,
+                      "start_line": 71,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 9,
+              "completion_tokens": 783,
+              "content": {
+                "content": "sha256:ce25293e5974993da543dbb1c5ce2d4b40742613e62eb96991cc0268681712f5"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 104,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 9,
+              "content": {
+                "analysis_model_claimed": "sha256:db014c0b457b01983a11b8b95eb34bd5275037e924293bed2edfb9404fcc94c0"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "seq": 106
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "proposed_digest": "sha256:a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 116
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:43f27e4860921cb9bd856415a402246ccca3ad1b5c9201ff7629da7679d26685",
+                "raw_output": "sha256:c5bf32748178f0185c96fc1d2abb520a718be06df8c3172cd4cd39122787ca40"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+              ],
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 115,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 119,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 10,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 135,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 97
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 130,
+              "call_seq": 10,
+              "content": {
+                "messages": "sha256:be1a4bbfb0911032c15692fa886018849f0501a52a18975df69d07fd34840867",
+                "wire_body": "sha256:21ab3f83544bdeb6847a1f37d37a11fac33907f8b84b2d4096b59af018a28796"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 134,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+              ],
+              "seq": 130,
+              "targets": [
+                {
+                  "digest": "893620b834d938502fc442af87047832643cb62d6b0e3f987704bc3696a75f71",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    71,
+                    72,
+                    73,
+                    74,
+                    75,
+                    76,
+                    77,
+                    78,
+                    79,
+                    80,
+                    81,
+                    82,
+                    83,
+                    84,
+                    85,
+                    86,
+                    87,
+                    88,
+                    89,
+                    90,
+                    91,
+                    92,
+                    93,
+                    94,
+                    95,
+                    96,
+                    97,
+                    98
+                  ],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_is_exact": true,
+                  "shown_member_id": "OwnerTests.shouldBeCaseInsensitiveSorting",
+                  "shown_revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 41,
+                      "start_line": 15,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 97,
+                      "start_line": 71,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 98,
+                      "start_line": 82,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 10,
+              "completion_tokens": 783,
+              "content": {
+                "content": "sha256:cb7d1db52641222f4ade16d5a0c3a05ebcb7eecdb77e52001876247460a82f94"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 136,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 10,
+              "content": {
+                "analysis_model_claimed": "sha256:e25ddde559731a3717d17d242a3bda2d18e5f740f51693d07ca382b423baf78e"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "seq": 138
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "proposed_digest": "sha256:a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 148
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:43f27e4860921cb9bd856415a402246ccca3ad1b5c9201ff7629da7679d26685",
+                "raw_output": "sha256:c5bf32748178f0185c96fc1d2abb520a718be06df8c3172cd4cd39122787ca40"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+              ],
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 147,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 151,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 11,
+              "changed": [
+                "authority",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory#3"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 167,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 128
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 162,
+              "call_seq": 11,
+              "content": {
+                "messages": "sha256:1a6b62ce6b77758b723d68d4d4eaece73d52dd9ee5690ff717303fc2f8b2a807",
+                "wire_body": "sha256:4cf1bdb5d1acb2b9b1c28d431a75402ff025c79ce3515fbc0d0d1871918f14e0"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 166,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "content": {
+                "messages": "sha256:cfde93d3cbf22ebedc8a1314912006a63f30fd6113a878a40953cbc19eed1398",
+                "wire_body": "sha256:ffa5db37e34ed90c950341c940f7a4b103398c7669603799c2e6368371355d12"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 179,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 13,
+              "content": {
+                "messages": "sha256:a214edb404c8932e407bafbfbb228df8397262eb7da52536629c399b4c423e0f",
+                "wire_body": "sha256:153f73ef5adcbe7316d4f90cca304c40c4b8ed0619258936a691bd405a524bbc"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 183,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 14,
+              "content": {
+                "messages": "sha256:75ec88bb679ddb15538b4b50778b1ff8154d6017aadcc98e965a60fc7226625b",
+                "wire_body": "sha256:a549bc206e6d000f71ff11ee7102c73b1c48d0d9e7291f18c4d5b8a2ae6799fe"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 192,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+              ],
+              "seq": 162,
+              "targets": [
+                {
+                  "digest": "9575ccd664372478ac4582dfcd91cea641f6874e76f19b3a5c90856af9ad2c06",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 2,
+                  "loci": [
+                    71,
+                    72,
+                    73,
+                    74,
+                    75,
+                    76,
+                    77,
+                    78,
+                    79,
+                    80,
+                    81,
+                    82,
+                    83,
+                    84,
+                    85,
+                    86,
+                    87,
+                    88,
+                    89,
+                    90,
+                    91,
+                    92,
+                    93,
+                    94,
+                    95,
+                    96,
+                    97,
+                    98
+                  ],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_is_exact": true,
+                  "shown_member_id": "OwnerTests.shouldBeCaseInsensitiveSorting",
+                  "shown_revision": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 41,
+                      "start_line": 15,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 98,
+                      "start_line": 66,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 97,
+                      "start_line": 71,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 11,
+              "completion_tokens": 755,
+              "content": {
+                "content": "sha256:9762453261594095e72b7144b43229b7f6f0a1ef0da603048192fdfc1b91070c"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 168,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "completion_tokens": 150,
+              "content": {
+                "content": "sha256:61031a88d23e56b3ecd92b58cc3f22c0e4b360d3c725362858ce02896fa95326"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 180,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 13,
+              "completion_tokens": 88,
+              "content": {
+                "content": "sha256:e79d5d8c3daf9ddf7ba8a6686dc58e09373aefb31e65f26e43c690fa7edf7eb6"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 184,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 14,
+              "completion_tokens": 624,
+              "content": {
+                "content": "sha256:4652e8443e8ba08145a62589067f36d60ef54505b8f01d61696bf40a0d90385e"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 193,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 11,
+              "content": {
+                "analysis_model_claimed": "sha256:97f0c1d0c01aa6aa0af43f2a0a4893c054c88f7ee763082963c2d97599c5dade"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "seq": 170
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "0931f2f747755b6d5c335a998024edd3aadcdaaafa5ce4ccd287a39d9f5c8b45",
+              "before_digest": "a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+              "content": {
+                "after": "sha256:0931f2f747755b6d5c335a998024edd3aadcdaaafa5ce4ccd287a39d9f5c8b45",
+                "before": "sha256:a6416abf17e6c43c34811f8a1cea394b935f1ab4a10503c133fc48b0fd6a82d6",
+                "diff": "sha256:b1d5b468fb3deb08518e4284e88fbf6722131650de25eefc32b5ab2b80423bec"
+              },
+              "decision": "STAGED",
+              "lines_added": 27,
+              "lines_removed": 0,
+              "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+              "seq": 174
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (3 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 160
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 2,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T201054-868fc770",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

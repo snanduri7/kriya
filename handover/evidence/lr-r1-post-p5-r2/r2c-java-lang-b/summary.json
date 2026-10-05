@@ -1,0 +1,288 @@
+{
+ "workspace": "r2c-java-lang-b",
+ "goal": "Add `public static int[] fill(final int[] a, final int fromIndex, final int toIndex, final int val)` to org.apache.commons.lang3.ArrayFill, mirroring the existing `fill(char[], int, int, char)` overload (fill the range with `Arrays.fill`, return the given array, and return null for a null array), and add unit tests for it in ArrayFillTest.",
+ "run_id": "20261005T195809-6a6add6d",
+ "generate_exit": 1,
+ "wall_seconds": 720.3644058704376,
+ "process_wall_seconds": 720.1491851250175,
+ "recorder_seconds": 0.245120040490292,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0002,
+  "capture_mode": 0.0,
+  "close_run": 0.0005,
+  "emit": 0.0012,
+  "ensure_store": 0.0021,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0002,
+  "mirror_decision": 0.0038,
+  "mirror_event": 0.0601,
+  "mirror_evidence": 0.0053,
+  "mirror_gate_outcome": 0.0069,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.0946,
+  "record_call_result": 0.0013,
+  "record_developer_parse": 0.0024,
+  "record_diagnosis": 0.0061,
+  "record_fallback_decision": 0.0004,
+  "record_wire_request": 0.0234,
+  "record_wire_response": 0.0266,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0059,
+  "_record_authority_snapshot": 0.0008,
+  "_record_candidate_change": 0.0017,
+  "_record_developer_sections": 0.0002,
+  "_recorded_section_fit": 0.0005,
+  "_record_recovery_decision": 0.0009,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 5,
+  "capture_mode": 5,
+  "close_run": 1,
+  "emit": 14,
+  "ensure_store": 2,
+  "enter_attempt_iteration": 5,
+  "exit_attempt_iteration": 5,
+  "mirror_decision": 5,
+  "mirror_event": 69,
+  "mirror_evidence": 6,
+  "mirror_gate_outcome": 7,
+  "note_retry_evidence": 5,
+  "prune_after_run": 1,
+  "record_call_result": 9,
+  "record_developer_parse": 3,
+  "record_diagnosis": 5,
+  "record_fallback_decision": 7,
+  "record_wire_request": 9,
+  "record_wire_response": 9,
+  "store_pointer": 1,
+  "_record_gate_result": 3,
+  "_record_authority_snapshot": 5,
+  "_record_candidate_change": 1,
+  "_record_developer_sections": 3,
+  "_recorded_section_fit": 5,
+  "_record_recovery_decision": 5,
+  "_unit_evidence": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 1,
+  "seconds": 0.0016867920057848096
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.0004541249945759773
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.09462920902296901
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 181,
+ "records_by_kind": {
+  "mirror.event": 69,
+  "model.request": 9,
+  "model.response": 9,
+  "model.result": 9,
+  "prompt.sections": 8,
+  "fallback.decision": 7,
+  "mirror.gate_outcome": 7,
+  "mirror.evidence": 6,
+  "mirror.decision": 5,
+  "attempt.opened": 5,
+  "authority.snapshot": 5,
+  "obligations.snapshot": 5,
+  "attempt.closed": 5,
+  "diagnosis": 5,
+  "recovery.decision": 5,
+  "attempt.concluded": 5,
+  "retry.delta": 4,
+  "gate.result": 3,
+  "developer.parse": 3,
+  "candidate.change": 3,
+  "run.opened": 1,
+  "unit.opened": 1,
+  "unit.closed": 1,
+  "run.closed": 1
+ },
+ "store_kib": 804,
+ "capture": "full",
+ "model_calls": 9,
+ "model_seconds": 222.13,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "localization",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "run_verifier",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "spec_compliance",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "reviewer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  }
+ ],
+ "attempts": 5,
+ "calls_outside_attempts": {
+  "localization": 1,
+  "planning": 2
+ },
+ "completeness": {
+  "Q1:NOT_APPLICABLE": 2,
+  "Q1:RECORDED": 3,
+  "Q2:RECORDED": 5,
+  "Q3:NOT_APPLICABLE": 2,
+  "Q3:RECORDED": 3,
+  "Q4:NOT_APPLICABLE": 2,
+  "Q4:RECORDED": 3,
+  "Q5:RECORDED": 5,
+  "Q6:RECORDED": 5,
+  "Q7:NOT_APPLICABLE": 1,
+  "Q7:RECORDED": 4,
+  "Q8:RECORDED": 5
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 2,
+   "question": "Q1",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model request was made in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 2,
+   "question": "Q3",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model response in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 2,
+   "question": "Q4",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no Developer request in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 3,
+   "question": "Q1",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model request was made in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 3,
+   "question": "Q3",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model response in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 3,
+   "question": "Q4",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no Developer request in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 5,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 9,
+    "seq": 181,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:40a365cdc2604195feeac091e5b35c0e294aac27b7f92bc3b49c1ba0395ae44b"
+   },
+   "failure_type": "regression_unattributed",
+   "progress_classification": "PROGRESS",
+   "retry": false,
+   "seq": 175,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "regression_unattributed",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "failure_category": "regression_unattributed",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 178,
+    "unit_id": "s1"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.034,
+ "non_model_seconds": 498.23,
+ "recorder_pct_non_model": 0.049
+}

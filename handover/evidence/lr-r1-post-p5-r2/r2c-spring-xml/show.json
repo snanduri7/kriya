@@ -1,0 +1,52 @@
+{
+  "base_revision": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 4,
+    "attempt.concluded": 4,
+    "attempt.opened": 4,
+    "authority.snapshot": 4,
+    "candidate.change": 4,
+    "developer.parse": 4,
+    "diagnosis": 2,
+    "fallback.decision": 4,
+    "gate.result": 13,
+    "mirror.decision": 7,
+    "mirror.event": 80,
+    "mirror.evidence": 4,
+    "mirror.gate_outcome": 9,
+    "model.request": 15,
+    "model.response": 15,
+    "model.result": 15,
+    "obligations.snapshot": 4,
+    "prompt.sections": 16,
+    "recovery.decision": 2,
+    "retry.delta": 2,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 2,
+    "unit.opened": 2
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "6530138fc6106b19b9329baab84ef903c2df2b2d",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-p5/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "265b9a507f4bbb1179fcb56e8c78dfb9b5ce6d25",
+    "version": "0.1.0"
+  },
+  "records": 218,
+  "run_id": "20261005T201054-868fc770",
+  "seal": {
+    "blob_count": 164,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-spring-xml"
+}

@@ -1,0 +1,59 @@
+diff --git a/src/main/java/org/springframework/samples/petclinic/model/Owner.java b/src/main/java/org/springframework/samples/petclinic/model/Owner.java
+index e662aea..b596b47 100644
+--- a/src/main/java/org/springframework/samples/petclinic/model/Owner.java
++++ b/src/main/java/org/springframework/samples/petclinic/model/Owner.java
+@@ -116,6 +116,18 @@ public class Owner extends Person {
+         return getPet(name, false);
+     }
+ 
++    public boolean hasPet(String name) {
++        name = name.toLowerCase();
++        for (Pet pet : getPetsInternal()) {
++            String compName = pet.getName();
++            compName = compName.toLowerCase();
++            if (compName.equals(name)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
+     /**
+      * Return the Pet with the given name, or null if none found for this Owner.
+      *
+diff --git a/src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java b/src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java
+index af36f4d..a0e288f 100644
+--- a/src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java
++++ b/src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java
+@@ -95,4 +95,31 @@ class OwnerTests {
+         assertThat(pets.get(1).getName()).isEqualTo("buddy");
+         assertThat(pets.get(2).getName()).isEqualTo("ZEPHYR");
+     }
++
++    @Test
++    void hasPet_returnsTrueWhenPetExists() {
++        // Given
++        Owner owner = new Owner();
++        Pet pet = new Pet();
++        pet.setName("Fluffy");
++        owner.addPet(pet);
++
++        // When & Then
++        assertThat(owner.hasPet("Fluffy")).isTrue();
++        assertThat(owner.hasPet("fluffy")).isTrue();
++        assertThat(owner.hasPet("FLUFFY")).isTrue();
++    }
++
++    @Test
++    void hasPet_returnsFalseWhenPetDoesNotExist() {
++        // Given
++        Owner owner = new Owner();
++        Pet pet = new Pet();
++        pet.setName("Fluffy");
++        owner.addPet(pet);
++
++        // When & Then
++        assertThat(owner.hasPet("Buddy")).isFalse();
++        assertThat(owner.hasPet("Max")).isFalse();
++    }
+ }

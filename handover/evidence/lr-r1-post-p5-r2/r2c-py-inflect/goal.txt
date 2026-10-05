@@ -1,0 +1,1 @@
+Add a method `count_noun(self, count, noun)` to the `inflect.engine` class in inflect/__init__.py that returns the count followed by a space and the noun inflected for that count with the engine's own `plural` method (for example `count_noun(1, "cat")` returns "1 cat" and `count_noun(3, "cat")` returns "3 cats"), and add tests for it in a new file tests/test_count_noun.py.

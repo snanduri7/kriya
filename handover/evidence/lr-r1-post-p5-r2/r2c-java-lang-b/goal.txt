@@ -1,0 +1,1 @@
+Add `public static int[] fill(final int[] a, final int fromIndex, final int toIndex, final int val)` to org.apache.commons.lang3.ArrayFill, mirroring the existing `fill(char[], int, int, char)` overload (fill the range with `Arrays.fill`, return the given array, and return null for a null array), and add unit tests for it in ArrayFillTest.

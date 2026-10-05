@@ -1,0 +1,217 @@
+{
+ "workspace": "r2c-py-cssselect2",
+ "goal": "Add a read-only property `depth` to `cssselect2.tree.ElementWrapper` in cssselect2/tree.py that returns the number of ancestors of the element (0 for the root element), and add tests for it in tests/test_cssselect2.py.",
+ "run_id": "20261005T192540-2f2806e9",
+ "generate_exit": 1,
+ "wall_seconds": 260.2701771259308,
+ "process_wall_seconds": 260.050517458003,
+ "recorder_seconds": 0.3080024521332234,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0003,
+  "capture_mode": 0.0,
+  "close_run": 0.0008,
+  "emit": 0.0014,
+  "ensure_store": 0.0021,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0003,
+  "mirror_decision": 0.0039,
+  "mirror_event": 0.085,
+  "mirror_evidence": 0.0065,
+  "mirror_gate_outcome": 0.0086,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.1061,
+  "record_call_result": 0.0018,
+  "record_developer_parse": 0.0059,
+  "record_diagnosis": 0.0116,
+  "record_fallback_decision": 0.0005,
+  "record_wire_request": 0.0355,
+  "record_wire_response": 0.0319,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0014,
+  "_record_authority_snapshot": 0.0007,
+  "_record_developer_sections": 0.0009,
+  "_recorded_section_fit": 0.0011,
+  "_record_recovery_decision": 0.0017,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 7,
+  "capture_mode": 7,
+  "close_run": 1,
+  "emit": 16,
+  "ensure_store": 2,
+  "enter_attempt_iteration": 7,
+  "exit_attempt_iteration": 7,
+  "mirror_decision": 5,
+  "mirror_event": 99,
+  "mirror_evidence": 8,
+  "mirror_gate_outcome": 7,
+  "note_retry_evidence": 7,
+  "prune_after_run": 1,
+  "record_call_result": 12,
+  "record_developer_parse": 8,
+  "record_diagnosis": 7,
+  "record_fallback_decision": 10,
+  "record_wire_request": 12,
+  "record_wire_response": 12,
+  "store_pointer": 1,
+  "_record_gate_result": 1,
+  "_record_authority_snapshot": 7,
+  "_record_developer_sections": 8,
+  "_recorded_section_fit": 16,
+  "_record_recovery_decision": 7,
+  "_unit_evidence": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 0,
+  "seconds": 0.0
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.0007622920675203204
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.10608716600108892
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 265,
+ "records_by_kind": {
+  "mirror.event": 99,
+  "prompt.sections": 24,
+  "model.request": 12,
+  "model.response": 12,
+  "model.result": 12,
+  "fallback.decision": 10,
+  "mirror.evidence": 8,
+  "developer.parse": 8,
+  "candidate.change": 8,
+  "attempt.opened": 7,
+  "authority.snapshot": 7,
+  "mirror.gate_outcome": 7,
+  "obligations.snapshot": 7,
+  "attempt.closed": 7,
+  "diagnosis": 7,
+  "recovery.decision": 7,
+  "attempt.concluded": 7,
+  "retry.delta": 6,
+  "mirror.decision": 5,
+  "run.opened": 1,
+  "unit.opened": 1,
+  "gate.result": 1,
+  "unit.closed": 1,
+  "run.closed": 1
+ },
+ "store_kib": 1120,
+ "capture": "full",
+ "model_calls": 12,
+ "model_seconds": 240.99,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "localization",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 4
+  },
+  {
+   "role": "developer",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 5
+  }
+ ],
+ "attempts": 7,
+ "calls_outside_attempts": {
+  "localization": 1,
+  "planning": 2
+ },
+ "completeness": {
+  "Q1:RECORDED": 7,
+  "Q2:RECORDED": 7,
+  "Q3:RECORDED": 7,
+  "Q4:RECORDED": 7,
+  "Q5:RECORDED": 7,
+  "Q6:RECORDED": 7,
+  "Q7:NOT_APPLICABLE": 1,
+  "Q7:RECORDED": 6,
+  "Q8:RECORDED": 7
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 7,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 12,
+    "seq": 265,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:c4beca4eb86d3559df2e14b840cbe4cf94ec32b540e9233dd300a35576498633"
+   },
+   "failure_type": "operation_contract",
+   "progress_classification": "NO_PROGRESS",
+   "retry": false,
+   "seq": 258,
+   "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "unauthorized_generation_target",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "failure_category": "unauthorized_generation_target",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 262,
+    "unit_id": "s1"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.118,
+ "non_model_seconds": 19.28,
+ "recorder_pct_non_model": 1.597
+}
