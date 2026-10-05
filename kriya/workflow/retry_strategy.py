@@ -65,6 +65,7 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
+from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
@@ -744,7 +745,11 @@ async def _record_attempt_failure(
         )
     elif force_strategy_transition(
         state.budgets, consecutive_no_progress=state.consecutive_no_progress_attempts,
-        targeted_max_retries=ctx.targeted_max_retries, has_fallback_model=bool(ctx.chain),
+        targeted_max_retries=ctx.targeted_max_retries,
+        # LR-R1-P1: a fallback proven unable to serve the patch-only next
+        # attempt is not requested (Option b); the retry decision after this
+        # failure's attribution re-reads the same resolver.
+        has_fallback_model=(routing := fallback_routing_for_context(state, ctx)).available,
     ):
         state.record_event(RunEvent(
             kind="retry.strategy_transition",
@@ -757,7 +762,8 @@ async def _record_attempt_failure(
                 "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
                 "from_mode": state.last_attempt_mode,
                 "targeted_budget_closed": True,
-                "fallback_targeted_requested": bool(ctx.chain),
+                "fallback_targeted_requested": routing.available,
+                "fallback_routing": routing.to_dict() if routing.patch_excluded else None,
                 "last_vector_digest": (
                     state.last_progress_vector.digest() if state.last_progress_vector is not None else None
                 ),

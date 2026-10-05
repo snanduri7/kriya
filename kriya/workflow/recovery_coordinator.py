@@ -35,6 +35,7 @@ from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.failure import Failure
+from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import RetryAction, RetryDecision, decide_for_state
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -248,11 +249,14 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
         _capture_final_contents_and_remove_sandbox(state, ctx, cleanup="scope-conflict cleanup")
         return RecoveryDecision(stop_loop=True, action=None, budgets_exhausted=False)
 
+    routing = fallback_routing_for_context(state, ctx)
     retry_decision = decide_for_state(
         state, max_retries=ctx.max_retries,
         targeted_max_retries=ctx.targeted_max_retries,
-        has_fallback_model=bool(ctx.chain),
+        has_fallback_model=routing.available,
     )
+    if routing.patch_excluded:
+        retry_decision = _route_around_patch_incompatible_fallbacks(state, ctx, routing, retry_decision)
     budgets_exhausted = not retry_decision.should_continue
     if budgets_exhausted:
         _abandon_active_repair_contract_if_any(state, reason=retry_decision.action.value)
@@ -269,6 +273,59 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
         stop_loop=budgets_exhausted and retry_decision.action is RetryAction.STOP_ENVIRONMENT,
         action=retry_decision.action, budgets_exhausted=budgets_exhausted, retry_decision=retry_decision,
     )
+
+
+def _route_around_patch_incompatible_fallbacks(state: GenerationState, ctx: Any, routing: Any,
+                                               decision: RetryDecision) -> RetryDecision:
+    """LR-R1-P1 Option (b): some remaining fallback is proven unable to
+    serve the patch-only next attempt, so routing treated it as unavailable
+    and ``decision`` is the route that remains. When that route stops only
+    because the fallback's route is gone - with the configured chain the run
+    would have continued on a fallback (fallback-targeted, or the reserved
+    fallback allowance) - the terminal is the typed
+    FALLBACK_MODEL_INCOMPATIBLE, decided here with no further model
+    invocation. The decision and every candidate's evidence are recorded
+    (run event ``model.fallback_routing``, attempt evidence
+    ``fallback.decision`` phase ``routing``)."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    terminal = False
+    if not decision.should_continue and decision.action is RetryAction.STOP_EXHAUSTED:
+        configured = decide_for_state(state, max_retries=ctx.max_retries,
+                                      targeted_max_retries=ctx.targeted_max_retries,
+                                      has_fallback_model=bool(ctx.chain))
+        terminal = configured.should_continue and (
+            configured.action is RetryAction.FALLBACK_TARGETED or configured.reserved_fallback)
+    details = {
+        **routing.to_dict(), "decision_point": "recovery.conclude_attempt_failure",
+        "other_route_remained": decision.should_continue,
+        "resulting_strategy": FALLBACK_MODEL_INCOMPATIBLE if terminal else decision.action.value,
+        "reason_code": FALLBACK_MODEL_INCOMPATIBLE,
+    }
+    state.record_event(RunEvent(
+        kind="model.fallback_routing", attempt=state.attempt_number, source="recovery_coordinator",
+        authority=EventAuthority.ADVISORY,
+        message=(f"Fallback(s) {', '.join(routing.patch_excluded)} cannot serve the patch-only next attempt "
+                 f"({', '.join(sorted({f for c in routing.candidates for f in c.patch_only_files}))}): "
+                 + ("no recovery route remains" if terminal else f"route {details['resulting_strategy']}")),
+        details=details,
+    ))
+    attempt_evidence_scope.record_fallback_decision({"phase": "routing", **details})
+    if not terminal:
+        return decision
+    reasons = [reason for c in routing.candidates for reason in c.reasons]
+    message = (f"{FALLBACK_MODEL_INCOMPATIBLE}: no remaining configured fallback can serve the patch-only next "
+               "attempt and no other recovery route remains - "
+               + "; ".join(f"{c.model}: {'; '.join(c.reasons)}" for c in routing.candidates))
+    state.environment_failure = message
+    state.record_event(RunEvent(
+        kind="model.fallback_incompatible", attempt=state.attempt_number, source="recovery_coordinator",
+        authority=EventAuthority.ADVISORY, message=message,
+        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "reasons": reasons, "phase": "routing",
+                 "rejected": [c.to_dict() for c in routing.candidates]},
+    ))
+    logger.error(message)
+    return RetryDecision(RetryAction.STOP_ENVIRONMENT, message)
 
 
 RecordFailure = Callable[[GenerationState, Any, Exception, ClassifiedAttemptFailure], Awaitable[None]]

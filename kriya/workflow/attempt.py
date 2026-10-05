@@ -1546,13 +1546,21 @@ def _preserved_authoritative_locator_files(
     ]
 
 
+def _fallback_routing(state: GenerationState, ctx: "AttemptContext") -> Any:
+    """LR-R1-P1: the shared routing view of the configured fallbacks
+    (model_transition.fallback_routing_for_context) - never ``bool(ctx.chain)``."""
+    from kriya.workflow.model_transition import fallback_routing_for_context
+
+    return fallback_routing_for_context(state, ctx)
+
+
 def _request_fallback_for_rejected_authoritative_target(
     state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
 ) -> None:
     if (
         preserved_files
         and state.last_attempt_mode == "targeted"
-        and ctx.chain
+        and _fallback_routing(state, ctx).available
         and not state.budgets.fallback_targeted_attempted
     ):
         state.budgets.fallback_targeted_requested = True
@@ -2027,7 +2035,7 @@ def _fallback_rejection(profile: Any, reasons: List[str]) -> Dict[str, Any]:
 
 
 def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
-                               rejected: List[Dict[str, Any]]) -> None:
+                               rejected: List[Dict[str, Any]], primary_route: bool = False) -> None:
     """PRD-017: why configured fallbacks were skipped and which one serves
     the attempt (the model.fallback_selection run event)."""
     from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
@@ -2039,10 +2047,12 @@ def _record_fallback_selection(state: GenerationState, *, phase: str, requested:
         authority=EventAuthority.ADVISORY,
         message=(
             f"Fallback {requested} skipped ({', '.join(r['model'] for r in rejected)} incompatible); "
-            + (f"{selected} selected" if selected else "no configured fallback remains")
+            + (f"{selected} selected" if selected
+               else "the full-set attempt stays on the primary" if primary_route
+               else "no configured fallback remains")
         ),
         details={"phase": phase, "requested": requested, "selected": selected, "rejected": rejected,
-                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE},
+                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE, "primary_route": primary_route},
     ))
 
 
@@ -2076,7 +2086,8 @@ def _raise_fallback_incompatible(state: GenerationState, requested: str, rejecte
     ))
 
 
-def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int) -> Any:
+def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int, *,
+                              targets: Iterable[str] = (), allow_primary: bool = False) -> Any:
     """PRD-017: the llm_chain fallback this attempt escalates to, chosen
     before its prompt is built (the prompt is sized for the chosen model's
     window). The configured order is kept (resolve_fallback_model); a
@@ -2084,43 +2095,71 @@ def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", re
     qualification case, the production profile without QUALIFIED, no
     prompt room - is skipped with its reasons (never re-evaluated or sent a
     request), and the next configured one is taken. None for the primary;
-    the typed terminal failure when no configured fallback remains."""
-    from kriya.workflow.model_transition import fallback_incompatibilities
+    the typed terminal failure when no configured fallback remains.
+
+    LR-R1-P1 Option (b): a fallback that cannot serve THIS attempt's
+    ``targets`` because one is patch-only for it (whole-file representation
+    impossible in its request, model_transition.patch_only_files) and it
+    returns whole files only is skipped for this attempt (not a run-wide
+    verdict). When every remaining fallback was skipped for that reason
+    alone and ``allow_primary`` (the full-set route), the attempt stays on
+    the primary (None) instead of ending; a run-wide rejection among them
+    keeps PRD-017's terminal semantics."""
+    from kriya.workflow.model_transition import (
+        existing_target_sizes,
+        fallback_incompatibilities,
+        patch_only_files,
+    )
 
     if retry_count <= 0 or not ctx.chain:
         return None
     start = min(retry_count - 1, len(ctx.chain) - 1)
     requested = ctx.chain[start]
+    sizes = existing_target_sizes(ctx.worktree_path, targets)
     newly_rejected: List[Dict[str, Any]] = []
+    patch_rejected: Dict[str, Dict[str, Any]] = {}
     for binding in ctx.chain[start:]:
         if binding.model in state.incompatible_fallbacks:
             continue
         profile = _developer_request_profile(ctx, binding.model)
         reasons = fallback_incompatibilities(ctx.kernel.config, profile)
-        if not reasons:
+        if reasons:
+            state.incompatible_fallbacks[binding.model] = reasons
+            newly_rejected.append(_fallback_rejection(profile, reasons))
+            continue
+        files = patch_only_files(ctx.kernel.config, binding, sizes)[0] if sizes else ()
+        patch_reasons = fallback_incompatibilities(ctx.kernel.config, profile, patch_required_files=files) \
+            if files else []
+        if not patch_reasons:
             break
-        state.incompatible_fallbacks[binding.model] = reasons
-        newly_rejected.append(_fallback_rejection(profile, reasons))
-    selected = resolve_fallback_model(retry_count, ctx.chain, state.incompatible_fallbacks)
+        patch_rejected[binding.model] = {**_fallback_rejection(profile, patch_reasons),
+                                         "patch_only_files": list(files)}
+    skipped = {*state.incompatible_fallbacks, *patch_rejected}
+    selected = resolve_fallback_model(retry_count, ctx.chain, skipped)
     attempt_evidence_scope.record_fallback_decision({
         "phase": "escalation", "retry_count": retry_count, "requested": requested.model,
         "selected": selected.model if selected is not None else None,
         "newly_rejected": newly_rejected, "previously_rejected": sorted(
             model for model in state.incompatible_fallbacks if model not in {r["model"] for r in newly_rejected}),
+        "patch_rejected": list(patch_rejected.values()),
     })
     if selected is requested:
         return selected
     evaluated_now = {item["model"]: item for item in newly_rejected}
     rejected: Dict[str, Dict[str, Any]] = {}
     for binding in ctx.chain[start:]:
-        if binding.model in state.incompatible_fallbacks and binding.model not in rejected:
+        if binding.model in patch_rejected:
+            rejected[binding.model] = patch_rejected[binding.model]
+        elif binding.model in state.incompatible_fallbacks and binding.model not in rejected:
             rejected[binding.model] = evaluated_now.get(binding.model) or {
                 "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
             }
     rejected = list(rejected.values())
+    stays_on_primary = selected is None and allow_primary and all(r["model"] in patch_rejected for r in rejected)
     _record_fallback_selection(state, phase="escalation", requested=requested.model,
-                               selected=selected.model if selected is not None else None, rejected=rejected)
-    if selected is None:
+                               selected=selected.model if selected is not None else None, rejected=rejected,
+                               primary_route=stays_on_primary)
+    if selected is None and not stays_on_primary:
         _raise_fallback_incompatible(state, requested.model, rejected)
     return selected
 
@@ -6432,7 +6471,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # not fire a second time here with a since-incremented attempt_number.
     retry_decision = decide_attempt_mode(
         state, max_retries=ctx.max_retries, targeted_max_retries=ctx.targeted_max_retries,
-        has_fallback_model=bool(ctx.chain),
+        has_fallback_model=_fallback_routing(state, ctx).available,
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.
@@ -6773,7 +6812,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
         state.budgets.fallback_targeted_requested = False
-        fallback = _select_developer_fallback(state, ctx, 1)
+        fallback = _select_developer_fallback(state, ctx, 1, targets=state.last_implicated_files or ())
         state.budgets.fallback_attempts_used += 1
         reference_window = allocation_window(ctx.kernel.config, fallback)
         learned_reference = developer_reference(
@@ -6963,7 +7002,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         extra_body_override = None
 
         active_prompt_window = allocation_window(ctx.kernel.config)
-        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count)
+        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count,
+                                              targets=ctx.architect_files, allow_primary=True)
         if fallback is not None:
             state.budgets.fallback_attempts_used += 1
             model_override = fallback.model

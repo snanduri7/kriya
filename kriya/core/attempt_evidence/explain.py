@@ -214,8 +214,13 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
             if deltas else _absent(NOT_RECORDED, "the next attempt recorded no retry delta")
     fallbacks = _of(records, "fallback.decision")
     if fallbacks:
+        # LR-R1-P1: a routing decision names its requirement, every
+        # candidate's evidence and status, whether another route remained
+        # and the strategy it led to (continued full-set vs terminal).
         answers["Q8"] = _recorded([_brief(r, "phase", "requested", "selected", "fallback", "requested_rejection",
-                                          "newly_rejected") for r in fallbacks])
+                                          "newly_rejected", "patch_rejected", "requirement", "candidates",
+                                          "decision_point", "other_route_remained", "resulting_strategy")
+                                   for r in fallbacks])
     else:
         answers["Q8"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer call in this attempt") \
             if not developer_requests else _absent(NOT_RECORDED, "no model decision was recorded")
@@ -349,6 +354,7 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
     units = _of(records, "unit.closed")
     decisions = _of(records, "recovery.decision")
     terminal_cause = _run_terminal_cause(records, units, closed[-1], run)
+    routings = [r for r in _of(records, "fallback.decision") if (r.get("payload") or {}).get("phase") == "routing"]
     return _recorded(
         [_brief(closed[-1], "terminal_status", "lifecycle_state", "commit_result", "model_calls")],
         terminal_cause=terminal_cause,
@@ -363,6 +369,10 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
         last_recovery_decision=_brief(decisions[-1], "failure_type", "action", "retry",
                                       "progress_classification", "no_progress_reason",
                                       "stop_reason_code") if decisions else None,
+        # LR-R1-P1: the last fallback-routing decision - "fallback bypassed,
+        # continued on <strategy>" vs "no recovery route remained" (terminal).
+        last_fallback_routing=_brief(routings[-1], "requirement", "selected", "other_route_remained",
+                                     "resulting_strategy", "decision_point") if routings else None,
     )
 
 

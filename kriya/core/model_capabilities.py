@@ -14,7 +14,7 @@ are thin, backward-compatible wrappers over it, not a second implementation.
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from kriya.config.config import ModelCapabilities
 
@@ -162,6 +162,10 @@ class ResolvedCapabilityProfile:
     model: str
     capabilities: ModelCapabilities
     source: str
+    # LR-R1-P1: for source "qualification_derived", what proved each
+    # capability (mapping version, exact runtime/settings/policy identity,
+    # the record key and the case statuses read); None otherwise.
+    evidence: Optional[Dict[str, Any]] = None
 
 
 def _log_resolution_once(profile: "ResolvedCapabilityProfile") -> None:
@@ -228,6 +232,32 @@ def is_campaign_named_model(model: str) -> bool:
 def resolve_model_capability_profile(config, model: str) -> ResolvedCapabilityProfile:
     """Deterministic capability-profile resolution - the one production
     contract every capability-sensitive call site should route through.
+
+    LR-R1-P1 precedence: 1. explicit operator declaration, 2. capabilities
+    derived from the exact passing cases of this binding's own current
+    Developer qualification (``qualification_derived_profile``), 3. known
+    production profile, 4. conservative default. Levels 1, 3 and 4 are
+    ``declared_capability_profile`` (unchanged, and the only input to the
+    runtime fingerprint's protocol identity); level 2 is evaluated only when
+    level 1 is absent.
+    """
+    declared = declared_capability_profile(config, model)
+    if declared.source.startswith("explicit_"):
+        return declared
+    derived = qualification_derived_profile(config, model)
+    if derived is None:
+        return declared
+    _log_resolution_once(derived)
+    return derived
+
+
+def declared_capability_profile(config, model: str) -> ResolvedCapabilityProfile:
+    """Capability resolution from configuration and code alone: an explicit
+    operator declaration, else a known production profile, else the
+    conservative default. Never reads a qualification record, so the
+    runtime fingerprint (whose protocol identity is this profile,
+    ``model_runtime.kriya_protocol_identity``) never depends on the record
+    that is looked up by that fingerprint.
 
     Precedence:
       1. explicit validated override - a config binding for THIS exact
@@ -302,6 +332,89 @@ def capabilities_for_model(config, model: str) -> ModelCapabilities:
     return resolve_model_capability_profile(config, model).capabilities
 
 
+# LR-R1-P1: which qualification case(s) prove each capability. Bump the
+# version when the mapping changes (it is recorded in every derived
+# profile's evidence).
+CAPABILITY_DERIVATION_VERSION = "qualification-derived/1"
+NATIVE_TOOL_CASES = ("native_tool_calls", "multiple_tool_calls", "tool_argument_integrity")
+CAPABILITY_PROOF_CASES: Dict[str, tuple] = {
+    "patch_edit": ("anchored_edit_protocol",),
+    "whole_file": ("full_file_raw_content",),
+    "native_tool_calls": NATIVE_TOOL_CASES,
+    "json_mode": ("structured_json",),
+    "reliable_multiline_json": ("multiline_json",),
+    "streaming": ("streaming_assembly",),
+}
+# The role whose qualification identity (runtime + that role's inference
+# settings) proves edit/tool/JSON capabilities: they govern Developer calls.
+DERIVATION_ROLE = "developer"
+
+
+def qualification_derived_profile(config, model: str) -> Optional[ResolvedCapabilityProfile]:
+    """Precedence level 2: capabilities proven by this exact binding's own
+    current Developer qualification record, or None when there is no such
+    record. Only an exact runtime, the binding's own Developer inference
+    settings and the current qualification policy count - a missing, STALE,
+    other-runtime, other-settings or other-policy record proves nothing
+    (None: levels 3/4 apply). The overall QUALIFIED status is never read:
+    each capability comes only from the case(s) in CAPABILITY_PROOF_CASES,
+    and only a PASS proves it - FAIL, UNAVAILABLE and a case not run leave
+    that capability at the conservative default. A derived (pinned) tag's
+    own record is the only evidence for it: nothing is inherited from a
+    base tag's known profile. Never contacts a model endpoint beyond the
+    cached runtime probe; never raises."""
+    from kriya.core import model_qualification as mq
+    from kriya.core.inference_settings import qualification_identity, role_inference_settings
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    try:
+        fingerprint = resolve_configured_model_runtime(config, model)
+        if not fingerprint.exact:
+            return None
+        settings = role_inference_settings(config, DERIVATION_ROLE, model)
+        policy_digest = mq.policy_digest_for(config)
+        record = mq.load_record(fingerprint.digest, settings)
+        current, _reasons = mq.record_is_current(record, fingerprint, settings, policy_digest=policy_digest)
+        if not current:
+            return None
+        statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])}
+    except Exception as error:  # evidence lookup only: no record proves nothing
+        logger.debug("Capability derivation for %s skipped: %s", model, error)
+        return None
+
+    def proven(name: str) -> bool:
+        return all(statuses.get(case) == mq.PASS for case in CAPABILITY_PROOF_CASES[name])
+
+    base = UNVERIFIED_MODEL_CONSERVATIVE_PROFILE
+    tools = proven("native_tool_calls")
+    if proven("patch_edit"):
+        edit_protocol = "small_native_tools" if tools else "text_markers"
+    else:
+        edit_protocol = base.preferred_edit_protocol
+    capabilities = ModelCapabilities(
+        native_tool_calls=tools or base.native_tool_calls,
+        json_mode=proven("json_mode") or base.json_mode,
+        reliable_multiline_json=proven("reliable_multiline_json") or base.reliable_multiline_json,
+        streaming=proven("streaming") or base.streaming,
+        max_tool_argument_chars=base.max_tool_argument_chars,
+        preferred_edit_protocol=edit_protocol,
+    )
+    proof_cases = sorted({case for cases in CAPABILITY_PROOF_CASES.values() for case in cases})
+    return ResolvedCapabilityProfile(
+        model=model, capabilities=capabilities, source="qualification_derived",
+        evidence={
+            "mapping_version": CAPABILITY_DERIVATION_VERSION,
+            "role": DERIVATION_ROLE,
+            "runtime_digest": fingerprint.digest,
+            "inference_settings_digest": settings.digest,
+            "policy_digest": policy_digest,
+            "record": qualification_identity(fingerprint.digest, settings),
+            "cases": {case: statuses.get(case, "NOT_RUN") for case in proof_cases},
+            "proven": sorted(name for name in CAPABILITY_PROOF_CASES if proven(name)),
+        },
+    )
+
+
 def generation_protocol_for_model(config, model: str) -> GenerationProtocol:
     capabilities = capabilities_for_model(config, model)
     return GenerationProtocol(
@@ -310,3 +423,4 @@ def generation_protocol_for_model(config, model: str) -> GenerationProtocol:
         streaming=capabilities.streaming,
         preferred_edit_protocol=capabilities.preferred_edit_protocol,
     )
+

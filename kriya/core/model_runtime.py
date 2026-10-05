@@ -249,10 +249,14 @@ def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint", 
 def kriya_protocol_identity(config: Any, model: str) -> str:
     """The Kriya-side protocol selected for this model: the resolved
     capability profile (which decides native tool calls, JSON mode, edit
-    protocol and tool-argument limits) plus its provenance."""
-    from kriya.core.model_capabilities import resolve_model_capability_profile
+    protocol and tool-argument limits) plus its provenance. LR-R1-P1: the
+    DECLARED profile (operator declaration / known profile / conservative
+    default), never the qualification-derived one - the record that derives
+    capabilities is found by this fingerprint, so it cannot also be an input
+    to it. Every existing fingerprint is unchanged."""
+    from kriya.core.model_capabilities import declared_capability_profile
 
-    profile = resolve_model_capability_profile(config, model)
+    profile = declared_capability_profile(config, model)
     caps = profile.capabilities.model_dump() if hasattr(profile.capabilities, "model_dump") else dict(profile.capabilities)
     canonical = json.dumps({"capabilities": caps, "source": profile.source}, sort_keys=True, separators=(",", ":"))
     return "capabilities-sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()

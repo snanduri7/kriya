@@ -4000,11 +4000,12 @@ class WorkflowEngine:
             requirement_set=requirement_set,
         )
 
+        from kriya.workflow.model_transition import fallback_routing_for_state
         from kriya.workflow.retry_policy import decide_for_state
         while decide_for_state(
             state, max_retries=max_retries,
             targeted_max_retries=TARGETED_MAX_RETRIES,
-            has_fallback_model=bool(chain),
+            has_fallback_model=fallback_routing_for_state(state, self.kernel.config, chain, worktree_path).available,
         ).should_continue:
             # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
             # section below. Independent review (2026-08-15) found the narrower reset
