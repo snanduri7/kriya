@@ -161,6 +161,24 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     return answers
 
 
+_UNIT_RESULT_FIELDS = ("failure_category", "quality_gates_passed")
+
+
+def _terminal_cause(units: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """The run's last closed unit as it recorded its own result (the unit
+    scope copies the workflow result's fields at close); never inferred."""
+    if not units:
+        return _absent(NOT_RECORDED, "no unit closed")
+    payload = units[-1].get("payload") or {}
+    if not any(field in payload for field in _UNIT_RESULT_FIELDS):
+        cause = _absent(NOT_RECORDED, "the last unit recorded no result fields")
+        if payload.get("outcome") == "EXCEPTION":
+            cause.update(unit_outcome="EXCEPTION", error_type=payload.get("error_type"))
+        return cause
+    return {"failure_category": payload.get("failure_category"),
+            "quality_gates_passed": payload.get("quality_gates_passed"), "unit_outcome": payload.get("outcome")}
+
+
 def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     closed = _of(records, "run.closed")
     if not closed:
@@ -170,9 +188,12 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
                 if (r.get("payload") or {}).get("success") is not True]
     units = _of(records, "unit.closed")
     decisions = _of(records, "recovery.decision")
+    terminal_cause = _terminal_cause(units)
     return _recorded(
         [_brief(closed[-1], "terminal_status", "lifecycle_state", "commit_result", "model_calls")],
-        units=[_brief(r, "outcome", "status", "error_type") for r in units],
+        terminal_cause=terminal_cause,
+        units=[_brief(r, "outcome", "status", "failure_category", "quality_gates_passed", "error_type")
+               for r in units],
         failed_terminal_gates=[_brief(r, "gate") for r in terminal],
         last_recovery_decision=_brief(decisions[-1], "failure_type", "action", "retry",
                                       "progress_classification", "no_progress_reason",

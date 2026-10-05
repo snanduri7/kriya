@@ -164,3 +164,102 @@ def test_b_a_parsed_proposal_without_a_candidate_decision_is_missing_evidence(tm
         scope.close_run(_Context(), lambda: None)
     q4 = explain_run(str(tmp_path / "state"), "run-interrupted")["attempts"][0]["answers"]["Q4"]
     assert q4["status"] == "NOT_RECORDED"
+
+
+# -- C: the terminal cause in Q9 ---------------------------------------------------------------
+
+def _refusing_reviewer(monkeypatch):
+    from test_prompt_budget_fit_001c import RefusingReviewer
+
+    from kriya.core.llm import LLMClient
+
+    refusing = RefusingReviewer()
+    monkeypatch.setattr(LLMClient, "_dispatch_budget", lambda client, **kw: refusing(client, **kw))
+    return refusing
+
+
+def test_c_a_final_review_refusal_is_the_q9_terminal_cause(tmp_path, monkeypatch):
+    from _chaos_harness import CALC_WITH_SUB
+
+    refusing = _refusing_reviewer(monkeypatch)
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES)
+    assert refusing.refused == 1 and observed.result["failure_category"] == "final_review_refused"
+    q9 = observed.explained["Q9"]
+    assert q9["terminal_cause"] == {"failure_category": "final_review_refused", "quality_gates_passed": False,
+                                    "unit_outcome": "RETURNED"}
+    assert q9["items"][0]["commit_result"] == "COMMITTED"          # what already happened stays visible
+
+
+def test_c_an_ordinary_terminal_failure_is_the_q9_terminal_cause(tmp_path, monkeypatch):
+    observed = direct_run(tmp_path, monkeypatch, _always(WRONG_SUB), FILES)
+    cause = observed.explained["Q9"]["terminal_cause"]
+    assert cause["failure_category"] == observed.result["failure_category"] == "no_progress"
+    assert cause["quality_gates_passed"] is False
+
+
+def test_c_a_successful_unit_is_the_q9_terminal_cause(tmp_path, monkeypatch):
+    from _chaos_harness import CALC_WITH_SUB
+
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES)
+    cause = observed.explained["Q9"]["terminal_cause"]
+    assert cause == {"failure_category": None, "quality_gates_passed": True, "unit_outcome": "RETURNED"}
+
+
+def test_c_a_terminal_cause_is_never_invented(tmp_path, monkeypatch):
+    """Negative control: a closed unit that recorded no result fields says
+    so; nothing is read from anywhere else."""
+    from kriya.core.attempt_evidence import scope
+    from kriya.core.attempt_evidence.explain import explain_run
+    from kriya.core.state_paths import ENV_STATE_DIR
+    from tests._strict_doubles import strict_config
+
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+
+    class _Context:
+        run_id = "run-no-cause"
+    cfg = strict_config()
+    with scope.run_scope(_Context()):
+        scope.ensure_store(cfg)
+        with scope.unit_scope(cfg, "u1", "direct"):
+            pass
+        scope.close_run(_Context(), lambda: None)
+    cause = explain_run(str(tmp_path / "state"), "run-no-cause")["Q9"]["terminal_cause"]
+    assert cause == {"status": "NOT_RECORDED", "reason": "the last unit recorded no result fields"}
+
+
+def test_c_an_escaped_exception_is_the_q9_terminal_condition(tmp_path, monkeypatch):
+    import pytest
+    from _chaos_harness import CALC_WITH_SUB, ChaosRuntime, RuntimeRegistration, chaos_engine, git_workspace, run_direct
+
+    import kriya.agents.agent as agent
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.attempt_evidence.explain import explain_run
+    from kriya.core.state_paths import ENV_STATE_DIR
+
+    async def crash(self, *args, **kwargs):
+        raise RuntimeError("injected reviewer crash")
+    monkeypatch.setattr(agent.ReviewerAgent, "run", crash)
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+    runtime = ChaosRuntime(_always(CALC_WITH_SUB))
+    with RuntimeRegistration(runtime), pytest.raises(RuntimeError, match="injected reviewer crash"):
+        run_direct(chaos_engine(chaos_config()), "add sub to calc.py", git_workspace(tmp_path, FILES))
+    [run_id] = reader.list_runs(str(tmp_path / "state"))
+    explained = explain_run(str(tmp_path / "state"), run_id)
+    assert explained["verification"] == reader.VERIFIED and explained["sealed"] is True
+    assert explained["Q9"]["terminal_cause"] == {"status": "NOT_RECORDED", "reason": "the last unit recorded no result fields",
+                                                 "unit_outcome": "EXCEPTION", "error_type": "RuntimeError"}
+
+
+def test_c_the_terminal_cause_is_the_last_units_not_an_earlier_ones(tmp_path, monkeypatch):
+    """Enforce: s1 succeeds, s2 (an unverifiable NO_CHANGE) fails last; the
+    terminal cause is s2's own recorded result."""
+    import test_enforce_verified_no_change as shape
+    from _t6_harness import shop_enforce
+
+    observed = shop_enforce(tmp_path, monkeypatch, plans=[lambda: shape._plan(shape.JUDGMENT_CRITERION)])
+    closed = observed.of("unit.closed")
+    assert [c["unit_id"] for c in closed][-1] == "s2"
+    assert closed[0]["payload"]["quality_gates_passed"] is True       # s1
+    cause = observed.explained["Q9"]["terminal_cause"]
+    assert cause["quality_gates_passed"] is False
+    assert cause["failure_category"] == closed[-1]["payload"]["failure_category"]
