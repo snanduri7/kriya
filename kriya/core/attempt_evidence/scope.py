@@ -49,6 +49,18 @@ class _RunScope:
     calls: int = 0
     invocations: Counter = field(default_factory=Counter)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # retry.delta bookkeeping per unit invocation (M1.8b): never read by a decision.
+    retry_inputs: Dict[Tuple[Optional[str], Optional[int]], "_UnitInputs"] = field(default_factory=dict)
+
+
+@dataclass
+class _UnitInputs:
+    """The inputs of a unit invocation's attempts, as recorded: the open
+    attempt's, the previous closed attempt's, and the signature of the last
+    diagnosed failure (what triggers the next attempt)."""
+    current: Optional[Dict[str, Any]] = None
+    previous: Optional[Dict[str, Any]] = None
+    last_failure_signature: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +155,7 @@ def emit(kind: str, payload: Mapping[str, Any], *, content: Optional[Mapping[str
             writer.gap(kind, f"scope run {identity['run_id']!r} differs from the store's run")
             return
         writer.record(kind, payload, identity=identity, content=content, provenance=provenance)
+        _observe(kind, payload)
     except Exception as error:  # observational: never alters the run
         logger.warning("Attempt evidence: %s not recorded (%s: %s)", kind, type(error).__name__, error)
 
@@ -316,6 +329,7 @@ def attempt_scope(attempt_number: Callable[[], Optional[int]]) -> Iterator[Dict[
             raise
         finally:
             closing.setdefault("outcome", "RETURNED")
+            _close_attempt_inputs()
             emit("attempt.closed", closing)
             _sync()
     finally:
@@ -324,6 +338,15 @@ def attempt_scope(attempt_number: Callable[[], Optional[int]]) -> Iterator[Dict[
 
 def attempt_opened(payload: Mapping[str, Any]) -> None:
     emit("attempt.opened", payload)
+    inputs = _unit_inputs()
+    if inputs is not None:
+        attempt = _ATTEMPT.get()
+        inputs.current = {
+            "attempt": attempt.attempt_number() if attempt is not None else None,
+            "mode": payload.get("mode"), "trigger_failure": inputs.last_failure_signature,
+            "retry_evidence": None, "sections": {}, "authority": None, "targets": None,
+            "model_profile": None, "first": None, "last": None, "staged": False,
+        }
 
 
 # -- calls and wires (M1.5) -----------------------------------------------------
@@ -408,6 +431,10 @@ def record_wire_request(runtime: Any, request: Any) -> None:
         return
     emit("model.request", payload,
          content={"messages": request.messages, "tools": request.tools, "wire_body": body})
+    try:
+        _note_developer_request(request)
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: retry.delta not built (%s: %s)", type(error).__name__, error)
 
 
 def record_wire_response(response: Any) -> None:
@@ -564,3 +591,209 @@ def bounded_output(text: Any) -> Tuple[Optional[str], Dict[str, Any]]:
         meta["full_digest"] = model.digest(data)
         data = data[:GATE_OUTPUT_CAP_BYTES]
     return data.decode("utf-8", "replace"), meta
+
+
+# -- diagnosis, recovery, fallback, retry delta (M1.8b) ----------------------------
+
+EVIDENCE_MEASURED = "MEASURED"
+EVIDENCE_DERIVED = "DERIVED_DETERMINISTIC"
+EVIDENCE_MODEL_CLAIMED = "MODEL_CLAIMED"
+EVIDENCE_UNKNOWN = "UNKNOWN"
+# Attribution tiers whose localization is the model's own judgment.
+_MODEL_JUDGED_TIERS = frozenset({"triage", "self_diagnosis"})
+# Failure sources whose text is a tool's or gate's own output.
+_MEASURED_SOURCES = frozenset({"quality_gate", "validator", "compile", "test", "run_verification"})
+
+
+def _unit_inputs() -> Optional[_UnitInputs]:
+    run, unit = _RUN.get(), _UNIT.get()
+    if run is None or run.status != STATUS_OPEN:
+        return None
+    key = (unit.unit_id, unit.invocation_seq) if unit is not None else (None, None)
+    with run.lock:
+        return run.retry_inputs.setdefault(key, _UnitInputs())
+
+
+def _digest_of(value: Any) -> Optional[str]:
+    return None if value is None else model.digest(model.as_bytes(value))
+
+
+def _section_digests(segments: Any) -> Dict[str, str]:
+    digests: Dict[str, str] = {}
+    for segment in segments or ():
+        name = str(segment.get("name"))
+        key, index = name, 1
+        while key in digests:
+            index += 1
+            key = f"{name}#{index}"
+        digests[key] = segment.get("digest")
+    return digests
+
+
+def _observe(kind: str, payload: Mapping[str, Any]) -> None:
+    """Keep the retry-delta inputs current from records just written."""
+    inputs = _unit_inputs()
+    if inputs is None:
+        return
+    current = inputs.current
+    if kind == "diagnosis":
+        inputs.last_failure_signature = _digest_of(
+            [payload.get("type"), payload.get("reason_code"), sorted(payload.get("likely_files") or [])])
+    if current is None:
+        return
+    if kind == "prompt.sections" and payload.get("fitter") == "fit_developer_request":
+        current["sections"] = _section_digests(payload.get("segments"))
+    elif kind == "authority.snapshot":
+        current["authority"] = _digest_of({k: v for k, v in payload.items() if k not in ("t_wall", "t_mono_ms")})
+        current["targets"] = sorted(t.get("path") for t in payload.get("targets") or [])
+    elif kind == "fallback.decision" and payload.get("phase") == "call":
+        current["model_profile"] = payload.get("profile_digest")
+    elif kind == "candidate.change" and payload.get("decision") == "STAGED":
+        current["staged"] = True
+
+
+def note_retry_evidence(fingerprint_digest: Optional[str]) -> None:
+    """The retry evidence this attempt's Developer request is built from
+    (its fingerprint digest): a retry.delta dimension, not a record."""
+    try:
+        inputs = _unit_inputs()
+        if inputs is not None and inputs.current is not None:
+            inputs.current["retry_evidence"] = fingerprint_digest
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: retry evidence not noted (%s)", error)
+
+
+def _note_developer_request(request: Any) -> None:
+    """At each Developer request inside an attempt: remember its inputs, and
+    at the attempt's first one emit retry.delta against the previous attempt."""
+    call = _CALL.get()
+    inputs = _unit_inputs()
+    if call is None or call.role != "developer" or inputs is None or inputs.current is None:
+        return
+    current = inputs.current
+    summary = {"model": request.model, "temperature": request.temperature,
+               "request_digest": _digest_of(request.messages), "model_profile": current["model_profile"],
+               "sections": dict(current["sections"]), "authority": current["authority"],
+               "targets": current["targets"]}
+    current["last"] = summary
+    if current["first"] is None:
+        current["first"] = summary
+        if inputs.previous is not None:
+            emit("retry.delta", retry_delta(inputs.previous, current))
+
+
+def _close_attempt_inputs() -> None:
+    try:
+        inputs = _unit_inputs()
+        if inputs is None or inputs.current is None:
+            return
+        if inputs.previous is not None and inputs.current["first"] is None:
+            # No Developer request this attempt: its delta is UNKNOWN.
+            emit("retry.delta", retry_delta(inputs.previous, inputs.current))
+        inputs.previous, inputs.current = inputs.current, None
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: retry inputs not closed (%s)", error)
+
+
+# Dimensions compared by retry_delta (design §3.4); the attempt counter is
+# deliberately not one (non-informative).
+RETRY_DELTA_DIMENSIONS = ("model", "model_profile", "temperature", "mode", "targets", "authority",
+                          "retry_evidence", "failure_signature")
+
+
+def retry_delta(previous: Mapping[str, Any], current: Mapping[str, Any]) -> Dict[str, Any]:
+    """Pure: the input-side difference between the previous attempt's last
+    Developer request and this attempt's first (design §3.4). Descriptive
+    only - no decision reads it in M1."""
+    before, after = previous.get("last"), current.get("first")
+    payload: Dict[str, Any] = {"previous_attempt": previous.get("attempt"), "attempt": current.get("attempt")}
+    if before is None or after is None:
+        side = "previous" if before is None else "current"
+        payload.update(information_gain="UNKNOWN", changed=[], dimensions={},
+                       reason=f"no recorded Developer request in the {side} attempt")
+        return payload
+    pairs = {
+        "model": (before["model"], after["model"]),
+        "model_profile": (before["model_profile"], after["model_profile"]),
+        "temperature": (before["temperature"], after["temperature"]),
+        "mode": (previous.get("mode"), current.get("mode")),
+        "targets": (before["targets"], after["targets"]),
+        "authority": (before["authority"], after["authority"]),
+        "retry_evidence": (previous.get("retry_evidence"), current.get("retry_evidence")),
+        "failure_signature": (previous.get("trigger_failure"), current.get("trigger_failure")),
+    }
+    for name in sorted(set(before["sections"]) | set(after["sections"])):
+        pairs[f"sections.{name}"] = (before["sections"].get(name), after["sections"].get(name))
+    changed = sorted(name for name, (old, new) in pairs.items() if old != new)
+    payload.update(
+        information_gain="PRESENT" if changed else "NONE", changed=changed,
+        dimensions={name: {"previous": old, "current": new} for name, (old, new) in pairs.items()},
+        request_digests={"previous": before["request_digest"], "current": after["request_digest"]},
+    )
+    return payload
+
+
+def _evidence_class(failure: Any) -> str:
+    tier = getattr(failure, "attribution_tier", None)
+    if tier in _MODEL_JUDGED_TIERS:
+        return EVIDENCE_MODEL_CLAIMED
+    if tier:
+        return EVIDENCE_DERIVED
+    if getattr(failure, "source", None) in _MEASURED_SOURCES:
+        return EVIDENCE_MEASURED
+    return EVIDENCE_UNKNOWN
+
+
+def record_diagnosis(failure: Any, operation: Optional[str]) -> None:
+    """``diagnosis`` for one recorded failure (GenerationState.record_failure),
+    and ``candidate.change`` REFUSED for content the failed attempt proposed
+    but never staged for its gates."""
+    if _active_writer() is None:
+        return
+    try:
+        diagnostics = failure.diagnostics if isinstance(failure.diagnostics, dict) else {}
+        raw_text, raw_meta = bounded_output(failure.raw_output)
+        payload = {
+            "type": failure.type, "source": failure.source, "authority": failure.authority,
+            "attempt": failure.attempt, "mode": failure.mode, "operation": operation,
+            "reason_code": diagnostics.get("reason_code"),
+            "likely_files": list(failure.likely_files),
+            "file_locations": [{"filepath": loc.filepath, "line": loc.line, "col": loc.col}
+                               for loc in failure.file_locations],
+            "attribution_tier": failure.attribution_tier, "attribution_confidence": failure.attribution_confidence,
+            "attribution_kind": failure.attribution_kind, "evidence_class": _evidence_class(failure),
+            "subtask_id": failure.subtask_id, "raw_output": raw_meta,
+        }
+        content = {"message": failure.message, "raw_output": raw_text,
+                   "attribution_reasoning": failure.attribution_reasoning}
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: diagnosis not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("diagnosis", payload, content=content)
+    _record_refused_candidate(failure, payload["reason_code"] or failure.type)
+
+
+def _record_refused_candidate(failure: Any, reason_code: str) -> None:
+    try:
+        inputs = _unit_inputs()
+        closed = inputs.previous if inputs is not None else None
+        if closed is None or closed.get("attempt") != failure.attempt or closed.get("staged"):
+            return
+        proposed = dict(failure.failed_content or {})
+        edits = list(failure.attempted_edits or [])
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: refused candidate not built (%s)", error)
+        return
+    for relpath in sorted(proposed):
+        emit("candidate.change", {"decision": "REFUSED", "path": relpath, "reason_code": reason_code,
+                                  "attempt": failure.attempt,
+                                  "proposed_digest": _digest_of(proposed[relpath])},
+             content={"proposed": proposed[relpath]})
+    if edits and not proposed:
+        emit("candidate.change", {"decision": "REFUSED", "path": None, "reason_code": reason_code,
+                                  "attempt": failure.attempt, "attempted_edits": len(edits)},
+             content={"attempted_edits": edits})
+
+
+def record_fallback_decision(payload: Mapping[str, Any]) -> None:
+    emit("fallback.decision", payload)

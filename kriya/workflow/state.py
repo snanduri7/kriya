@@ -987,4 +987,5 @@ class GenerationState:
                 "attempted_edits": list(failure.attempted_edits),
             },
         ))
+        attempt_evidence_scope.record_diagnosis(failure, operation)
         return event

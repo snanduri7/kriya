@@ -28,14 +28,15 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.failure import Failure
 from kriya.workflow.repair_contract import RepairContractStatus
-from kriya.workflow.retry_policy import RetryAction, decide_for_state
+from kriya.workflow.retry_policy import RetryAction, RetryDecision, decide_for_state
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
@@ -84,6 +85,10 @@ class RecoveryDecision:
     stop_loop: bool
     action: Optional[RetryAction]
     budgets_exhausted: bool
+    # LR-R1-M1: the retry policy's full decision, for the evidence record
+    # only (None when the attempt stopped before the policy). Not compared:
+    # the decision is the three fields above.
+    retry_decision: Optional[RetryDecision] = field(default=None, compare=False)
 
 
 def classify_attempt_exception(
@@ -262,7 +267,7 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
     # and the loop would otherwise continue into another pointless retry.
     return RecoveryDecision(
         stop_loop=budgets_exhausted and retry_decision.action is RetryAction.STOP_ENVIRONMENT,
-        action=retry_decision.action, budgets_exhausted=budgets_exhausted,
+        action=retry_decision.action, budgets_exhausted=budgets_exhausted, retry_decision=retry_decision,
     )
 
 
@@ -281,5 +286,43 @@ class RecoveryCoordinator:
             exc, ctx, last_attempt_mode=state.last_attempt_mode, ground_scope_denial=self._ground_scope_denial,
         )
         await self._record_failure(state, ctx, exc, classified)
-        return conclude_attempt_failure(state, ctx)
+        decision = conclude_attempt_failure(state, ctx)
+        _record_recovery_decision(state, classified, decision)
+        return decision
+
+
+def _record_recovery_decision(state: GenerationState, classified: ClassifiedAttemptFailure,
+                              decision: RecoveryDecision) -> None:
+    """LR-R1-M1 ``recovery.decision``: the classification, the decision and
+    the retry policy's reason, after the decision was made (observational)."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        retry = decision.retry_decision
+        conflict = state.plan_scope_conflict
+        payload = {
+            "attempt": state.attempt_number, "failure_type": classified.failure.type,
+            "attempt_mode": classified.attempt_mode,
+            "unrecoverable_scope_denial": classified.unrecoverable_scope_denial,
+            "unrecoverable_denial_reason": classified.unrecoverable_denial_reason,
+            "internal_framework_bug": classified.internal_framework_bug,
+            "containment_setup_failure": classified.containment_setup_failure,
+            "stop_loop": decision.stop_loop, "action": decision.action.value if decision.action else None,
+            "budgets_exhausted": decision.budgets_exhausted,
+            "retry_decision": None if retry is None else {
+                "action": retry.action.value, "reason": retry.reason,
+                "reserved_fallback": retry.reserved_fallback, "should_continue": retry.should_continue},
+            "retry": bool(not decision.stop_loop and retry is not None and retry.should_continue),
+            "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
+            "no_progress_terminated": state.no_progress_terminated,
+            "plan_scope_conflict": None if conflict is None else {
+                "required_files": list(conflict.get("required_files") or []),
+                "reason_code": conflict.get("reason_code")},
+            "environment_failure": state.environment_failure is not None,
+        }
+    except Exception as error:  # observational: never alters the decision
+        logger.warning("Attempt evidence: recovery.decision not built (%s: %s)", type(error).__name__, error)
+        return
+    attempt_evidence_scope.emit("recovery.decision", payload,
+                                content={"environment_failure": state.environment_failure})
 

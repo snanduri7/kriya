@@ -1255,6 +1255,7 @@ def _prepare_retry_context(
             ))
         state.budgets.last_retry_evidence_fingerprint = fingerprint
         state.retry_evidence_seen.setdefault(fingerprint_hash, state.attempt_number)
+        attempt_evidence_scope.note_retry_evidence(fingerprint_hash)
 
     return RetryContextPreparation(
         retry_package=retry_package,
@@ -2101,6 +2102,12 @@ def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", re
         state.incompatible_fallbacks[binding.model] = reasons
         newly_rejected.append(_fallback_rejection(profile, reasons))
     selected = resolve_fallback_model(retry_count, ctx.chain, state.incompatible_fallbacks)
+    attempt_evidence_scope.record_fallback_decision({
+        "phase": "escalation", "retry_count": retry_count, "requested": requested.model,
+        "selected": selected.model if selected is not None else None,
+        "newly_rejected": newly_rejected, "previously_rejected": sorted(
+            model for model in state.incompatible_fallbacks if model not in {r["model"] for r in newly_rejected}),
+    })
     if selected is requested:
         return selected
     evaluated_now = {item["model"]: item for item in newly_rejected}
@@ -2171,8 +2178,21 @@ def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs
     reasons = fallback_incompatibilities(
         ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
     ) if is_fallback else []
-    if reasons:
-        kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    requested_model = profile.model
+    requested_digest = profile.digest
+    try:
+        if reasons:
+            kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    except BaseException:
+        attempt_evidence_scope.record_fallback_decision({
+            "phase": "call", "fallback": is_fallback, "requested": requested_model,
+            "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
+            "selected": None, "profile_digest": None})
+        raise
+    attempt_evidence_scope.record_fallback_decision({
+        "phase": "call", "fallback": is_fallback, "requested": requested_model,
+        "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
+        "selected": profile.model, "profile_digest": profile.digest})
     previous = state.last_developer_request_profile
     if previous is None or previous.digest != profile.digest:
         changes = profile_changes(previous, profile)
