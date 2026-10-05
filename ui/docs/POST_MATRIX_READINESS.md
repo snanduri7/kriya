@@ -126,3 +126,10 @@ on acquire; a panel inferring anything not recorded. Each stops the procedure an
 ## 8. Acceptance preparation (2026-10-05)
 
 Resolved inputs and the exact acquisition command for approval: `REAL_STORE_ACCEPTANCE_PLAN.md`. Merge instructions for the main-repository session: `KUP_MERGE_INSTRUCTIONS.md`. Manual accessibility script, every step pending: `A11Y_MANUAL_WALKTHROUGH.md`. Real-store use remains held.
+
+## 9. First real-store acceptance executed (2026-10-05)
+
+The owner released real-store use; steps 1-9 of §7 were executed and PASS, stopped before step 10 (the owner names the recovery
+workspace). Measured values, observations (lowercase real status vocabulary, `retrieved_chunks` section, first-acquisition
+metadata change) and the pending manual checks: `REAL_STORE_ACCEPTANCE_RESULTS.md`. Harness for the panel step:
+`ui/test-host/test/real_store_acceptance.test.tsx` (runs only with `KRIYA_REAL_EXPORT_DIR`).
