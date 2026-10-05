@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # `name as name` marks an explicit re-export: the helper moved to its own module
 # during modularization, and callers (tests, review_context.py, spikes) still
@@ -93,6 +93,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.compile_regression import attribute_compile_regression
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     RetrievalLimits,
@@ -975,6 +976,42 @@ def close_requirements_with_named_tests(
     )
 
 
+def _seed_grounded_loci(
+    state: GenerationState, worktree_path: str, grounded_locations: Sequence[Mapping[str, Any]],
+) -> None:
+    """P2: the edit loci of a grounded failure carried into a plan-scope
+    re-invocation (a fresh GenerationState) - each only when the file's raw
+    revision in this sandbox equals the one the locator was observed on. A
+    locus only decides which exact lines are shown (CONTEXT-EDIT-PROTOCOL
+    windows); write authority stays the validated plan's."""
+    seeded: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    for location in grounded_locations:
+        path = str(location.get("filepath") or "")
+        line = location.get("line")
+        normalized = os.path.normpath(path) if path else ""
+        full = os.path.join(worktree_path, normalized)
+        current = None
+        if (normalized and not os.path.isabs(normalized) and not normalized.startswith("..")
+                and isinstance(line, int) and line > 0 and os.path.isfile(full)):
+            try:
+                current = read_file_revision(full)
+            except OSError:
+                current = None
+        entry = {"filepath": path, "line": line}
+        if current is None or current != location.get("revision"):
+            dropped.append(entry)
+            continue
+        state.edit_anchor_loci[normalized] = sorted(set(state.edit_anchor_loci.get(normalized, [])) | {line})
+        seeded.append(entry)
+    state.record_event(RunEvent(
+        kind="recovery.grounded_loci", attempt=state.attempt_number, source="workflow.run_generation_workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        message=f"plan-scope recovery: {len(seeded)} grounded locus/loci carried, {len(dropped)} stale dropped",
+        details={"seeded": seeded, "dropped": dropped},
+    ))
+
+
 def _oracle_base_revision(candidate_root: str, workspace_path: str) -> Optional[str]:
     """FS-1C0: the revision a named test must be authored at - the owning
     run's base (so an earlier unit's committed change is still the run's
@@ -1532,6 +1569,7 @@ class WorkflowEngine:
         planned_source_files: Optional[Sequence[str]] = None,
         reference_context: str = "",
         recovery_contract_block: str = "",
+        grounded_locations: Optional[Sequence[Mapping[str, Any]]] = None,
         established_files: Optional[List[str]] = None,
         predetermined_plan: Optional[str] = None,
         predetermined_design: Optional[str] = None,
@@ -3894,6 +3932,11 @@ class WorkflowEngine:
                 "Refusing to generate directly in the application workspace."
             ) from e
 
+        # P2: a plan-scope re-invocation keeps the grounded loci of the
+        # failure that widened its scope (revision-bound; a stale one is dropped).
+        if grounded_locations:
+            _seed_grounded_loci(state, worktree_path, grounded_locations)
+
         # Resolved ONCE, here, against workspace_path BEFORE any Developer
         # write happens (worktree_path above is an isolated copy - writes
         # never touch workspace_path directly until the approval/copy-back
@@ -4933,6 +4976,9 @@ class WorkflowEngine:
                 # ever narrows what's shown for the FULL-suite signal, never
                 # touches the targeted one.
                 _full_regression_unattributed = False
+                # P2: files the compiler's errors name, when a test-compilation
+                # failure is attributed to the candidate (compile_regression.py).
+                _regression_known_files: List[str] = list(state.all_files_written)
                 if _regression_should_block and _baseline_delta_result is not None:
                     from kriya.workflow.regression_attribution import confirm_ambiguous_regressions
                     _resolved_level2, _replay_evidence = confirm_ambiguous_regressions(
@@ -4972,7 +5018,27 @@ class WorkflowEngine:
                                 f"{_targeted_test_res.get('output', '')}"
                             )
                     elif not _targeted_regression_should_block:
-                        _full_regression_unattributed = True
+                        # P2: no per-test evidence at all (a test-compilation
+                        # failure runs no test) is not "every failure is
+                        # pre-existing": under a green, comparable PRE the
+                        # compiler's own diagnostics attribute it.
+                        _compile_regression = attribute_compile_regression(
+                            _baseline_delta_result, full_test_res.get("output", ""), worktree_path,
+                        )
+                        if _compile_regression is None:
+                            _full_regression_unattributed = True
+                        else:
+                            _regression_known_files = sorted(
+                                set(state.all_files_written) | set(_compile_regression.files))
+                            state.record_event(RunEvent(
+                                kind="validation_baseline.compile_regression_attributed",
+                                attempt=state.attempt_number,
+                                source="workflow.run_generation_workflow",
+                                authority=EventAuthority.AUTHORITATIVE,
+                                message=("Full-regression compilation failure attributed to the candidate "
+                                         "from compiler diagnostics: " + ", ".join(_compile_regression.files)),
+                                details=_compile_regression.as_dict(),
+                            ))
 
                 if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
@@ -5055,7 +5121,7 @@ class WorkflowEngine:
                             failure = _build_quality_gate_failure(
                                 "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
                                 _regression_failure_output, worktree_path,
-                                state.all_files_written, state.attempt_number,
+                                _regression_known_files, state.attempt_number,
                             )
                         state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)

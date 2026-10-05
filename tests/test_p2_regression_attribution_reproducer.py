@@ -3,16 +3,17 @@ full regression is reported REGRESSION_UNATTRIBUTED and never repaired
 (handover/P2_REGRESSION_ATTRIBUTION_INVESTIGATION.md).
 
 ``test_p2_t4_shape_is_what_javac_reports`` grounds the fixtures in real javac.
-``test_p2_today_*`` pins today's path (passes now; its assertions describe
-the defect). The required behaviour is asserted by
-handover/evidence/p2/test_p2_required_behaviour.py (run explicitly; it fails
-until P2 is fixed, then moves here replacing the pin - no xfail).
+The required behaviour (handover/evidence/p2/test_p2_required_behaviour.py,
+failing before the fix) is asserted here end to end; the pre-fix pin is kept
+as evidence (handover/evidence/p2/test_p2_prefix_pin.py).
 """
 import shutil
 import subprocess
 
 import _p2_t4_shape as t4
 import pytest
+
+from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
 
 
 @pytest.mark.skipif(shutil.which("javac") is None, reason="needs a local javac")
@@ -57,33 +58,47 @@ def test_p2_t4_shape_is_what_javac_reports(tmp_path):
     assert "ArrayFillTest.java:[167,40] reference to fill is ambiguous" in t4.T4_OUTPUT
 
 
-def test_p2_today_a_candidate_caused_test_compile_regression_is_unattributed_and_never_repaired(
-        tmp_path, monkeypatch):
-    """Pins today's path (it passes now; its assertions describe the defect)."""
+def test_a_candidate_caused_test_compile_regression_is_attributed_and_repaired(tmp_path, monkeypatch):
     observed = t4.run(tmp_path, monkeypatch)
-    legacy = observed.result.legacy_result
-    oracle_calls = observed.extra["oracle"].calls
-
-    # PRE baseline green; the candidate compiles; the full regression's test compile fails.
-    tests_runs = [c for c in oracle_calls if c["goals"][0] == "test"]
-    assert tests_runs[0]["verdict"] == "green" and tests_runs[-1]["verdict"] == "ambiguous"
-    assert legacy["status"] != "success"
-    [closed] = [r["payload"] for r in observed.of("unit.closed")]
-    assert closed["failure_category"] == "regression_unattributed"
-    # Kriya had the compiler's locator (file, line, the conflicting new method) ...
-    [regression] = [r for r in observed.of("mirror.gate_outcome") if r["payload"]["type"] == "regression_unattributed"]
-    outcome = t4.blob_json(observed, regression, "outcome")
-    assert "ArrayFillTest.java:[167,40] reference to fill is ambiguous" in outcome["output"]
-    assert "fill(int[],int,int,int) in org.apache.commons.lang3.ArrayFill" in outcome["output"]
-    # ... but reported nothing attributable, stopped, and repaired nothing.
-    assert outcome["file_locations"] == [] and outcome["likely_files"] == []
-    [diagnosis] = [r["payload"] for r in observed.of("diagnosis") if r["payload"]["type"] == "regression_unattributed"]
-    assert diagnosis["evidence_class"] == "UNKNOWN" and diagnosis["file_locations"] == []
     decisions = [r["payload"] for r in observed.of("recovery.decision")]
-    assert decisions[-1]["action"] == "stop_environment"
-    assert decisions[-1]["stop_reason_code"] == "REGRESSION_UNATTRIBUTED"
-    assert not any(t4.TEST in (r["payload"].get("authorized_write_scope") or [])
-                   for r in observed.of("authority.snapshot"))            # no request could repair the test
-    assert [r["payload"]["unit_id"] for r in observed.of("unit.opened")] == ["s1"]   # s2 never ran
-    assert t4.workspace_text(observed, t4.MAIN) == t4.BASE_MAIN           # nothing applied
-    assert t4.workspace_text(observed, t4.TEST) == t4.BASE_TEST
+
+    # 1. Never the unattributed stop.
+    assert all(d.get("stop_reason_code") != "REGRESSION_UNATTRIBUTED" for d in decisions)
+    assert all(r["payload"]["type"] != "regression_unattributed" for r in observed.of("mirror.gate_outcome"))
+
+    # 2. The regression is grounded deterministically to the compiler's locator.
+    regressions = [r["payload"] for r in observed.of("diagnosis") if r["payload"]["type"] == "regression_test"]
+    assert regressions, "the candidate-caused full-regression failure must be an ordinary, attributable regression"
+    first = regressions[0]
+    assert {"filepath": t4.TEST, "line": 167} in [{k: loc[k] for k in ("filepath", "line")}
+                                                   for loc in first["file_locations"]]
+    assert first["attribution_tier"] in DETERMINISTIC_ATTRIBUTION_TIERS
+
+    # 3. An authorized repair route: a later Developer request may write the broken test file.
+    assert any(t4.TEST in (r["payload"].get("authorized_write_scope") or []) for r in observed.of("authority.snapshot"))
+
+    # 4. End to end: the repair is applied and the run succeeds on a green full regression.
+    assert observed.result.legacy_result["status"] == "success"
+    assert t4.CAST_CALL in t4.workspace_text(observed, t4.TEST)
+    assert t4.INT_OVERLOAD.strip() in t4.workspace_text(observed, t4.MAIN)
+    assert observed.extra["oracle"].calls[-1]["verdict"] == "green"
+
+
+def test_p2_the_attribution_names_the_compiler_locator_and_the_carried_locus_is_revision_bound(
+        tmp_path, monkeypatch):
+    """The chain's intermediate facts: the attribution event names exactly
+    the error locator (the COMPILATION WARNING locator in the same output,
+    CharSetTest.java:[394,55], is not an error and is ignored); the
+    PLAN_SCOPE_REVISION_REQUIRED decision requires exactly ArrayFillTest.java;
+    the re-invocation seeds line 167 because the file's revision is unchanged."""
+    observed = t4.run(tmp_path, monkeypatch)
+    events = [t4.blob_json(observed, r, "event") for r in observed.of("mirror.event")
+              if r["payload"]["kind"] in ("validation_baseline.compile_regression_attributed",
+                                          "recovery.grounded_loci")]
+    [attributed] = [e for e in events if e.get("kind") == "validation_baseline.compile_regression_attributed"]
+    assert attributed["details"] == {"files": [t4.TEST], "locations": [{"filepath": t4.TEST, "line": 167}]}
+    conflicts = [r["payload"]["plan_scope_conflict"] for r in observed.of("recovery.decision")
+                 if r["payload"].get("plan_scope_conflict")]
+    assert conflicts[0] == {"required_files": [t4.TEST], "reason_code": "PLAN_SCOPE_REVISION_REQUIRED"}
+    [carried] = [e for e in events if e.get("kind") == "recovery.grounded_loci"]
+    assert carried["details"] == {"seeded": [{"filepath": t4.TEST, "line": 167}], "dropped": []}

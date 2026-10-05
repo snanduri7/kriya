@@ -962,7 +962,10 @@ class GenerationState:
             metrics["process_profile"] = self.process_profile.to_dict()
         return metrics
 
-    def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
+    def record_failure(self, failure: Any, *, operation: Optional[str] = None, diagnosis: bool = True) -> RunEvent:
+        """The failure's run event and evidence; ``diagnosis=False`` leaves the
+        LR-R1-M1 ``diagnosis`` record to a caller that writes it once the
+        failure's attribution is known (retry_strategy, P2)."""
         try:
             authority = EventAuthority(failure.authority)
         except (ValueError, TypeError):
@@ -997,5 +1000,6 @@ class GenerationState:
                 "attempted_edits": list(failure.attempted_edits),
             },
         ))
-        attempt_evidence_scope.record_diagnosis(failure, operation)
+        if diagnosis:
+            attempt_evidence_scope.record_diagnosis(failure, operation)
         return event

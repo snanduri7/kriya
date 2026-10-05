@@ -28,8 +28,9 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attribution import (
@@ -46,6 +47,7 @@ from kriya.workflow.deterministic_failure_diagnostic import (
 )
 from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSION_UNATTRIBUTED, StopReasonEvidence
 from kriya.workflow.edit_capability import ANCHOR_CONTEXT_NOT_ESCALATED
+from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.failure import (
     Failure,
     FailureAttributionKind,
@@ -429,6 +431,24 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     return decision.stop_loop
 
 
+def _grounded_locations(worktree_path: str, failure: Any, paths: Sequence[str]) -> List[Dict[str, Any]]:
+    """The failure's file:line locators in ``paths``, each with the file's
+    raw revision now; a file that cannot be read is left out."""
+    wanted = set(paths)
+    located: List[Dict[str, Any]] = []
+    for location in failure.file_locations:
+        if location.filepath not in wanted or not location.line:
+            continue
+        try:
+            revision = read_file_revision(os.path.join(worktree_path, location.filepath))
+        except OSError:
+            continue
+        entry = {"filepath": location.filepath, "line": int(location.line), "revision": revision}
+        if entry not in located:
+            located.append(entry)
+    return located
+
+
 async def _record_attempt_failure(
     state: GenerationState, ctx, e: Exception, classified: ClassifiedAttemptFailure,
 ) -> None:
@@ -468,7 +488,8 @@ async def _record_attempt_failure(
     previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
-    state.record_failure(failure, operation=attempt_mode)
+    # The M1 diagnosis record is written below, once attribution has run (P2).
+    state.record_failure(failure, operation=attempt_mode, diagnosis=False)
     failed_mode = state.last_attempt_mode or "full_set"
     state.failed_attempts_by_mode[failed_mode] = state.failed_attempts_by_mode.get(failed_mode, 0) + 1
     state.record_event(RunEvent(
@@ -1182,6 +1203,10 @@ async def _record_attempt_failure(
                     # obligation needs to quote. Bounded length - this
                     # becomes Developer-facing prompt text, not a log dump.
                     "raw_evidence": grounded_evidence_excerpt(failure.raw_output or "", outside_scope),
+                    # P2: the exact grounded loci outside the scope, bound to
+                    # the raw revision they were observed on - the plan-scope
+                    # re-invocation shows exactly these lines (never a stale one).
+                    "grounded_locations": _grounded_locations(ctx.worktree_path, failure, outside_scope),
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/
@@ -1415,6 +1440,10 @@ async def _record_attempt_failure(
         )
         if narrowed:
             state.repair_contract.immediate_correction_targets = narrowed
+
+    # LR-R1-M1 diagnosis with the failure's final attribution (P2: a
+    # regression grounded by the compiler's locator records its tier).
+    attempt_evidence_scope.record_diagnosis(failure, attempt_mode)
 
     # Charged before the scope override below, so the override sees whether
     # this attempt spent the last of recovery's own budget. Nothing after this

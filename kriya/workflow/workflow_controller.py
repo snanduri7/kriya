@@ -80,7 +80,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -5240,6 +5240,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             *,
             recovery_context: str = "",
             execution_role: str = "planned",
+            grounded_locations: Sequence[Mapping[str, Any]] = (),
         ) -> Dict[str, Any]:
             target_goal = build_subtask_goal_text(
                 target, target_position, total, plan=plan, grounding_goal=goal,
@@ -5295,6 +5296,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # recovery_contract_block's own docstring) - never merely
                 # another paragraph prepended to existing context.
                 recovery_contract_block=recovery_context,
+                grounded_locations=list(grounded_locations),
                 established_files=sorted(established_file_context.keys()),
                 predetermined_plan=build_subtask_plan_text(target),
                 predetermined_design=BOUNDED_SUBTASK_DESIGN,
@@ -5895,6 +5897,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "repeat the former service-only repair."
                         ),
                         execution_role="plan_scope_recovery",
+                        # P2: the grounded loci of the failure that widened the
+                        # scope (revision-bound), so the new owner's exact lines
+                        # are shown to the re-invoked stage.
+                        grounded_locations=scope_conflict.get("grounded_locations") or (),
                     )
                     scope_conflict = call_result.get("plan_scope_conflict") or {}
                     grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
