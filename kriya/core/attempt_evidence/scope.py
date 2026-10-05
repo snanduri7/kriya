@@ -49,6 +49,8 @@ class _RunScope:
     calls: int = 0
     invocations: Counter = field(default_factory=Counter)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # (state dir, keep_runs, max_bytes) once the store opened (M1.9 retention).
+    retention: Optional[Tuple[str, int, int]] = None
     # retry.delta bookkeeping per unit invocation (M1.8b): never read by a decision.
     retry_inputs: Dict[Tuple[Optional[str], Optional[int]], "_UnitInputs"] = field(default_factory=dict)
 
@@ -217,6 +219,8 @@ def ensure_store(cfg: Any) -> None:
             writer = AttemptEvidenceWriter(state_dir, run.run_id, capture=capture,
                                            manifest=_run_manifest(run.context))
             run.writer, run.directory, run.status = writer, writer.directory, STATUS_OPEN
+            bounds = cfg.evidence.attempt_recorder.retention
+            run.retention = (state_dir, bounds.keep_runs, bounds.max_bytes)
         except Exception as error:  # observational (D5): RecorderUnavailable, a bad state dir, anything
             run.status, run.reason = STATUS_UNAVAILABLE, f"{type(error).__name__}: {error}"
             logger.warning("RECORDER_UNAVAILABLE: attempt evidence for run %s is not recorded (%s); "
@@ -263,6 +267,27 @@ def close_run(context: Any, load_record: Callable[[], Any]) -> None:
             run.status = STATUS_CLOSED
     except Exception as error:  # observational: never alters the run
         logger.warning("Attempt evidence: run close not recorded (%s: %s)", type(error).__name__, error)
+
+
+def prune_after_run(context: Any, references: Callable[[], Any]) -> None:
+    """Retention at run close (design §10), after the seal and under the
+    caller's workspace lock: the run's own store and every run the
+    workspace still references (``references()``) are protected. Never
+    raises; never alters the run."""
+    try:
+        run = _RUN.get()
+        if run is None or run.run_id != getattr(context, "run_id", None) or run.retention is None:
+            return
+        from kriya.core.attempt_evidence.retention import prune_evidence
+
+        state_dir, keep_runs, max_bytes = run.retention
+        report = prune_evidence(state_dir, keep_runs=keep_runs, max_bytes=max_bytes,
+                                protect_run_ids={run.run_id, *references()})
+        if report.pruned:
+            logger.info("Attempt evidence: pruned %d store(s), %d bytes freed",
+                        len(report.pruned), report.freed_bytes)
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: retention skipped (%s: %s)", type(error).__name__, error)
 
 
 def store_pointer() -> Dict[str, Any]:

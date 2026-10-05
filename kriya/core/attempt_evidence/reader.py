@@ -166,7 +166,7 @@ def list_runs(state_dir: str) -> List[str]:
     if not os.path.isdir(root):
         return []
     return sorted(name for name in os.listdir(root)
-                  if os.path.isfile(os.path.join(root, name, _MANIFEST)))
+                  if not name.startswith(".") and os.path.isfile(os.path.join(root, name, _MANIFEST)))
 
 
 def open_run(state_dir: str, run_id: str) -> EvidenceRun:

@@ -436,6 +436,8 @@ def begin_mutating_run(
                     prune_after_run(canonical, context.run_id)
                 finally:
                     attempt_evidence_scope.close_run(context, lambda: load_run_record(canonical, context.run_id))
+                    from kriya.control.retention import workspace_run_references
+                    attempt_evidence_scope.prune_after_run(context, lambda: workspace_run_references(canonical))
                     # Always expire the capability with the lock, so a same-process
                     # caller (e.g. the REPL) can never reuse it without ownership.
                     lease.active = False

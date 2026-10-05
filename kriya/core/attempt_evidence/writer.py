@@ -42,7 +42,9 @@ _SEAL = "seal.json"
 _BLOBS = "blobs"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
-_RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
+# A run id never starts with "." - that namespace is the retention's staging
+# (kriya/core/attempt_evidence/retention.py), invisible to readers.
+_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}$")
 _IDENTITY_KEYS = ("run_id", "unit_id", "unit_kind", "invocation_seq", "phase", "attempt_number", "call_seq",
                   "wire_seq", "role")
 
