@@ -5274,9 +5274,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # planner rationale, or any other free-form field as an
                 # authority signal.
                 tool_context = project_for_subtask(execution_context, subtask)
-                result = await subtask_executor.execute(
-                    subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
-                )
+                # LR-R1-M1: the action as its own evidence unit (observational).
+                with attempt_evidence_scope.tool_unit(getattr(kernel, "config", None), subtask.id,
+                                                      subtask.tool_name) as evidence:
+                    result = await subtask_executor.execute(
+                        subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
+                    )
+                    evidence["result"] = result
                 subtask_results.append(result)
                 record_subtask_attempt(ledger, plan, result, attempt=1)
                 control_state = control_state.with_updates(

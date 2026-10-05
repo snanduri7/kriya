@@ -388,6 +388,37 @@ def exit_attempt_iteration(token: Any, *, succeeded: bool) -> None:
                 logger.warning("Attempt evidence: attempt iteration not reset (%s)", error)
 
 
+@contextlib.contextmanager
+def tool_unit(cfg: Any, unit_id: str, tool_name: Optional[str]) -> Iterator[Dict[str, Any]]:
+    """An enforce TOOL subtask: an action (one deterministic tool call, never
+    a model call, never retried, not a verification gate) as its own unit
+    with one execution attempt. The caller puts the SubtaskResult in the
+    yielded dict as ``result``; ``tool.execution`` records it after the
+    call, and the unit closes with its status. Observational."""
+    holder: Dict[str, Any] = {}
+    with unit_scope(cfg, unit_id, "tool", {"tool_name": tool_name}) as closing:
+        with attempt_scope(lambda: 1):
+            attempt_opened({"mode": "tool", "operation": None, "tool_name": tool_name})
+            yield holder
+            _record_tool_execution(tool_name, holder.get("result"), closing)
+
+
+def _record_tool_execution(tool_name: Optional[str], result: Any, closing: Dict[str, Any]) -> None:
+    if _active_writer() is None or result is None:
+        return
+    try:
+        status = getattr(getattr(result, "status", None), "value", None)
+        output = getattr(result, "tool_output", None)
+        text, meta = bounded_output(None if output is None else model.as_bytes(output))
+        payload = {"tool_name": tool_name, "status": status, "error": getattr(result, "error", None),
+                   "reason_codes": list(getattr(result, "reason_codes", None) or ()), "tool_output": meta}
+        closing["tool_status"] = status
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: tool.execution not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("tool.execution", payload, content={"tool_output": text})
+
+
 def attempt_opened(payload: Mapping[str, Any]) -> None:
     emit("attempt.opened", payload)
     inputs = _unit_inputs()

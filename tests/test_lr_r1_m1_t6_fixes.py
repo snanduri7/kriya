@@ -263,3 +263,39 @@ def test_c_the_terminal_cause_is_the_last_units_not_an_earlier_ones(tmp_path, mo
     cause = observed.explained["Q9"]["terminal_cause"]
     assert cause["quality_gates_passed"] is False
     assert cause["failure_category"] == closed[-1]["payload"]["failure_category"]
+
+
+# -- D: the enforce TOOL subtask in the evidence hierarchy ------------------------------------
+
+def test_d_an_executed_tool_subtask_is_a_unit_with_its_action_result(tmp_path, monkeypatch):
+    from _t6_harness import echo_tool, shop_enforce, tool_plan
+
+    observed = shop_enforce(tmp_path, monkeypatch, plans=[tool_plan], tools={"t6_echo": echo_tool()})
+    by_id = {r.subtask_id: r for r in observed.result.subtask_results}
+    assert by_id["s0"].status.value == "completed"
+    opened = observed.of("unit.opened", unit_id="s0")
+    assert len(opened) == 1 and opened[0]["payload"]["unit_kind"] == "tool"
+    [execution] = observed.of("tool.execution", unit_id="s0")
+    assert execution["attempt_number"] == 1 and execution["payload"]["tool_name"] == "t6_echo"
+    assert execution["payload"]["status"] == "completed" and execution["call_seq"] is None
+    assert b"echoed" in observed.run.blob(execution["blobs"]["tool_output"])
+    [closed] = observed.of("unit.closed", unit_id="s0")
+    assert closed["payload"]["tool_status"] == "completed"
+    answers = observed.attempt(1, unit="s0")
+    for label in ("Q1", "Q2", "Q3", "Q8"):
+        assert answers[label]["status"] == "NOT_APPLICABLE" and answers[label]["reason"].startswith("no_model_call")
+    assert answers["Q4"] == {"status": "NOT_APPLICABLE", "reason": "tool_action: no Developer candidate"}
+    assert answers["Q5"] == {"status": "NOT_APPLICABLE", "reason": "no_verification_gate"}
+    assert answers["Q6"] == {"status": "NOT_APPLICABLE", "reason": "tool_subtask: executed once, never retried"}
+    # No model call was made inside the tool unit.
+    assert not [r for r in observed.records if r["kind"] == "model.request" and r["unit_id"] == "s0"]
+
+
+def test_d_a_failed_tool_subtask_is_the_terminal_condition(tmp_path, monkeypatch):
+    from _t6_harness import echo_tool, shop_enforce, tool_plan
+
+    observed = shop_enforce(tmp_path, monkeypatch, plans=[tool_plan], tools={"t6_echo": echo_tool(fail=True)})
+    assert [r.subtask_id for r in observed.result.subtask_results] == ["s0"]      # the run stopped there
+    [execution] = observed.of("tool.execution", unit_id="s0")
+    assert execution["payload"]["status"] == "failed" and "echo failed" in execution["payload"]["error"]
+    assert observed.explained["Q9"]["terminal_cause"] == {"tool_status": "failed", "unit_outcome": "RETURNED"}

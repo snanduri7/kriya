@@ -86,6 +86,8 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     requests = _of(records, "model.request")
     developer_requests = [r for r in requests if r.get("role") == "developer"]
     answers: Dict[str, Any] = {}
+    if _of(records, "tool.execution") and not requests:
+        return _answer_tool_attempt(next_records)
     answers["Q1"] = _recorded([_brief(r, "model", "dispatched", "wire_reason", "refusal_type", "temperature")
                                for r in requests]) if requests else _absent(
         NOT_RECORDED, "no_model_call: no model request was made in this attempt")
@@ -170,6 +172,8 @@ def _terminal_cause(units: List[Mapping[str, Any]]) -> Dict[str, Any]:
     if not units:
         return _absent(NOT_RECORDED, "no unit closed")
     payload = units[-1].get("payload") or {}
+    if "tool_status" in payload:
+        return {"tool_status": payload.get("tool_status"), "unit_outcome": payload.get("outcome")}
     if not any(field in payload for field in _UNIT_RESULT_FIELDS):
         cause = _absent(NOT_RECORDED, "the last unit recorded no result fields")
         if payload.get("outcome") == "EXCEPTION":
@@ -177,6 +181,22 @@ def _terminal_cause(units: List[Mapping[str, Any]]) -> Dict[str, Any]:
         return cause
     return {"failure_category": payload.get("failure_category"),
             "quality_gates_passed": payload.get("quality_gates_passed"), "unit_outcome": payload.get("outcome")}
+
+
+_TOOL_NO_MODEL_CALL = "no_model_call: a tool subtask makes no model call"
+
+
+def _answer_tool_attempt(next_records: Optional[List[Mapping[str, Any]]]) -> Dict[str, Any]:
+    """An enforce TOOL subtask's execution: an action, not a model call,
+    a candidate or a verification gate; executed once (TOOL-001). Its own
+    result is the attempt's ``tool.execution`` record (and Q9)."""
+    answers = {label: _absent(NOT_APPLICABLE, _TOOL_NO_MODEL_CALL) for label in ("Q1", "Q2", "Q3", "Q8")}
+    answers["Q4"] = _absent(NOT_APPLICABLE, "tool_action: no Developer candidate")
+    answers["Q5"] = _absent(NOT_APPLICABLE, "no_verification_gate")
+    answers["Q6"] = _absent(NOT_APPLICABLE, "tool_subtask: executed once, never retried")
+    answers["Q7"] = _absent(NOT_APPLICABLE, "no later attempt in this unit invocation") if next_records is None \
+        else _absent(NOT_RECORDED, "a tool unit recorded a later attempt")
+    return answers
 
 
 def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -221,10 +241,14 @@ def explain_run(state_dir: str, run_id: str) -> Dict[str, Any]:
     for index, key in enumerate(keys):
         nxt = keys[index + 1] if index + 1 < len(keys) else None
         same_invocation = nxt is not None and nxt[:2] == key[:2]
-        result["attempts"].append({
+        entry = {
             "unit_id": key[0], "invocation_seq": key[1], "attempt": key[2],
             "answers": _answer_attempt(key, attempts[key], attempts[nxt] if same_invocation else None),
-        })
+        }
+        actions = _of(attempts[key], "tool.execution")
+        if actions:
+            entry["tool_execution"] = [_brief(r, "tool_name", "status", "error", "reason_codes") for r in actions]
+        result["attempts"].append(entry)
     phases: "OrderedDict[str, int]" = OrderedDict()
     for record in _of(outside, "model.request"):
         phase = record.get("phase") or "unscoped"

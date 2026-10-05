@@ -53,6 +53,7 @@ KINDS = frozenset({
     "diagnosis",
     "recovery.decision",
     "fallback.decision",
+    "tool.execution",
     "retry.delta",
     "mirror.event", "mirror.decision", "mirror.evidence",
     "mirror.gate_outcome", "mirror.gate_outcomes_restored",

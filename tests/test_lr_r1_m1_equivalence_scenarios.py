@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List
 from unittest.mock import AsyncMock
 from unittest.mock import patch as mock_patch
 
+import _t6_harness
 import pytest
 import test_enforce_verified_no_change as enforce_shape
 from _chaos_harness import CALC, CALC_WITH_SUB, TEST_SUB, benign_roles, run_direct
@@ -130,7 +131,8 @@ def _invalid_plan(criterion):
     return EngineeringPlan.model_validate(plan)
 
 
-def _enforce_observe(tmp_path: Path, monkeypatch, variant: str, plans: List[Callable], criterion) -> Dict[str, Any]:
+def _enforce_observe(tmp_path: Path, monkeypatch, variant: str, plans: List[Callable], criterion,
+                     tools: Callable = dict) -> Dict[str, Any]:
     state = tmp_path / "states" / variant
     state.mkdir(parents=True)
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
@@ -184,6 +186,8 @@ def _enforce_observe(tmp_path: Path, monkeypatch, variant: str, plans: List[Call
     capture = {"off_again": "off", "open_fails": "full", "write_fails": "full"}.get(variant, variant)
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     engine.planner.run = AsyncMock(return_value="structured plan")
+    for name, tool in tools().items():
+        engine.kernel.registry.register("tool", name, tool)
     from kriya.workflow.workflow_controller import WorkflowController
 
     with monkeypatch.context() as patch:
@@ -234,6 +238,12 @@ ENFORCE_SCENARIOS = {
     "enforce_no_change_refused": dict(plans=[enforce_shape._plan], criterion=enforce_shape.JUDGMENT_CRITERION),
     "enforce_planner_repair": dict(plans=[_invalid_plan, enforce_shape._plan],
                                    criterion=enforce_shape.TOOL_CRITERION),
+    "enforce_tool_subtask": dict(plans=[lambda criterion: _t6_harness.tool_plan()],
+                                 criterion=enforce_shape.TOOL_CRITERION,
+                                 tools=lambda: {"t6_echo": _t6_harness.echo_tool()}),
+    "enforce_tool_subtask_failed": dict(plans=[lambda criterion: _t6_harness.tool_plan()],
+                                        criterion=enforce_shape.TOOL_CRITERION,
+                                        tools=lambda: {"t6_echo": _t6_harness.echo_tool(fail=True)}),
 }
 
 
@@ -242,7 +252,9 @@ def test_enforce_paths_are_unchanged_by_the_recorder(tmp_path, monkeypatch, scen
     spec = ENFORCE_SCENARIOS[scenario]
     observations = {variant: _enforce_observe(tmp_path, monkeypatch, variant, **spec) for variant in VARIANTS}
     baseline, again = observations["off"], observations["off_again"]
-    assert baseline["requests"] != "[]"
+    # A failing TOOL subtask stops the run before any model call (the
+    # Planner is mocked here); every other scenario calls the model.
+    assert (baseline["requests"] == "[]") is (scenario == "enforce_tool_subtask_failed")
     for variant, observed in observations.items():
         assert observed["requests"] == baseline["requests"], (scenario, variant, "requests")
         assert observed["tree"] == baseline["tree"], (scenario, variant, "tree")
@@ -258,8 +270,17 @@ def test_enforce_paths_are_unchanged_by_the_recorder(tmp_path, monkeypatch, scen
     statuses = {s[0]: s[1] for s in baseline["result"]["subtasks"]}
     if scenario == "enforce_success":
         assert statuses == {"s1": "completed", "s2": "completed"}
-    assert {p["status"] for p in observations["full"]["_pointers"]} == {"OPEN"}
-    assert {p["status"] for p in observations["open_fails"]["_pointers"]} == {"RECORDER_UNAVAILABLE"}
+    if scenario == "enforce_tool_subtask":
+        assert statuses["s0"] == "completed"
+    if scenario == "enforce_tool_subtask_failed":
+        assert statuses == {"s0": "failed"}
+    if scenario == "enforce_tool_subtask_failed":
+        # No generation unit ran, so no trace row carries the pointer event;
+        # the store itself is checked below.
+        assert all(observed["_pointers"] == [] for observed in observations.values())
+    else:
+        assert {p["status"] for p in observations["full"]["_pointers"]} == {"OPEN"}
+        assert {p["status"] for p in observations["open_fails"]["_pointers"]} == {"RECORDER_UNAVAILABLE"}
     full_runs = reader.list_runs(observations["full"]["_state"])
     assert full_runs and reader.open_run(observations["full"]["_state"], full_runs[0]).verify().status == \
         reader.VERIFIED

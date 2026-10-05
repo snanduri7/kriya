@@ -142,3 +142,38 @@ def shop_enforce(tmp_path, monkeypatch, *, plans=None, responder=shop_responder,
 
     return enforce_run(tmp_path, monkeypatch, responder, shop_files(), shape.GOAL,
                        plans or [lambda: shape._plan(shape.TOOL_CRITERION)], cfg=cfg, tools=tools)
+
+
+# -- an enforce TOOL subtask ----------------------------------------------------------------------
+
+def echo_tool(*, fail: bool = False):
+    from pydantic import BaseModel
+
+    from kriya.tools.tool import BaseTool
+
+    class _Args(BaseModel):
+        pass
+
+    class EchoTool(BaseTool):
+        name = "t6_echo"
+        description = "echo (T6 test tool)"
+        arguments_schema = _Args
+
+        async def _run(self, args):
+            if fail:
+                raise RuntimeError("echo failed")
+            return {"output": "echoed"}
+    return EchoTool()
+
+
+def tool_plan():
+    import test_enforce_verified_no_change as shape
+
+    from kriya.workflow.plan_schema import EngineeringPlan
+
+    plan = shape._plan(shape.TOOL_CRITERION).model_dump()
+    plan["subtasks"].insert(0, {"id": "s0", "description": "run the echo tool", "execution_method": "tool",
+                                "tool_name": "t6_echo", "provides": ["echoed"],
+                                "relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": [],
+                                "verification": []})
+    return EngineeringPlan.model_validate(plan)
