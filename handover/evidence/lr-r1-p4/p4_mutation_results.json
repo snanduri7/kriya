@@ -1,0 +1,114 @@
+{
+ "head": "976c5a3ebc57e4d6cd3547a75052c722cc581d2d",
+ "baseline": "461 passed in 28.82s",
+ "tests": [
+  "tests/test_lr_r1_p4_verification_only_retry_reproducer.py",
+  "tests/test_lr_r1_p4_verification_retry_admission.py",
+  "tests/test_prd026_retry_progress.py",
+  "tests/test_retry_policy.py",
+  "tests/test_prd031_coordinators.py",
+  "tests/test_workflow_controller_enforce.py",
+  "tests/test_lr_r1_m1_recovery.py",
+  "tests/state_machine"
+ ],
+ "mutants": [
+  {
+   "label": "retry-whenever-budget-remains",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 303 passed in 13.53s",
+   "seconds": 14.4
+  },
+  {
+   "label": "verification-only-flag-ignored",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 295 passed in 17.35s",
+   "seconds": 18.2
+  },
+  {
+   "label": "verification-only-predicate-ignores-executable-verifiers",
+   "file": "kriya/workflow/verification_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 295 passed in 11.36s",
+   "seconds": 12.2
+  },
+  {
+   "label": "workspace-change-check-ignored",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 305 passed in 10.79s",
+   "seconds": 11.7
+  },
+  {
+   "label": "new-recovery-input-check-ignored",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 309 passed in 10.46s",
+   "seconds": 11.3
+  },
+  {
+   "label": "mutable-recovery-suppressed",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 298 passed in 10.45s",
+   "seconds": 11.3
+  },
+  {
+   "label": "transient-infrastructure-stop-overridden",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 308 passed in 10.48s",
+   "seconds": 11.3
+  },
+  {
+   "label": "attempt-number-is-new-information",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 299 passed in 10.56s",
+   "seconds": 11.4
+  },
+  {
+   "label": "resume-is-a-state-change",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 299 passed in 10.84s",
+   "seconds": 11.7
+  },
+  {
+   "label": "typed-failure-converted-to-success",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "SURVIVED",
+   "summary": "461 passed in 23.89s",
+   "seconds": 24.7
+  },
+  {
+   "label": "stop-without-typed-reason",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 303 passed in 10.68s",
+   "seconds": 11.6
+  },
+  {
+   "label": "non-verification-attempt-guard-removed",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 311 passed in 10.63s",
+   "seconds": 11.4
+  },
+  {
+   "label": "admission-never-called",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 311 passed in 11.96s",
+   "seconds": 12.8
+  },
+  {
+   "label": "admission-evidence-unrecorded",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 303 passed in 11.09s",
+   "seconds": 11.9
+  }
+ ]
+}

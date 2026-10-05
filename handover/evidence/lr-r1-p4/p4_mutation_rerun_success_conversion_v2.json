@@ -1,0 +1,23 @@
+{
+ "head": "7aab9fc7e7a38f267fed760ef3025d98fcf2b316",
+ "baseline": "461 passed in 23.74s",
+ "tests": [
+  "tests/test_lr_r1_p4_verification_only_retry_reproducer.py",
+  "tests/test_lr_r1_p4_verification_retry_admission.py",
+  "tests/test_prd026_retry_progress.py",
+  "tests/test_retry_policy.py",
+  "tests/test_prd031_coordinators.py",
+  "tests/test_workflow_controller_enforce.py",
+  "tests/test_lr_r1_m1_recovery.py",
+  "tests/state_machine"
+ ],
+ "mutants": [
+  {
+   "label": "typed-failure-converted-to-success (faithful: all four success flags)",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 295 passed in 11.30s",
+   "seconds": 12.2
+  }
+ ]
+}

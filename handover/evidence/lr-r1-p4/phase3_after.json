@@ -1,0 +1,111 @@
+{
+ "wall_seconds": 1.327,
+ "model_calls": [
+  [
+   "s1",
+   "You are the Kriya Developer Agent. MODE: REPAIR_WITH_FULL_FI"
+  ],
+  [
+   "s1",
+   "You are the Kriya Reviewer Agent."
+  ]
+ ],
+ "model_calls_in_s2": [],
+ "verifications_verification_only": [
+  {
+   "t": 1.15,
+   "attempt": 1,
+   "required_verification": [
+    {
+     "type": "tool",
+     "description": "run the tests",
+     "tool_name": "test",
+     "verifier_kind": "test",
+     "requires_runtime_execution": false
+    }
+   ],
+   "root": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-3084/test_measure0/ws/.kriya/worktrees/candidate-kriya-worktree-c2a3db38",
+   "workspace_hash": "32dac9f0511a09af804ee289be8e9120b8f01d5b8a0cc3bfe8e9cb63ca57a4fa",
+   "service_sha256": "5d50733b15c2478e54fd5cb125e7b9d6bdd31bc0ef2dfe4155f5b40939e7dd77",
+   "seconds": 0.001
+  }
+ ],
+ "test_gate_runs": [
+  "s1",
+  "s2"
+ ],
+ "attempt_failed": [
+  [
+   1,
+   "test"
+  ]
+ ],
+ "progress": [
+  [
+   1,
+   "PROGRESS",
+   [
+    "failure_signature",
+    "workspace_hash",
+    "implicated_files",
+    "missing_files",
+    "evidence_fingerprint",
+    "context_revisions",
+    "action",
+    "protocol",
+    "request_profile",
+    "plan_revision",
+    "repair_contract_revision",
+    "diagnostics"
+   ]
+  ]
+ ],
+ "no_progress_terminal": [
+  {
+   "reason_code": "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE",
+   "classification": "PROGRESS",
+   "limit": null,
+   "last_vector_digest": "2e3b6026ca003fcc60eebe6d29821a4ba63765c3f7b978f111d0616f9da25e29"
+  }
+ ],
+ "subtask_status": {
+  "s1": "completed",
+  "s2": "failed"
+ },
+ "legacy_status": "failed",
+ "evidence_verify": "VERIFIED",
+ "s2_attempts": [
+  {
+   "attempt": 1,
+   "Q1": "NOT_APPLICABLE",
+   "Q4": {
+    "status": "NOT_APPLICABLE",
+    "reason": "no_model_call: no Developer request in this attempt"
+   },
+   "Q6": [
+    {
+     "action": null,
+     "retry": false,
+     "stop_loop": true,
+     "no_progress_reason": "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE",
+     "progress_classification": "PROGRESS"
+    }
+   ],
+   "Q7": "NOT_APPLICABLE"
+  }
+ ],
+ "Q9": {
+  "terminal_cause": {
+   "failure_category": "no_progress",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "last_recovery_decision": {
+   "seq": 59,
+   "failure_type": "test",
+   "retry": false,
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+  }
+ }
+}
