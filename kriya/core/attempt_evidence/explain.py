@@ -166,7 +166,7 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     if decisions:
         answers["Q6"] = _recorded([_brief(r, "failure_type", "action", "retry", "stop_loop", "retry_decision",
                                           "no_progress_terminated", "progress_classification",
-                                          "no_progress_reason", "stop_reason_code")
+                                          "no_progress_reason", "stop_reason_code", "plan_scope_conflict")
                                    for r in decisions])
     elif not diagnoses:
         # A recovery decision follows a recorded failure; none was recorded.
@@ -245,6 +245,10 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
     return _recorded(
         [_brief(closed[-1], "terminal_status", "lifecycle_state", "commit_result", "model_calls")],
         terminal_cause=terminal_cause,
+        plan_scope_conflicts=[{"seq": r.get("seq"), "unit_id": r.get("unit_id"),
+                               "attempt": (r.get("payload") or {}).get("attempt"),
+                               **(r.get("payload") or {})["plan_scope_conflict"]}
+                              for r in decisions if (r.get("payload") or {}).get("plan_scope_conflict")],
         units=[_brief(r, "outcome", "status", "failure_category", "quality_gates_passed", "error_type")
                for r in units],
         failed_terminal_gates=[_brief(r, "gate") for r in terminal],

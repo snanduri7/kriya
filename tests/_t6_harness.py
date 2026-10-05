@@ -208,3 +208,59 @@ def rename_responder(role, request):
     if "MODE: REPAIR." in system or "KRIYA:EDIT" in system:
         return sentinel("calc.py", analysis="FIX ANALYSIS: rename.", edits=(("def add0(a, b):", "def plus0(a, b):"),))
     return BIG_CALC.replace("def add0", "def plus0")
+
+
+# -- a real plan-scope conflict (a misdirected edit outside the subtask's scope) ------------------
+
+SCOPE_FILES = {"app/__init__.py": "", "app/config.py": "VALUE = \"1\"\n",
+               "app/lib.py": "from app.config import VALUE\n\n\ndef run():\n    return int(VALUE)\n",
+               "tests/__init__.py": "",
+               "tests/test_app.py": "from app.lib import run\n\n\ndef test_run():\n    assert run() == 1\n"}
+SCOPE_GOAL = "Keep run() in app/lib.py working and set VALUE in app/config.py to the word one."
+
+
+def scope_plan():
+    from kriya.workflow.plan_schema import EngineeringPlan
+
+    def sub(sid, path, description, **extra):
+        return {"id": sid, "description": description, "execution_method": "model",
+                "planned_files": [{"path": path, "action": "modify"}], "relevant_global_invariant_ids": ["gi1"],
+                "acceptance_criteria_ids": ["ac1"],
+                "verification": [{"type": "tool", "tool_name": "test", "description": "run the tests"}], **extra}
+    return EngineeringPlan.model_validate({
+        "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}],
+        "acceptance_criteria": [{"id": "ac1", "description": "run works", "method": "tool", "tool_name": "test"}],
+        "subtasks": [sub("s1", "app/lib.py", "keep run working", provides=["run"]),
+                     sub("s2", "app/config.py", "set VALUE to one", requires=["run"], depends_on=["s1"])]})
+
+
+def scope_responder(role, request):
+    """s1 documents app/lib.py (a real write); s2, allowed only app/config.py,
+    sends an edit whose anchor exists only in app/lib.py: a misdirected edit."""
+    from _chaos_harness import benign_roles
+    from _protocol_responses import sentinel
+
+    system = next((m["content"] for m in request.messages if m["role"] == "system"), "")
+    if role == "file_list":
+        return '{"files": ["app/lib.py"]}'
+    if role == "developer":
+        if 'path="app/config.py"' in system:
+            return sentinel("app/config.py", analysis="FIX ANALYSIS: set it.",
+                            edits=(("    return int(VALUE)", "    return 1"),))
+        return sentinel("app/lib.py", analysis="document run.", content=(
+            "from app.config import VALUE\n\n\ndef run():\n    \"\"\"The configured value.\"\"\"\n"
+            "    return int(VALUE)\n"))
+    return benign_roles(role, request)
+
+
+def scope_enforce(tmp_path, monkeypatch):
+    cfg = chaos_config()
+    cfg.llm.capabilities.preferred_edit_protocol = "small_native_tools"   # the repair asks for a patch
+    return enforce_run(tmp_path, monkeypatch, scope_responder, SCOPE_FILES, SCOPE_GOAL, [scope_plan] * 6, cfg=cfg)
+
+
+def conflict_attempt(observed):
+    """The s2 attempt whose failure was the misdirected edit."""
+    [attempt] = [a for a in observed.attempts() if a["unit_id"] == "s2"
+                 and any(d["type"] == "misdirected_edit" for d in a["answers"]["Q5"].get("diagnoses") or [])]
+    return attempt

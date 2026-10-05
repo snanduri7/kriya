@@ -433,3 +433,27 @@ def test_f_a_transition_names_only_operations_that_changed(tmp_path, monkeypatch
     second = snapshots[1]["payload"]
     assert second["transition"]["changed"] == {"a.py": "repair_with_patch"}
     assert [t["requested_operation"] for t in second["targets"]] == ["repair_with_patch", "repair_with_patch"]
+
+
+# -- G1: the recorded plan-scope conflict in Q6 and Q9 ----------------------------------------
+
+def test_g1_the_recorded_plan_scope_conflict_is_explained(tmp_path, monkeypatch):
+    from _t6_harness import conflict_attempt, scope_enforce
+
+    observed = scope_enforce(tmp_path, monkeypatch)
+    expected = {"reason_code": "PLAN_SCOPE_REVISION_REQUIRED", "required_files": ["app/lib.py"]}
+    attempt = conflict_attempt(observed)
+    recorded = next(r for r in observed.of("recovery.decision", unit_id="s2", attempt_number=attempt["attempt"]))
+    assert recorded["payload"]["plan_scope_conflict"] == expected               # what the recorder holds
+    [decision] = attempt["answers"]["Q6"]["items"]
+    assert decision["plan_scope_conflict"] == expected and decision["retry"] is False
+    conflicts = observed.explained["Q9"]["plan_scope_conflicts"]
+    assert conflicts == [{"seq": recorded["seq"], "unit_id": "s2", "attempt": attempt["attempt"], **expected}]
+
+
+def test_g1_runs_without_a_conflict_list_none(tmp_path, monkeypatch):
+    """Negative control: nothing is listed when no decision recorded one."""
+    observed = direct_run(tmp_path, monkeypatch, _always(WRONG_SUB), FILES)
+    assert observed.explained["Q9"]["plan_scope_conflicts"] == []
+    assert all("plan_scope_conflict" not in item for a in observed.attempts()
+               for item in a["answers"]["Q6"].get("items") or [])
