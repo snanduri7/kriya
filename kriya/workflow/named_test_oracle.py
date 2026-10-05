@@ -42,7 +42,8 @@ is simply equal):
   top-level test directory (test resources).
 - Maven/Gradle (JUnit): every build file (``pom.xml``, ``*.gradle[.kts]``,
   ``settings.gradle[.kts]``, ``gradle.properties``, ``mvnw``, ``gradlew``),
-  ``.mvn/``, ``buildSrc/``, ``gradle/``, everything under any ``src/test/``,
+  ``.mvn/``, ``buildSrc/``, ``gradle/``, everything under any non-main source
+  set of any module (``src/test/``, ``src/integrationTest/``, ...),
   every ``junit-platform.properties`` and ``META-INF/services/`` file. The JVM
   test classpath is scanned (ServiceLoader, JUnit extension autodetection,
   Spring component scanning), so it is not narrowed by import analysis: any
@@ -216,6 +217,12 @@ def _is_test_side(path: str) -> bool:
     name = parts[-1]
     return (any(part in _TEST_DIR_NAMES for part in parts[:-1]) or name == "conftest.py"
             or name.startswith("test_") or name.endswith("_test.py"))
+
+
+def _non_main_source_set(parts: Sequence[str]) -> bool:
+    """A file under ``src/<set>/`` for any source set but ``main``."""
+    return any(part == "src" and index + 2 < len(parts) and parts[index + 1] != "main"
+               for index, part in enumerate(parts[:-1]))
 
 
 def _ini_section(section: str) -> Callable[[bytes], Any]:
@@ -402,12 +409,15 @@ class OracleSurface:
             for path in universe:
                 if path.startswith(prefix) and not path.endswith((".py", ".pyc")):
                     entries.setdefault(path, None)
-        # JVM: build configuration and the whole scanned test classpath.
+        # JVM: build configuration and the whole scanned test classpath -
+        # every non-main source set of every module (src/test,
+        # src/integrationTest, src/testFixtures, ...).
+        jvm = any(path.rsplit("/", 1)[-1] in _JVM_MODULE_MARKERS for path in universe)
         for path in universe:
             parts = path.split("/")
             if (parts[-1] in _JVM_BUILD_FILES or parts[-1].endswith((".gradle", ".gradle.kts"))
-                    or parts[0] in _JVM_TOP_DIRS or "/src/test/" in f"/{path}"
-                    or "META-INF/services/" in path):
+                    or parts[0] in _JVM_TOP_DIRS or "META-INF/services/" in path
+                    or (jvm and _non_main_source_set(parts))):
                 entries.setdefault(path, None)
         self.entries = entries
         self.output_roots = sorted(

@@ -270,6 +270,36 @@ def test_the_jvm_surface_is_the_build_and_the_whole_scanned_test_classpath(tmp_p
     assert _changed(tmp_path, candidate, base=JVM, named=("src/test/java/a/AppTest.java",)) == changed
 
 
+def test_every_non_main_source_set_of_every_module_is_on_the_jvm_surface(tmp_path):
+    """Another module's tests (a test-jar dependency) and other source sets
+    (integration tests, test fixtures) load on the same scanned classpath."""
+    base = {"pom.xml": "<project/>", "a/pom.xml": "<project/>", "b/pom.xml": "<project/>",
+            "a/src/test/java/a/AppTest.java": "class AppTest {}", "b/src/main/java/b/B.java": "class B {}"}
+    named = ("a/src/test/java/a/AppTest.java",)
+    assert _changed(tmp_path / "a", {"b/src/test/java/b/Helper.java": "class Helper {}"}, base=base,
+                    named=named) == ["b/src/test/java/b/Helper.java"]
+    assert _changed(tmp_path / "b", {"a/src/integrationTest/java/a/It.java": "class It {}"}, base=base,
+                    named=named) == ["a/src/integrationTest/java/a/It.java"]
+    assert _changed(tmp_path / "c", {"b/src/main/java/b/B.java": "class B { int x; }"}, base=base,
+                    named=named) == []
+
+
+def test_a_python_src_layout_is_not_mistaken_for_a_jvm_source_set(tmp_path):
+    base = dict(PY, **{"src/pkg/__init__.py": "", "src/pkg/mod.py": "x = 1\n"})
+    assert _changed(tmp_path, {"src/pkg/mod.py": "x = 2\n"}, base=base) == []
+
+
+def test_a_candidate_write_into_an_output_root_refuses_the_closure_end_to_end(tmp_path):
+    """A correct candidate that also wrote bytecode next to the oracle's
+    support module (loaded without its source being read) never closes."""
+    repo = make_base(tmp_path / "repo")
+    write(repo, SCENARIOS["correct"])
+    write(repo, {"tests/__pycache__/helpers.cpython-314.pyc": "planted"})
+    [attempt], outcomes, _ = close(repo, modified=["app.py", "tests/__pycache__/helpers.cpython-314.pyc"])
+    assert attempt["reason_code"] == ORACLE_DEPENDENCY_CHANGED and "__pycache__" in attempt["reason"]
+    assert outcomes["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
 def test_jvm_production_sources_and_build_output_are_not_surface_but_writes_into_output_are(tmp_path):
     named = ("src/test/java/a/AppTest.java",)
     assert _changed(tmp_path / "a", {"src/main/java/a/App.java": "class App { int x; }",
