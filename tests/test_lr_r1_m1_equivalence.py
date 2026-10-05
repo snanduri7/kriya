@@ -34,7 +34,7 @@ import re
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 import pytest
 from _chaos_harness import (
@@ -130,7 +130,12 @@ def _apply_variant(patch, cfg, variant: str) -> None:
 
 
 def _observe(tmp_path: Path, monkeypatch, variant: str, responder: Callable, files: Dict[str, str],
-             goal: str = GOAL) -> Dict[str, Any]:
+             goal: str = GOAL, configure: Optional[Callable] = None,
+             drive: Optional[Callable] = None) -> Dict[str, Any]:
+    """``configure(cfg, patch)`` adjusts the scenario's configuration (and may
+    patch, inside the variant's patch context); ``drive(engine_factory,
+    workspace)`` runs the scenario (default: one direct run of ``goal``) and
+    returns the last result."""
     state = tmp_path / "states" / variant
     state.mkdir(parents=True)
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
@@ -145,8 +150,13 @@ def _observe(tmp_path: Path, monkeypatch, variant: str, responder: Callable, fil
     cfg = chaos_config()
     with monkeypatch.context() as patch:
         _apply_variant(patch, cfg, variant)
+        if configure is not None:
+            configure(cfg, patch)
         with RuntimeRegistration(runtime):
-            result = run_direct(chaos_engine(cfg), goal, workspace)
+            if drive is None:
+                result = run_direct(chaos_engine(cfg), goal, workspace)
+            else:
+                result = drive(lambda: chaos_engine(cfg), workspace)
     with sqlite3.connect(trace_db_path(cfg)) as db:
         rows = list(db.execute("SELECT run_events FROM runs ORDER BY rowid"))
     events, pointers = [], []
@@ -190,8 +200,8 @@ SCENARIOS = {
 }
 
 
-def assert_recorder_has_no_effect(tmp_path, monkeypatch, make_responder, files, label):
-    observations = {variant: _observe(tmp_path, monkeypatch, variant, make_responder(), files)
+def assert_recorder_has_no_effect(tmp_path, monkeypatch, make_responder, files, label, **hooks):
+    observations = {variant: _observe(tmp_path, monkeypatch, variant, make_responder(), files, **hooks)
                     for variant in VARIANTS}
     baseline, again = observations["off"], observations["off_again"]
     assert baseline["requests"] != "[]"

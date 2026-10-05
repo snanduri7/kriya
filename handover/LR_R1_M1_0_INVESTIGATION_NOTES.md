@@ -147,3 +147,51 @@ above.
 | DEV-7 | M1.8b, D7 | **The typed codes are not in `Failure.diagnostics["reason_code"]`.** That field is already consumed by decisions: `retry_strategy._attempt_progress_vector` folds it into the ProgressVector (`diagnostics=(reason_code,)`), which drives no-progress classification, and `attempt.py`'s repeated-evidence check reads it (TRACED). Placing a D7 code there would let a production decision consume it, which D7 forbids. Instead `GenerationState.environment_failure_code = (code, exact message)` is set beside the two existing stop messages (`kriya/workflow/diagnosis_codes.py`); the recorder reports the code only while that message is still the current `environment_failure`. Also TRACED: `REGRESSION_UNATTRIBUTED` already had a typed `Failure.type` (`regression_unattributed`); only `NO_AUTHORIZED_REPAIR_TARGET` was text-only | Design §13 says "typed reason_code in Failure.diagnostics" |
 | DEV-8 | M1.8b, §3.4 | **`retry.delta` is emitted at the retry's first Developer request**, not at `attempt.opened`: the delta compares that request's inputs, which do not exist yet when the attempt opens. An attempt that closes with no Developer request emits its delta at close, `information_gain: UNKNOWN`. Dimensions recorded: model, model profile digest, temperature, mode, targets, authority digest, retry-evidence fingerprint, triggering failure signature, per-section digests; the whole-request digest is recorded but is not a dimension (it always differs) | Design §5.6 "Emit retry.delta at attempt.opened" |
 | DEV-9 | M1.8b | **`RecoveryDecision.retry_decision` is `compare=False`.** The PRD-031 tests compare decisions by equality; the policy's decision is still exactly `stop_loop`/`action`/`budgets_exhausted` | Additive field per design; equality kept |
+
+## 8. M1.10 certification evidence (2026-10-05)
+
+### 8.1 Invariant I-2 equivalence (T3)
+
+Six recorder variants (`off` twice, `full`, `digest_only`, store open refused, every append failing) over every
+scenario. Request bytes, workspace bytes, result, trace-row run events (minus the pointer), RunRecords and decision
+ledger identical; volatile values measured between the two `off` runs.
+
+| Suite | Scenarios |
+|---|---|
+| `tests/test_lr_r1_m1_equivalence.py` | direct success; retried until the no-progress stop |
+| `tests/test_lr_r1_m1_equivalence_scenarios.py` | fallback refused (`FALLBACK_MODEL_INCOMPATIBLE`); fallback substituted at the call; resume (failed run, then `resume=True`); enforce success (real `WorkflowController`); enforce refused verified-no-change; enforce Planner repair (invalid plan, then valid: 2 Planner calls) |
+
+**Negative controls (MEASURED):** a planted recorder effect, active only while a store is open, must fail the suites.
+
+| Planted effect | Result |
+|---|---|
+| a candidate byte appended while recording `candidate.change` | 8 failed |
+| a space appended to the system prompt at the call boundary | 8 failed |
+| `retry_count` bumped while recording `recovery.decision` | 4 failed (every scenario that retries) |
+
+### 8.2 Overhead
+
+| Measurement | Result | Status |
+|---|---|---|
+| scripted direct run (7 attempts, 220 records), recorder time per run | `full` 93 ms, `digest_only` 9 ms (wall median 1.01 s vs 0.91 s `off`, 3 runs each) | MEASURED |
+| one `model.request` with a unique 50 KB / 400 KB prompt | `full` 2.6 / 15.4 ms; `digest_only` 0.26 / 1.4 ms | MEASURED |
+| store size, the same scripted run | `full` 279 KB, `digest_only` 200 KB (records only) | MEASURED |
+| share of a live run (10-300 s model calls, ~16 min per run) | about 40 calls x 15 ms + gate outputs: under 2 s of ~960 s, about 0.2% | INFERRED |
+
+Below the design's 1% trigger (§10), so blob compression stays synchronous. A live measurement belongs to the first
+live run with the recorder (not run here: no live model work in this phase).
+
+### 8.3 Mutation campaign
+
+Each milestone commit killed its mutants before committing (listed in each commit message: M1.1 store, M1.3c
+tripwire, M1.5 calls, M1.6 sections, M1.7 authority/parse, M1.8a candidate/gates, M1.8b records and D7 codes, M1.9a
+retention, M1.9b explain, M1.9c doctor, M1.9d tripwire). Survivors found during the campaign were resolved by a
+stronger test, or by removing code proven redundant (M1.8b `delta_emitted`; M1.9b's payload-attempt fallback after
+the attempt-identity fix).
+
+### 8.4 Defect found in own earlier work
+
+`4d4f90f`: M1.2 scoped attempt identity to `run_attempt` only. The direct loop's checks after it (terminal
+regression, approval, static analysis, requirements) were recorded without an attempt number. Fixed with an
+identity-only scope for the whole retry-loop iteration plus `attempt.concluded`; regression test fails without the
+fix.
