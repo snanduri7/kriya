@@ -13,13 +13,19 @@ export interface RunsColumnProps {
   emptyText?: string;
 }
 
+/** Colour hints for the RECORDED run status values (runs.status is the literal string Kriya's workflow writes; the real
+ * vocabulary is lowercase: success, failure, needs_review, approval_required, knowledge_gap, baseline_indeterminate,
+ * planner_output_incomplete, planner_output_schema_invalid, ... - MEASURED on the owner's store 2026-10-05 and TRACED to
+ * kriya/workflow/workflow.py). A hint is applied only to the four values whose meaning is explicit; every other value,
+ * including any future or differently-cased one, stays neutral and is never classified as success or failure. */
+export const STATUS_HINTS: Readonly<Record<string, 'st-success' | 'st-failed' | 'st-review'>> = Object.freeze({
+  success: 'st-success', // the run completed and its changes were applied
+  failure: 'st-failed', // a terminal failure (failure_category names the class)
+  needs_review: 'st-review', // Kriya stopped for a human decision
+  approval_required: 'st-review', // human approval was required and not available (changes not applied)
+});
 export function statusClass(status: string | null): string {
-  switch (status) {
-    case 'SUCCESS': return 'st-success';
-    case 'FAILED': return 'st-failed';
-    case 'NEEDS_REVIEW': return 'st-review';
-    default: return 'st-unknown';
-  }
+  return (status !== null && Object.prototype.hasOwnProperty.call(STATUS_HINTS, status) ? STATUS_HINTS[status] : null) ?? 'st-unknown';
 }
 
 export function RunsColumn({ runs, selectedRunId, onSelect, onLoadMore, pending, height, emptyText }: RunsColumnProps) {

@@ -44,8 +44,10 @@ const sec = (availability, data, reason = null, provenance = 'fixture:trace_row'
 const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj));
 
 const AVAIL = ['recorded', 'not_recorded', 'unreadable', 'excluded', 'unsupported'];
-const STATUS = ['SUCCESS', 'FAILED', 'FAILED', 'NEEDS_REVIEW', 'SUCCESS'];
-const CATS = ['quality_gate_failed', 'time_budget_exhausted', 'fallback_model_incompatible', null, 'final_review_refused'];
+// runs.status values EXACTLY as Kriya writes them (lowercase; MEASURED on the owner's store 2026-10-05, TRACED to
+// kriya/workflow/workflow.py): the common four plus three rarer terminal statuses the real store also carries.
+const STATUS = ['success', 'failure', 'failure', 'needs_review', 'success', 'approval_required', 'planner_output_incomplete', 'planner_output_schema_invalid'];
+const CATS = ['quality_gate_failed', 'time_budget_exhausted', 'fallback_model_incompatible', null, 'final_review_refused', null, 'planner_output_incomplete', 'planner_output_schema_invalid'];
 // Real Kriya event kinds (grep kind="..." in kriya/); the shape is RunEvent.to_dict's: kind, attempt, source, authority,
 // message, failure_type, operation, details, created_at (epoch seconds). Details of the kinds the UI interprets follow
 // the serializer fixture's real shapes.
@@ -71,7 +73,7 @@ function events(n, { unknownFields = false, big = false, attempts = 2 } = {}) {
 const RUNS = [];
 function addRun(id, over = {}, detailOver = {}, opts = {}) {
   const i = RUNS.length;
-  const summary = { run_id: id, timestamp: over.timestamp ?? `2026-09-${String(28 - (i % 28)).padStart(2, '0')} 1${i % 10}:00:00`, goal: over.goal ?? `Fixture goal ${i}: add an audit log to module ${i % 7} and cover it with tests`, duration_sec: 40 + i * 3.25, attempts: (i % 4) + 1, status: STATUS[i % 5], failure_category: CATS[i % 5], files_modified: `src/mod${i % 7}/a.py,src/mod${i % 7}/b.py,tests/test_mod${i % 7}.py`, milestone_group_id: i % 3 === 0 ? `group-${Math.floor(i / 3)}` : null, milestone_index: i % 3 === 0 ? i % 5 : null, milestone_total: i % 3 === 0 ? 5 : null, ...over };
+  const summary = { run_id: id, timestamp: over.timestamp ?? `2026-09-${String(28 - (i % 28)).padStart(2, '0')} 1${i % 10}:00:00`, goal: over.goal ?? `Fixture goal ${i}: add an audit log to module ${i % 7} and cover it with tests`, duration_sec: 40 + i * 3.25, attempts: (i % 4) + 1, status: STATUS[i % 8], failure_category: CATS[i % 8], files_modified: `src/mod${i % 7}/a.py,src/mod${i % 7}/b.py,tests/test_mod${i % 7}.py`, milestone_group_id: i % 3 === 0 ? `group-${Math.floor(i / 3)}` : null, milestone_index: i % 3 === 0 ? i % 5 : null, milestone_total: i % 3 === 0 ? 5 : null, ...over };
   RUNS.push(summary);
   const av = opts.availability ?? 'recorded';
   const evs = events(opts.eventCount ?? 60, opts);
@@ -105,7 +107,7 @@ addRun('run-big-events', { goal: 'FIXTURE: >4 MiB run_events payload with heavy 
 addRun('run-unknown-fields', { goal: 'FIXTURE: unknown event fields and an unknown status', status: 'PARTIALLY_SETTLED_v9' }, { novel_top_level_section: { availability: 'recorded', data: { hello: 'future' } } }, { unknownFields: true });
 addRun('run-incomplete-context', { goal: 'FIXTURE: incomplete context record' }, { context: sec('recorded', { items: [{ path: 'src/mod1/a.py' }, { path: 'src/mod1/b.py', omitted: true }], tokens: null }, 'package hash and token accounting were not recorded', 'run_events:context.known_target_package') });
 // run_events exactly as Kriya serializes them, read back through the KUP adapter (fixtures/serializer_events.py).
-addRun('run-serializer-events', { goal: 'FIXTURE: run_events exactly as Kriya serializes them (RunEvent.to_dict through the KUP adapter)', status: 'SUCCESS', failure_category: null, attempts: 2 },
+addRun('run-serializer-events', { goal: 'FIXTURE: run_events exactly as Kriya serializes them (RunEvent.to_dict through the KUP adapter)', status: 'success', failure_category: null, attempts: 2 },
   { run_events: { availability: SERIALIZER.section.availability, provenance: SERIALIZER.section.provenance, reason: SERIALIZER.section.reason, data: SERIALIZER.run_events } });
 for (const a of AVAIL) addRun(`run-avail-${a}`, { goal: `FIXTURE: every section "${a}"`, timestamp: '2026-09-20 12:00:00' }, {}, { availability: a });
 addRun('run-no-events', { goal: 'FIXTURE: a trace row with an empty event list', timestamp: '2026-09-20 12:00:00' }, {}, { eventCount: 0 });

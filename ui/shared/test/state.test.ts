@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { freshnessLabel } from '../src/state/snapshot';
 import { initialSelection, selectionReducer } from '../src/state/selection';
 import { GenerationCounter, applyFailure, applyResponse, emptySlot, startRequest } from '../src/state/requests';
 
@@ -38,5 +39,20 @@ describe('request generations (P-32)', () => {
     const g3 = c.next('detail'); slot = startRequest(slot, g3);
     slot = applyFailure(slot, g3, c, 'detail', { code: 'STORE_BUSY', message: 'wal' });
     expect(slot.current).toBe(false); expect(slot.value).toBe('new'); expect(slot.error?.code).toBe('STORE_BUSY');
+  });
+});
+
+describe('freshness label wording (gate C-3): a metadata difference is a stat observation, never a content change or a new run', () => {
+  const consistency = (changed: boolean | null) => ({ kind: 'snapshot_copy', live_stream: false, snapshot_id: 'x', acquisition_started_at: '2026-10-05T02:02:54.000166Z', acquisition_completed_at: '2026-10-05T02:02:54.026756Z', source_metadata_changed: changed }) as never;
+  it('changed: says stat only, not a content change, not a new run; unchanged: not a freshness guarantee; null: not observed', () => {
+    const changed = freshnessLabel(consistency(true));
+    expect(changed.metadata).toBe('change_detected');
+    expect(changed.metadataText).toMatch(/stat only/); expect(changed.metadataText).toMatch(/not a content change/); expect(changed.metadataText).toMatch(/not a new run/);
+    expect(changed.metadataText).not.toMatch(/\b(content changed|run recorded|store updated|newer run)\b/); // never an affirmative claim
+    expect(changed.headline).toBe('snapshot acquired at 2026-10-05T02:02:54.026756Z');
+    const same = freshnessLabel(consistency(false));
+    expect(same.metadata).toBe('no_change_detected'); expect(same.metadataText).toMatch(/not a freshness guarantee/); expect(same.metadataText).not.toMatch(/\b(current|latest|fresh|unchanged content)\b/);
+    expect(freshnessLabel(consistency(null))).toMatchObject({ metadata: 'unknown', metadataText: 'source metadata not observed' });
+    expect(freshnessLabel(null)).toMatchObject({ metadata: 'unknown', headline: 'no snapshot displayed' });
   });
 });

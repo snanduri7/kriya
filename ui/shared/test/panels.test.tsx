@@ -4,7 +4,7 @@ import { App } from '../src/App';
 import { FakeHost, env, withSnapshots, SNAP_ID_OLD, snapshotSummary } from './fakeHost';
 import { AVAILABILITY_STATES, type Availability, type RunDetail, type RunSummary } from '../src/model/kup';
 
-const run = (id: string, over: Partial<RunSummary> = {}): RunSummary => ({ run_id: id, timestamp: '2026-09-01 10:00:00', goal: `goal of ${id}`, duration_sec: 3.5, attempts: 2, status: 'FAILED', failure_category: 'quality_gate_failed', files_modified: 'a.py,b.py', ...over });
+const run = (id: string, over: Partial<RunSummary> = {}): RunSummary => ({ run_id: id, timestamp: '2026-09-01 10:00:00', goal: `goal of ${id}`, duration_sec: 3.5, attempts: 2, status: 'failure', failure_category: 'quality_gate_failed', files_modified: 'a.py,b.py', ...over });
 
 function detailFor(id: string, avail: Availability, extra: Partial<RunDetail> = {}): RunDetail {
   const sec = <T,>(data: T) => ({ availability: avail, data: avail === 'recorded' ? data : null, reason: avail === 'recorded' ? null : `fixture ${avail}`, provenance: 'fixture' });
@@ -25,7 +25,7 @@ function hostWith(detail: RunDetail) {
   return new FakeHost(withSnapshots((req) => {
     switch (req.operation) {
       case 'capabilities': return env('capabilities', { kup_versions: [1], operations: ['history.list'], identity: { kriya_version: '0.1.0', commit: 'abcdef1234567890' }, limits: {}, features: {} });
-      case 'history.list': return env('history.list', { runs: [run('r1'), run('r2', { status: 'SUCCESS', goal: 'second' })], next_cursor: null });
+      case 'history.list': return env('history.list', { runs: [run('r1'), run('r2', { status: 'success', goal: 'second' })], next_cursor: null });
       case 'history.detail': return env('history.detail', detail);
       case 'history.prompt': return env('history.prompt', { prompt_rendered: 'PLAN \u0007 prompt', role: 'planner', scope: 'plan_prompt' });
       case 'workspace.status': return env('workspace.status', { workspace: '/fixture/workspace', run_active: false, status: 'IDLE', exit_code: 0, assessment: {} });

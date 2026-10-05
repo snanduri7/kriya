@@ -44,7 +44,7 @@ describe('a serializer-produced run record (RunEvent.to_dict through the KUP ada
   const run = report.runs[0]!;
   it('reports the literal outcome, attempts, events, context tiers/omissions, token accounting, gates and failures, each with file and pointer', () => {
     expect(report.inputs[0]).toMatchObject({ file: SERIALIZER, operation: 'history.detail', schema_version: 1, status: 'run_detail' });
-    expect(run.status_as_recorded).toEqual({ value: 'SUCCESS', source: { file: SERIALIZER, pointer: '/data/run/status' } });
+    expect(run.status_as_recorded).toEqual({ value: 'success', source: { file: SERIALIZER, pointer: '/data/run/status' } });
     expect(run.attempts.value).toBe(2);
     expect(run.events.map((e: any) => e.kind.value)).toEqual(['context.known_target_package', 'developer.prompt_composition', 'model.transition', 'model.role_metrics']);
     expect(run.events[0].created_at_utc).toBe('2026-10-04T07:00:00.250Z');
@@ -80,7 +80,7 @@ describe('a serializer-produced run record (RunEvent.to_dict through the KUP ada
   it('the Markdown carries the historical label, the literal status wording, the sources and the provider/estimate separation', () => {
     const md = renderMarkdown(report);
     expect(md).toContain(LABEL);
-    expect(md).toContain('status (literal; not mapped to success or failure) | SUCCESS |');
+    expect(md).toContain('status (literal; not mapped to success or failure) | success |');
     expect(md).toContain(`\`${SERIALIZER}#/data/run_events/data/0/details/tiers/0/tier\``);
     expect(md).toContain('| provider-reported count | prompt_tokens_reported | 4190 |');
     expect(md).toContain('| estimated by Kriya (len/4) | skills_tokens |');

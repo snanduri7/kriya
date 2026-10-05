@@ -4,8 +4,10 @@
  * - "Acquire new snapshot" is an explicit action distinct from "Refresh displayed snapshot" (a refresh never acquires);
  * - switching the pinned snapshot invalidates prior responses and cursors (the caller bumps request generations and
  *   clears the list/detail/prompt slots);
- * - labels: "snapshot acquired at …" and "source metadata change detected"; metadata equality is never shown as
- *   unchanged/current/latest, and the snapshot never implies live run status;
+ * - labels: "snapshot acquired at …" and "source metadata differs since acquisition (stat only: ...)"; metadata equality is
+ *   never shown as unchanged/current/latest, a metadata difference is never shown as a content change or a new run (an
+ *   acquisition's own read connection creates the -wal/-shm sidecars, which alone changes the stat), and the snapshot never
+ *   implies live run status;
  * - digest verified at pin (08 review F-4): a pin carries the verification Kriya performed on exactly that id before
  *   anything of it was displayed; later queries check size/mtime only (the guarantee is stated in those words).
  */
@@ -62,7 +64,7 @@ export function freshnessLabel(consistency: Consistency | null | undefined, summ
   const acquiredAt = consistency?.acquisition_completed_at ?? summary?.acquisition_completed_at ?? null;
   const changed = consistency?.source_metadata_changed ?? summary?.source_metadata_changed ?? null;
   const headline = acquiredAt ? `snapshot acquired at ${acquiredAt}` : 'no snapshot displayed';
-  if (changed === true) return { headline, metadata: 'change_detected', metadataText: 'source metadata change detected since acquisition' };
+  if (changed === true) return { headline, metadata: 'change_detected', metadataText: 'source metadata differs since acquisition (stat only: size, mtime, inode or sidecar files; not a content change, not a new run)' };
   if (changed === false) return { headline, metadata: 'no_change_detected', metadataText: 'no source metadata change detected (not a freshness guarantee)' };
   return { headline, metadata: 'unknown', metadataText: 'source metadata not observed' };
 }

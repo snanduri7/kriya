@@ -8,7 +8,7 @@ import type { Availability, RunDetail, RunEvent, RunSummary } from '../src/model
 import serializerFixture from '../../fixtures/serializer/run_events.json';
 
 const EVENTS = (serializerFixture as unknown as { run_events: RunEvent[] }).run_events;
-const run = (id: string): RunSummary => ({ run_id: id, timestamp: '2026-09-01 10:00:00', goal: `goal of ${id}`, duration_sec: 3.5, attempts: 2, status: 'FAILED', failure_category: 'quality_gate_failed', files_modified: 'a.py' });
+const run = (id: string): RunSummary => ({ run_id: id, timestamp: '2026-09-01 10:00:00', goal: `goal of ${id}`, duration_sec: 3.5, attempts: 2, status: 'failure', failure_category: 'quality_gate_failed', files_modified: 'a.py' });
 function detailWith(events: RunEvent[], availability: Availability = 'recorded'): RunDetail {
   const sec = <T,>(data: T) => ({ availability, data: availability === 'recorded' ? data : null, reason: availability === 'recorded' ? null : `fixture ${availability}`, provenance: 'fixture' });
   return { run: run('r1'), fields: {}, run_events: sec(events), evidence_records: sec([]), gate_outcomes: sec([{ attempt: 1, type: 'compile', success: false, output: 'boom' }]), model_hops: sec([]), generation_metrics: sec({}), failure_report: sec([]), context: sec({ items: [], tokens: null }), attribution: sec({ cause: 'c', evidence_ids: [] }), diagnostics: sec({}), comparisons: sec([{ path: 'a.py', before: { text: 'a\n', provenance: 'p', revision: 'r1' }, after: { text: 'b\n', provenance: 'p', revision: 'r2' } }]), output: sec('out') } as RunDetail;
