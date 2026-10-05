@@ -240,8 +240,8 @@ def test_t6_enforce_tool_subtask(tmp_path, monkeypatch):
 
     observed = shop_enforce(tmp_path, monkeypatch, plans=[tool_plan], tools={"t6_echo": echo_tool()})
     row = record("TOOL subtask", observed.attempt(1, unit="s0"), observed.explained)
-    row.pop("Q9")
-    assert row == {"Q1": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
+    assert row["Q9"] == "PASS"
+    assert {label: value for label, value in row.items() if label != "Q9"} == {"Q1": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
                    "Q2": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
                    "Q3": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
                    "Q4": "NOT_APPLICABLE(tool_action: no Developer candidate)",
