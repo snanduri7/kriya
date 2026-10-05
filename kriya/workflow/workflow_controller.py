@@ -2420,12 +2420,133 @@ def _integration_reference_token(path: str) -> str:
     return stem
 
 
+class EstablishedProvenance:
+    """LR-R1-P5: which subtask established each artifact in this enforce run,
+    at which raw bytes, in which (plan) workspace - recorded at the same
+    sites that fill established_file_context (subtask completion, resume,
+    owner recovery). The integration check reads it to judge a relationship
+    on the artifacts that can legitimately satisfy it: provider artifacts
+    established by a declared producer and still those bytes, and the
+    consumer's CURRENT planned artifacts (written this run or unchanged)."""
+
+    def __init__(self, workspace_path: str) -> None:
+        self.workspace_path = workspace_path
+        self.writer: Dict[str, str] = {}
+        self.digest: Dict[str, Optional[str]] = {}
+
+    def _raw_digest(self, path: str) -> Optional[str]:
+        try:
+            with open(os.path.join(self.workspace_path, path), "rb") as handle:
+                return hashlib.sha256(handle.read()).hexdigest()
+        except OSError:
+            return None
+
+    def record(self, path: str, subtask_id: str) -> None:
+        self.writer[path] = subtask_id
+        self.digest[path] = self._raw_digest(path)
+
+    def provider_state(self, path: str, producers: Iterable[str]) -> Tuple[str, Optional[str]]:
+        """(state, establishing subtask) for a required provider artifact:
+        "valid" (established by a declared producer and unchanged since),
+        "not_established", "established_by_non_provider" or "invalidated"
+        (removed or changed after it was established)."""
+        writer = self.writer.get(path)
+        if writer is None:
+            return "not_established", None
+        if writer not in set(producers):
+            return "established_by_non_provider", writer
+        current = self._raw_digest(path)
+        if current is None or current != self.digest.get(path):
+            return "invalidated", writer
+        return "valid", writer
+
+    def current_content(self, path: str) -> Optional[str]:
+        """The artifact's current content in the workspace, projected exactly
+        as established content is; None when it does not exist."""
+        try:
+            with open(os.path.join(self.workspace_path, path), "r", encoding="utf-8", errors="replace") as handle:
+                content = handle.read()
+        except OSError:
+            return None
+        return project_implementation_source(
+            content, path, _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+            reason="established_by_earlier_subtask",
+        ).content
+
+
+def _integration_evidence(
+    plan: EngineeringPlan, rel: Any, consumer_id: str, producer_paths: List[str], consumer_paths: List[str],
+    established_file_context: Dict[str, str], provenance: EstablishedProvenance,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """LR-R1-P5: the relationship judged on the artifacts that can
+    legitimately satisfy it. Provider side: every required producer artifact
+    must have been established by one of the relationship's declared
+    producers and be unchanged in the workspace (a provider's local pass is
+    not enough; another subtask's write of the same path does not count).
+    Consumer side, unchanged criterion (whole-word reference to each provider
+    artifact's stem) over the consumer's CURRENT planned artifacts - written
+    this run, else unchanged on disk - so a verified no-change consumer is
+    judged on what it actually contains. A consumer with no planned artifact
+    in the relationship (verification-only) has nothing to reference: it is
+    judged by the valid provider artifacts plus its own declared
+    verification, which has passed when this runs (the check runs only after
+    the consumer completed); with no declared verification it fails closed.
+    Returns (missing provider artifacts, evidence fields)."""
+    provider_evidence: Dict[str, Any] = {}
+    invalid: List[str] = []
+    for path in producer_paths:
+        state, writer = provenance.provider_state(path, rel.producer_subtask_ids)
+        provider_evidence[path] = {"state": state, "established_by": writer}
+        if state != "valid":
+            invalid.append(path)
+    sources: Dict[str, str] = {}
+    contents: List[str] = []
+    for path in consumer_paths:
+        if path in established_file_context and provenance.writer.get(path) in rel.consumer_subtask_ids:
+            sources[path] = "written_this_run"
+            contents.append(established_file_context[path])
+            continue
+        current = provenance.current_content(path)
+        sources[path] = "current_workspace" if current is not None else "absent"
+        if current is not None:
+            contents.append(current)
+    consumer = plan.subtask_by_id(consumer_id)
+    verification = [f"{getattr(getattr(v, 'type', ''), 'value', getattr(v, 'type', ''))}:"
+                    f"{getattr(v, 'tool_name', None) or getattr(v, 'description', '')}"
+                    for v in (getattr(consumer, "verification", None) or [])]
+    evidence: Dict[str, Any] = {
+        "provider_evidence": provider_evidence,
+        "consumer_evidence": {"paths": list(consumer_paths), "sources": sources, "verification": verification},
+    }
+    missing = list(invalid)
+    if consumer_paths:
+        evidence["evaluation"] = "reference"
+        consumer_content = "\n".join(contents)
+        for path in producer_paths:
+            if path in invalid:
+                continue
+            token = _integration_reference_token(path)
+            if not re.search(rf"\b{re.escape(token)}\b", consumer_content):
+                missing.append(path)
+    else:
+        evidence["evaluation"] = "verification_only_consumer"
+        if not verification:
+            evidence["failure_reason"] = "consumer has no planned artifact and no declared verification"
+            missing = sorted(set(missing) | set(producer_paths)) or ["<no consumer evidence>"]
+    if missing and "failure_reason" not in evidence:
+        evidence["failure_reason"] = "; ".join(
+            f"{path}: {provider_evidence[path]['state'] if path in invalid else 'not referenced by the consumer'}"
+            for path in missing if path in provider_evidence)
+    return missing, evidence
+
+
 def _evaluate_integration_obligations(
     plan: EngineeringPlan,
     obligation_ledger: Optional[ObligationLedger],
     completed_subtask_id: str,
     established_file_context: Dict[str, str],
     revision: Any,
+    provenance: Optional[EstablishedProvenance] = None,
 ) -> None:
     """Correctness Continuity Part C (PRV-06, 2026-08-29) - the deterministic
     evidence source that can transition a plan.integration.* obligation
@@ -2474,21 +2595,28 @@ def _evaluate_integration_obligations(
             for pf in (plan.subtask_by_id(cid).planned_files if plan.subtask_by_id(cid) else [])
             if not rel.participating_artifacts or pf.path in rel.participating_artifacts
         ]
-        consumer_content = "\n".join(
-            established_file_context[p] for p in consumer_paths if p in established_file_context
-        )
-        missing_producers = []
-        for producer_path in producer_paths:
-            if producer_path not in established_file_context:
-                # The producer hasn't been established yet at all - cannot
-                # possibly have been integrated (Part C6's scheduling
-                # invariant: a consumer finalizing before its producer's
-                # contract exists is itself the defect this records).
-                missing_producers.append(producer_path)
-                continue
-            token = _integration_reference_token(producer_path)
-            if not re.search(rf"\b{re.escape(token)}\b", consumer_content):
-                missing_producers.append(producer_path)
+        if provenance is None:
+            # Callers without the run's provenance: the established content only.
+            consumer_content = "\n".join(
+                established_file_context[p] for p in consumer_paths if p in established_file_context
+            )
+            missing_producers = []
+            for producer_path in producer_paths:
+                if producer_path not in established_file_context:
+                    # The producer hasn't been established yet at all - cannot
+                    # possibly have been integrated (Part C6's scheduling
+                    # invariant: a consumer finalizing before its producer's
+                    # contract exists is itself the defect this records).
+                    missing_producers.append(producer_path)
+                    continue
+                token = _integration_reference_token(producer_path)
+                if not re.search(rf"\b{re.escape(token)}\b", consumer_content):
+                    missing_producers.append(producer_path)
+            p5_evidence: Dict[str, Any] = {}
+        else:
+            missing_producers, p5_evidence = _integration_evidence(
+                plan, rel, completed_subtask_id, producer_paths, consumer_paths, established_file_context, provenance,
+            )
         satisfied = not missing_producers
         record = ObligationRecord(
             id=obligation_id,
@@ -2501,6 +2629,7 @@ def _evaluate_integration_obligations(
             evidence={
                 **current.evidence,
                 "missing_producer_references": missing_producers,
+                **p5_evidence,
             },
             owner_subtask_id=current.owner_subtask_id,
             terminal_required=True,
@@ -2512,6 +2641,22 @@ def _evaluate_integration_obligations(
             "SATISFIED" if satisfied else "VIOLATED",
             obligation_id, completed_subtask_id, missing_producers,
         )
+        if provenance is not None:
+            # LR-R1-P5: the decision and its evidence in the attempt-evidence
+            # store (an ordinary mirrored run event; observational).
+            from kriya.workflow.run_events import EventAuthority, RunEvent
+
+            attempt_evidence_scope.mirror_event(RunEvent(
+                kind="integration.obligation", attempt=0, source="workflow_controller.integration_check",
+                authority=EventAuthority.AUTHORITATIVE,
+                message=f"{obligation_id} {'SATISFIED' if satisfied else 'VIOLATED'}",
+                details={"obligation_id": obligation_id, "relationship_kind": rel.kind,
+                         "producer_subtask_ids": list(rel.producer_subtask_ids),
+                         "consumer_subtask_ids": list(rel.consumer_subtask_ids),
+                         "completed_consumer": completed_subtask_id,
+                         "status": record.status.value, "missing_producer_references": missing_producers,
+                         **p5_evidence},
+            ))
 
 
 def _transitive_dependents(plan: EngineeringPlan, subtask_id: str) -> set[str]:
@@ -5036,6 +5181,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 reason=f"migration resolution itself raised ({type(e).__name__}: {e})",
             )
         established_file_context: Dict[str, str] = {}
+        # LR-R1-P5: who established each artifact, at which bytes (integration evidence).
+        established_provenance = EstablishedProvenance(plan_workspace_path)
         subtask_results: List[SubtaskResult] = []
         subtask_call_results: List[Dict[str, Any]] = []
         knowledge_gap_break: Optional[Dict[str, Any]] = None
@@ -5228,6 +5375,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         reason="established_by_earlier_subtask",
                     )
                     established_file_context[planned_file.path] = projection.content
+                    established_provenance.record(planned_file.path, subtask_id)
                 continue
 
             approved_stage_states[subtask_id] = "in_progress"
@@ -6104,11 +6252,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             reason="recovered_upstream_subtask",
                         )
                         established_file_context[path] = projection.content
+                        established_provenance.record(path, owner_id)
                     # Correctness Continuity Part C: the reopened owner may
                     # itself be a relationship's consumer (not just its
                     # producer) - no-op when it isn't.
                     _evaluate_integration_obligations(
                         plan, obligation_ledger, owner_id, established_file_context, owner_position,
+                        provenance=established_provenance,
                     )
                     exec_plan.completed_group_ids = exec_plan.completed_group_ids + (group_id,)
 
@@ -6474,6 +6624,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason="established_by_earlier_subtask",
                 )
                 established_file_context[path] = projection.content
+                established_provenance.record(path, subtask_id)
 
             # Correctness Continuity Part C (PRV-06, 2026-08-29): this
             # subtask just finished and its files are now in
@@ -6483,6 +6634,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # relationships at all (every plan predating this feature).
             _evaluate_integration_obligations(
                 plan, obligation_ledger, subtask_id, established_file_context, position,
+                provenance=established_provenance,
             )
 
         # Authoritative scope recovery may merge/remove a stage. Completion
@@ -6851,3 +7003,4 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         control-plane bookkeeping (and, in shadow mode, an observational
         run alongside it) around the outside."""
         return await self.workflow_engine.run_generation_workflow(goal, workspace_path, **legacy_kwargs)
+

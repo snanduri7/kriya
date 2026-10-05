@@ -389,7 +389,34 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
         # continued on <strategy>" vs "no recovery route remained" (terminal).
         last_fallback_routing=_brief(routings[-1], "requirement", "selected", "other_route_remained",
                                      "resulting_strategy", "decision_point") if routings else None,
+        integration_obligations=_integration_obligations(records, run),
     )
+
+
+_INTEGRATION_FIELDS = ("obligation_id", "status", "evaluation", "producer_subtask_ids", "consumer_subtask_ids",
+                       "provider_evidence", "consumer_evidence", "missing_producer_references", "failure_reason")
+
+
+def _integration_obligations(records: List[Mapping[str, Any]],
+                             run: Optional[reader.EvidenceRun]) -> Optional[List[Dict[str, Any]]]:
+    """LR-R1-P5: every cross-subtask integration decision of the run (the
+    mirrored ``integration.obligation`` events): which provider artifacts and
+    consumer evidence it judged, and why it passed or failed. None when the
+    run decided none."""
+    decisions = [r for r in _of(records, "mirror.event")
+                 if (r.get("payload") or {}).get("kind") == "integration.obligation"]
+    if not decisions:
+        return None
+    out = []
+    for record in decisions:
+        event = _content(run, record, "event")
+        if event is None:
+            out.append({"seq": record.get("seq"), **_absent(NOT_RECORDED, "the decision's content is not in this "
+                                                                          "store (digest-only capture)")})
+            continue
+        details = event.get("details") or {}
+        out.append({"seq": record.get("seq"), **{key: details.get(key) for key in _INTEGRATION_FIELDS}})
+    return out
 
 
 def explain_run(state_dir: str, run_id: str) -> Dict[str, Any]:
