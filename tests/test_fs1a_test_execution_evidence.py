@@ -410,3 +410,51 @@ def test_the_report_leaves_the_gate_output_byte_identical(tmp_path):
 
     assert "generated xml file" not in with_report["output"] and ".kriya" not in with_report["output"]
     assert normalized(with_report["output"]) == normalized(without_report["output"])
+
+
+# ---------------------------------------------------------------- required test 12: the T5 reference success, honestly
+
+T5_GOAL = ("Add a method `public boolean hasPet(String name)` to org.springframework.samples.petclinic.model.Owner "
+           "that returns true when the owner has a pet with that name (matched the same way as the existing "
+           "`getPet(String name)`) and false otherwise, and add a unit test for it in OwnerTests.")
+T5_REQUIREMENT_SET_DIGEST = "c5609719b08e3c82fafe87f8ff60a4e8504d48f9076cc4f9087792c49d8a0acf"  # the live run's
+
+
+def test_the_t5_reference_success_is_unverified_and_blocked_under_the_production_policy():
+    """R2 T5 (preserved packet): its tests genuinely executed (Rule E holds on
+    the run's own Surefire report), but its one requirement had only the
+    verifier's "satisfied". Candidate-written tests close no original
+    requirement (owner decision: no EXECUTED_CANDIDATE_TESTS closure), and the
+    test the requirement names (OwnerTests) was changed by the candidate, so
+    the named-test closure refuses it. Under the production policy T5 is
+    therefore UNVERIFIED and blocked - not a success."""
+    from kriya.workflow.obligations import ObligationLedger
+    from kriya.workflow.requirements import (
+        RequirementOutcome,
+        blocking_requirements,
+        close_unverified_requirements_with_named_tests,
+        derive_requirements,
+        record_requirement_verdicts,
+        requirement_outcomes,
+        seed_requirement_obligations,
+    )
+
+    report = _report((SPECIMENS / "T5-TEST-OwnerTests.xml").read_bytes())
+    assert judge_test_delta({T5_PATH: (_specimen("T5-OwnerTests.base.java"),
+                                       _specimen("T5-OwnerTests.candidate.java"))}, report).satisfied
+
+    reqs = derive_requirements(T5_GOAL)
+    assert reqs.digest == T5_REQUIREMENT_SET_DIGEST and reqs.ids == ["REQ-1"]
+    ledger = ObligationLedger()
+    seed_requirement_obligations(ledger, reqs)
+    record_requirement_verdicts(ledger, reqs, {"REQ-1": (RequirementOutcome.SATISFIED, "hasPet exists; tests exist")},
+                                revision="terminal", evidence_fingerprint="t5-candidate", source="test")
+    runs = []
+    [attempt] = close_unverified_requirements_with_named_tests(
+        ledger, reqs, test_files=[T5_PATH], modified=[T5_PATH], run_tests=lambda paths: runs.append(paths),
+        confirms_execution=lambda output: True, source="test", revision="terminal")
+    assert attempt["closed"] is False and "written or changed by this candidate" in attempt["reason"]
+    assert runs == []
+    assert requirement_outcomes(ledger, reqs) == {"REQ-1": RequirementOutcome.UNVERIFIED}
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="block",
+                                                   unverified_policy="block")] == ["REQ-1"]
