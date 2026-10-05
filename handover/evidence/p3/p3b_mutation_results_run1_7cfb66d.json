@@ -1,0 +1,46 @@
+{
+ "commit": "7cfb66d",
+ "tests": [
+  "tests/test_p3b_stitched_anchor_loci.py",
+  "tests/test_p3_developer_protocol_reproducers.py",
+  "tests/test_context_edit_protocol_001.py"
+ ],
+ "mutants": [
+  {
+   "label": "gap-loci-dropped",
+   "file": "kriya/workflow/edit_capability.py",
+   "status": "KILLED",
+   "summary": "2 failed, 23 passed in 8.21s",
+   "seconds": 9.0
+  },
+  {
+   "label": "stitch-detection-skipped",
+   "file": "kriya/workflow/edit_capability.py",
+   "status": "KILLED",
+   "summary": "3 failed, 20 passed in 4.94s",
+   "seconds": 5.8
+  },
+  {
+   "label": "ambiguous-part-accepted",
+   "file": "kriya/workflow/edit_capability.py",
+   "status": "KILLED",
+   "summary": "1 failed, 23 passed in 5.02s",
+   "seconds": 5.8
+  },
+  {
+   "label": "out-of-order-parts-accepted",
+   "file": "kriya/workflow/edit_capability.py",
+   "status": "KILLED",
+   "summary": "1 failed, 24 passed in 4.96s",
+   "seconds": 5.9
+  },
+  {
+   "label": "shortest-part-not-longest",
+   "file": "kriya/workflow/edit_capability.py",
+   "status": "KILLED",
+   "summary": "1 failed, 28 passed in 4.91s",
+   "seconds": 5.8
+  }
+ ],
+ "baseline": "38 passed in 6.65s"
+}
