@@ -2363,6 +2363,36 @@ def _only_response_validity_failures(state: GenerationState) -> bool:
     return all(outcome.get("type") in _RESPONSE_VALIDITY_FAILURES for outcome in failed)
 
 
+def _record_authority_snapshot(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
+                               capabilities: Dict[str, Any], requested: Dict[str, Any], model: str) -> None:
+    """LR-R1-M1 ``authority.snapshot``: what this Developer invocation was
+    authorized to change and on what source, recorded before inference
+    (observational; every value is already decided above)."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        allowed = list(getattr(ctx, "allowed_write_relpaths", None) or [])
+        mode = getattr(ctx, "write_scope_mode", None)
+        targets = []
+        for path, capability in capabilities.items():
+            item = state.known_target_context_items.get(path)
+            targets.append({
+                **capability.summary(),
+                "requested_operation": getattr(requested.get(path), "value", requested.get(path)),
+                "whole_file_authority": capability.full_file,
+                "shown_tier": getattr(item, "tier", None), "shown_member_id": getattr(item, "member_id", None),
+                "shown_is_exact": getattr(item, "is_exact", None), "shown_revision": getattr(item, "revision", None),
+                "member_units_shown": len(state.known_target_member_items.get(path, ())),
+                "in_write_scope": (path in allowed) if allowed else None,
+            })
+        payload = {"model": model, "write_scope_mode": getattr(mode, "value", mode), "authorized_write_scope": allowed,
+                   "targets": targets, "known_target_files": list(kwargs.get("known_target_files") or [])}
+    except Exception as error:  # observational: never alters the attempt
+        logger.warning("Attempt evidence: authority.snapshot not built (%s: %s)", type(error).__name__, error)
+        return
+    attempt_evidence_scope.emit("authority.snapshot", payload)
+
+
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
     this Developer invocation (kriya/workflow/edit_capability.py), decided
@@ -2450,6 +2480,7 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         details={"model": model, "budget_chars": budget_chars,
                  "targets": [capability.summary() for capability in capabilities.values()]},
     ))
+    _record_authority_snapshot(state, ctx, kwargs, capabilities, requested, model)
 
     infeasible = [path for path, capability in capabilities.items() if not capability.feasible]
     if infeasible:

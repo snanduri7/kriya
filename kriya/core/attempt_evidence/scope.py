@@ -85,6 +85,9 @@ _ATTEMPT: contextvars.ContextVar[Optional[_AttemptScope]] = contextvars.ContextV
     "attempt_evidence_attempt", default=None)
 _CALL: contextvars.ContextVar[Optional[_CallScope]] = contextvars.ContextVar("attempt_evidence_call", default=None)
 _WIRE: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("attempt_evidence_wire", default=None)
+# The most recent logical call this task (or a parent) made: what a parse of
+# its answer, which runs after the call scope closed, refers to.
+_LAST_CALL: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("attempt_evidence_last_call", default=None)
 
 
 def _configured_capture(cfg: Any) -> Optional[str]:
@@ -337,6 +340,7 @@ def call_scope(role: Optional[str]) -> Iterator[Optional[int]]:
     with run.lock:
         run.calls += 1
         seq = run.calls
+    _LAST_CALL.set(seq)  # deliberately not reset: the caller's task reads it after the call returns
     token = _CALL.set(_CallScope(call_seq=seq, role=role))
     try:
         yield seq
@@ -520,3 +524,25 @@ def mirror_gate_outcome(index: int, outcome: Any) -> None:
 def mirror_gate_outcomes_restored(outcomes: Any, source: str) -> None:
     _mirror("mirror.gate_outcomes_restored", lambda: {"count": len(outcomes), "source": source,
                                                        "outcomes": list(outcomes)}, ("count", "source"), "restored")
+
+
+def record_developer_parse(parsed: Any, filepath: str, *, selected_protocol: Optional[str], source: str) -> None:
+    """``developer.parse``: how one Developer answer was read (protocol, kind,
+    reason code). The model's own analysis text is content, marked as the
+    model's claim. ``call_seq_parsed`` is the logical call whose answer this
+    is (the task's most recent call)."""
+    if _active_writer() is None:
+        return
+    try:
+        payload = {
+            "path": filepath, "source": source, "protocol_selected": selected_protocol,
+            "protocol": getattr(parsed, "protocol", None), "kind": getattr(parsed, "kind", None),
+            "reason_code": getattr(parsed, "reason_code", None), "detail": (getattr(parsed, "detail", None) or "")[:500],
+            "edit_count": len(getattr(parsed, "edits", None) or ()), "final_newline": getattr(parsed, "final_newline", None),
+            "call_seq_parsed": _LAST_CALL.get(),
+        }
+        analysis = getattr(parsed, "analysis", None)
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: developer.parse not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("developer.parse", payload, content={"analysis_model_claimed": analysis})
