@@ -1,0 +1,20 @@
+baseline 185 passed in 41.02s
+model-SATISFIED-writes-SATISFIED KILLED 2 failed, 94 passed in 20.21s
+UNVERIFIED-does-not-block KILLED 5 failed, 45 passed in 19.92s
+candidate-tests-alone-close-original-requirement KILLED 3 failed, 96 passed in 21.63s
+missing-report-treated-as-PASS KILLED 2 failed, 91 passed in 20.17s
+stale-report-accepted KILLED 2 failed, 74 passed in 20.35s
+JUnit-missing-test-ignored KILLED 1 failed, 76 passed in 20.24s
+pytest-missing-test-ignored KILLED 4 failed, 53 passed in 6.73s
+test-count-increase-treated-as-sufficient KILLED 4 failed, 57 passed in 6.54s
+helper-method-treated-as-required-executable-test KILLED 2 failed, 72 passed in 20.45s
+model-claim-outranks-deterministic-failure SURVIVED 185 passed in 22.49s
+legacy-SATISFIED-record-not-demoted SURVIVED 185 passed in 22.30s
+rule-E-never-called KILLED 1 failed, 180 passed in 14.68s
+indeterminate-evidence-not-a-stop KILLED 1 failed, 72 passed in 21.13s
+skipped-counts-as-passed KILLED 2 failed, 70 passed in 20.78s
+incomplete-pytest-session-accepted KILLED 1 failed, 114 passed in 21.68s
+report-summary-line-not-silenced KILLED 1 failed, 104 passed in 20.78s
+covering-run-skipped KILLED 2 failed, 72 passed in 20.24s
+TOTAL 17 {'KILLED': 15, 'SURVIVED': 2}
+exit=0

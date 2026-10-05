@@ -42,6 +42,7 @@ from kriya.workflow.requirements import (
     requirement_lineage,
     requirement_obligation_id,
     requirement_outcomes,
+    requirement_verdict_details,
     seed_requirement_obligations,
 )
 
@@ -880,3 +881,49 @@ async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(
     outcomes = result.legacy_result["requirements"]["outcomes"]
     assert outcomes == {"REQ-1": "closed_by_evidence"}
     assert not result.legacy_result.get("global_requirement_gap")
+
+
+def _pre_fs1_checkpoint(outcomes):
+    """A ledger as a pre-FS-1 checkpoint holds it: the verifier's "satisfied"
+    stored as the outcome itself (no model_outcome / evidence_class)."""
+    reqs, ledger = _ledger_with(outcomes)
+    snapshot = json.loads(json.dumps(ledger.to_snapshot()))
+    rewritten = 0
+
+    def to_pre_fs1(node):
+        nonlocal rewritten
+        if isinstance(node, dict):
+            if node.get("model_outcome") == "satisfied" and node.get("outcome") == "unverified":
+                node["outcome"] = "satisfied"
+                del node["model_outcome"], node["evidence_class"]
+                rewritten += 1
+            for value in node.values():
+                to_pre_fs1(value)
+        elif isinstance(node, list):
+            for value in node:
+                to_pre_fs1(value)
+
+    to_pre_fs1(snapshot)
+    assert rewritten == len(outcomes)
+    return reqs, ObligationLedger.from_snapshot(snapshot)
+
+
+def test_a_resumed_pre_fs1_satisfied_record_authorizes_nothing():
+    """FS-1B on resume: a SATISFIED verdict read back from an older checkpoint
+    is UNVERIFIED (blocked in production), reports as UNVERIFIED with the
+    claim kept, still closes with deterministic evidence, and deterministic
+    counter-evidence still makes it VIOLATED."""
+    reqs, ledger = _pre_fs1_checkpoint({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.SATISFIED,
+                                        "REQ-3": RequirementOutcome.SATISFIED})
+    assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.UNVERIFIED}
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-2", "REQ-3"]
+    details = requirement_verdict_details(ledger, reqs)
+    assert (details["REQ-1"]["outcome"], details["REQ-1"]["model_outcome"]) == ("unverified", "satisfied")
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
+                               detail={}, source="test", revision=1)
+    record_requirement_closure(ledger, reqs, "REQ-3", evidence_id="cand-1", method="mutation_scope",
+                               detail={}, source="test", revision=1, violated=True)
+    outcomes = requirement_outcomes(ledger, reqs)
+    assert outcomes == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.CLOSED_BY_EVIDENCE,
+                        "REQ-3": RequirementOutcome.VIOLATED}
+    assert {r.id: o for r, o in blocking_requirements(ledger, reqs)} == {"REQ-3": RequirementOutcome.VIOLATED}

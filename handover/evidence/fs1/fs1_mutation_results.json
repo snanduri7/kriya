@@ -1,0 +1,135 @@
+{
+ "commit": "1697e32",
+ "tests": [
+  "tests/test_fs1_false_success_reproducer.py",
+  "tests/test_fs1a_test_execution_evidence.py",
+  "tests/test_prd020_requirement_lineage.py",
+  "tests/test_prd020_mutation_scope.py",
+  "tests/test_prd020_milestone_requirements.py",
+  "tests/test_d8_terminal_toolchain_authority.py",
+  "tests/test_model_evidence_hardening_001.py",
+  "tests/test_lr_r1_m1_t6_paths.py"
+ ],
+ "mutants": [
+  {
+   "label": "model-SATISFIED-writes-SATISFIED",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "2 failed, 94 passed in 20.21s",
+   "seconds": 21.1
+  },
+  {
+   "label": "UNVERIFIED-does-not-block",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "5 failed, 45 passed in 19.92s",
+   "seconds": 20.8
+  },
+  {
+   "label": "candidate-tests-alone-close-original-requirement",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "3 failed, 96 passed in 21.63s",
+   "seconds": 22.5
+  },
+  {
+   "label": "missing-report-treated-as-PASS",
+   "file": "kriya/workflow/test_delta.py",
+   "status": "KILLED",
+   "summary": "2 failed, 91 passed in 20.17s",
+   "seconds": 21.0
+  },
+  {
+   "label": "stale-report-accepted",
+   "file": "kriya/tools/test_execution.py",
+   "status": "KILLED",
+   "summary": "2 failed, 74 passed in 20.35s",
+   "seconds": 21.2
+  },
+  {
+   "label": "JUnit-missing-test-ignored",
+   "file": "kriya/workflow/test_delta.py",
+   "status": "KILLED",
+   "summary": "1 failed, 76 passed in 20.24s",
+   "seconds": 21.1
+  },
+  {
+   "label": "pytest-missing-test-ignored",
+   "file": "kriya/workflow/test_delta.py",
+   "status": "KILLED",
+   "summary": "4 failed, 53 passed in 6.73s",
+   "seconds": 7.6
+  },
+  {
+   "label": "test-count-increase-treated-as-sufficient",
+   "file": "kriya/workflow/test_delta.py",
+   "status": "KILLED",
+   "summary": "4 failed, 57 passed in 6.54s",
+   "seconds": 7.4
+  },
+  {
+   "label": "helper-method-treated-as-required-executable-test",
+   "file": "kriya/workflow/test_delta.py",
+   "status": "KILLED",
+   "summary": "2 failed, 72 passed in 20.45s",
+   "seconds": 21.3
+  },
+  {
+   "label": "model-claim-outranks-deterministic-failure",
+   "file": "kriya/workflow/requirements.py",
+   "status": "SURVIVED",
+   "summary": "185 passed in 22.49s",
+   "seconds": 23.4
+  },
+  {
+   "label": "legacy-SATISFIED-record-not-demoted",
+   "file": "kriya/workflow/requirements.py",
+   "status": "SURVIVED",
+   "summary": "185 passed in 22.30s",
+   "seconds": 23.2
+  },
+  {
+   "label": "rule-E-never-called",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 180 passed in 14.68s",
+   "seconds": 15.5
+  },
+  {
+   "label": "indeterminate-evidence-not-a-stop",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 72 passed in 21.13s",
+   "seconds": 22.0
+  },
+  {
+   "label": "skipped-counts-as-passed",
+   "file": "kriya/tools/test_execution.py",
+   "status": "KILLED",
+   "summary": "2 failed, 70 passed in 20.78s",
+   "seconds": 21.7
+  },
+  {
+   "label": "incomplete-pytest-session-accepted",
+   "file": "kriya/tools/test_execution.py",
+   "status": "KILLED",
+   "summary": "1 failed, 114 passed in 21.68s",
+   "seconds": 22.5
+  },
+  {
+   "label": "report-summary-line-not-silenced",
+   "file": "kriya/capabilities/pip.py",
+   "status": "KILLED",
+   "summary": "1 failed, 104 passed in 20.78s",
+   "seconds": 21.6
+  },
+  {
+   "label": "covering-run-skipped",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "2 failed, 72 passed in 20.24s",
+   "seconds": 21.1
+  }
+ ],
+ "baseline": "185 passed in 41.02s"
+}
