@@ -457,3 +457,32 @@ def test_g1_runs_without_a_conflict_list_none(tmp_path, monkeypatch):
     assert observed.explained["Q9"]["plan_scope_conflicts"] == []
     assert all("plan_scope_conflict" not in item for a in observed.attempts()
                for item in a["answers"]["Q6"].get("items") or [])
+
+
+# -- G2: the recorded authorized write scope in Q2 --------------------------------------------
+
+def test_g2_the_recorded_authorized_write_scope_is_explained(tmp_path, monkeypatch):
+    from _t6_harness import conflict_attempt, scope_enforce
+
+    observed = scope_enforce(tmp_path, monkeypatch)
+    attempt = conflict_attempt(observed)
+    recorded = [r for r in observed.of("authority.snapshot", unit_id="s2", attempt_number=attempt["attempt"])]
+    shown = attempt["answers"]["Q2"]["items"]
+    assert len(shown) == len(recorded) >= 1
+    for item, snapshot in zip(shown, recorded, strict=True):
+        # Exactly the snapshot's own value - never the plan or the targets.
+        assert item["authorized_write_scope"] == snapshot["payload"]["authorized_write_scope"] == ["app/config.py"]
+        assert item["write_scope_mode"] == "allowlist"
+        assert {t["path"]: t["in_write_scope"] for t in item["targets"]} == {"app/config.py": True}
+
+
+def test_g2_an_unrestricted_scope_is_shown_as_recorded(tmp_path, monkeypatch):
+    """Negative control: a direct run records an empty authorized scope (no
+    allowlist); it is shown as that, never filled from the targets."""
+    from _chaos_harness import CALC_WITH_SUB
+
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES)
+    [item] = observed.attempt(1)["Q2"]["items"]
+    [snapshot] = observed.of("authority.snapshot")
+    assert item["authorized_write_scope"] == snapshot["payload"]["authorized_write_scope"]
+    assert item["authorized_write_scope"] != [t["path"] for t in item["targets"]]

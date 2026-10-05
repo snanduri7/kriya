@@ -112,7 +112,8 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         NOT_APPLICABLE, "no_model_call: no model request was made in this attempt")
     snapshots = _of(records, "authority.snapshot")
     if snapshots:
-        answers["Q2"] = _recorded([_brief(r, "write_scope_mode", "targets", "transition") for r in snapshots])
+        answers["Q2"] = _recorded([_brief(r, "write_scope_mode", "authorized_write_scope", "targets", "transition")
+                                   for r in snapshots])
     else:
         answers["Q2"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer request in this attempt") \
             if not developer_requests else _absent(NOT_RECORDED, "no authority snapshot was recorded")
