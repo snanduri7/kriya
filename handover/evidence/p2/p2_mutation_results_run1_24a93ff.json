@@ -1,0 +1,96 @@
+{
+ "commit": "24a93ff",
+ "tests": [
+  "tests/test_p2_compile_regression_attribution.py",
+  "tests/test_p2_regression_attribution_reproducer.py",
+  "tests/test_validation_baseline.py",
+  "tests/test_lr_r1_m1_recovery.py"
+ ],
+ "mutants": [
+  {
+   "label": "level2-available-guard-dropped",
+   "file": "kriya/workflow/compile_regression.py",
+   "status": "KILLED",
+   "summary": "1 failed, 78 passed in 22.68s",
+   "seconds": 23.6
+  },
+  {
+   "label": "pre-success-guard-dropped",
+   "file": "kriya/workflow/compile_regression.py",
+   "status": "KILLED",
+   "summary": "3 failed, 67 passed in 28.70s",
+   "seconds": 29.6
+  },
+  {
+   "label": "locator-files-omitted-from-known-files",
+   "file": "kriya/workflow/workflow.py",
+   "status": "KILLED",
+   "summary": "1 failed, 88 passed in 16.58s",
+   "seconds": 17.4
+  },
+  {
+   "label": "no-loci-carried-by-controller",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 88 passed in 16.40s",
+   "seconds": 17.2
+  },
+  {
+   "label": "no-loci-recorded-on-conflict",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 88 passed in 16.34s",
+   "seconds": 17.2
+  },
+  {
+   "label": "loci-carried-without-revision-check",
+   "file": "kriya/workflow/workflow.py",
+   "status": "KILLED",
+   "summary": "1 failed, 79 passed in 22.75s",
+   "seconds": 23.6
+  },
+  {
+   "label": "ambiguous-resolution-accepted",
+   "file": "kriya/workflow/compile_regression.py",
+   "status": "SURVIVED",
+   "summary": "91 passed in 24.15s",
+   "seconds": 25.0
+  },
+  {
+   "label": "attribution-recorded-before-it-is-known",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "2 failed, 86 passed in 13.68s",
+   "seconds": 14.6
+  },
+  {
+   "label": "warnings-counted-as-errors",
+   "file": "kriya/workflow/compile_regression.py",
+   "status": "KILLED",
+   "summary": "3 failed, 71 passed in 10.64s",
+   "seconds": 11.5
+  },
+  {
+   "label": "unresolved-diagnostic-skipped",
+   "file": "kriya/workflow/compile_regression.py",
+   "status": "KILLED",
+   "summary": "2 failed, 73 passed in 22.75s",
+   "seconds": 23.6
+  },
+  {
+   "label": "seed-path-escape-accepted",
+   "file": "kriya/workflow/workflow.py",
+   "status": "SURVIVED",
+   "summary": "91 passed in 23.13s",
+   "seconds": 24.0
+  },
+  {
+   "label": "unattributed-stop-never-set",
+   "file": "kriya/workflow/workflow.py",
+   "status": "KILLED",
+   "summary": "1 failed, 86 passed in 23.00s",
+   "seconds": 23.9
+  }
+ ],
+ "baseline": "91 passed in 24.22s"
+}

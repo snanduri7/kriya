@@ -72,12 +72,13 @@ def test_any_unlocated_or_unresolvable_compiler_error_keeps_it_unattributed(tree
 
 
 def test_an_ambiguous_resolution_keeps_it_unattributed(tree):
-    """Two files the diagnostic path could denote: never guessed."""
-    for rel in ("a/Dup.java", "b/Dup.java"):
+    """Two tree files are both suffixes of the diagnostic's path: never guessed."""
+    for rel in ("a/Dup.java", "x/a/Dup.java"):
         (tree / rel).parent.mkdir(parents=True, exist_ok=True)
         (tree / rel).write_text("class Dup {}\n")
-    assert attribute_compile_regression(_delta(), "[ERROR] Dup.java:[1,1] x\n", str(tree)) is None
-    assert attribute_compile_regression(_delta(), "[ERROR] /w/a/Dup.java:[1,1] x\n", str(tree)).files == (
+    assert attribute_compile_regression(_delta(), "[ERROR] /w/x/a/Dup.java:[1,1] x\n", str(tree)) is None
+    # Only one is a suffix of this path: resolved.
+    assert attribute_compile_regression(_delta(), "[ERROR] /w/y/a/Dup.java:[1,1] x\n", str(tree)).files == (
         "a/Dup.java",)
 
 
@@ -87,16 +88,18 @@ def test_a_locator_in_the_candidates_own_file_is_attributed_like_any_other(tree)
 
 
 def test_a_carried_locus_is_seeded_only_on_its_own_revision(tmp_path):
-    for rel in ("A.java", "B.java"):
-        (tmp_path / rel).write_text("class A {}\n" * 200)
-    fresh = read_file_revision(str(tmp_path / "A.java"))
-    stale = read_file_revision(str(tmp_path / "B.java"))
-    (tmp_path / "B.java").write_text("class B {}\n" * 200)               # changed since it was observed
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    for path in (tree / "A.java", tree / "B.java", tmp_path / "A.java"):
+        path.write_text("class A {}\n" * 200)
+    fresh = read_file_revision(str(tree / "A.java"))
+    stale = read_file_revision(str(tree / "B.java"))
+    (tree / "B.java").write_text("class B {}\n" * 200)                   # changed since it was observed
     state = GenerationState()
-    _seed_grounded_loci(state, str(tmp_path), [
+    _seed_grounded_loci(state, str(tree), [
         {"filepath": "A.java", "line": 167, "revision": fresh},
         {"filepath": "B.java", "line": 12, "revision": stale},
-        {"filepath": "../A.java", "line": 1, "revision": fresh},            # outside the tree
+        {"filepath": "../A.java", "line": 1, "revision": fresh},            # outside the tree (it exists)
         {"filepath": "Missing.java", "line": 1, "revision": fresh},
         {"filepath": "A.java", "line": "167", "revision": fresh},           # not a line number
     ])
