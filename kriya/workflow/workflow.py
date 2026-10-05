@@ -4020,6 +4020,9 @@ class WorkflowEngine:
             # run_attempt() is even called, guarantees no exception path can skip it.
             state.pre_approval_review = None
             state.verified_candidate_binding = None
+            # LR-R1-M1: the whole iteration is the attempt's evidence identity
+            # (observational; reset in this try's finally).
+            attempt_evidence_token = attempt_evidence_scope.enter_attempt_iteration(lambda: state.attempt_number)
             try:
                 # Best-of-N only ever applies to the very first attempt of a run
                 # (state.attempt_number == 0 going in - resumed checkpoints also
@@ -5444,6 +5447,9 @@ class WorkflowEngine:
             except Exception as e:
                 if await handle_attempt_failure(state, attempt_ctx, e):
                     break
+            finally:
+                attempt_evidence_scope.exit_attempt_iteration(
+                    attempt_evidence_token, succeeded=state.overall_attempt_succeeded)
 
         # Intermediate trace checkpoint (2026-08-15, found while forensically
         # investigating a real live run): the ONLY trace_logger.log_run() call

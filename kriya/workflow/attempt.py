@@ -6352,9 +6352,10 @@ def _attempt_evidence_boundary(func):
         with attempt_evidence_scope.attempt_scope(lambda: state.attempt_number) as closing:
             try:
                 await func(state, ctx)
-                closing.update(outcome="PASSED" if state.overall_attempt_succeeded else "RETURNED",
-                               candidate_gates_passed=state.candidate_gates_succeeded,
-                               terminal_regression_passed=state.terminal_regression_succeeded)
+                # run_attempt returned: generation and the candidate gates
+                # completed. Whether the attempt as a whole succeeded is the
+                # retry loop's attempt.concluded (later checks run there).
+                closing.update(outcome="RETURNED", candidate_gates_passed=state.candidate_gates_succeeded)
             finally:
                 _record_obligations_snapshot(ctx)
     return wrapper

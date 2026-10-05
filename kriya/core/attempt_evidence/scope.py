@@ -361,6 +361,33 @@ def attempt_scope(attempt_number: Callable[[], Optional[int]]) -> Iterator[Dict[
         _ATTEMPT.reset(token)
 
 
+def enter_attempt_iteration(attempt_number: Callable[[], Optional[int]]) -> Any:
+    """One iteration of the retry loop: the attempt's identity for what the
+    attempt does after ``run_attempt`` returns (pre-apply verification,
+    requirements, static analysis, approval, the terminal regression) and
+    for its failure handling. Emits nothing itself; ``run_attempt``'s own
+    scope (nested inside) emits attempt.opened/closed. Returns the token for
+    ``exit_attempt_iteration`` (called from the loop's ``finally``)."""
+    try:
+        return _ATTEMPT.set(_AttemptScope(attempt_number=attempt_number))
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: attempt iteration not entered (%s)", error)
+        return None
+
+
+def exit_attempt_iteration(token: Any, *, succeeded: bool) -> None:
+    """``attempt.concluded`` (the iteration's own outcome: whether the
+    attempt as a whole succeeded) and the end of its identity."""
+    try:
+        emit("attempt.concluded", {"succeeded": bool(succeeded)})
+    finally:
+        if token is not None:
+            try:
+                _ATTEMPT.reset(token)
+            except (ValueError, RuntimeError) as error:  # observational: never alters the run
+                logger.warning("Attempt evidence: attempt iteration not reset (%s)", error)
+
+
 def attempt_opened(payload: Mapping[str, Any]) -> None:
     emit("attempt.opened", payload)
     inputs = _unit_inputs()
