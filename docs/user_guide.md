@@ -892,6 +892,18 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
 
 Every case must succeed. A failed case, even a typed one, means the identity is not certified.
 
+### 2.1k Attempt evidence (LR-R1-M1)
+
+Every `generate`/`fix` run records what each attempt asked the model, what came back, the candidate change, each check and each retry or fallback decision, under `<state dir>/attempt-evidence/<run_id>/` (state dir: `KRIYA_STATE_DIR` > `paths.state` > `~/.kriya/state`). Recording never changes a run, and a recording failure never stops one.
+
+- **`kriya evidence show [RUN_ID] [--content sha256:...] [--json]`.** Lists recorded runs; with a run id, its integrity and record counts; with `--content`, the exact bytes of one recorded prompt, response, diff or gate output.
+- **`kriya evidence explain RUN_ID [--json]`.** For each attempt: what the model was asked, what authority it had, what it returned, what candidate change resulted, which check failed, why Kriya retried, what changed in the next retry and why a fallback was selected or refused; and why the run finally succeeded or failed. An answer the run cannot give says `NOT RECORDED (<reason>)` or `NOT APPLICABLE (<reason>)`, never blank.
+- **`kriya evidence verify RUN_ID`.** Recomputes the hash chain, blobs and seal: exit 0 only for `VERIFIED`; 1 for `UNSEALED` (crashed or still running) or no store; 2 for a broken chain, corrupt blob or seal mismatch.
+- **`kriya evidence prune [--dry-run] [--workspace DIR] [--json]`.** Applies retention now (it also runs at the end of every run).
+- **Configuration.** `evidence.attempt_recorder.capture`: `full` (default), `full_with_reasoning`, `digest_only` or `off`; `evidence.attempt_recorder.retention.keep_runs` (200) and `.max_bytes` (5 GiB). The section is security-authority configuration: a repository cannot set it.
+- **Privacy.** In `full` mode the store holds prompts, model output and code. It stays on this machine, with owner-only file modes; use `digest_only` to keep digests without content.
+- **Doctor.** `kriya doctor --production` reports `evidence.attempt_recorder` (never required): capture mode, a writable store, the newest store's integrity, and the last run whose recorder was unavailable.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

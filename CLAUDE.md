@@ -250,6 +250,13 @@ macOS hides several Linux behaviours, so verify containment/resource changes on 
 - **Thresholds.** None ship; they are the operator's.
 - **New decisions.** Add a typed event (e.g. `approval.decision`) rather than parsing text.
 
+### Attempt evidence recorder (`kriya/core/attempt_evidence/`) — LR-R1-M1
+- **Observational only (I-2).** Never changes request bytes, workspace, result, retry/fallback or control-plane outcomes; every emit catches `Exception` (degrades the store), never `BaseException`; a store that cannot open is `RECORDER_UNAVAILABLE` and the run continues (D5). `tests/test_lr_r1_m1_equivalence.py` proves it across `full`/`digest_only`/`off`/fault modes; the `evidence` config section is excluded from the config fingerprint.
+- **Producers use `scope.py` only.** Identity comes from ContextVar scopes (run > unit invocation > attempt = the whole retry-loop iteration > call > wire), never from the caller. Gate outcomes go through `GenerationState.record_gate_outcome`/`restore_gate_outcomes` (AST tripwire: no direct `gate_outcomes` mutation). New record kinds must be added to `model.KINDS`.
+- **Layout is internal (I-1).** Consumers use `reader.py` / `explain.py` / `kriya evidence ... --json`; a tripwire rejects code naming the store's files; production never imports the reader (the CLI and explainer are the listed consumers).
+- **D7 codes.** `GenerationState.environment_failure_code` (`diagnosis_codes.py`) is read only by the recorder (structural test) - never by a decision; `Failure.diagnostics["reason_code"]` was rejected for this because it feeds the ProgressVector.
+- **Retention** (`retention.py`) at run close; `kriya evidence show|explain|verify|prune`; doctor row `evidence.attempt_recorder` (never required). Docs: `docs/design.md` §2.9l.
+
 ### Live model certification (`kriya/core/model_certification.py`) — PRD-035
 - **What it certifies.** An exact identity (runtime digest + inference-settings digest + environment digest + case-set version), never a model name.
 - **Matrix and command.** The matrix is `tests/test_live_prd035_certification.py` (`live_certification`, run by `scripts/certify_model.sh`); `kriya model certification` reports CURRENT/FAILED/STALE/INVALID/MISSING.
