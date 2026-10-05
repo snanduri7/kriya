@@ -1,0 +1,8 @@
+== v5-t4-lang-count-true start 18:26:33 base 5cba51c7e kriya 6530138fc
+analyze exit=0 seconds=287
+generate exit=1 wall_seconds=481.8
+run_id=20261005T183121-9434e9d6
+verify exit=0
+explain exit=0
+252	/Users/sriramnanduri/kriya-m1-live/state/attempt-evidence/20261005T183121-9434e9d6
+== v5-t4-lang-count-true end 18:39:25

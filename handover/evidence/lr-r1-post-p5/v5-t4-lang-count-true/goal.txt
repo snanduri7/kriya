@@ -1,0 +1,1 @@
+Add `public static int countTrue(final boolean... array)` to org.apache.commons.lang3.BooleanUtils that returns the number of true values in the array and throws NullPointerException for a null array, and add unit tests for it in BooleanUtilsTest.

@@ -1,0 +1,1170 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 14,
+        "seq": 228,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:226430a66b193f3b78859bc8e050043735d4e3e2a24755d83df97537c104d2fe"
+      },
+      "failure_type": "attribution_rejected",
+      "progress_classification": "NO_PROGRESS",
+      "retry": false,
+      "seq": 216,
+      "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "unauthorized_generation_target",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 78,
+        "unit_id": "s1"
+      },
+      {
+        "failure_category": "unauthorized_generation_target",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 224,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 42,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:87bfcefa1185c3e7546df3eb957f25e4fcdd0e2d21da8626735a692d3e0dee67",
+                "wire_body": "sha256:f0903f34a5a32180577730fc23d790ce2e0f09ed1a3ac7fceaa5a17284c1b893"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "more_itertools/more.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 44,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:4cdb70db40ca73b4d7a56cb9f2314f09ebe59c2251c85f4e8fc7d45bb97f0c6f",
+                "wire_body": "sha256:9038aaad8d7f1112c9c59cb307df78fd411d5ee394c43b7e3e7362f901fa4de5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 53,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:d793a70a39bafa0f41409d0c0149ce7ef993521466f2a897aad15f6b20eee593",
+                "wire_body": "sha256:c87b4972dcb990ea1d01d7a251ce6fa5fdff38105ac57921b78b650080393f56"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 57,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:8e58047450d6de392eaf9fc534e7761eb2451d880d9fe0c9faf9191c18efd664",
+                "wire_body": "sha256:7fa96d108aaeaa24aa571765d04c0044b2b60c1266278b2d793dd2363e2b80de"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 67,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "more_itertools/more.py"
+              ],
+              "seq": 42,
+              "targets": [
+                {
+                  "digest": "f3b9e01273ed656c5950c6eea13e4ade9ed4a8bdfe20ad2b2421ccd6e02180b1",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    1215,
+                    1224,
+                    4752
+                  ],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "more_itertools/more.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "5c28cfa80aa7f79a5a7108039340e590bfccb4ff4cf62d325edcef73b42ac2e3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "countable.__iter__",
+                  "shown_revision": "5c28cfa80aa7f79a5a7108039340e590bfccb4ff4cf62d325edcef73b42ac2e3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 385,
+                      "start_line": 384,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1220,
+                      "start_line": 1196,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1228,
+                      "start_line": 1222,
+                      "unit": "member"
+                    },
+                    {
+                      "end_line": 4756,
+                      "start_line": 4712,
+                      "unit": "member"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 1007,
+              "content": {
+                "content": "sha256:f71d55c48286594677c16e1f9a5fe72678910c373bc5e127e9692ece25c8fe83"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 45,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 108,
+              "content": {
+                "content": "sha256:182054e02d1d6dff8eb5ab9051594c110b66cee5ce2ae05a6bd837050b74dfb4"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 54,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 117,
+              "content": {
+                "content": "sha256:4ca10bc9de769bde1d70e129a98d2c4f8acaa0be6c6ab372d94a3ffec3b5b061"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 58,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 678,
+              "content": {
+                "content": "sha256:7ad1a381f231d138ed17296c2b5f62b9e368581882874174cccf3f3873e0f66d"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 68,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:da33dc44084f22ce15d4cc3b0f95110d4a40a0f0852e20b5dda007caa87059df"
+              },
+              "kind": "edits",
+              "path": "more_itertools/more.py",
+              "seq": 47
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "616edb96853a13a9d9cc4e5917cf03691111b66c2c21266e54275b9f6117a757",
+              "before_digest": "5c28cfa80aa7f79a5a7108039340e590bfccb4ff4cf62d325edcef73b42ac2e3",
+              "content": {
+                "after": "sha256:616edb96853a13a9d9cc4e5917cf03691111b66c2c21266e54275b9f6117a757",
+                "before": "sha256:5c28cfa80aa7f79a5a7108039340e590bfccb4ff4cf62d325edcef73b42ac2e3",
+                "diff": "sha256:6b11157b3ee3f17c386c082f95c450c8d71c7139f62574759fbf9e0de2202c26"
+              },
+              "decision": "STAGED",
+              "lines_added": 21,
+              "lines_removed": 0,
+              "path": "more_itertools/more.py",
+              "seq": 50
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:d817366381e93f6f08f5c8d2004c3516b2b760be2b88c6c6d28d71ae0b3ca254"
+              },
+              "gate": "tests",
+              "seq": 71,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 39
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 103,
+              "call_seq": 10,
+              "content": {
+                "messages": "sha256:cffc05bf3294aaef085e0fbf79886bc420de4d4d8997da4fd5e3f94d1ff3ebcc",
+                "wire_body": "sha256:c9b58f1572f042fa4cc96d9d517cd14a0c7ddcead44d07f95dc9063ca2225482"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "tests/test_more.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 105,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_more.py"
+              ],
+              "seq": 103,
+              "targets": [
+                {
+                  "digest": "ba8093f76e82aa767431b9c0c1848608df99f8dc8dfba738ab41cab9e643cbe0",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "tests/test_more.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+                  "shown_is_exact": true,
+                  "shown_member_id": "AllUniqueTests.test_basic",
+                  "shown_revision": "14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 562,
+                      "start_line": 558,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 847,
+                      "start_line": 843,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 2601,
+                      "start_line": 2600,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 4952,
+                      "start_line": 4943,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 5057,
+                      "start_line": 5054,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 10,
+              "completion_tokens": 346,
+              "content": {
+                "content": "sha256:11030110d73d9a6deb4788f7f810b5fd9e908e9e824284501168f3a6f7a9fba3"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 106,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 10,
+              "content": {
+                "analysis_model_claimed": "sha256:450dbebd6ce04ef139a3e57d5847e9f04c02bd5501d66130dfec074a6c651592"
+              },
+              "kind": "edits",
+              "path": "tests/test_more.py",
+              "seq": 108
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+              "before_digest": "14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+              "content": {
+                "after": "sha256:511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+                "before": "sha256:14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+                "diff": "sha256:32874c073c3a19161de87159b6a14bbeba70fbe357cb60a395bc409b26f618cb"
+              },
+              "decision": "STAGED",
+              "lines_added": 13,
+              "lines_removed": 0,
+              "path": "tests/test_more.py",
+              "seq": 111
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:862e1d1b94f60c91390d3ebc05b8d3ae6b6f48ca74f858deeae94add05101de6",
+                "raw_output": "sha256:1bf4f4ce6b64d6d71447a33ca6a57d2de9bfad50db2b9f54b0f214481fcd3f50"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "tests/test_more.py"
+              ],
+              "seq": 120,
+              "type": "targeted_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:1bf4f4ce6b64d6d71447a33ca6a57d2de9bfad50db2b9f54b0f214481fcd3f50"
+              },
+              "gate": "tests",
+              "seq": 114,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "targeted_test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 123,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 11,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 136,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 100
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 132,
+              "call_seq": 11,
+              "content": {
+                "messages": "sha256:5a612c0e855e7303891b10d064643e013a49ad0f3b31d16ace16c5015060d42e",
+                "wire_body": "sha256:0ad893d4f834b2c9e5e2369cce4aceb427735989ebefbae0cd71bb1b6e7d5f8a"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "tests/test_more.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 135,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_more.py"
+              ],
+              "seq": 132,
+              "targets": [
+                {
+                  "digest": "2ba27f68b39e0dd26b76e2c9bf50446eeb6023666b7ead157e0c1242a51c9318",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "tests/test_more.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+                  "shown_is_exact": true,
+                  "shown_member_id": "AllUniqueTests.test_basic",
+                  "shown_revision": "511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 562,
+                      "start_line": 558,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 847,
+                      "start_line": 843,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 2601,
+                      "start_line": 2600,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 4965,
+                      "start_line": 4956,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 5070,
+                      "start_line": 5067,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 11,
+              "completion_tokens": 733,
+              "content": {
+                "content": "sha256:da6a014b0ef4d19478e7c67e387fa618a85a11061aec60efc1f0ec83b636c380"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 137,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 11,
+              "content": {
+                "analysis_model_claimed": "sha256:0e0a86f8df7b1c6c255435ed67bd9f1d9b934e668c273dc91528b57a1a6b43ea"
+              },
+              "kind": "edits",
+              "path": "tests/test_more.py",
+              "seq": 139
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "tests/test_more.py",
+              "proposed_digest": "sha256:511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 149
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:a5264a9e200c981be061913c9698357d7363910082b0d3cdf616d204188a221a",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "tests/test_more.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 148,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 152,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 12,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 166,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 130
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 162,
+              "call_seq": 12,
+              "content": {
+                "messages": "sha256:e75888e8335696de08722711dc3ca5dccf119fc8fb5f58b4790780d6009fcfd0",
+                "wire_body": "sha256:90912be77ab522250c56e1186a85ba43d7cb46c1a6bc67f891ed8746e3d15615"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "tests/test_more.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 165,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_more.py"
+              ],
+              "seq": 162,
+              "targets": [
+                {
+                  "digest": "adae8a8f93eb80a324873c6cd762284d66e1d2a1c4326fee09c7f5d192b91a34",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    2600,
+                    2601,
+                    2603,
+                    2604,
+                    2605,
+                    2606,
+                    2607,
+                    2609,
+                    2610
+                  ],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "tests/test_more.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+                  "shown_is_exact": true,
+                  "shown_member_id": "AllUniqueTests.test_basic",
+                  "shown_revision": "511d28d661aa59bc3e96b592f04ec63f04ce81715a4ff0ad9f1a51049fd217f8",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 562,
+                      "start_line": 558,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 847,
+                      "start_line": 843,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 2626,
+                      "start_line": 2587,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 2601,
+                      "start_line": 2600,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 4965,
+                      "start_line": 4956,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 5070,
+                      "start_line": 5067,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 12,
+              "completion_tokens": 561,
+              "content": {
+                "content": "sha256:549a5406d7ad466bb48581635828576923ff7b469fd9bf6db2d898968adaed5f"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 167,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 12,
+              "content": {
+                "analysis_model_claimed": "sha256:fcd00c5272e0d03f91b416657216687881eb5fc209920e3cde8f34c5ce77c22e"
+              },
+              "kind": "edits",
+              "path": "tests/test_more.py",
+              "seq": 169
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "7a63e5600d6d125229a3d66f2bd34dc2a7290cfdb28b7913b5ed6ccad00866da",
+              "before_digest": "14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+              "content": {
+                "after": "sha256:7a63e5600d6d125229a3d66f2bd34dc2a7290cfdb28b7913b5ed6ccad00866da",
+                "before": "sha256:14368fe915fb259a12118916075e534d0f1201e9d5add2c32057986cdd44d90f",
+                "diff": "sha256:ada52df4fb29605866fef9d7a7cdcb9ab31cadd4107a31f620d6c7328de2f868"
+              },
+              "decision": "STAGED",
+              "lines_added": 12,
+              "lines_removed": 7,
+              "path": "tests/test_more.py",
+              "seq": 174
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:805ab2ebe14cd21c7e3ca9faf7a2b5095737c9dd127c7f132fc50cc7261f02cf",
+                "raw_output": "sha256:35dc07d7812a29328a87c5feae534f0237e0cfa0cd284e0a421ab030b38ef7b0"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "tests/test_more.py"
+              ],
+              "seq": 183,
+              "type": "targeted_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:35dc07d7812a29328a87c5feae534f0237e0cfa0cd284e0a421ab030b38ef7b0"
+              },
+              "gate": "tests",
+              "seq": 177,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "targeted_test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 186,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 13,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 199,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 160
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 195,
+              "call_seq": 13,
+              "content": {
+                "messages": "sha256:c14e3172199b30f2f7448c65ac5bf2023c48840f69369428d2fd73b663acb3be",
+                "wire_body": "sha256:57fd2547a0502ce4eaa25a9c030ff28f7c0ec210a614f7878e5ef878b8bb2351"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "tests/test_more.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 198,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_more.py"
+              ],
+              "seq": 195,
+              "targets": [
+                {
+                  "digest": "5925bd7c0c49d5bcbfd22feb9d2025aeb835d54b8028eb32c2670f32daef3e87",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    2600,
+                    2601,
+                    2603,
+                    2604,
+                    2605,
+                    2606,
+                    2607,
+                    2609,
+                    2610
+                  ],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "tests/test_more.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7a63e5600d6d125229a3d66f2bd34dc2a7290cfdb28b7913b5ed6ccad00866da",
+                  "shown_is_exact": true,
+                  "shown_member_id": "AllUniqueTests.test_basic",
+                  "shown_revision": "7a63e5600d6d125229a3d66f2bd34dc2a7290cfdb28b7913b5ed6ccad00866da",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 562,
+                      "start_line": 558,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 847,
+                      "start_line": 843,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 2601,
+                      "start_line": 2600,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 2614,
+                      "start_line": 2603,
+                      "unit": "member"
+                    },
+                    {
+                      "end_line": 4957,
+                      "start_line": 4948,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 5062,
+                      "start_line": 5059,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 13,
+              "completion_tokens": 3420,
+              "content": {
+                "content": "sha256:33f31659ef2f4245feb1bab58334b79630d32e3ae09c936481a273ede0eddbb3"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 200,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 13,
+              "content": {
+                "analysis_model_claimed": "sha256:57816f7482f14317d12e5e4c7adfe647e231764474acfae02251ca2bf2c3a8fb"
+              },
+              "kind": "no_change",
+              "path": "tests/test_more.py",
+              "seq": 202
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "reason": "model_proposed_no_change",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:d0aebc02bcdc163fc4df5b7bc146600a3539385e8342bb695b81880c30679b4d",
+                "raw_output": "sha256:7f07f0d960dd2919a7a7acf309fd25aa14e6583fc17dcf0a3115e3038ef0f177"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "more_itertools/more.py"
+              ],
+              "seq": 213,
+              "type": "attribution_rejected"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:226430a66b193f3b78859bc8e050043735d4e3e2a24755d83df97537c104d2fe"
+              },
+              "failure_type": "attribution_rejected",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "NO_AUTHORIZED_REPAIR_TARGET: this failure is grounded to ['more_itertools/more.py'], entirely outside this subtask's authorized write scope (['tests/test_more.py']) - no generation against this subtask's own authorized files can fix a failure whose real cause lives elsewhere; stopping before another Developer call rather than paying for a full-set retry that cannot possibly address it.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 216,
+              "stop_loop": true,
+              "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 193
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 3,
+    "review": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T174757-165198e5",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

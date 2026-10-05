@@ -1,0 +1,3 @@
+5cba51c7e benchmark task base: 62f6edfd^ + the commit's tests
+9ed5d0ba9 Fix low surrogate false match in containsAny/containsNone/indexOfAny (#1771).
+4ee32aa56 Fix low surrogate false match in containsAny/containsNone/indexOfAny (#1771)

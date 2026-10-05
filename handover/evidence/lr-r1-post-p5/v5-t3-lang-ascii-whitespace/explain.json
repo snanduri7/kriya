@@ -1,0 +1,3201 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 24,
+        "seq": 491,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_exhausted",
+      "failure_type": "targeted_test",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 479
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "quality_gates_exhausted",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 129,
+        "unit_id": "s1"
+      },
+      {
+        "failure_category": "quality_gates_exhausted",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 487,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 32,
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:2d96adf782df21a68129480260f0d438cd0c5efca58c5e1036a8fc3acb132384",
+                "wire_body": "sha256:f49655b62e16743f09f6b485f953dce182c1d722233b2a6a0ed736c4e155f310"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/CharUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 34,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java"
+              ],
+              "seq": 32,
+              "targets": [
+                {
+                  "digest": "d95eaa81f837b2a5b42b192af78ab33728fb95d2c988df718e6380aad30422bb",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtils.isAsciiControl",
+                  "shown_revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 94,
+                      "start_line": 92,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 113,
+                      "start_line": 111,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 189,
+                      "start_line": 187,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 3,
+              "completion_tokens": 520,
+              "content": {
+                "content": "sha256:520dece91106f2d5ddb8540c7710afa71a6d8f4f165043c2839ccce89e4397d2"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 35,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 3,
+              "content": {
+                "analysis_model_claimed": "sha256:82cb5ef4d708391b1499bf57d7415c55e0832d5aa2d53ee3dba523315ee72e45"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "seq": 37
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "proposed_digest": "sha256:cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 46
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:b2e4b1311b661a63b5746e5498ffb481ddf78f6ed36c8da5d6cb5ae9100b8e60",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 45,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 49,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 4,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 64,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 29
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 59,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:77e5c17fb5c2db32b0eea60b0ab57e0628f5dd8ab28bafa4d30b681a771fbfcc",
+                "wire_body": "sha256:cd556edfdb4956dc5c4c027293c07c9e74be71a748494f5683b275ace65840f5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/CharUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 63,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java"
+              ],
+              "seq": 59,
+              "targets": [
+                {
+                  "digest": "da691365aabb83edf8829b11ad71c9485d6bd1a7a561dd88b0f0cfc193ef215b",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    92,
+                    93,
+                    130,
+                    131
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtils.isAsciiControl",
+                  "shown_revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 94,
+                      "start_line": 92,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 113,
+                      "start_line": 111,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 130,
+                      "unit": "member"
+                    },
+                    {
+                      "end_line": 189,
+                      "start_line": 187,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 749,
+              "content": {
+                "content": "sha256:be51278b990f743ae2d5f472654448236fddbc9c141ac7dee75e19d3e95cfa47"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 65,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:99972cc826553683483071afa84975bcc215cca451669a4200219cc126f49841"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "seq": 67
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "proposed_digest": "sha256:cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 77
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:fd1e4897f15269a411ebd6be05eb7d3a552840e45df42cb0d1dfd481c7c9ab03",
+                "raw_output": "sha256:c5bf32748178f0185c96fc1d2abb520a718be06df8c3172cd4cd39122787ca40"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java"
+              ],
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 76,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 80,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 5,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory#3"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 95,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 57
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 90,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:3fd71ba47197ccbb615b916e2a1ed154b4bb7065773b1667471011af1b37ab62",
+                "wire_body": "sha256:33f8ef2bec6ae8db111509ce85c89c5101620e90bfd39e9891a40485050f3be8"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/CharUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 94,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:b10603a3c24bc7c0531129cd44557c987df783f61f944552d488520ab47e1e46",
+                "wire_body": "sha256:085733ec4a32fe6b89b976aec1849d5f19078c8ec9a27bc84a178eaafe7cd436"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 105,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:bce4e869c3e6e63bb3c59a50ee3dc754a261a36e45430ccea9d5e52c5135cc5a",
+                "wire_body": "sha256:64e6df00f8c90f07e181dcec5d3c353784e64ea2b41aee1bed1251585210c522"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 109,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:32f90be31e2a9495d63a713f4d3fcf5ea6c6ccbc2d7653bcf96aed1a7a8eb67e",
+                "wire_body": "sha256:4c544d05f8e9210b60774155317051a0243e40c594b6de74798c65aaacc90a6c"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 118,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java"
+              ],
+              "seq": 90,
+              "targets": [
+                {
+                  "digest": "d1aa14e3b8052a6b8e73ea41f1d2b19809988abbd2e7741accc7e436a1f778ce",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 2,
+                  "loci": [
+                    92,
+                    93,
+                    130,
+                    131,
+                    172,
+                    173,
+                    174,
+                    175,
+                    176,
+                    177,
+                    178,
+                    179,
+                    180,
+                    181,
+                    182,
+                    183,
+                    184,
+                    185,
+                    186,
+                    187,
+                    188,
+                    189
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtils.isAsciiControl",
+                  "shown_revision": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 94,
+                      "start_line": 92,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 113,
+                      "start_line": 111,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 130,
+                      "unit": "member"
+                    },
+                    {
+                      "end_line": 218,
+                      "start_line": 140,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 189,
+                      "start_line": 187,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 882,
+              "content": {
+                "content": "sha256:244511ea9e15cd2a4d6a58e413d93893a3c2c35b547ede06c5ac527a0d3e83e6"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 96,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 101,
+              "content": {
+                "content": "sha256:057a870798bc533ea77b85cd693531d41c3620ebf13768f015b5087589c5266b"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 106,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 107,
+              "content": {
+                "content": "sha256:f279c623d7fafde1c1847bb7be913714f5dedeb9d236bb93e4ce80edcda5fd38"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 110,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 521,
+              "content": {
+                "content": "sha256:c7918f7ecb19d87f76d1930b1e6fcab29930669bc517e98e26ecf98c0286ee6f"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 119,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:077725cce33dd63982ae52667cc493858f35748ae1b5c8716056665920062b4d"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "seq": 98
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "bcebd6620ac1ce066a38ee9463512b5d553d7c52f978d5a2d1450e9be36b225b",
+              "before_digest": "cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+              "content": {
+                "after": "sha256:bcebd6620ac1ce066a38ee9463512b5d553d7c52f978d5a2d1450e9be36b225b",
+                "before": "sha256:cc6db1cb37ecc9ce677232e13cda976d3cb39ea5b30bae81c72ab2770ea69773",
+                "diff": "sha256:b5590900b4b26ea2cb31c400c51836c37d96cb0084a14719d2ad869db4bac7e2"
+              },
+              "decision": "STAGED",
+              "lines_added": 22,
+              "lines_removed": 0,
+              "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+              "seq": 102
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:78dc6c57324e49c5e029d5663fbcdb328fef3a97c799b1988a27529cb6f95f53"
+              },
+              "gate": "tests",
+              "seq": 122,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 88
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 154,
+              "call_seq": 10,
+              "content": {
+                "messages": "sha256:78c0d3dd27f495a515d901187cb50b556fdb26470a91548e4b58ffd583cbea20",
+                "wire_body": "sha256:fa6641dde15eb263fa51ae03f54fe9d36e3160878570b01aa02b42d0c6fd535b"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 156,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 11,
+              "content": {
+                "messages": "sha256:5af055a13db3d7a50ed337db51cb961e82390cb9d5b3a9e72848e83a6bd5f015",
+                "wire_body": "sha256:b461e618ff0028539efc57ea7017a35f7ca9000c2af10bf4bc38504da7247fa5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 167,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "content": {
+                "messages": "sha256:e73a74844ffd74c315a5f8b177147a1eed08e36627eccaf26fef93e085511f20",
+                "wire_body": "sha256:16c617ea10a22630b7523fd1de501076a80746d1ead0691951433f22bf772829"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 171,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 154,
+              "targets": [
+                {
+                  "digest": "516777b88b6df4c577c5505839e22acbb87dcf3380b7a6dbfbdea3a9600ae4d5",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 129,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 10,
+              "completion_tokens": 843,
+              "content": {
+                "content": "sha256:1c6a2183a9e2815c7c50eaae90e067d331b78c511fbd9a6002679f887fda56eb"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 157,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 11,
+              "completion_tokens": 177,
+              "content": {
+                "content": "sha256:f6b59b0e512ed8a527ca47486c1c7ffabf849c30922aeb9d7ba95342057e2d80"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 168,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "completion_tokens": 145,
+              "content": {
+                "content": "sha256:0442c651e9f5e41793c5ee2e1aaa5a6ccf8891df1619de1cb2ad6fba106ed034"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 172,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 10,
+              "content": {
+                "analysis_model_claimed": "sha256:0fb19f3e698523def55197af703e0d9bc580e3df11ad86374973c8bddf83cf56"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 159
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+              "before_digest": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+              "content": {
+                "after": "sha256:9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                "before": "sha256:a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                "diff": "sha256:719e88e77e6ae75390deffdb1a88472be8609e3169f7f08be0e65cbac5a2fce4"
+              },
+              "decision": "STAGED",
+              "lines_added": 27,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 162
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:5d23405a76448da1b8b709e0a257993bfd216053353950bbaa2e93f2ed6dd1cc",
+                "raw_output": "sha256:5d23405a76448da1b8b709e0a257993bfd216053353950bbaa2e93f2ed6dd1cc"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 179,
+              "type": "goal_spec_compliance"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "goal_spec_compliance",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 182,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 13,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 194,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 151
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 191,
+              "call_seq": 13,
+              "content": {
+                "messages": "sha256:7fb36db784faed76fec743d8bb922809a3a809c36e2f8dfc32a05ba0b86ecbc4",
+                "wire_body": "sha256:5f645f5f1e5caa1fce28742c8415344bffa6c9a01c1a16cb1631f0601b4840ae"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 193,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 191,
+              "targets": [
+                {
+                  "digest": "3a482015fc4321e2df35c77f30b44be8b0ed8ca05faec29ad0dd8bf94e99a1f7",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 129,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 13,
+              "completion_tokens": 987,
+              "content": {
+                "content": "sha256:7f444b344158027b406b41e64a40a1009bf29beabb7909ebd2814fdcf64d338b"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 195,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 13,
+              "content": {
+                "analysis_model_claimed": "sha256:115ebbe0cbbbc14bb7f1b498f36fdf180f404b8cf81fa9af41906dbd4e513330"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 197
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "proposed_digest": "sha256:9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 206
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:17753b7ae9d01f529e6327214179077555a8a9e6b2ec5be9e9758eb2b74d5c43",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 205,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 209,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the current attempt",
+              "seq": 221
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 189
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 219,
+              "targets": [
+                {
+                  "digest": "3a482015fc4321e2df35c77f30b44be8b0ed8ca05faec29ad0dd8bf94e99a1f7",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    138,
+                    139,
+                    141
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 129,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:ef405050085bc7b93be2521f4859b55ef11e3cd47fe02643db9172813c8ab674",
+                "raw_output": "sha256:a2a4c194a1f801605bb4bfdeea50164f38be0667505c6742c2d9b190beaa96b5"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 225,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 229,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 240
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 217
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 238,
+              "targets": [
+                {
+                  "digest": "3a482015fc4321e2df35c77f30b44be8b0ed8ca05faec29ad0dd8bf94e99a1f7",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    138,
+                    139,
+                    141
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 129,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:ef405050085bc7b93be2521f4859b55ef11e3cd47fe02643db9172813c8ab674",
+                "raw_output": "sha256:a2a4c194a1f801605bb4bfdeea50164f38be0667505c6742c2d9b190beaa96b5"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 244,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 249,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 14,
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "role": "developer",
+              "seq": 263,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 236
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 260,
+              "call_seq": 14,
+              "content": {
+                "messages": "sha256:0bdeddc02c5589404b72cdd8de5f7164dc65ea29c86eaea100053efe2b718a0a",
+                "wire_body": "sha256:ee2a89517add15933a97925bca138f7c5c10ca10f2c3610fff466896460792ed"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 262,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 15,
+              "content": {
+                "messages": "sha256:5af055a13db3d7a50ed337db51cb961e82390cb9d5b3a9e72848e83a6bd5f015",
+                "wire_body": "sha256:b461e618ff0028539efc57ea7017a35f7ca9000c2af10bf4bc38504da7247fa5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 275,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 16,
+              "content": {
+                "messages": "sha256:8e38f71954bf386a7a7587da8dcf4480583d64c0d86c8c2cdfb839200ce66e34",
+                "wire_body": "sha256:f06706a0c06cd72984caa57d4eecb530be10a98e6a0b7018f5a795863dd9d0b7"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 279,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 260,
+              "targets": [
+                {
+                  "digest": "3a482015fc4321e2df35c77f30b44be8b0ed8ca05faec29ad0dd8bf94e99a1f7",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    138,
+                    139,
+                    141
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "9718ecc04679aad34b21c493eeba3606af86ada3ec99483781bda1a2683c7a25",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 129,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 14,
+              "completion_tokens": 3433,
+              "content": {
+                "content": "sha256:a1873496c7b749f7a8082506813a81bb7a1974b07283ea02c49e460b75a07370"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 264,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 15,
+              "completion_tokens": 124,
+              "content": {
+                "content": "sha256:17eb9d3132bfc46892501ed59ce2ff1a784249c283db40d906bdd96191117f2d"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 276,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 16,
+              "completion_tokens": 166,
+              "content": {
+                "content": "sha256:8ac76c461ec3f8716cb9699edb0d6c10aca45b1b41ed7ae31611f183fdcb0cb9"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 280,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 14,
+              "content": {
+                "analysis_model_claimed": "sha256:6ad914ba6ef56745c1d26d67deb390582a339890db87858e1d0b7be3766e0c30"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 266
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+              "before_digest": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+              "content": {
+                "after": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                "before": "sha256:a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                "diff": "sha256:3302fa62e312c88a828843086226c9617e43f9c22c9d6be61fcb15c6f67271c3"
+              },
+              "decision": "STAGED",
+              "lines_added": 51,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 270
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:4506c0112e3d98dce2730a57a230e068a470c2ec2814c8e151fa8a22423c78e1",
+                "raw_output": "sha256:4506c0112e3d98dce2730a57a230e068a470c2ec2814c8e151fa8a22423c78e1"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java",
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 287,
+              "type": "goal_spec_compliance"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "goal_spec_compliance",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 290,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 17,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 303,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 253
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 257
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 5,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 300,
+              "call_seq": 17,
+              "content": {
+                "messages": "sha256:e54a0cd1c0d6e04ea885f4d059d446b06b5c1b35308df09ef4eca117f737a5f8",
+                "wire_body": "sha256:2997918da7b0987edfd835a1cd81edf16c5c37d9df84276c65497f494c21c49a"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 302,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 300,
+              "targets": [
+                {
+                  "digest": "36b20f4e3cdd7d80b17530506f21bc1c92c31f209ddfdf3af982a418cd8d9557",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    138,
+                    139,
+                    141
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 149,
+                      "start_line": 123,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 168,
+                      "start_line": 153,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 17,
+              "completion_tokens": 761,
+              "content": {
+                "content": "sha256:0395c27e797383193edbc246680a2fcdcb688afed83974729707fdb5236b7b41"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 304,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 17,
+              "content": {
+                "analysis_model_claimed": "sha256:b34b2b5310eb6661848f3aeb3569510b9c9daa3003982e92763776fd72dcf683"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 306
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "proposed_digest": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 315
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:17753b7ae9d01f529e6327214179077555a8a9e6b2ec5be9e9758eb2b74d5c43",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 314,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 318,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 18,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 331,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 297
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 6,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 328,
+              "call_seq": 18,
+              "content": {
+                "messages": "sha256:f6df80bacd7bded54e217aedabcd0c459474feea6a503b6dc46094c923dabe6c",
+                "wire_body": "sha256:2cf9f4702e154545e5c137b74558879b4f188104a74451c57b6bb701450d099b"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 330,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 328,
+              "targets": [
+                {
+                  "digest": "a3d96820374940a7109670fced0d5987590fd55f7afdeb216f9689975da83a13",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    136,
+                    137,
+                    138,
+                    139,
+                    140,
+                    141,
+                    144,
+                    145,
+                    147
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 160,
+                      "start_line": 114,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 168,
+                      "start_line": 153,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 18,
+              "completion_tokens": 975,
+              "content": {
+                "content": "sha256:4f78448a16fe64071abe25d8653894a0f4a96a04d6bc058c4b162c86e11fc709"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 332,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 18,
+              "content": {
+                "analysis_model_claimed": "sha256:79315dd25f5cffe61dc33122f298f98131032e400595383e822ad7aa4ea20cb4"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 334
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "proposed_digest": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 343
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:17753b7ae9d01f529e6327214179077555a8a9e6b2ec5be9e9758eb2b74d5c43",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 342,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 346,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 19,
+              "changed": [
+                "authority",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 359,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 326
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 7,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 356,
+              "call_seq": 19,
+              "content": {
+                "messages": "sha256:9fb69ea3921fcc0963f3cb720e8e6a81972c0e9473c959724c826c3c187e8719",
+                "wire_body": "sha256:529780739dd600e4615fbe896d814146c360250c67722d139a22791d9001a9f5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 358,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 356,
+              "targets": [
+                {
+                  "digest": "42262017e9258eb0ec7271460798cd1030333c18a9c143c193baa06eefcadfca",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 2,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    136,
+                    137,
+                    138,
+                    139,
+                    140,
+                    141,
+                    144,
+                    145,
+                    147,
+                    153,
+                    154,
+                    155,
+                    156,
+                    157,
+                    158,
+                    159,
+                    162,
+                    163,
+                    165
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 176,
+                      "start_line": 98,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 168,
+                      "start_line": 153,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 19,
+              "completion_tokens": 644,
+              "content": {
+                "content": "sha256:cf5864096e8628097854f45e0219d8837bbe04509fc5dbc3d201685e2d240064"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 360,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 19,
+              "content": {
+                "analysis_model_claimed": "sha256:7be59d5492bfa215ca10fa5f2874beb41d916ee93f8d5d13339d4f95b17a1b07"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 362
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "proposed_digest": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+              "reason_code": "structural_corruption",
+              "seq": 371
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:e016b4a7d00f31b37344092cd0e33d0cf524bf56839e7cb40f3b6a6814d17a0c",
+                "raw_output": "sha256:ec5a90a53727df16679c4e4788c9a7bf0b7a0bce98560fe9fb8247fe3e5fa4bc"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 370,
+              "type": "structural_corruption"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "structural_corruption",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 375,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 20,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 389,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 354
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 8,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 386,
+              "call_seq": 20,
+              "content": {
+                "messages": "sha256:447d5335b47c8fe7182af92cd9fbdc4902a97c490d39d697dd1deb6922b50736",
+                "wire_body": "sha256:2d52c8758bc4d081ea35f08b21994c443522babc913dbe3352d350c7a66efa9c"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 388,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 386,
+              "targets": [
+                {
+                  "digest": "c743728d7b5a73e45e2a89c9d3a6a70795c40db3f13675b6d3d77d6a347ae306",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    136,
+                    137,
+                    138,
+                    139,
+                    140,
+                    141,
+                    144,
+                    145,
+                    147,
+                    153,
+                    154,
+                    155,
+                    156,
+                    157,
+                    158,
+                    159,
+                    162,
+                    163,
+                    165
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 152,
+                      "start_line": 122,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 168,
+                      "start_line": 153,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 20,
+              "completion_tokens": 725,
+              "content": {
+                "content": "sha256:e9b100856cfaded5235efd98a16247b24f188d388ba762d7184aaed2dd286067"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 390,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 20,
+              "content": {
+                "analysis_model_claimed": "sha256:a4f196fa033e9ba6da7743797548a98c2a1d281464f58c08528cba8de2b5740d"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 392
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "1dcaf116367d7730ff2cc74d077ebe6b4c7391ceaabc2341251e9b34d8212294",
+              "before_digest": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+              "content": {
+                "after": "sha256:1dcaf116367d7730ff2cc74d077ebe6b4c7391ceaabc2341251e9b34d8212294",
+                "before": "sha256:a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                "diff": "sha256:a27a7c5c2a8f46fb059a06e739d24edc724f63bb240cbc42784ef0f5ffc6bee0"
+              },
+              "decision": "STAGED",
+              "lines_added": 69,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 396
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:eb62115c6ed2267390e6772f35821fff7eca3d5cea5f725bb1398208fb48bc15",
+                "raw_output": "sha256:8558e5e06e23ddf1b84a0cfb3421e380b47a0196851ef1c638834e5bddebbd37"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 405,
+              "type": "targeted_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:8558e5e06e23ddf1b84a0cfb3421e380b47a0196851ef1c638834e5bddebbd37"
+              },
+              "gate": "tests",
+              "seq": 399,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "targeted_test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 408,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 21,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 423,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 379
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 383
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 9,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 419,
+              "call_seq": 21,
+              "content": {
+                "messages": "sha256:78e5a0cfdd4d62f0dd0f048ab7200c9a1b76386c23aff888c4ad76dd72f08eba",
+                "wire_body": "sha256:5c0e114f97d1f48df010f9ca67cc6a15a49a22479a983e8bbfa68f36143fcee2"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 422,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 22,
+              "content": {
+                "messages": "sha256:8e38f71954bf386a7a7587da8dcf4480583d64c0d86c8c2cdfb839200ce66e34",
+                "wire_body": "sha256:f06706a0c06cd72984caa57d4eecb530be10a98e6a0b7018f5a795863dd9d0b7"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 437,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 419,
+              "targets": [
+                {
+                  "digest": "dd7c4072a71f658ed8640e3776a3607e4637b0b21ffebcd2adddc30424e5934f",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    136,
+                    137,
+                    138,
+                    139,
+                    140,
+                    141,
+                    144,
+                    145,
+                    147,
+                    153,
+                    154,
+                    155,
+                    156,
+                    157,
+                    158,
+                    159,
+                    162,
+                    163,
+                    165,
+                    188
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1dcaf116367d7730ff2cc74d077ebe6b4c7391ceaabc2341251e9b34d8212294",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "1dcaf116367d7730ff2cc74d077ebe6b4c7391ceaabc2341251e9b34d8212294",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 173,
+                      "start_line": 122,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 186,
+                      "start_line": 171,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 196,
+                      "start_line": 180,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 21,
+              "completion_tokens": 415,
+              "content": {
+                "content": "sha256:73b6646228befc16a67a102e934750e1261f2f9120c5beab4d7c5028ab19b635"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 424,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 22,
+              "completion_tokens": 164,
+              "content": {
+                "content": "sha256:cc15d0a7aa6e3153dc7b90bfdba771a7a43ca614d2c19059b0170b9c4c1bd0f3"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 438,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 21,
+              "content": {
+                "analysis_model_claimed": "sha256:1205cbc306e86b7f0185f7606597f66e3af76ea15ad35dd02d8675cc3e6cd6d4"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 426
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+              "before_digest": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+              "content": {
+                "after": "sha256:7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                "before": "sha256:a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                "diff": "sha256:3302fa62e312c88a828843086226c9617e43f9c22c9d6be61fcb15c6f67271c3"
+              },
+              "decision": "STAGED",
+              "lines_added": 51,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 431
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:e7fac6be0f0f4f07be97422395d2062603986f276f3808b58ea35fb94dd0981f",
+                "raw_output": "sha256:e7fac6be0f0f4f07be97422395d2062603986f276f3808b58ea35fb94dd0981f"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/CharUtils.java",
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 445,
+              "type": "goal_spec_compliance"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "goal_spec_compliance",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 448,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 23,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 460,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 416
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 10,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 457,
+              "call_seq": 23,
+              "content": {
+                "messages": "sha256:bd0b560a9ebb7910850a344ef1199a7a8967f3d52b7e4c9b124346833338b7ee",
+                "wire_body": "sha256:39ddfb94686d29023b7d25f64b179a16bbcd5ff20ed6d6c25eaf0b8d4389c1ba"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 459,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 457,
+              "targets": [
+                {
+                  "digest": "c743728d7b5a73e45e2a89c9d3a6a70795c40db3f13675b6d3d77d6a347ae306",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    51,
+                    52,
+                    53,
+                    54,
+                    55,
+                    56,
+                    57,
+                    129,
+                    130,
+                    131,
+                    132,
+                    133,
+                    134,
+                    135,
+                    136,
+                    137,
+                    138,
+                    139,
+                    140,
+                    141,
+                    144,
+                    145,
+                    147,
+                    153,
+                    154,
+                    155,
+                    156,
+                    157,
+                    158,
+                    159,
+                    162,
+                    163,
+                    165
+                  ],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharUtilsTest.testConstructor",
+                  "shown_revision": "7f9eaa77ff4241c4b8e3d0db76c2fb1be2b28417ed3cd7f52a5d4c849d58b6c3",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 58,
+                      "start_line": 51,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 72,
+                      "start_line": 61,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 152,
+                      "start_line": 122,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 168,
+                      "start_line": 153,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 23,
+              "completion_tokens": 1010,
+              "content": {
+                "content": "sha256:af9a16f53004a5b299d00a02577c8e2aa91913512d837602576fafb115330bb0"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 461,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 23,
+              "content": {
+                "analysis_model_claimed": "sha256:d15028c05f52997e397b20f7195aeae04acff8c405fae07f623661d36c887379"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 463
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "1716716cd4550a856ac4d6fc2b8c3f1c851c427d05f3da43d8e7f14af704372b",
+              "before_digest": "a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+              "content": {
+                "after": "sha256:1716716cd4550a856ac4d6fc2b8c3f1c851c427d05f3da43d8e7f14af704372b",
+                "before": "sha256:a1ee59351859e4952f5566e5d36735fa8971343187a671f36344518479667bed",
+                "diff": "sha256:329836409f848a6352650cfc420cca64bf5da74938a4ec3610a016f9239d0925"
+              },
+              "decision": "STAGED",
+              "lines_added": 82,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+              "seq": 467
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:5fafc1b1134df489818bf0d934370fc7fba2d657cac8855f31f9fff4ec0fce20",
+                "raw_output": "sha256:81c886fd4e903c18f6b0aa45980e907b35e33f73f8d6b04ffc31ac79783f64c6"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+              ],
+              "seq": 476,
+              "type": "targeted_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:81c886fd4e903c18f6b0aa45980e907b35e33f73f8d6b04ffc31ac79783f64c6"
+              },
+              "gate": "tests",
+              "seq": 470,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_exhausted",
+              "failure_type": "targeted_test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_exhausted",
+                "reason": "global attempt bound reached across all failure families",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 479,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 455
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 11,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 1,
+    "review": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T180101-bf592824",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

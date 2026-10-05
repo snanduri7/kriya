@@ -1,0 +1,1 @@
+Add a method `public int getPetCount()` to org.springframework.samples.petclinic.owner.Owner that returns the number of pets the owner has, and add a unit test for it in OwnerTests.

@@ -1,0 +1,122 @@
+{
+ "process_wall_seconds": 452.27142216596985,
+ "recorder_seconds": 0.37734091584570706,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 5,
+   "seconds": 0.0001639589900150895
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 5,
+   "seconds": 4.54107066616416e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0006040410371497273
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 14,
+   "seconds": 0.002133459027390927
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 3,
+   "seconds": 0.0020188339985907078
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 5,
+   "seconds": 5.47909876331687e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 5,
+   "seconds": 0.0003962920163758099
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 8,
+   "seconds": 0.0057594559621065855
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 88,
+   "seconds": 0.07429407886229455
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 6,
+   "seconds": 0.005303582933265716
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 9,
+   "seconds": 0.047519458865281194
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 5,
+   "seconds": 7.4169947765767574e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.020484416047111154
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 14,
+   "seconds": 0.0018979169544763863
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 5,
+   "seconds": 0.004500332986935973
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 4,
+   "seconds": 0.0045873759663663805
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 5,
+   "seconds": 0.0002716669696383178
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 14,
+   "seconds": 0.039117957989219576
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 14,
+   "seconds": 0.04059941810555756
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 2,
+   "seconds": 1.195893855765462e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 7,
+   "seconds": 0.008372833952307701
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 5,
+   "seconds": 0.0005190830561332405
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 3,
+   "seconds": 0.1163166260230355
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 5,
+   "seconds": 0.0004494570312090218
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 7,
+   "seconds": 0.0007367930957116187
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 4,
+   "seconds": 0.001204917032737285
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 2,
+   "seconds": 1.0250951163470745e-05
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p5/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/v5-t2-moreit-count-unique.yaml",
+  "generate",
+  "Add a function `count_unique(iterable, key=None)` to more_itertools/more.py that returns the number of distinct items in the iterable (distinct by `key(item)` when a key function is given), add it to the module's `__all__`, and add tests for it in tests/test_more.py.",
+  "-y"
+ ]
+}

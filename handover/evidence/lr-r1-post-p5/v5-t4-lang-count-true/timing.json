@@ -1,0 +1,110 @@
+{
+ "process_wall_seconds": 481.55486412497703,
+ "recorder_seconds": 0.08638820901978761,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 1,
+   "seconds": 4.39999857917428e-05
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 1,
+   "seconds": 5.829497240483761e-07
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0006425410392694175
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 4,
+   "seconds": 0.0009295429917983711
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 2,
+   "seconds": 0.002094375027809292
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 1,
+   "seconds": 2.2249994799494743e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 1,
+   "seconds": 6.39590434730053e-05
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 6,
+   "seconds": 0.004491708998102695
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 21,
+   "seconds": 0.019971626927144825
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 2,
+   "seconds": 0.001729791983962059
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 1,
+   "seconds": 0.001122457964811474
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 1,
+   "seconds": 1.4579854905605316e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.036010790965519845
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 3,
+   "seconds": 0.000514791056048125
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 1,
+   "seconds": 0.000873750017490238
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 1,
+   "seconds": 6.404105806723237e-05
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 3,
+   "seconds": 0.0069503330159932375
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 3,
+   "seconds": 0.007169458025600761
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 1,
+   "seconds": 5.999987479299307e-06
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 1,
+   "seconds": 0.0029233749955892563
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 1,
+   "seconds": 0.00014599994756281376
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 2,
+   "seconds": 0.00020358298206701875
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 1,
+   "seconds": 0.000406875042244792
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 1,
+   "seconds": 4.917033948004246e-06
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p5/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/v5-t4-lang-count-true.yaml",
+  "generate",
+  "Add `public static int countTrue(final boolean... array)` to org.apache.commons.lang3.BooleanUtils that returns the number of true values in the array and throws NullPointerException for a null array, and add unit tests for it in BooleanUtilsTest.",
+  "-y"
+ ]
+}

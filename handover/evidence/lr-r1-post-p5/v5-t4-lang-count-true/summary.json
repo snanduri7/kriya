@@ -1,0 +1,213 @@
+{
+ "workspace": "v5-t4-lang-count-true",
+ "goal": "Add `public static int countTrue(final boolean... array)` to org.apache.commons.lang3.BooleanUtils that returns the number of true values in the array and throws NullPointerException for a null array, and add unit tests for it in BooleanUtilsTest.",
+ "run_id": "20261005T183121-9434e9d6",
+ "generate_exit": 1,
+ "wall_seconds": 481.7599537372589,
+ "process_wall_seconds": 481.55486412497703,
+ "recorder_seconds": 0.08638820901978761,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0,
+  "capture_mode": 0.0,
+  "close_run": 0.0006,
+  "emit": 0.0009,
+  "ensure_store": 0.0021,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0001,
+  "mirror_decision": 0.0045,
+  "mirror_event": 0.02,
+  "mirror_evidence": 0.0017,
+  "mirror_gate_outcome": 0.0011,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.036,
+  "record_call_result": 0.0005,
+  "record_diagnosis": 0.0009,
+  "record_fallback_decision": 0.0001,
+  "record_wire_request": 0.007,
+  "record_wire_response": 0.0072,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0029,
+  "_record_authority_snapshot": 0.0001,
+  "_recorded_section_fit": 0.0002,
+  "_record_recovery_decision": 0.0004,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 1,
+  "capture_mode": 1,
+  "close_run": 1,
+  "emit": 4,
+  "ensure_store": 2,
+  "enter_attempt_iteration": 1,
+  "exit_attempt_iteration": 1,
+  "mirror_decision": 6,
+  "mirror_event": 21,
+  "mirror_evidence": 2,
+  "mirror_gate_outcome": 1,
+  "note_retry_evidence": 1,
+  "prune_after_run": 1,
+  "record_call_result": 3,
+  "record_diagnosis": 1,
+  "record_fallback_decision": 1,
+  "record_wire_request": 3,
+  "record_wire_response": 3,
+  "store_pointer": 1,
+  "_record_gate_result": 1,
+  "_record_authority_snapshot": 1,
+  "_recorded_section_fit": 2,
+  "_record_recovery_decision": 1,
+  "_unit_evidence": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 0,
+  "seconds": 0.0
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.0006425410392694175
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.036010790965519845
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 54,
+ "records_by_kind": {
+  "mirror.event": 21,
+  "mirror.decision": 6,
+  "model.request": 3,
+  "model.response": 3,
+  "model.result": 3,
+  "prompt.sections": 2,
+  "mirror.evidence": 2,
+  "run.opened": 1,
+  "unit.opened": 1,
+  "gate.result": 1,
+  "attempt.opened": 1,
+  "fallback.decision": 1,
+  "authority.snapshot": 1,
+  "obligations.snapshot": 1,
+  "attempt.closed": 1,
+  "diagnosis": 1,
+  "mirror.gate_outcome": 1,
+  "recovery.decision": 1,
+  "attempt.concluded": 1,
+  "unit.closed": 1,
+  "run.closed": 1
+ },
+ "store_kib": 252,
+ "capture": "full",
+ "model_calls": 3,
+ "model_seconds": 71.28,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "localization",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  }
+ ],
+ "attempts": 1,
+ "calls_outside_attempts": {
+  "localization": 1,
+  "planning": 2
+ },
+ "completeness": {
+  "Q1:NOT_APPLICABLE": 1,
+  "Q2:RECORDED": 1,
+  "Q3:NOT_APPLICABLE": 1,
+  "Q4:NOT_APPLICABLE": 1,
+  "Q5:RECORDED": 1,
+  "Q6:RECORDED": 1,
+  "Q7:NOT_APPLICABLE": 1,
+  "Q8:RECORDED": 1
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q1",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model request was made in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q3",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no model response in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q4",
+   "status": "NOT_APPLICABLE",
+   "reason": "no_model_call: no Developer request in this attempt"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 3,
+    "seq": 54,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:0a941655034ffcdf61c7b8f543b558346ad5b465801f7a3f73646fae3104032c"
+   },
+   "failure_type": "context_edit_protocol_unsatisfiable",
+   "progress_classification": "PROGRESS",
+   "retry": false,
+   "seq": 47
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "context_edit_protocol_unsatisfiable",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "failure_category": "context_edit_protocol_unsatisfiable",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 51,
+    "unit_id": "s1"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.018,
+ "non_model_seconds": 410.48,
+ "recorder_pct_non_model": 0.021
+}
