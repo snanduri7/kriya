@@ -1,0 +1,29 @@
+derive qualified-implies-all-capabilities KILLED 3 failed, 162 passed in 5.70s
+derive unavailable-counts-as-pass KILLED 3 failed, 153 passed in 5.66s
+derive ignore-stale-record KILLED 1 failed, 133 passed in 6.83s
+derive ignore-runtime-identity SURVIVED 322 passed in 24.55s
+derive ignore-inference-identity KILLED 1 failed, 140 passed in 5.79s
+derive patch-implies-native-tools KILLED 3 failed, 132 passed in 5.83s
+derive inherit-base-tag-capabilities KILLED 2 failed, 169 passed in 6.97s
+derive skip-edit-consumer-request-profile KILLED 1 failed, 169 passed in 5.87s
+derive explicit-loses-to-derived KILLED 1 failed, 153 passed in 5.89s
+derive fingerprint-reads-derived-profile KILLED 3 failed, 203 passed in 11.70s
+route configured-equals-compatible KILLED 3 failed, 152 passed in 5.86s
+route ordinary-fallback-targeted-uses-bool-chain KILLED 3 failed, 157 passed in 5.80s
+route only-force-strategy-transition-fixed KILLED 5 failed, 105 passed in 4.39s
+route transition-reverts-to-bool-chain KILLED 1 failed, 209 passed in 6.00s
+route ignore-patch-only-targets KILLED 3 failed, 139 passed in 5.64s
+route remove-call-time-backstop KILLED 3 failed, 190 passed in 6.91s
+route reorder-fallback-chain KILLED 2 failed, 138 passed in 5.79s
+route full-set-escalation-invokes-incompatible KILLED 2 failed, 148 passed in 5.81s
+route first-incompatible-stops-the-scan KILLED 2 failed, 150 passed in 5.96s
+route unknown-protocol-treated-as-incompatible KILLED 3 failed, 145 passed in 4.55s
+route primary-full-set-path-skipped KILLED 3 failed, 107 passed in 6.00s
+route terminal-while-primary-route-remains KILLED 3 failed, 127 passed in 5.79s
+route boundary-equal-is-proof KILLED 1 failed, 153 passed in 5.74s
+route nominal-window-not-allocation KILLED 2 failed, 142 passed in 5.76s
+route run-wide-rejection-becomes-primary-route KILLED 1 failed, 216 passed in 7.91s
+route full-set-escalation-without-targets KILLED 1 failed, 225 passed in 8.25s
+evidence q8-drops-routing-fields KILLED 1 failed, 222 passed in 8.03s
+evidence routing-decision-unrecorded KILLED 1 failed, 222 passed in 8.29s
+TOTAL 28 {'KILLED': 27, 'SURVIVED': 1}

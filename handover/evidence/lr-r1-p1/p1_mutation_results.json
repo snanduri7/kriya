@@ -1,0 +1,247 @@
+{
+ "head": "ec24d78f78a912b3d0af8dd2483f9fee8213f5a2",
+ "baseline": {
+  "exit": 0,
+  "summary": "322 passed in 24.71s"
+ },
+ "tests": [
+  "tests/test_lr_r1_p1_capability_routing.py",
+  "tests/test_lr_r1_p1_fallback_incompatible_reproducer.py",
+  "tests/test_prd017_fallback_transition.py",
+  "tests/test_model_capabilities.py",
+  "tests/test_prd014_model_qualification.py",
+  "tests/test_retry_policy.py",
+  "tests/test_best_of_n.py",
+  "tests/test_prd031_coordinators.py",
+  "tests/test_context_edit_protocol_001.py",
+  "tests/test_lr_r1_m1_recovery.py",
+  "tests/test_lr_r1_m1_t6_paths.py",
+  "tests/state_machine"
+ ],
+ "mutants": [
+  {
+   "group": "derive",
+   "label": "qualified-implies-all-capabilities",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "3 failed, 162 passed in 5.70s",
+   "seconds": 6.5
+  },
+  {
+   "group": "derive",
+   "label": "unavailable-counts-as-pass",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "3 failed, 153 passed in 5.66s",
+   "seconds": 6.5
+  },
+  {
+   "group": "derive",
+   "label": "ignore-stale-record",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "1 failed, 133 passed in 6.83s",
+   "seconds": 7.7
+  },
+  {
+   "group": "derive",
+   "label": "ignore-runtime-identity",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "SURVIVED",
+   "summary": "322 passed in 24.55s",
+   "seconds": 25.4
+  },
+  {
+   "group": "derive",
+   "label": "ignore-inference-identity",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "1 failed, 140 passed in 5.79s",
+   "seconds": 6.6
+  },
+  {
+   "group": "derive",
+   "label": "patch-implies-native-tools",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "3 failed, 132 passed in 5.83s",
+   "seconds": 6.7
+  },
+  {
+   "group": "derive",
+   "label": "inherit-base-tag-capabilities",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "2 failed, 169 passed in 6.97s",
+   "seconds": 7.8
+  },
+  {
+   "group": "derive",
+   "label": "skip-edit-consumer-request-profile",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "1 failed, 169 passed in 5.87s",
+   "seconds": 6.7
+  },
+  {
+   "group": "derive",
+   "label": "explicit-loses-to-derived",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "1 failed, 153 passed in 5.89s",
+   "seconds": 6.7
+  },
+  {
+   "group": "derive",
+   "label": "fingerprint-reads-derived-profile",
+   "file": "kriya/core/model_runtime.py",
+   "status": "KILLED",
+   "summary": "3 failed, 203 passed in 11.70s",
+   "seconds": 12.5
+  },
+  {
+   "group": "route",
+   "label": "configured-equals-compatible",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "3 failed, 152 passed in 5.86s",
+   "seconds": 6.7
+  },
+  {
+   "group": "route",
+   "label": "ordinary-fallback-targeted-uses-bool-chain",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "3 failed, 157 passed in 5.80s",
+   "seconds": 6.6
+  },
+  {
+   "group": "route",
+   "label": "only-force-strategy-transition-fixed",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "5 failed, 105 passed in 4.39s",
+   "seconds": 5.2
+  },
+  {
+   "group": "route",
+   "label": "transition-reverts-to-bool-chain",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 209 passed in 6.00s",
+   "seconds": 6.8
+  },
+  {
+   "group": "route",
+   "label": "ignore-patch-only-targets",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "3 failed, 139 passed in 5.64s",
+   "seconds": 6.5
+  },
+  {
+   "group": "route",
+   "label": "remove-call-time-backstop",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "3 failed, 190 passed in 6.91s",
+   "seconds": 7.8
+  },
+  {
+   "group": "route",
+   "label": "reorder-fallback-chain",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "2 failed, 138 passed in 5.79s",
+   "seconds": 6.6
+  },
+  {
+   "group": "route",
+   "label": "full-set-escalation-invokes-incompatible",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "2 failed, 148 passed in 5.81s",
+   "seconds": 6.6
+  },
+  {
+   "group": "route",
+   "label": "first-incompatible-stops-the-scan",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "2 failed, 150 passed in 5.96s",
+   "seconds": 6.7
+  },
+  {
+   "group": "route",
+   "label": "unknown-protocol-treated-as-incompatible",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "3 failed, 145 passed in 4.55s",
+   "seconds": 5.3
+  },
+  {
+   "group": "route",
+   "label": "primary-full-set-path-skipped",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "3 failed, 107 passed in 6.00s",
+   "seconds": 6.8
+  },
+  {
+   "group": "route",
+   "label": "terminal-while-primary-route-remains",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "3 failed, 127 passed in 5.79s",
+   "seconds": 6.6
+  },
+  {
+   "group": "route",
+   "label": "boundary-equal-is-proof",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "1 failed, 153 passed in 5.74s",
+   "seconds": 6.5
+  },
+  {
+   "group": "route",
+   "label": "nominal-window-not-allocation",
+   "file": "kriya/workflow/model_transition.py",
+   "status": "KILLED",
+   "summary": "2 failed, 142 passed in 5.76s",
+   "seconds": 6.6
+  },
+  {
+   "group": "route",
+   "label": "run-wide-rejection-becomes-primary-route",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 216 passed in 7.91s",
+   "seconds": 8.8
+  },
+  {
+   "group": "route",
+   "label": "full-set-escalation-without-targets",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 225 passed in 8.25s",
+   "seconds": 9.1
+  },
+  {
+   "group": "evidence",
+   "label": "q8-drops-routing-fields",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 222 passed in 8.03s",
+   "seconds": 8.8
+  },
+  {
+   "group": "evidence",
+   "label": "routing-decision-unrecorded",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 222 passed in 8.29s",
+   "seconds": 9.1
+  }
+ ]
+}
