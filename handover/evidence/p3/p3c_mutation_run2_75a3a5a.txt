@@ -1,0 +1,6 @@
+baseline 869 passed in 83.77s (0:01:23)
+baseline-subtraction-removed KILLED 1 failed, 231 passed in 24.94s
+subtract-by-identity-not-count KILLED 1 failed, 233 passed in 24.53s
+check-skipped-entirely KILLED 1 failed, 280 passed in 41.66s
+edit-path-baseline-is-the-candidate KILLED 1 failed, 280 passed in 39.41s
+TOTAL 4 {'KILLED': 4}
