@@ -333,11 +333,54 @@ def _bind_verification_tree(state: GenerationState, ctx: "AttemptContext") -> Ve
     the gates will verify (repository content + candidate). Every validator
     of this attempt checks it after each command it runs."""
     _require_worktree_matches_candidate(state, ctx)
+    _record_candidate_change(state, ctx)
     binding = VerificationTreeBinding(
         ctx.worktree_path, repository_content_paths(ctx.workspace_path), state.candidate_digests,
     )
     state.verification_tree_binding = binding
     return binding
+
+
+def _record_candidate_change(state: GenerationState, ctx: "AttemptContext") -> None:
+    """LR-R1-M1 ``candidate.change`` (STAGED): the candidate exactly as it is
+    frozen for this attempt's gates - per path the base and candidate raw
+    digests (the commit-evidence digests) and, as content, both byte
+    versions and their unified diff. Observational."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    import difflib
+
+    for relpath, after_digest in sorted(state.candidate_digests.items()):
+        try:
+            before = state.all_original_raw.get(relpath)
+            path = os.path.join(ctx.worktree_path, relpath)
+            after = None
+            if after_digest is not None and os.path.isfile(path):
+                with open(path, "rb") as handle:
+                    after = handle.read()
+            try:
+                before_text = before.decode("utf-8") if before is not None else ""
+                after_text = after.decode("utf-8") if after is not None else ""
+            except UnicodeDecodeError:
+                before_text = after_text = None   # bytes are recorded; no lossy text diff
+            diff = None if before_text is None else "".join(
+                line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
+                for line in difflib.unified_diff(
+                    before_text.splitlines(keepends=True), after_text.splitlines(keepends=True),
+                    fromfile="/dev/null" if before is None else f"a/{relpath}",
+                    tofile="/dev/null" if after is None else f"b/{relpath}"))
+            diff_lines = (diff or "").splitlines()
+            added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+            removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
+            payload = {"decision": "STAGED", "path": relpath,
+                       "before_digest": raw_digest(before) if before is not None else None,
+                       "after_digest": after_digest, "created": before is None, "deleted": after_digest is None,
+                       "lines_added": added, "lines_removed": removed, "text_diff": diff is not None}
+        except Exception as error:  # observational: never alters the attempt
+            logger.warning("Attempt evidence: candidate.change for %s not built (%s)", relpath, error)
+            continue
+        attempt_evidence_scope.emit("candidate.change", payload,
+                                    content={"before": before, "after": after, "diff": diff})
 
 
 def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptContext") -> None:
@@ -6287,11 +6330,33 @@ def _attempt_evidence_boundary(func):
     @functools.wraps(func)
     async def wrapper(state: GenerationState, ctx: AttemptContext) -> None:
         with attempt_evidence_scope.attempt_scope(lambda: state.attempt_number) as closing:
-            await func(state, ctx)
-            closing.update(outcome="PASSED" if state.overall_attempt_succeeded else "RETURNED",
-                           candidate_gates_passed=state.candidate_gates_succeeded,
-                           terminal_regression_passed=state.terminal_regression_succeeded)
+            try:
+                await func(state, ctx)
+                closing.update(outcome="PASSED" if state.overall_attempt_succeeded else "RETURNED",
+                               candidate_gates_passed=state.candidate_gates_succeeded,
+                               terminal_regression_passed=state.terminal_regression_succeeded)
+            finally:
+                _record_obligations_snapshot(ctx)
     return wrapper
+
+
+def _record_obligations_snapshot(ctx: AttemptContext) -> None:
+    """LR-R1-M1 ``obligations.snapshot`` at attempt close: the ledger's
+    revision and digest and the unresolved terminal obligations by kind."""
+    ledger = getattr(ctx, "obligation_ledger", None)
+    if ledger is None or attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        revision, digest = ledger.fingerprint()
+        unresolved: Dict[str, List[str]] = {}
+        for record in ledger.unresolved_terminal_obligations():
+            unresolved.setdefault(getattr(record.kind, "value", str(record.kind)), []).append(record.id)
+        payload = {"ledger_revision": revision, "ledger_digest": digest,
+                   "unresolved_terminal": {kind: sorted(ids) for kind, ids in sorted(unresolved.items())}}
+    except Exception as error:  # observational: never alters the attempt
+        logger.warning("Attempt evidence: obligations.snapshot not built (%s)", error)
+        return
+    attempt_evidence_scope.emit("obligations.snapshot", payload)
 
 
 @_attempt_evidence_boundary

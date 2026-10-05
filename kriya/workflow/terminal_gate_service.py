@@ -43,6 +43,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import load_artifact_registry
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisGateResult, banner
 from kriya.workflow.edit_safety import (
     CandidateMaterializationError,
@@ -249,6 +250,22 @@ class TerminalGateReport:
 TERMINAL_GATES_NOT_RUN = TerminalGateReport(ran=False)
 
 
+def _record_terminal_report(report: TerminalGateReport) -> None:
+    """LR-R1-M1 ``gate.result`` for each terminal gate, from the report the
+    commit decision itself reads (observational)."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    gates = (("migration", report.migration_gap), ("stack_contract", report.stack_contract_gap),
+             ("preserved_references", report.preserved_reference_gap),
+             ("static_analysis", report.static_analysis_gap),
+             ("terminal_obligations", report.terminal_obligation_gap),
+             ("original_requirements", report.requirement_gap), ("artifact_registry", report.artifact_error))
+    for gate, gap in gates:
+        attempt_evidence_scope.emit("gate.result", {
+            "stage": "terminal", "gate": gate, "success": gap is None,
+            "commit_eligible": report.commit_eligible}, content={"output": gap})
+
+
 class TerminalGateService:
     """Runs the terminal gates in order against one candidate."""
 
@@ -296,7 +313,7 @@ class TerminalGateService:
             artifact_error = str(error)
         await emit_gate_outcome("artifact_registry", "failed" if artifact_error else "passed", artifact_error)
 
-        return TerminalGateReport(
+        report = TerminalGateReport(
             ran=True, migration_gap=migration_gap, stack_contract_gap=stack_contract_gap,
             preserved_reference_gap=preserved_reference_gap, terminal_obligation_gap=terminal_obligation_gap,
             static_analysis=static_analysis, static_analysis_gap=static_analysis_gap,
@@ -304,6 +321,8 @@ class TerminalGateService:
             requirement_closure_attempts=tuple(closure_attempts), candidate_derived_artifacts=derived,
             verified_candidate=verified_candidate,
         )
+        _record_terminal_report(report)
+        return report
 
     @staticmethod
     def _bind_candidate(request: TerminalGateRequest) -> Optional[CandidateVerificationBinding]:

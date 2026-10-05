@@ -23,7 +23,7 @@ import logging
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Tuple
 
 from kriya.core.attempt_evidence import model
 from kriya.core.attempt_evidence.writer import AttemptEvidenceWriter
@@ -546,3 +546,21 @@ def record_developer_parse(parsed: Any, filepath: str, *, selected_protocol: Opt
         logger.warning("Attempt evidence: developer.parse not built (%s: %s)", type(error).__name__, error)
         return
     emit("developer.parse", payload, content={"analysis_model_claimed": analysis})
+
+
+# -- gates, candidate, obligations (M1.8a) ----------------------------------------
+
+GATE_OUTPUT_CAP_BYTES = 8 * 1024 * 1024
+
+
+def bounded_output(text: Any) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Gate output for the store: kept whole up to GATE_OUTPUT_CAP_BYTES, else
+    its head, with the original size and the full output's digest."""
+    if text is None:
+        return None, {"output_bytes": 0, "truncated": False}
+    data = text if isinstance(text, bytes) else str(text).encode("utf-8", "replace")
+    meta: Dict[str, Any] = {"output_bytes": len(data), "truncated": len(data) > GATE_OUTPUT_CAP_BYTES}
+    if meta["truncated"]:
+        meta["full_digest"] = model.digest(data)
+        data = data[:GATE_OUTPUT_CAP_BYTES]
+    return data.decode("utf-8", "replace"), meta

@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
@@ -245,6 +246,29 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
 RUNTIME_VERIFICATION_GATE = "runtime_verification"
 
 
+def _record_gate_result(name: str, result: Any, started: float, *, error: Optional[BaseException] = None) -> None:
+    """LR-R1-M1 ``gate.result`` for one validator gate invocation, passing or
+    failing, recorded after the gate (and its tree check) - observational."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        output = result.get("output") if isinstance(result, dict) else None
+        text, meta = attempt_evidence_scope.bounded_output(output)
+        payload = {
+            "stage": "validator", "gate": name, "duration_seconds": round(time.monotonic() - started, 3),
+            "success": result.get("success") if isinstance(result, dict) else None,
+            "exit_code": result.get("exit_code", result.get("returncode")) if isinstance(result, dict) else None,
+            "timed_out": result.get("timed_out") if isinstance(result, dict) else None,
+            "runtime_artifacts": result.get("runtime_artifacts") if isinstance(result, dict) else None,
+            "error_type": type(error).__name__ if error is not None else None,
+            **meta,
+        }
+    except Exception as record_error:  # observational: never alters the gate
+        logger.warning("Attempt evidence: gate.result not built (%s)", record_error)
+        return
+    attempt_evidence_scope.emit("gate.result", payload, content={"output": text})
+
+
 def _verification_gate(name: str):
     """A validator method that runs repository/toolchain code is a named
     verification gate. FILE-INTEGRITY-CONTRACT-001: when a tree is bound
@@ -266,9 +290,11 @@ def _verification_gate(name: str):
             if self.tree_binding is not None:
                 self.tree_binding.check(name, "before")
             previous, self._gate = self._gate, name
+            started = time.monotonic()
             try:
                 result = method(self, *args, **kwargs)
-            except BaseException:
+            except BaseException as error:
+                _record_gate_result(name, None, started, error=error)
                 if self.tree_binding is not None:
                     self.tree_binding.check(name, ephemeral_untracked=ephemeral)
                 raise
@@ -278,6 +304,7 @@ def _verification_gate(name: str):
                 artifacts = self.tree_binding.check(name, ephemeral_untracked=ephemeral)
                 if ephemeral and isinstance(result, dict):
                     result["runtime_artifacts"] = artifacts
+            _record_gate_result(name, result, started)
             return result
         return wrapper
     return decorate
