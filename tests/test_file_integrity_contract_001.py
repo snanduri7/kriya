@@ -869,7 +869,7 @@ _AUDITED_WRITE_SITES = {
     "kriya/control/recovery.py": 3, "kriya/control/retention.py": 1, "kriya/core/model_certification.py": 4,
     "kriya/core/model_qualification.py": 3, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
 
-    "kriya/core/state_paths.py": 2, "kriya/knowledge/staging.py": 4, "kriya/mcp/invocation_approval.py": 2,
+    "kriya/core/attempt_evidence/writer.py": 2, "kriya/core/state_paths.py": 2, "kriya/knowledge/staging.py": 4, "kriya/mcp/invocation_approval.py": 2,
     "kriya/memory/memory.py": 2, "kriya/metrics/adjudication.py": 2, "kriya/metrics/report.py": 2,
     "kriya/policy/approved_sources.py": 1, "kriya/production_doctor.py": 4, "kriya/skills/skill.py": 4,
     "kriya/static_analysis/scope.py": 1, "kriya/static_analysis/service.py": 2, "kriya/static_analysis/waivers.py": 2,
