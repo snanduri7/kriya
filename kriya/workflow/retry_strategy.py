@@ -1412,4 +1412,4 @@ async def _record_attempt_failure(
     # append - chiefly IncompleteGenerationError, plus the general_error
     # defensive path.
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())

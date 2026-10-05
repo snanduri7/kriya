@@ -361,7 +361,7 @@ def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptCon
         authority="deterministic", attempt=state.attempt_number,
         diagnostics={"reason_code": WORKTREE_CONTENT_MISMATCH, "paths": mismatches[:50]},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -405,7 +405,7 @@ def _file_integrity_stop(state: GenerationState, filepath: str, error: Any) -> "
         file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
         diagnostics={"reason_code": getattr(error, "reason_code", None)},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     return QualityGateFailure(failure)
 
 
@@ -1532,7 +1532,7 @@ def _reject_explanatory_prose(
         likely_files=[filepath], failed_content={filepath: content},
         attempt=state.attempt_number,
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -3693,7 +3693,7 @@ def _raise_unsafe_process_boundary_test_candidate(
         },
         attempt=state.attempt_number,
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -3796,7 +3796,7 @@ def _raise_ungrounded_child_process_test_candidate(
             "grounded_classpath": exemplar["classes_dir"],
         },
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -3868,7 +3868,7 @@ def _prepare_finite_command_runtime_artifacts(
                 worktree_path=ctx.worktree_path, known_files=known_files,
                 attempt=state.attempt_number, extra_likely_files=["pom.xml"],
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # PREPARATION_FAILED - distinguish "the build command actually ran
@@ -3887,7 +3887,7 @@ def _prepare_finite_command_runtime_artifacts(
                 worktree_path=ctx.worktree_path, known_files=known_files,
                 attempt=state.attempt_number, extra_likely_files=["pom.xml"],
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         message = (
@@ -3898,7 +3898,7 @@ def _prepare_finite_command_runtime_artifacts(
             type="verification_infrastructure_failure", message=message,
             raw_output=outcome.stderr or outcome.reasoning, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
 
@@ -3944,7 +3944,7 @@ def _raise_runtime_verification_infrastructure_failure(
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
-    state.gate_outcomes.append(outcome)
+    state.record_gate_outcome(outcome)
     raise QualityGateFailure(failure)
 
 
@@ -3972,7 +3972,7 @@ def _raise_candidate_runtime_entrypoint_failure(
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
-    state.gate_outcomes.append(outcome)
+    state.record_gate_outcome(outcome)
     raise QualityGateFailure(failure)
 
 
@@ -4624,7 +4624,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     )
     # PRD-031: the declared verifiers are sequenced by VerificationCoordinator.
     await VerificationCoordinator(
-        validator, record_gate_outcome=lambda outcome: state.gate_outcomes.append(outcome),
+        validator, record_gate_outcome=lambda outcome: state.record_gate_outcome(outcome),
         run_runtime_verification=lambda: _execute_runtime_verification_directly(state, ctx, validator),
     ).verify(VerificationRequest(
         required_verification=ctx.required_verification,
@@ -4960,7 +4960,7 @@ async def _execute_managed_service_verification(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     logger.info(
@@ -5051,7 +5051,7 @@ async def _execute_managed_service_verification(
                     outcome_dict.update({
                         "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
                     })
-                    state.gate_outcomes.append(outcome_dict)
+                    state.record_gate_outcome(outcome_dict)
                     raise QualityGateFailure(failure)
                 # Neither an environment gap nor a missing-module shape -
                 # classify_environment_failure found nothing conclusive
@@ -5080,7 +5080,7 @@ async def _execute_managed_service_verification(
         outcome_dict.update({
             "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
         })
-        state.gate_outcomes.append(outcome_dict)
+        state.record_gate_outcome(outcome_dict)
         raise QualityGateFailure(failure)
 
     if result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED:
@@ -5096,14 +5096,14 @@ async def _execute_managed_service_verification(
             "graded_by": "managed_service_probe", "commands": [spec.service_command],
             "managed_service_outcome": result.outcome.value,
         })
-        state.gate_outcomes.append(failure_outcome)
+        state.record_gate_outcome(failure_outcome)
         raise QualityGateFailure(failure)
 
     # PROBE_PASSED - successful runtime evidence, deterministic (the probe's
     # own status/body match IS the verdict, no LLM grade() call needed -
     # same "process exit is already the authoritative verdict" precedent
     # deterministic_sequence_kind's test/compile commands already use.
-    state.gate_outcomes.append({
+    state.record_gate_outcome({
         "attempt": state.attempt_number, "type": "run_verification", "success": True,
         "output": output + f"\n\n[Managed service probe]: {result.reasoning}",
         "graded_by": "managed_service_probe", "commands": [spec.service_command],
@@ -5161,7 +5161,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if ctx.runtime_verification_required and state.run_verification_declined:
         message = (
@@ -5172,7 +5172,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if not autonomy_cfg_rv.run_verification_enabled or state.run_verification_declined:
         return
@@ -5223,7 +5223,7 @@ async def _execute_runtime_verification_directly(
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
             raw_judgment, ctx.goal
@@ -5239,7 +5239,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if _runtime_verification_is_advisory_only(ctx, judgment):
         logger.info(
@@ -5258,7 +5258,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if execution_mode == "managed_service":
         await _execute_managed_service_verification(state, ctx, judgment, known_files, validator)
@@ -5272,7 +5272,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     if judgment.get("run_commands"):
@@ -5413,7 +5413,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     # FILE-INTEGRITY-CONTRACT-001: pom corrections are candidate mutations,
     # applied before the first gate of this attempt, never between gates.
@@ -5550,10 +5550,10 @@ async def _execute_runtime_verification_directly(
             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
             **runtime_evidence_outcome_fields(grade),
         })
-        state.gate_outcomes.append(failure_outcome)
+        state.record_gate_outcome(failure_outcome)
         raise QualityGateFailure(failure)
 
-    state.gate_outcomes.append({
+    state.record_gate_outcome({
         "attempt": state.attempt_number, "type": gate_type, "success": True,
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
@@ -6412,7 +6412,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             for fp, content in (ctx.resume_state.get("final_files") or {}).items()
         ]
         if skipping_candidate_gates:
-            state.gate_outcomes = list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes)
+            state.restore_gate_outcomes(list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes),
+                                        source="resume_checkpoint")
         state.model_hops = list(ctx.resume_state.get("model_hops") or state.model_hops)
         model_override = None
         base_url_override = None
@@ -7336,7 +7337,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 },
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # CORR-018-P1 (A3-bound slice, 2026-09-09): a SEPARATE, deterministic
@@ -7390,7 +7391,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 },
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # UNREQUESTED_ARCHITECTURAL_SURFACE: verification strategy must not be
@@ -7451,7 +7452,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE"},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     # Enforce the selected response contract before attribution heuristics or
@@ -7493,7 +7494,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 ),
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         # VAL-001 G1 D1-A (2026-09-18): independent of `mandatory_patch`
         # above (which only ever reflects the REQUESTED operation - see
@@ -7556,7 +7557,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 attempt=state.attempt_number,
             )
             _record_edit_protocol_failure(state, filepath, failure.type)
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if actual_operation in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
             state.edit_failure_capability.pop(filepath, None)  # an authorized whole-file edit was accepted
@@ -7654,7 +7655,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files, state.redirected_test_obligations, state.all_files_written, state.attempt_number,
     )
     if _unpreserved_obligation is not None:
-        state.gate_outcomes.append(_unpreserved_obligation.to_gate_outcome())
+        state.record_gate_outcome(_unpreserved_obligation.to_gate_outcome())
         raise QualityGateFailure(_unpreserved_obligation)
 
     # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
@@ -7723,7 +7724,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
             attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     # Read original file contents before overwriting (crucial for fallback mode diffs)
@@ -7902,7 +7903,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         attempted_edits=edits,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure) from anchor_ex
 
                 state.budgets.anchor_failure_counts[filepath] = (
@@ -7922,7 +7923,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     diagnostics=({"reason_code": anchor_reason} if anchor_reason.isupper() else {}),
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
 
             state.budgets.anchor_failure_counts[filepath] = 0
@@ -7964,7 +7965,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Layer 1 pre-flight check (see find_edits_ignoring_reported_line's
@@ -8041,7 +8042,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     attempted_edits=edits,
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Layer 2 pre-flight check (see find_edits_ignoring_own_diagnosis's own
@@ -8080,7 +8081,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         attempted_edits=edits,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
             else:
                 # This file's edit looked consistent with its own analysis -
@@ -8128,7 +8129,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     likely_files=[filepath], diagnostics={"reason_code": integrity_ex.reason_code},
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from integrity_ex
 
             structural_problem = find_structural_corruption(filepath, content)
@@ -8142,7 +8143,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     failed_content={filepath: content},
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Cross-file duplicate-type pre-flight check - only for a
@@ -8188,7 +8189,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         failed_content=conflict_content,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 for name in candidate_type_names:
                     paths = workspace_type_index.setdefault(name, [])
@@ -8225,7 +8226,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             failed_content={filepath: prior_content},
                             attempt=state.attempt_number,
                         )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
@@ -8376,7 +8377,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if redirected:
             failure = Failure(
@@ -8395,7 +8396,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
             state.api_contract_recovery.owner_contract_restored()
@@ -8444,7 +8445,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 failed_content={filepath: failed_pom_content},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     if not skipping_candidate_gates:
@@ -8551,7 +8552,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 known_files=static_check_known_files,
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # Quality Gates: Polymorphic compile & test checks inside sandbox
@@ -8686,7 +8687,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Self-correction micro-loop resolved the compile failure in "
                     f"{self_correction_result.turns_used} turn(s)."
                 )
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "compile",
                     "success": True,
@@ -8818,10 +8819,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "transcript": self_correction_result.transcript,
                         "final_compile_output": self_correction_result.final_compile_output,
                     }
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
         else:
-            state.gate_outcomes.append({
+            state.record_gate_outcome({
                 "attempt": state.attempt_number,
                 "type": "compile",
                 "success": True,
@@ -8860,7 +8861,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Quality Gates: Targeted test selection collected zero tests for "
                     f"{target_test}; retrying the full suite before attributing a code failure."
                 )
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test_selection",
                     "success": False,
@@ -8882,10 +8883,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "test_selection_fallback", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
@@ -8928,7 +8929,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         ))
                 if test_repair_result and test_repair_result.resolved:
                     _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                    state.gate_outcomes.append({
+                    state.record_gate_outcome({
                         "attempt": state.attempt_number,
                         "type": "targeted_test",
                         "success": True,
@@ -8955,11 +8956,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "targeted_test", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
             if target_test and not (test_repair_result and test_repair_result.resolved):
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "targeted_test",
                     "success": True,
@@ -8988,10 +8989,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "full_suite", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
@@ -9022,7 +9023,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 likely_files=sorted(state.all_files_written),
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # The same acceptance rule applies whether extract_target_test() chose
@@ -9046,7 +9047,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 ],
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
@@ -9064,7 +9065,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if ctx.runtime_verification_required and state.run_verification_declined:
             message = (
@@ -9075,7 +9076,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
             current_judgment_basis = _run_verification_basis_hash(ctx, state)
@@ -9132,7 +9133,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         raw_output=message,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # Independent brutal review finding #2 (2026-08-15): don't trust
                 # command_source="goal_explicit" as self-reported - verify it's
@@ -9180,7 +9181,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
             if execution_mode_error:
@@ -9189,7 +9190,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             if judgment.get("should_run") and execution_mode == "managed_service":
                 await _execute_managed_service_verification(
@@ -9211,7 +9212,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             # Deterministic Java entrypoint resolution - applied fresh every
             # attempt (never cached alongside judge()'s own should_run/
@@ -9372,7 +9373,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             type="verification_infrastructure_failure", message=rv_message,
                             raw_output=rv_message, attempt=state.attempt_number,
                         )
-                        state.gate_outcomes.append(rv_failure.to_gate_outcome())
+                        state.record_gate_outcome(rv_failure.to_gate_outcome())
                         raise QualityGateFailure(rv_failure)
                     command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
                     logger.info(
@@ -9774,7 +9775,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
                             **runtime_evidence_outcome_fields(grade),
                         })
-                        state.gate_outcomes.append(failure_outcome)
+                        state.record_gate_outcome(failure_outcome)
                         raise QualityGateFailure(failure)
                     run_verification_outcome = {
                         "attempt": state.attempt_number,
@@ -9808,7 +9809,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         run_verification_outcome["self_corrected"] = True
                         run_verification_outcome["self_correction_turns"] = self_correction_result.turns_used
                         run_verification_outcome["self_correction_transcript"] = self_correction_result.transcript
-                    state.gate_outcomes.append(run_verification_outcome)
+                    state.record_gate_outcome(run_verification_outcome)
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the
                     # skill-verification gap check is looking for - mark every
@@ -9920,7 +9921,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "reason_codes": migration_gap["reason_codes"],
                 "pending_reason_codes": migration_gap.get("pending_reason_codes", []),
             }
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     # Quality Gates: Goal Spec Compliance. Compiling, passing tests, and (when
@@ -10059,7 +10060,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="spec_compliance_indeterminate", message=message, raw_output=message,
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
         if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
             message = (
@@ -10070,7 +10071,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if not spec_result["compliant"] and settled_goal_spec is not None:
             # Correctness Continuity Part A (PRV-06, 2026-08-29): the SAME
@@ -10202,7 +10203,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                               "missing_requirements": kept_requirements},
                     owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
                 ))
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if goal_spec_obligation_id and ctx.obligation_ledger is not None:
             ctx.obligation_ledger.record(ObligationRecord(
@@ -10231,7 +10232,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # SUPPRESSED are the only values; a real compliant verdict carries
         # no `status` key at all (unchanged from before this fix).
         _spec_status = spec_result.get("status")
-        state.gate_outcomes.append({
+        state.record_gate_outcome({
             "attempt": state.attempt_number,
             "type": "goal_spec_compliance",
             "success": True,

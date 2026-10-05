@@ -598,7 +598,7 @@ def _settle_no_change_proposal(
             diagnostics={"reason_code": VERIFIED_NO_CHANGE_REFUSED, "verified_no_change": refusal},
             attempt=attempt,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         state.record_event(RunEvent(
             kind="unit.verified_no_change_refused", attempt=attempt, source="workflow",
             authority=EventAuthority.AUTHORITATIVE,
@@ -1125,7 +1125,7 @@ def _run_static_analysis_gate(
             "reason_codes": list(result.reason_codes), "evidence_digest": result.evidence_digest,
         },
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1158,7 +1158,7 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
         diagnostics={"reason_code": reason, "workspace_state": outcome.workspace_state,
                      "commit_transaction_id": outcome.transaction_id},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1183,7 +1183,7 @@ def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
         source="contract_registry_gate", authority="deterministic",
         attempt=state.attempt_number, diagnostics={"reason_code": reason},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -4068,7 +4068,7 @@ class WorkflowEngine:
                         raw_output=message,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
 
                 # PRD-022: near-duplicates the candidate actually created,
@@ -4147,7 +4147,7 @@ class WorkflowEngine:
                                 "blocking": {req.id: outcome.value for req, outcome in blocking},
                             },
                         )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
 
                 # PRD-031A: the static-analysis gate, on the exact batch the
@@ -5026,7 +5026,7 @@ class WorkflowEngine:
                                 _regression_failure_output, worktree_path,
                                 state.all_files_written, state.attempt_number,
                             )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                     _record_future_owner_verification_deferred(
                         obligation_ledger, deferral,
@@ -5041,7 +5041,7 @@ class WorkflowEngine:
                         deferral.evidence_path, deferral.verification_subtask_id,
                         deferral.required_capability, deferral.future_owner_id, current_subtask_id,
                     )
-                    state.gate_outcomes.append({
+                    state.record_gate_outcome({
                         "attempt": state.attempt_number,
                         "type": "regression_test",
                         "success": True,
@@ -5121,7 +5121,7 @@ class WorkflowEngine:
                     ):
                         merged = state.ownership_redirect_recovery.setdefault(key, [])
                         merged.extend(v for v in values if v not in merged)
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only) - same
                 # authorization the per-attempt pre-write gate in
@@ -5167,7 +5167,7 @@ class WorkflowEngine:
                         },
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # CORR-018-P1 (A3-bound slice, 2026-09-09) - same terminal
                 # re-check discipline as the brownfield-API gate immediately
@@ -5207,9 +5207,9 @@ class WorkflowEngine:
                         },
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "regression_test",
                     "success": True,
