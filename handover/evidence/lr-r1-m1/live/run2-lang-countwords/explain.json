@@ -1,0 +1,684 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 4,
+        "seq": 122,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:db367c8aa5a0b5a35f005f6ac15d1fc44e4fa5dff54f5f831a62e92cb675624e"
+      },
+      "failure_type": "fallback_incompatible",
+      "progress_classification": "NO_PROGRESS",
+      "retry": false,
+      "seq": 115
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "fallback_model_incompatible",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "fallback_model_incompatible",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 119,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 38,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:d9dbcdbc5849fadc05cbdf8429b960911b99111531021f7eb887e0f3b3024ba3",
+                "wire_body": "sha256:adebd4c5c1be569894ecbb20d9bb9ab7868f6141c8220a38dece90ae1cacd937"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/StringUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 40,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "seq": 38,
+              "targets": [
+                {
+                  "digest": "d0dccf572fd53ca400391293b842f17c1cfd0efad07508ef435be5d068b0b90f",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 7,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "StringUtils.isWhitespace",
+                  "shown_revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 1343,
+                      "start_line": 1331,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1374,
+                      "start_line": 1369,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1509,
+                      "start_line": 1497,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1545,
+                      "start_line": 1534,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3579,
+                      "start_line": 3571,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3791,
+                      "start_line": 3778,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3868,
+                      "start_line": 3857,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 751,
+              "content": {
+                "content": "sha256:85eacb66994b3904761f4ad420e5ff1a003c1cb2edb4d61a42a41c0d784c0236"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 41,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:7c52c46eb6cea11337a59e7b8c81e72c3285f3afe3bdd6d1c18ed88424225bf1"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+              "seq": 43
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+              "proposed_digest": "sha256:11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 52
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:aa2f8a9ec7166d3a7ba26507bf25ab2efb46b0e2a1c4a4dc2d29c3a026fc0be6",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 51,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 55,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the current attempt",
+              "seq": 67
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 35
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "seq": 65,
+              "targets": [
+                {
+                  "digest": "d0dccf572fd53ca400391293b842f17c1cfd0efad07508ef435be5d068b0b90f",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    1505,
+                    1508,
+                    1534,
+                    1535,
+                    1539,
+                    1540,
+                    1541,
+                    1542,
+                    1544
+                  ],
+                  "member_units_shown": 7,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "StringUtils.isWhitespace",
+                  "shown_revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 1343,
+                      "start_line": 1331,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1374,
+                      "start_line": 1369,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1509,
+                      "start_line": 1497,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1545,
+                      "start_line": 1534,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3579,
+                      "start_line": 3571,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3791,
+                      "start_line": 3778,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3868,
+                      "start_line": 3857,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no candidate was staged or refused in this attempt",
+          "status": "NOT_RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:1127fc0ee3adc08ab77a27b13907a5b82146fc6d612b943ddbefa1bfab22e8f7",
+                "raw_output": "sha256:fe16ed60bc0075ce3f5a934d104b90e8d6e710948881648340fa37f1b72a93c2"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 71,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 75,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 86
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 63
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "seq": 84,
+              "targets": [
+                {
+                  "digest": "d0dccf572fd53ca400391293b842f17c1cfd0efad07508ef435be5d068b0b90f",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    1505,
+                    1508,
+                    1534,
+                    1535,
+                    1539,
+                    1540,
+                    1541,
+                    1542,
+                    1544
+                  ],
+                  "member_units_shown": 7,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "StringUtils.isWhitespace",
+                  "shown_revision": "11d1866b6cd0a6172c0f4303feffe522e642f4ab4c5a37629c0db1d6a54286d0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 1343,
+                      "start_line": 1331,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1374,
+                      "start_line": 1369,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1509,
+                      "start_line": 1497,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1545,
+                      "start_line": 1534,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3579,
+                      "start_line": 3571,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3791,
+                      "start_line": 3778,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 3868,
+                      "start_line": 3857,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no candidate was staged or refused in this attempt",
+          "status": "NOT_RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:1127fc0ee3adc08ab77a27b13907a5b82146fc6d612b943ddbefa1bfab22e8f7",
+                "raw_output": "sha256:fe16ed60bc0075ce3f5a934d104b90e8d6e710948881648340fa37f1b72a93c2"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/StringUtils.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 90,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 95,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 107
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 82
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no candidate was staged or refused in this attempt",
+          "status": "NOT_RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:db367c8aa5a0b5a35f005f6ac15d1fc44e4fa5dff54f5f831a62e92cb675624e",
+                "raw_output": "sha256:db367c8aa5a0b5a35f005f6ac15d1fc44e4fa5dff54f5f831a62e92cb675624e"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [],
+              "reason_code": "FALLBACK_MODEL_INCOMPATIBLE",
+              "seq": 111,
+              "type": "fallback_incompatible"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:db367c8aa5a0b5a35f005f6ac15d1fc44e4fa5dff54f5f831a62e92cb675624e"
+              },
+              "failure_type": "fallback_incompatible",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "FALLBACK_MODEL_INCOMPATIBLE: no remaining configured fallback from qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a can serve this attempt - qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a: the attempt may only patch src/main/java/org/apache/commons/lang3/StringUtils.java (no complete current source was shown), but qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a's capability profile (unverified_conservative_default) returns whole files only (edit protocol full_file)",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 115,
+              "stop_loop": true
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 99
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [
+                "the attempt may only patch src/main/java/org/apache/commons/lang3/StringUtils.java (no complete current source was shown), but qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a's capability profile (unverified_conservative_default) returns whole files only (edit protocol full_file)"
+              ],
+              "seq": 105
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 2
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T133256-87d73817",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

@@ -1,0 +1,31 @@
+Error loading configuration: 1 validation error for AppConfig
+evidence.attempt_recorder.capture
+  Input should be 'full', 'digest_only', 'full_with_reasoning' or 'off' [type=literal_error, input_value=False, input_type=bool]
+    For further information visit https://errors.pydantic.dev/2.13/v/literal_error
+== ctrl-httpx-isvalid-off start 13:42:43 base 3de1915 kriya ceb99435e
+analyze exit=1 seconds=1
+generate exit=1 wall_seconds=0.6
+Error loading configuration: 1 validation error for AppConfig
+evidence.attempt_recorder.capture
+  Input should be 'full', 'digest_only', 'full_with_reasoning' or 'off' [type=literal_error, input_value=False, input_type=bool]
+    For further information visit https://errors.pydantic.dev/2.13/v/literal_error
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json;b=set(json.load(open('/Users/sriramnanduri/kriya-m1-live/evidence/ctrl-httpx-isvalid-off/stores.before.json'))['runs']);a=json.load(open('/Users/sriramnanduri/kriya-m1-live/evidence/ctrl-httpx-isvalid-off/stores.after.json'))['runs'];n=[r for r in a if r not in b];print(n[0] if len(n)==1 else '')
+                      ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 298, in load
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+run_id=NONE
+== ctrl-httpx-isvalid-off end 13:42:46

@@ -1,0 +1,1 @@
+Add a classmethod `codes.is_valid(value)` to httpx/_status_codes.py that returns True when the integer value is a defined status code in `codes` and False otherwise, and add tests for it in tests/test_status_codes.py.

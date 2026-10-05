@@ -1,0 +1,8 @@
+== run1-httpx-isvalid start 13:22:37 base 3de1915 kriya ceb99435e
+analyze exit=0 seconds=43
+generate exit=1 wall_seconds=154.2
+run_id=20261005T132321-13cbc1d7
+verify exit=0
+explain exit=0
+472	/Users/sriramnanduri/kriya-m1-live/state/attempt-evidence/20261005T132321-13cbc1d7
+== run1-httpx-isvalid end 13:25:58

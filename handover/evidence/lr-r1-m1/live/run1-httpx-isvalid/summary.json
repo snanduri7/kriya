@@ -1,0 +1,231 @@
+{
+ "workspace": "run1-httpx-isvalid",
+ "goal": "Add a classmethod `codes.is_valid(value)` to httpx/_status_codes.py that returns True when the integer value is a defined status code in `codes` and False otherwise, and add tests for it in tests/test_status_codes.py.",
+ "run_id": "20261005T132321-13cbc1d7",
+ "generate_exit": 1,
+ "wall_seconds": 154.2092800140381,
+ "process_wall_seconds": 154.0120822500321,
+ "recorder_seconds": 0.08997079217806458,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0,
+  "capture_mode": 0.0,
+  "close_run": 0.0005,
+  "emit": 0.0011,
+  "ensure_store": 0.0028,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0001,
+  "mirror_decision": 0.0036,
+  "mirror_event": 0.0231,
+  "mirror_evidence": 0.0032,
+  "mirror_gate_outcome": 0.0041,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.0034,
+  "record_call_result": 0.0009,
+  "record_developer_parse": 0.0009,
+  "record_diagnosis": 0.0009,
+  "record_fallback_decision": 0.0,
+  "record_wire_request": 0.0155,
+  "record_wire_response": 0.0162,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0101,
+  "_record_authority_snapshot": 0.0001,
+  "_record_candidate_change": 0.0026,
+  "_record_developer_sections": 0.0001,
+  "_recorded_section_fit": 0.0004,
+  "_record_recovery_decision": 0.0003,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 1,
+  "capture_mode": 1,
+  "close_run": 1,
+  "emit": 4,
+  "ensure_store": 2,
+  "enter_attempt_iteration": 1,
+  "exit_attempt_iteration": 1,
+  "mirror_decision": 5,
+  "mirror_event": 27,
+  "mirror_evidence": 2,
+  "mirror_gate_outcome": 3,
+  "note_retry_evidence": 1,
+  "prune_after_run": 1,
+  "record_call_result": 7,
+  "record_developer_parse": 1,
+  "record_diagnosis": 1,
+  "record_fallback_decision": 1,
+  "record_wire_request": 7,
+  "record_wire_response": 7,
+  "store_pointer": 1,
+  "_record_gate_result": 3,
+  "_record_authority_snapshot": 1,
+  "_record_candidate_change": 1,
+  "_record_developer_sections": 1,
+  "_recorded_section_fit": 3,
+  "_record_recovery_decision": 1,
+  "_unit_evidence": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 1,
+  "seconds": 0.002605541958473623
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.00047154101775959134
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.0034229590091854334
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 79,
+ "records_by_kind": {
+  "mirror.event": 27,
+  "model.request": 7,
+  "model.response": 7,
+  "model.result": 7,
+  "mirror.decision": 5,
+  "prompt.sections": 4,
+  "gate.result": 3,
+  "mirror.gate_outcome": 3,
+  "mirror.evidence": 2,
+  "run.opened": 1,
+  "unit.opened": 1,
+  "attempt.opened": 1,
+  "fallback.decision": 1,
+  "authority.snapshot": 1,
+  "developer.parse": 1,
+  "candidate.change": 1,
+  "obligations.snapshot": 1,
+  "attempt.closed": 1,
+  "diagnosis": 1,
+  "recovery.decision": 1,
+  "attempt.concluded": 1,
+  "unit.closed": 1,
+  "run.closed": 1
+ },
+ "store_kib": 472,
+ "capture": "full",
+ "model_calls": 7,
+ "model_seconds": 90.47,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "localization",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "run_verifier",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "spec_compliance",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "reviewer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  }
+ ],
+ "attempts": 1,
+ "calls_outside_attempts": {
+  "localization": 1,
+  "planning": 2
+ },
+ "completeness": {
+  "Q1:RECORDED": 1,
+  "Q2:RECORDED": 1,
+  "Q3:RECORDED": 1,
+  "Q4:RECORDED": 1,
+  "Q5:RECORDED": 1,
+  "Q6:RECORDED": 1,
+  "Q7:NOT_APPLICABLE": 1,
+  "Q8:RECORDED": 1
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 7,
+    "seq": 79,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+   },
+   "failure_type": "regression_unattributed",
+   "progress_classification": "PROGRESS",
+   "retry": false,
+   "seq": 73,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "regression_unattributed",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "failure_category": "regression_unattributed",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 76,
+    "unit_id": "s1"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.058,
+ "non_model_seconds": 63.74,
+ "recorder_pct_non_model": 0.141
+}

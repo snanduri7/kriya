@@ -1,0 +1,1 @@
+Add a public static method StringUtils.countWords(CharSequence cs) that returns the number of whitespace-separated words (Character.isWhitespace), returning 0 for null or empty/blank input, and add unit tests for it.

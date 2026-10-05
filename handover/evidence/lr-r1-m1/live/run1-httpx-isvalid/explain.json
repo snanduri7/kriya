@@ -1,0 +1,341 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 7,
+        "seq": 79,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+      },
+      "failure_type": "regression_unattributed",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 73,
+      "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "regression_unattributed",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "regression_unattributed",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 76,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 37,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:d462dcd600f4b9ebb24f3be7ced14279ce244e7b65d1ec99e4a104ec6485ba69",
+                "wire_body": "sha256:badacd2502c9ff395b851b9b35b22ce35385b7d18c88bb6c357faabdc273d9ba"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "httpx/_status_codes.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 39,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:938e036976dde04e0eb5720cd9d533dc381b6958509b2febde43c8a443735c62",
+                "wire_body": "sha256:1aa1c52249c82175f3ebad602320c9bd0999d22c5ada69a315ee5e98a0b0f0b3"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 48,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:b10c2e4005d037483f2dcad1a1ad29b61ffe077925e3e2dfc706219938ad74b3",
+                "wire_body": "sha256:2fec3d128143d987a336b00a465aaf992a88f6d11bf4d03e935074917460419f"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 52,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:a36bf90c904a83d7d64b8b855b592158ed81b8789af845aff773c12cd0b759ce",
+                "wire_body": "sha256:c0c548bf7e7d4af017815c3274c09e49ac27306b482732d71fd675f2a831e8ed"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 61,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "httpx/_status_codes.py"
+              ],
+              "seq": 37,
+              "targets": [
+                {
+                  "digest": "bc651b297d833ddc1aa39d343f4d1ab172b6cea5c9c18a6e2ced6d4a15197b72",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "httpx/_status_codes.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "0d89fedae7c180c797cb9b3cc77fd307bc2302e00031ec136a43eb9b9ad712c7",
+                  "shown_is_exact": true,
+                  "shown_member_id": "codes.is_success",
+                  "shown_revision": "0d89fedae7c180c797cb9b3cc77fd307bc2302e00031ec136a43eb9b9ad712c7",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 50,
+                      "start_line": 45,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 57,
+                      "start_line": 52,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 64,
+                      "start_line": 59,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 71,
+                      "start_line": 66,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 85,
+                      "start_line": 80,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 395,
+              "content": {
+                "content": "sha256:b7cdb51ac9c6f53d7cc8364bd5a3b35f22894ac2ce9fe8acd9ee76691285fe9c"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 40,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 102,
+              "content": {
+                "content": "sha256:507a6508115ad2fa4184bc0e2127944613cf41661837ef6c4cb06aad1f59e0f2"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 49,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 88,
+              "content": {
+                "content": "sha256:014043f02b6795276966923a4d9e22c221764ce066e1d3cee745e01b6dc31550"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 53,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 459,
+              "content": {
+                "content": "sha256:f1d058410ffe0fcd55a997be22ec3b2ddd6db1ca34f2267507334cc43bb456bb"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 62,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:e8d6fd0851d32a9583b55c8ddcc2dc8145b3d9b52b8d580d0c99fba582e4f16d"
+              },
+              "kind": "edits",
+              "path": "httpx/_status_codes.py",
+              "seq": 42
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "e35d6f79240cae48b93470815773e89170819fe9057b1012169eefa928d97339",
+              "before_digest": "0d89fedae7c180c797cb9b3cc77fd307bc2302e00031ec136a43eb9b9ad712c7",
+              "content": {
+                "after": "sha256:e35d6f79240cae48b93470815773e89170819fe9057b1012169eefa928d97339",
+                "before": "sha256:0d89fedae7c180c797cb9b3cc77fd307bc2302e00031ec136a43eb9b9ad712c7",
+                "diff": "sha256:5fa78c6e09dbf2c8faaf43b09ef9b440ce3279d018c0c3d7547c1219d0b0c9c6"
+              },
+              "decision": "STAGED",
+              "lines_added": 11,
+              "lines_removed": 0,
+              "path": "httpx/_status_codes.py",
+              "seq": 45
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901",
+                "raw_output": "sha256:0b7a001a68b33c2bfbeceac508639b1778422d72cd45132229ccf8286c12ae1e"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [],
+              "seq": 70,
+              "type": "regression_unattributed"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:0b7a001a68b33c2bfbeceac508639b1778422d72cd45132229ccf8286c12ae1e"
+              },
+              "gate": "tests",
+              "seq": 65,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+              },
+              "failure_type": "regression_unattributed",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=CHANGED_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer regeneration cannot resolve an aggregate-level delta with no attributable test.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 73,
+              "stop_loop": true,
+              "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 34
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 2
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T132321-13cbc1d7",
+  "sealed": true,
+  "verification": "VERIFIED"
+}
