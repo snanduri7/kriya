@@ -1,0 +1,8 @@
+23,25c23,25
+<   skills: /Users/sriramnanduri/.kriya/operator/provider-contract-v3/skills
+<   state: /Users/sriramnanduri/.kriya/operator/provider-contract-v3/state
+<   memory: /Users/sriramnanduri/.kriya/operator/provider-contract-v3/memory
+---
+>   skills: /Users/sriramnanduri/kriya-m1-live/skills
+>   state: /Users/sriramnanduri/kriya-m1-live/state
+>   memory: /Users/sriramnanduri/kriya-m1-live/memory/p1live-lang-countwords
