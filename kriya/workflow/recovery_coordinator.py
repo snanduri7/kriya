@@ -324,6 +324,11 @@ def _record_recovery_decision(state: GenerationState, classified: ClassifiedAtte
             "retry": bool(not decision.stop_loop and retry is not None and retry.should_continue),
             "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
             "no_progress_terminated": state.no_progress_terminated,
+            # The runtime's own, already-computed progress facts (never
+            # recomputed here): this attempt's classification, and the
+            # terminal no-progress reason once the run stops on it.
+            "progress_classification": state.last_progress_classification,
+            "no_progress_reason": state.no_progress_reason,
             "plan_scope_conflict": None if conflict is None else {
                 "required_files": list(conflict.get("required_files") or []),
                 "reason_code": conflict.get("reason_code")},
