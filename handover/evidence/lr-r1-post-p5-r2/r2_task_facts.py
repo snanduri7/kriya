@@ -14,12 +14,12 @@ for x in rec:
         continue
     k, p = x["kind"], x["payload"]
     d = cur.setdefault((x.get("unit_id"), x.get("attempt_number")), {})
-    if k == "attempt.opened": d["mode"] = p.get("mode")
-    if k == "fallback.decision" and p.get("phase") == "call": d["model"] = (p.get("selected") or "")[:12]
-    if k == "candidate.change": d.setdefault("cand", []).append((p.get("decision"), (p.get("path") or "")[-30:], p.get("reason_code")))
-    if k == "gate.result": d.setdefault("gates", []).append((p.get("stage"), p.get("gate"), p.get("success")))
-    if k == "diagnosis": d["diag"] = (p.get("type"), p.get("reason_code"))
-    if k == "recovery.decision": d["next"] = (p.get("action"), p.get("stop_reason_code"), p.get("no_progress_reason"))
+    if k == "attempt.opened": d["mode"] = p.get("mode")  # noqa: E701 - evidence script kept as run
+    if k == "fallback.decision" and p.get("phase") == "call": d["model"] = (p.get("selected") or "")[:12]  # noqa: E701 - evidence script kept as run
+    if k == "candidate.change": d.setdefault("cand", []).append((p.get("decision"), (p.get("path") or "")[-30:], p.get("reason_code")))  # noqa: E701 - evidence script kept as run
+    if k == "gate.result": d.setdefault("gates", []).append((p.get("stage"), p.get("gate"), p.get("success")))  # noqa: E701 - evidence script kept as run
+    if k == "diagnosis": d["diag"] = (p.get("type"), p.get("reason_code"))  # noqa: E701 - evidence script kept as run
+    if k == "recovery.decision": d["next"] = (p.get("action"), p.get("stop_reason_code"), p.get("no_progress_reason"))  # noqa: E701 - evidence script kept as run
 term_gates = [(x["payload"].get("gate"), x["payload"].get("success")) for x in rec
               if x["kind"] == "gate.result" and x["payload"].get("stage") == "terminal"]
 ev = [x["payload"].get("kind") for x in rec if x["kind"] == "mirror.event"]
