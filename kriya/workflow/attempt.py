@@ -1575,9 +1575,11 @@ def _request_fallback_for_rejected_authoritative_target(
 
 
 def _reject_explanatory_prose(
-    state: GenerationState, filepath: str, content: str,
+    state: GenerationState, filepath: str, content: str, baseline: Optional[str],
 ) -> None:
-    contamination = find_explanatory_prose_contamination(filepath, content)
+    """``baseline``: the file before this write (None for a new file); only
+    what the candidate added is judged (P3-C)."""
+    contamination = find_explanatory_prose_contamination(filepath, content, baseline)
     if not contamination:
         return
     failure = Failure(
@@ -8383,7 +8385,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            _reject_explanatory_prose(state, filepath, new_content)
+            _reject_explanatory_prose(state, filepath, new_content, orig_text)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=new_content,
@@ -8525,7 +8527,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            _reject_explanatory_prose(state, filepath, content)
+            _reject_explanatory_prose(state, filepath, content, None if file_is_new else prior_content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=content,

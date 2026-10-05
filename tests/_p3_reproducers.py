@@ -173,7 +173,8 @@ def prose_on_unchanged_line():
     state = GenerationState()
     state.attempt_number = 2
     try:
-        attempt._reject_explanatory_prose(state, TREE_PATH, LIVE["r2_t2_a2_candidate_tree_py"])
+        # The edit path's baseline: the file before the write (the live base).
+        attempt._reject_explanatory_prose(state, TREE_PATH, LIVE["r2_t2_a2_candidate_tree_py"], TREE)
     except attempt.QualityGateFailure as rejected:
         return rejected.failure.raw_output
     return None

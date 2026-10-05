@@ -11,7 +11,6 @@ from _p3_reproducers import (
     LIVE,
     MEMBER_UNITS,
     anchor_outside_retry,
-    candidate_added_lines,
     prose_end_to_end,
     prose_on_unchanged_line,
     stitched_anchor_retry,
@@ -48,17 +47,21 @@ def test_p3b_the_retry_shows_the_lines_between_the_stitched_parts(tmp_path):
     assert all(span.text in ARRAYFILL for span in second.spans)
 
 
-def test_p3c_the_prose_check_flags_a_line_of_the_unchanged_base_file():
-    """R2-T2 s1 a2: the flagged line is in the base file; nothing the
-    candidate added matches a prose pattern."""
-    flagged = prose_on_unchanged_line()
-    assert flagged and "This method is deprecated" in flagged
-    added = "\n".join(candidate_added_lines())
-    assert "This method is deprecated" not in added
-    assert find_explanatory_prose_contamination("cssselect2/tree.py", added) is None
+def test_p3c_a_line_of_the_unchanged_base_is_not_candidate_contamination():
+    """R2-T2 s1 (fixed by P3-C): the flagged line is in the unchanged base."""
+    assert prose_on_unchanged_line() is None
 
 
-def test_p3c_every_attempt_with_the_live_response_is_rejected_end_to_end(tmp_path, monkeypatch):
+def test_p3c_the_live_response_is_accepted_end_to_end(tmp_path, monkeypatch):
     passed, failures, final = prose_end_to_end(tmp_path, monkeypatch)
-    assert passed is False and "def depth" not in final
-    assert failures.count("prose_contamination") >= 3
+    assert "prose_contamination" not in failures
+    assert passed is True and "def depth" in final
+
+
+def test_p3c_negative_controls_still_reject_prose_the_candidate_wrote(tmp_path, monkeypatch):
+    added_prose = LIVE["r2_t2_a2_developer_response"].replace(
+        "        return len(self.ancestors)", "        The fix is to count the ancestors.\n        return len(self.ancestors)")
+    passed, failures, _ = prose_end_to_end(tmp_path, monkeypatch, response=added_prose)
+    assert passed is False and "prose_contamination" in failures
+    # A new file is all candidate text: a prose line in it is still contamination.
+    assert find_explanatory_prose_contamination("pkg/new.py", "The fix is to count.\n") is not None
