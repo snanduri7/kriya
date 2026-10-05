@@ -451,8 +451,8 @@ def test_the_t5_reference_success_is_unverified_and_blocked_under_the_production
                                 revision="terminal", evidence_fingerprint="t5-candidate", source="test")
     runs = []
     [attempt] = close_unverified_requirements_with_named_tests(
-        ledger, reqs, test_files=[T5_PATH], modified=[T5_PATH], run_tests=lambda paths: runs.append(paths),
-        confirms_execution=lambda output: True, source="test", revision="terminal")
+        ledger, reqs, test_files=[T5_PATH], modified=[T5_PATH], judge=lambda paths: runs.append(paths),
+        source="test", revision="terminal")
     assert attempt["closed"] is False and "written or changed by this candidate" in attempt["reason"]
     assert runs == []
     assert requirement_outcomes(ledger, reqs) == {"REQ-1": RequirementOutcome.UNVERIFIED}

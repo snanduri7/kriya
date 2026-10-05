@@ -928,6 +928,7 @@ def close_requirements_with_named_tests(
     candidate; it never re-decides a toolchain change. Without that
     authority a changed declaration still fails closed here."""
     from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.named_test_oracle import judge_named_tests
     from kriya.workflow.requirements import (
         RequirementOutcome,
         close_unverified_requirements_with_named_tests,
@@ -948,18 +949,44 @@ def close_requirements_with_named_tests(
                and named_existing_tests(requirement.text, test_files)
                for requirement in requirement_set.requirements):
         return []  # D8: nothing to close, so no validator and no toolchain resolution
-    validator = PolymorphicValidator(
-        candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-        toolchain_declaration_mutable=toolchain_declaration_mutable,
-    )
-    validator.java_home_override = java_home_override
-    validator.tree_binding = tree_binding
+    def candidate_validator() -> PolymorphicValidator:
+        validator = PolymorphicValidator(
+            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+            toolchain_declaration_mutable=toolchain_declaration_mutable,
+        )
+        validator.java_home_override = java_home_override
+        validator.tree_binding = tree_binding
+        return validator
+
+    def base_validator(root: str) -> PolymorphicValidator:
+        # The base revision declares its own toolchain; nothing is changed there.
+        validator = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+        validator.java_home_override = java_home_override
+        return validator
+
+    modified = list(modified)
+    base_revision = _oracle_base_revision(candidate_root, workspace_path)
     return close_unverified_requirements_with_named_tests(
         ledger, requirement_set, test_files=test_files, modified=modified,
-        run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
-        confirms_execution=output_confirms_nonzero_test_execution,
+        judge=lambda named: judge_named_tests(
+            named, candidate_root=candidate_root, base_revision=base_revision, modified=modified,
+            candidate_validator=candidate_validator, base_validator=base_validator),
         source="requirement_closure.named_test_run", revision=revision,
     )
+
+
+def _oracle_base_revision(candidate_root: str, workspace_path: str) -> Optional[str]:
+    """FS-1C0: the revision a named test must be authored at - the owning
+    run's base (so an earlier unit's committed change is still the run's
+    own), else the candidate's HEAD; None when neither can be read."""
+    from kriya.workflow.worktree import git_read_lines
+
+    try:
+        base = _run_committed_paths(workspace_path)[1]
+        return base or git_read_lines(candidate_root, "rev-parse", "HEAD")[0]
+    except Exception as exc:  # no readable base: the oracle refuses (UNVERIFIED)
+        logger.info(f"Named-test oracle base revision unavailable: {exc}")
+        return None
 
 
 def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[str], List[str]]:

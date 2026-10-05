@@ -22,6 +22,7 @@ from kriya.config.authority import classify_field
 from kriya.config.config import runtime_profile_preset_fields
 from kriya.core.kernel import Kernel
 from kriya.core.state_paths import trace_db_path
+from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_schema import (
     ChangeKind,
@@ -635,31 +636,36 @@ def test_named_tests_come_from_the_requirement_text_only():
     assert named_existing_tests("keep the legacy behaviour", files) == []
 
 
-@pytest.mark.parametrize("modified, result, closed, reason", [
-    ((), {"success": True, "output": "1 passed"}, True, None),
-    (("tests/test_legacy.py",), {"success": True, "output": "1 passed"}, False, "written or changed"),
-    ((), {"success": True, "output": "no tests ran"}, False, "did not execute"),
-    ((), {"success": False, "output": "1 failed"}, False, "failed"),
+@pytest.mark.parametrize("modified, judgment, closed, reason", [
+    ((), ("ORACLE_PASSED", ""), True, None),
+    (("tests/test_legacy.py",), ("ORACLE_PASSED", ""), False, "written or changed"),
+    ((), ("ORACLE_IDENTITY_NOT_EXECUTED", "expected case(s) did not execute: t::a"), False, "did not execute"),
+    ((), ("ORACLE_IDENTITY_NOT_PASSED", "expected case(s) did not pass: t::a"), False, "did not pass"),
 ])
-def test_a_named_test_closes_only_when_unmodified_executed_and_passing(modified, result, closed, reason):
+def test_a_named_test_closes_only_when_unmodified_and_the_oracle_passes(modified, judgment, closed, reason):
+    """The requirement-level rule; what "the oracle passes" means (FS-1C0:
+    independent trust surface, base inventory, complete evidence) is
+    tests/test_fs1c0_named_test_oracle.py."""
+    from kriya.workflow.named_test_oracle import OracleJudgment
+
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.UNVERIFIED},
                                 goal=CLOSE_GOAL)
     runs = []
 
-    def run_tests(paths):
-        runs.append(list(paths))
-        return result
-
-    from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
+    def judge(named):
+        runs.append(list(named))
+        return OracleJudgment(judgment[0], judgment[1], {"method": "named_test_oracle", "base_revision": "b"})
 
     [attempt] = close_unverified_requirements_with_named_tests(
         ledger, reqs, test_files=["tests/test_legacy.py", "tests/test_other.py"], modified=modified,
-        run_tests=run_tests, confirms_execution=output_confirms_nonzero_test_execution,
-        source="test", revision=1)
+        judge=judge, source="test", revision=1)
     assert attempt["closed"] is closed and (reason is None or reason in attempt["reason"])
     assert runs == ([] if modified else [["tests/test_legacy.py"]])  # exactly the named test, never more
     expected = RequirementOutcome.CLOSED_BY_EVIDENCE if closed else RequirementOutcome.UNVERIFIED
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is expected
+    if closed:
+        closure = ledger.current("requirement.REQ-2.closure").evidence
+        assert closure["method"] == "named_test_oracle" and closure["base_revision"] == "b"
 
 
 def _verdicts_json(prompt, unverifiable=()):
@@ -670,38 +676,64 @@ def _verdicts_json(prompt, unverifiable=()):
                             "evidence": "greeting.py"} for rid in ids]})
 
 
-def _legacy_workspace(tmp_path):
-    workspace = tmp_path / "ws"
-    (workspace / "tests").mkdir(parents=True)
-    (workspace / "tests" / "test_legacy.py").write_text("def test_legacy():\n    assert True\n")
-    return workspace
+# The candidate (greeting.py) breaks the "failing" legacy check; the other one
+# holds on any candidate.
+LEGACY_TESTS = {
+    True: "def test_legacy():\n    assert True\n",
+    False: ("import os\n\n\ndef test_legacy():\n"
+            "    assert not os.path.exists(os.path.join(os.path.dirname(__file__), \"..\", \"greeting.py\"))\n"),
+}
 
 
-@pytest.mark.parametrize("named_result, passes", [
-    ({"success": True, "output": "1 passed"}, True),
-    ({"success": False, "output": "1 failed"}, False),
-])
+def _git_base(root, files):
+    """``root`` as a git repository whose HEAD (the run's base) holds ``files``."""
+    import subprocess
+
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=root, check=True,
+                       capture_output=True)
+    return root
+
+
+def _real_named_test_runs(runs, other):
+    """run_tests stubbed for the gates; the named test (on the candidate and
+    on the base export) runs for real - FS-1C0 judges its structured report."""
+    real = PolymorphicValidator.run_tests
+
+    def run_tests(self, target_test=None, *args, **kwargs):
+        runs.append(target_test)
+        if target_test == ["tests/test_legacy.py"]:
+            return real(self, target_test)
+        return other
+
+    return run_tests
+
+
+@pytest.mark.parametrize("passes", [True, False])
 @pytest.mark.asyncio
-async def test_production_run_closes_cannot_confirm_only_by_running_the_named_test(tmp_path, named_result, passes):
+async def test_production_run_closes_cannot_confirm_only_by_running_the_named_test(tmp_path, passes):
     """The verifier says "satisfied" - a model claim (FS-1B) - so the run passes
     exactly when the named test, run deterministically, passes."""
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdicts_json(prompt),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
-    workspace = _legacy_workspace(tmp_path)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    _git_base(workspace, {"tests/test_legacy.py": LEGACY_TESTS[passes]})
     runs = []
-
-    def run_tests(self, target_test=None, *args, **kwargs):
-        runs.append(target_test)
-        return named_result if target_test == ["tests/test_legacy.py"] else {"success": True, "output": "3 passed"}
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
                return_value={"success": True, "output": ""}), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests):
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               new=_real_named_test_runs(runs, {"success": True, "output": "3 passed"})):
         res = await engine.run_generation_workflow(goal=LEGACY_ONLY_GOAL, workspace_path=str(workspace))
 
     assert ["tests/test_legacy.py"] in runs
     [closure] = _events(cfg, "requirement.closure")[:1]
     assert closure["closures"][0]["requirement"] == "REQ-1" and closure["closures"][0]["closed"] is passes
+    assert closure["closures"][0]["reason_code"] == ("ORACLE_PASSED" if passes else "ORACLE_IDENTITY_NOT_PASSED")
     assert res["quality_gates_passed"] is passes
     assert res["requirements"]["verdicts"]["REQ-1"]["model_outcome"] == "satisfied"
     if passes:
@@ -752,21 +784,18 @@ def test_the_migration_gate_closes_only_the_requirement_stating_the_migration():
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.UNVERIFIED
 
 
-@pytest.mark.parametrize("named_result, passes", [
-    ({"success": True, "output": "1 passed"}, True),
-    ({"success": False, "output": "1 failed"}, False),
-])
+@pytest.mark.parametrize("passes", [True, False])
 @pytest.mark.asyncio
-async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_test(
-        tmp_path, monkeypatch, named_result, passes):
+async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_test(tmp_path, monkeypatch, passes):
     from kriya.workflow import workflow_controller as wc
     from kriya.workflow.plan_validation import PlanValidationResult
     from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 
     goal = LEGACY_ONLY_GOAL
-    (tmp_path / "app.py").write_text("original\n")
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_legacy.py").write_text("def test_legacy():\n    assert True\n")
+    legacy = ("def test_legacy():\n    assert True\n" if passes else
+              "import os\n\n\ndef test_legacy():\n    with open(os.path.join(os.path.dirname(__file__), \"..\", "
+              "\"app.py\")) as f:\n        assert f.read() == \"original\\n\"\n")
+    _git_base(tmp_path, {"app.py": "original\n", "tests/test_legacy.py": legacy})
     monkeypatch.setattr(wc, "create_git_worktree", lambda workspace: workspace)
     plan = EngineeringPlan(plan_id="prd020", kind=ChangeKind.TASK, subtasks=[Subtask(
         id="s1", description="add run()", execution_method=ExecutionMethod.MODEL,
@@ -798,14 +827,11 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
     we.planner.run = AsyncMock(return_value="fake plan text")
     runs = []
 
-    def run_tests(self, target_test=None, *args, **kwargs):
-        runs.append(target_test)
-        return named_result if target_test == ["tests/test_legacy.py"] else {"success": True, "output": "2 passed"}
-
     with patch.object(wc, "parse_planner_structured_output", return_value=(MagicMock(), None)), \
          patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
          patch.object(wc, "validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests):
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               new=_real_named_test_runs(runs, {"success": True, "output": "2 passed"})):
         result = await wc.WorkflowController(we).execute(goal, str(tmp_path), migration_mode="enforce")
 
     assert ["tests/test_legacy.py"] in runs

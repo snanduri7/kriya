@@ -841,21 +841,21 @@ def verifier_result_verdicts(
 
 def close_unverified_requirements_with_named_tests(
     ledger: ObligationLedger, requirements: RequirementSet, *,
-    test_files: Iterable[str], modified: Iterable[str],
-    run_tests: Any, confirms_execution: Any, source: str, revision: Any,
+    test_files: Iterable[str], modified: Iterable[str], judge: Any, source: str, revision: Any,
 ) -> List[Dict[str, Any]]:
     """Close each UNVERIFIED requirement whose own text names existing tests,
     by running exactly those tests on the candidate the verifier judged.
 
-    Authoritative only under all of: the binding is the user's words
-    (``named_existing_tests``); every named test file is unchanged by the
-    candidate (``modified`` - a test the run wrote or edited is the model's
-    evidence, not an independent verifier); the run executed tests
-    (``confirms_execution(output)``) and passed. ``run_tests(paths)`` returns
-    the validator's ``{"success", "output"}``; it runs against the same
-    candidate the verdict's ``evidence_id`` identifies (the caller's
-    worktree, before anything else changes it). Returns one record per
-    attempted closure (closed or not, with why)."""
+    The binding is the user's words (``named_existing_tests``). A named test
+    file the candidate wrote or edited (``modified``) is the model's evidence,
+    not an independent verifier, and is refused without running anything.
+    Otherwise ``judge(named)`` - the FS-1C0 named-test oracle
+    (kriya/workflow/named_test_oracle.py), run against the same candidate the
+    verdict's ``evidence_id`` identifies - decides: it closes only when the
+    oracle is independent of the candidate (its trust surface equals the
+    authorized base), every case the base revision executes ran and passed,
+    and the evidence is complete; the closure record carries its bindings.
+    Returns one record per attempted closure (closed or not, with why)."""
     changed = set(modified)
     files = list(test_files)
     attempts: List[Dict[str, Any]] = []
@@ -875,19 +875,15 @@ def close_unverified_requirements_with_named_tests(
         elif not evidence_id:
             entry["reason"] = "the verdict has no evidence id to bind to"
         else:
-            try:
-                result = run_tests(named) or {}
-            except Exception as exc:  # a runner failure is no evidence either way
-                result = {"success": False, "output": f"runner raised: {exc}"}
-            executed = bool(confirms_execution(str(result.get("output", ""))))
-            if result.get("success") and executed:
+            judgment = judge(named)
+            entry["reason_code"] = judgment.reason_code
+            if judgment.closed:
                 record_requirement_closure(
-                    ledger, requirements, requirement.id, evidence_id=evidence_id, method="named_test_run",
-                    detail={"tests": named, "passed": True}, source=source, revision=revision,
+                    ledger, requirements, requirement.id, evidence_id=evidence_id, method=judgment.evidence["method"],
+                    detail=dict(judgment.evidence), source=source, revision=revision,
                 )
                 entry["closed"] = True
             else:
-                entry["reason"] = ("named tests did not execute" if not executed
-                                   else "named tests failed")
+                entry["reason"] = judgment.reason
         attempts.append(entry)
     return attempts

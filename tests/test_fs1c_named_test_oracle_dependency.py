@@ -1,66 +1,38 @@
-"""FS-1C finding (Track A): the named-test closure's oracle depends on files
-it does not guard. A requirement naming a pre-existing test closes when that
-test file is unchanged, executed and passing - but the candidate can change
-what the test means without touching it: a candidate conftest.py hook turns
-its failure into a pass (measured: report AND exit code both "passed").
+"""FS-1C finding (Track A), fixed by FS-1C0: the named-test closure's oracle
+depended on files it did not guard - a candidate conftest.py hook turned the
+unchanged named test's failure into a pass (report AND exit code), and the
+requirement closed. ``close_with_candidate`` keeps Track A's specimen
+signature (handover/evidence/fs1c/test_named_test_oracle_required.py imports
+it) and now drives the production closure on a real git base; the pre-fix pin
+is kept as evidence (handover/evidence/fs1c/test_named_test_oracle_prefix_pin.py)."""
+from _named_test_oracle_harness import FLIP_HOOK, close, make_base, write
 
-This pins today's behaviour (the closure happens). The required behaviour is
-asserted by handover/evidence/fs1c/test_named_test_oracle_required.py (fails
-today; no xfail in the suite)."""
-import sys
+from kriya.workflow.named_test_oracle import ORACLE_DEPENDENCY_CHANGED, ORACLE_IDENTITY_NOT_PASSED
+from kriya.workflow.requirements import RequirementOutcome
 
-from kriya.tools.validate import PolymorphicValidator
-from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
-from kriya.workflow.obligations import ObligationLedger
-from kriya.workflow.requirements import (
-    RequirementOutcome,
-    close_unverified_requirements_with_named_tests,
-    derive_requirements,
-    record_requirement_verdicts,
-    requirement_outcomes,
-    seed_requirement_obligations,
-)
-
-GOAL = "Behaviour stays compatible with the legacy check test_legacy\n"
 LEGACY = "from app import value\n\n\ndef test_legacy():\n    assert value() == 1\n"
-FLIP_HOOK = ("import pytest\n\n\n@pytest.hookimpl(hookwrapper=True)\n"
-             "def pytest_runtest_makereport(item, call):\n    outcome = yield\n"
-             "    outcome.get_result().outcome = \"passed\"\n")
 
 
 def close_with_candidate(tmp_path, conftest):
-    """The candidate breaks app.value() and (optionally) adds a conftest.py;
-    the named test file itself is unchanged."""
-    (tmp_path / "requirements.txt").write_text("")
-    (tmp_path / "app.py").write_text("def value():\n    return 2\n")       # candidate: wrong
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "__init__.py").write_text("")
-    (tmp_path / "tests" / "test_legacy.py").write_text(LEGACY)               # pre-existing, unchanged
-    modified = ["app.py"]
+    """Track A's specimen: the candidate breaks app.value() and (optionally)
+    adds a conftest.py; the named test file itself is unchanged."""
+    repo = make_base(tmp_path / "repo", {"requirements.txt": "", "app.py": "def value():\n    return 1\n",
+                                          "tests/__init__.py": "", "tests/test_legacy.py": LEGACY})
+    candidate = {"app.py": "def value():\n    return 2\n"}  # candidate: wrong
     if conftest:
-        (tmp_path / "tests" / "conftest.py").write_text(FLIP_HOOK)
-        modified.append("tests/conftest.py")
-    reqs = derive_requirements(GOAL)
-    ledger = ObligationLedger()
-    seed_requirement_obligations(ledger, reqs)
-    record_requirement_verdicts(ledger, reqs, {"REQ-1": (RequirementOutcome.SATISFIED, "")}, revision=1,
-                                evidence_fingerprint="cand-1", source="test")
-    validator = PolymorphicValidator(str(tmp_path))
-    validator._resolve_python_interpreter = lambda: (sys.executable, None)
-    [attempt] = close_unverified_requirements_with_named_tests(
-        ledger, reqs, test_files=["tests/test_legacy.py"], modified=modified,
-        run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
-        confirms_execution=output_confirms_nonzero_test_execution, source="test", revision=1)
-    return attempt, requirement_outcomes(ledger, reqs)["REQ-1"]
+        candidate["tests/conftest.py"] = FLIP_HOOK
+    write(repo, candidate)
+    [attempt], outcomes, _ = close(repo, modified=sorted(candidate))
+    return attempt, outcomes["REQ-1"]
 
 
 def test_control_the_unchanged_named_test_catches_the_wrong_candidate(tmp_path):
     attempt, outcome = close_with_candidate(tmp_path, conftest=False)
     assert attempt["closed"] is False and outcome is RequirementOutcome.UNVERIFIED
+    assert attempt["reason_code"] == ORACLE_IDENTITY_NOT_PASSED
 
 
-def test_a_candidate_conftest_hook_closes_the_requirement_today(tmp_path):
-    """Pins the defect path: the named test file is unchanged, the candidate
-    is wrong, a candidate conftest hook makes the run report a pass."""
+def test_a_candidate_changed_oracle_dependency_never_closes_a_requirement(tmp_path):
     attempt, outcome = close_with_candidate(tmp_path, conftest=True)
-    assert attempt["closed"] is True and outcome is RequirementOutcome.CLOSED_BY_EVIDENCE
+    assert attempt["closed"] is False and outcome is RequirementOutcome.UNVERIFIED
+    assert attempt["reason_code"] == ORACLE_DEPENDENCY_CHANGED and "tests/conftest.py" in attempt["reason"]
