@@ -254,3 +254,16 @@ def test_q9_explains_the_integration_decision(tmp_path, monkeypatch):
     assert decision["consumer_evidence"]["sources"] == {CONTROLLER: "current_workspace"}
     assert decision["missing_producer_references"] == [SERVICE]
     assert "not referenced by the consumer" in decision["failure_reason"]
+
+
+def test_another_subtasks_written_reference_is_not_the_consumers_evidence(tmp_path):
+    """Not a union of every write: a sibling's established file references
+    the provider, the consumer's own artifact does not - VIOLATED."""
+    provenance = _workspace(tmp_path, {SERVICE: harness.SERVICE_SRC, CONTROLLER: "def f():\n    return 1\n",
+                                       OTHER: "from shop.service import find_pet_types\n"})
+    provenance.record(SERVICE, "s1")
+    provenance.record(OTHER, "s4")
+    record = _judge(_two_unit(), provenance, established={SERVICE: harness.SERVICE_SRC,
+                                                          OTHER: "from shop.service import find_pet_types\n"})
+    assert record.status == ObligationStatus.VIOLATED
+    assert record.evidence["consumer_evidence"]["paths"] == [CONTROLLER]
