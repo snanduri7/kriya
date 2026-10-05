@@ -1,0 +1,103 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< org.apache.commons:commons-lang3 >------------------
+[INFO] Building Apache Commons Lang 3.21.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (enforce-maven-version) @ commons-lang3 ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed
+[INFO] 
+[INFO] --- enforcer:3.6.3:enforce (enforce-java-version) @ commons-lang3 ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] 
+[INFO] --- apache-rat:0.17:check (rat-check) @ commons-lang3 ---
+[WARNING] Basedir is : /kriya/workspace
+[INFO] Excluding patterns: site-content/**, src/site/resources/.htaccess, src/site/resources/download_lang.cgi, src/site/resources/release-notes/RELEASE-NOTES-*.txt, src/test/resources/lang-708-input.txt, **/*.svg, **/*.xcf, site-content/**, .checkstyle, .fbprefs, .pmd, .asf.yaml, .gitattributes, src/site/resources/download_*.cgi, maven-eclipse.xml, .externalToolBuilders/**, .vscode/**, .project, .classpath, .settings/**, **/*.svg, **/*.xcf
+[INFO] Excluding MAVEN collection.
+[INFO] Excluding ECLIPSE collection.
+[INFO] Excluding IDEA collection.
+[INFO] Processing exclude file from STANDARD_SCMS.
+[INFO] Excluding STANDARD_SCMS collection.
+[INFO] Excluding MISC collection.
+[INFO] Excluding HIDDEN_DIR collection.
+[INFO] RAT summary:
+[INFO]   Approved:  669
+[INFO]   Archives:  0
+[INFO]   Binaries:  6
+[INFO]   Document types:  4
+[INFO]   Ignored:  37
+[INFO]   License categories:  1
+[INFO]   License names:  1
+[INFO]   Notices:  3
+[INFO]   Standards:  669
+[INFO]   Unapproved:  0
+[INFO]   Unknown:  0
+[INFO] 
+[INFO] --- artifact:3.6.1:check-buildplan (check-buildplan) @ commons-lang3 ---
+[INFO] No known issue in 21 plugins
+[INFO] 
+[INFO] --- build-helper:3.6.1:parse-version (parse-version) @ commons-lang3 ---
+[INFO] 
+[INFO] --- antrun:3.2.0:run (javadoc.resources) @ commons-lang3 ---
+[INFO] Executing tasks
+[INFO] Executed tasks
+[INFO] 
+[INFO] --- remote-resources:3.3.0:process (process-resource-bundles) @ commons-lang3 ---
+[INFO] Skipping remote resources execution.
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ commons-lang3 ---
+[INFO] skip non existing resourceDirectory /kriya/workspace/src/main/resources
+[INFO] Copying 2 resources from . to target/classes/META-INF
+[INFO] 
+[INFO] --- compiler:3.16.0:compile (default-compile) @ commons-lang3 ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- bundle:5.1.9:manifest (bundle-manifest) @ commons-lang3 ---
+[INFO] No MANIFEST.MF file found, generating manifest.
+[INFO] Writing manifest: /kriya/workspace/target/osgi/MANIFEST.MF
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ commons-lang3 ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] Copying 2 resources from . to target/test-classes/META-INF
+[INFO] 
+[INFO] --- compiler:3.16.0:testCompile (default-testCompile) @ commons-lang3 ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 363 source files with javac [debug target 1.8] to target/test-classes
+[INFO] /kriya/workspace/src/test/java/org/apache/commons/lang3/AppendableJoinerTest.java: Some input files use or override a deprecated API.
+[INFO] /kriya/workspace/src/test/java/org/apache/commons/lang3/AppendableJoinerTest.java: Recompile with -Xlint:deprecation for details.
+[INFO] /kriya/workspace/src/test/java/org/apache/commons/lang3/EnumUtilsTest.java: Some input files use unchecked or unsafe operations.
+[INFO] /kriya/workspace/src/test/java/org/apache/commons/lang3/EnumUtilsTest.java: Recompile with -Xlint:unchecked for details.
+[INFO] -------------------------------------------------------------
+[WARNING] COMPILATION WARNING : 
+[INFO] -------------------------------------------------------------
+[WARNING] /kriya/workspace/src/test/java/org/apache/commons/lang3/CharSetTest.java:[394,55] non-varargs call of varargs method with inexact argument type for last parameter;
+  cast to java.lang.String for a varargs call
+  cast to java.lang.String[] for a non-varargs call and to suppress this warning
+[INFO] 1 warning
+[INFO] -------------------------------------------------------------
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /kriya/workspace/src/test/java/org/apache/commons/lang3/ArrayFillTest.java:[167,40] reference to fill is ambiguous
+  both method fill(char[],int,int,char) in org.apache.commons.lang3.ArrayFill and method fill(int[],int,int,int) in org.apache.commons.lang3.ArrayFill match
+[INFO] 1 error
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  22.330 s
+[INFO] Finished at: 2026-10-05T14:40:06Z
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.16.0:testCompile (default-testCompile) on project commons-lang3: Compilation failure
+[ERROR] /kriya/workspace/src/test/java/org/apache/commons/lang3/ArrayFillTest.java:[167,40] reference to fill is ambiguous
+[ERROR]   both method fill(char[],int,int,char) in org.apache.commons.lang3.ArrayFill and method fill(int[],int,int,int) in org.apache.commons.lang3.ArrayFill match
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp
