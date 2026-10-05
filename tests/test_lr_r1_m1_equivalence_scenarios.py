@@ -101,7 +101,21 @@ def _resume_drive(engine_factory, workspace):
     return run_direct(engine_factory(), "add sub to calc.py", workspace, resume=True)
 
 
+def _output_budget_configure(cfg, patch):
+    del patch
+    cfg.llm.max_tokens = 1024
+    cfg.llm.context_policy.max_output_tokens = 1024
+    cfg.llm.capabilities.preferred_edit_protocol = "small_native_tools"
+
+
+def _rename_drive(engine_factory, workspace):
+    return run_direct(engine_factory(), _t6_harness.RENAME_GOAL, workspace)
+
+
 DIRECT_SCENARIOS = {
+    # PRD-016: a refused full-file request, then an anchored patch in the same attempt.
+    "output_budget_fallback": dict(make=lambda: _t6_harness.rename_responder, configure=_output_budget_configure,
+                                   drive=_rename_drive, files={"calc.py": _t6_harness.BIG_CALC}),
     "fallback_refused": dict(make=_always_wrong, configure=_fallback_refused),
     "fallback_substituted": dict(make=_always_wrong, configure=_fallback_substituted),
     "resume": dict(make=_resume_responder, drive=_resume_drive),
@@ -112,7 +126,8 @@ DIRECT_SCENARIOS = {
 def test_direct_paths_are_unchanged_by_the_recorder(tmp_path, monkeypatch, scenario):
     spec = dict(DIRECT_SCENARIOS[scenario])
     make = spec.pop("make")
-    observations = assert_recorder_has_no_effect(tmp_path, monkeypatch, make, FILES, scenario, **spec)
+    files = spec.pop("files", FILES)
+    observations = assert_recorder_has_no_effect(tmp_path, monkeypatch, make, files, scenario, **spec)
     full_state = observations["full"]["_state"]
     runs = reader.list_runs(full_state)
     assert runs and all(reader.open_run(full_state, run).verify().status == reader.VERIFIED for run in runs)
@@ -121,6 +136,10 @@ def test_direct_paths_are_unchanged_by_the_recorder(tmp_path, monkeypatch, scena
         assert "fallback.decision" in kinds
     if scenario == "resume":
         assert len(runs) == 2
+    if scenario == "output_budget_fallback":
+        transitions = [r for run in runs for r in reader.open_run(full_state, run).records()
+                       if r["kind"] == "authority.snapshot" and "transition" in r["payload"]]
+        assert transitions, "the fallback must have run"
 
 
 # -- enforce scenarios through the real controller ---------------------------------------------

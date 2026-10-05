@@ -2679,6 +2679,9 @@ async def _run_developer_generation_as_developer(
             retry_kwargs = _lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
             if retry_kwargs is None:
                 raise
+            attempt_evidence_scope.record_authority_transition(
+                "output_budget_protocol_fallback",
+                {path: getattr(op, "value", op) for path, op in (retry_kwargs.get("operation_by_file") or {}).items()})
             result = await ctx.developer.run_generation(**retry_kwargs)
         succeeded = True
         return result

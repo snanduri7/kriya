@@ -728,6 +728,7 @@ def _observe(kind: str, payload: Mapping[str, Any], seq: Optional[int] = None) -
         current["sections"] = _section_digests(payload.get("segments"))
     elif kind == "authority.snapshot":
         current["authority"] = _digest_of({k: v for k, v in payload.items() if k not in ("t_wall", "t_mono_ms")})
+        current["authority_payload"], current["authority_seq"] = dict(payload), seq
         current["targets"] = sorted(t.get("path") for t in payload.get("targets") or [])
     elif kind == "fallback.decision" and payload.get("phase") == "call":
         current["model_profile"] = payload.get("profile_digest")
@@ -736,6 +737,37 @@ def _observe(kind: str, payload: Mapping[str, Any], seq: Optional[int] = None) -
     elif kind == "developer.parse" and seq is not None:
         current["proposals"].append({"path": payload.get("path"), "kind": payload.get("kind"),
                                      "reason_code": payload.get("reason_code"), "seq": seq})
+
+
+def record_authority_transition(reason: str, operations: Mapping[str, Any]) -> None:
+    """A fresh ``authority.snapshot`` when the requested operation changes
+    within one Developer invocation (e.g. the PRD-016 output-budget fallback
+    to an anchored patch): the invocation's recorded snapshot with the
+    operations actually requested now, and the transition (reason, previous
+    snapshot, changed targets). Only recorded facts; never a decision."""
+    try:
+        inputs = _unit_inputs()
+        current = inputs.current if inputs is not None else None
+        base = current.get("authority_payload") if current is not None else None
+        if base is None:
+            return
+        changed: Dict[str, Any] = {}
+        targets = []
+        for target in base.get("targets") or []:
+            target = dict(target)
+            new = operations.get(target.get("path"))
+            if new is not None and new != target.get("requested_operation"):
+                target["requested_operation"] = changed[target["path"]] = new
+            targets.append(target)
+        if not changed:
+            return
+        payload = {**base, "targets": targets,
+                   "transition": {"reason": reason, "previous_snapshot_seq": current.get("authority_seq"),
+                                  "changed": changed}}
+    except Exception as error:  # observational
+        logger.warning("Attempt evidence: authority transition not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("authority.snapshot", payload)
 
 
 def note_retry_evidence(fingerprint_digest: Optional[str]) -> None:

@@ -365,3 +365,71 @@ def test_e_an_attempt_that_made_no_model_call_is_not_applicable(tmp_path, monkey
         assert answers[label]["status"] == "NOT_APPLICABLE" and answers[label]["reason"].startswith("no_model_call")
     # The model for the call was decided before admission stopped it: a fact.
     assert answers["Q8"]["status"] == "RECORDED" and answers["Q8"]["items"][0]["phase"] == "call"
+
+
+# -- F: authority is per call, including a within-attempt protocol fallback -------------------
+
+def test_f_a_protocol_fallback_call_has_its_own_authority_snapshot(tmp_path, monkeypatch):
+    from _t6_harness import BIG_CALC, RENAME_GOAL, output_budget_config, rename_responder
+
+    observed = direct_run(tmp_path, monkeypatch, rename_responder, {"calc.py": BIG_CALC},
+                          goal=RENAME_GOAL, cfg=output_budget_config(patch_capable=True))
+    calls = [item for item in observed.attempt(1)["Q1"]["items"] if item["role"] == "developer"]
+    assert len(calls) == 2
+    refused, patched = calls
+    assert refused["dispatched"] is False and refused["refusal_type"] == "OutputBudgetUnsatisfiableError"
+    assert patched["dispatched"] is True
+    # Each call carries the authority it was actually given.
+    assert refused["requested_operations"] == {"calc.py": "repair_with_full_file"}
+    assert patched["requested_operations"] == {"calc.py": "repair_with_patch"}
+    assert refused["authority_snapshot_seq"] != patched["authority_snapshot_seq"]
+    snapshots = {r["seq"]: r for r in observed.of("authority.snapshot")}
+    second = snapshots[patched["authority_snapshot_seq"]]["payload"]
+    assert second["transition"] == {"reason": "output_budget_protocol_fallback",
+                                    "previous_snapshot_seq": refused["authority_snapshot_seq"],
+                                    "changed": {"calc.py": "repair_with_patch"}}
+    assert snapshots[patched["authority_snapshot_seq"]]["seq"] < next(
+        r["seq"] for r in observed.of("model.request") if r["call_seq"] == patched["call_seq"])
+    # Q2 shows both snapshots.
+    assert len(observed.attempt(1)["Q2"]["items"]) == 2
+
+
+def test_f_a_call_without_a_transition_keeps_one_snapshot(tmp_path, monkeypatch):
+    """Negative control: an attempt whose single Developer call needs no
+    fallback has exactly one snapshot, bound to that call."""
+    from _chaos_harness import CALC_WITH_SUB
+
+    observed = direct_run(tmp_path, monkeypatch, _always(CALC_WITH_SUB), FILES)
+    [call] = [item for item in observed.attempt(1)["Q1"]["items"] if item["role"] == "developer"]
+    [snapshot] = observed.of("authority.snapshot")
+    assert call["authority_snapshot_seq"] == snapshot["seq"] and "transition" not in snapshot["payload"]
+
+
+def test_f_a_transition_names_only_operations_that_changed(tmp_path, monkeypatch):
+    from kriya.core.attempt_evidence import reader, scope
+    from kriya.core.state_paths import ENV_STATE_DIR
+    from tests._strict_doubles import strict_config
+
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+
+    class _Context:
+        run_id = "run-transition"
+    cfg = strict_config()
+    with scope.run_scope(_Context()):
+        scope.ensure_store(cfg)
+        with scope.unit_scope(cfg, "u1", "direct"):
+            with scope.attempt_scope(lambda: 1):
+                scope.attempt_opened({"mode": "full_set"})
+                scope.emit("authority.snapshot", {"targets": [
+                    {"path": "a.py", "requested_operation": "repair_with_full_file"},
+                    {"path": "b.py", "requested_operation": "repair_with_patch"}]})
+                scope.record_authority_transition("x", {"a.py": "repair_with_full_file",
+                                                        "b.py": "repair_with_patch"})   # nothing changed
+                scope.record_authority_transition("x", {"a.py": "repair_with_patch", "b.py": "repair_with_patch"})
+        scope.close_run(_Context(), lambda: None)
+    snapshots = [r for r in reader.open_run(str(tmp_path / "state"), "run-transition").records()
+                 if r["kind"] == "authority.snapshot"]
+    assert len(snapshots) == 2                          # the no-change call recorded nothing
+    second = snapshots[1]["payload"]
+    assert second["transition"]["changed"] == {"a.py": "repair_with_patch"}
+    assert [t["requested_operation"] for t in second["targets"]] == ["repair_with_patch", "repair_with_patch"]

@@ -55,6 +55,22 @@ def _brief(record: Mapping[str, Any], *fields: str) -> Dict[str, Any]:
     return {key: value for key, value in brief.items() if value is not None}
 
 
+def _with_authority(item: Dict[str, Any], request: Mapping[str, Any],
+                    records: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """A Developer request with the authority it was given: the latest
+    ``authority.snapshot`` recorded before it in the same attempt."""
+    if request.get("role") != "developer":
+        return item
+    prior = [r for r in records if r.get("kind") == "authority.snapshot" and r.get("seq", 0) < request.get("seq", 0)]
+    if not prior:
+        return item
+    snapshot = prior[-1]
+    item["authority_snapshot_seq"] = snapshot.get("seq")
+    item["requested_operations"] = {target.get("path"): target.get("requested_operation")
+                                    for target in (snapshot.get("payload") or {}).get("targets") or []}
+    return item
+
+
 def _attempt_key(record: Mapping[str, Any]) -> Optional[AttemptKey]:
     """The attempt a record belongs to: its scope's attempt identity (the
     retry-loop iteration, so failure handling after run_attempt included)."""
@@ -90,12 +106,13 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         return _answer_tool_attempt(next_records)
     # No model call is a fact Kriya recorded (the attempt ran and called
     # nothing), so it is NOT_APPLICABLE - never missing evidence.
-    answers["Q1"] = _recorded([_brief(r, "model", "dispatched", "wire_reason", "refusal_type", "temperature")
+    answers["Q1"] = _recorded([_with_authority(_brief(r, "model", "dispatched", "wire_reason", "refusal_type",
+                                                      "temperature"), r, records)
                                for r in requests]) if requests else _absent(
         NOT_APPLICABLE, "no_model_call: no model request was made in this attempt")
     snapshots = _of(records, "authority.snapshot")
     if snapshots:
-        answers["Q2"] = _recorded([_brief(r, "write_scope_mode", "targets") for r in snapshots])
+        answers["Q2"] = _recorded([_brief(r, "write_scope_mode", "targets", "transition") for r in snapshots])
     else:
         answers["Q2"] = _absent(NOT_APPLICABLE, "no_model_call: no Developer request in this attempt") \
             if not developer_requests else _absent(NOT_RECORDED, "no authority snapshot was recorded")
