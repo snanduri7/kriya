@@ -177,4 +177,8 @@ def test_a_failing_verification_only_unit_with_no_change_mechanism_is_not_retrie
     assert decision["retry"] is False and decision["stop_loop"] is True
     assert decision["no_progress_reason"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
     assert explained["Q9"]["terminal_cause"]["failure_category"] == "no_progress"
+    assert explained["Q9"]["terminal_cause"]["quality_gates_passed"] is False   # never converted to success
+    [s2_unit] = [u for u in explained["Q9"]["units"] if u["unit_id"] == "s2"]
+    assert s2_unit["quality_gates_passed"] is False and s2_unit["failure_category"] == "no_progress"
+    assert explained["Q9"]["items"][0]["terminal_status"] == "FAILURE"
     assert explained["Q9"]["last_recovery_decision"]["no_progress_reason"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
