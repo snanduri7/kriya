@@ -39,7 +39,7 @@ def main(ws):
                                             if v["calls"]}
     summary["recorder_function_calls"] = {k.rsplit(".", 1)[-1]: v["calls"] for k, v in functions.items() if v["calls"]}
     summary["missing_targets"] = [k for k in functions if k.startswith("MISSING:")]
-    pick = lambda name: next((v for k, v in functions.items() if k.endswith("." + name)), {"calls": 0, "seconds": 0.0})
+    pick = lambda name: next((v for k, v in functions.items() if k.endswith("." + name)), {"calls": 0, "seconds": 0.0})  # noqa: E731 - evidence script kept byte-for-byte as run (LR-R1-M1 live validation)
     summary["record_candidate_change"] = pick("_record_candidate_change")
     summary["close_run"] = pick("close_run")
     summary["prune_after_run"] = pick("prune_after_run")

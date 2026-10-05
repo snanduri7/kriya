@@ -17,7 +17,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 
-from kriya.core.attempt_evidence import scope
+from kriya.core.attempt_evidence import scope  # noqa: F401 - evidence script kept as run (LR-R1-M1 live validation)
 from kriya.workflow import attempt
 
 D = os.path.expanduser("~/kriya-m1-live")
