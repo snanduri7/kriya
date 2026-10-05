@@ -11,6 +11,7 @@ to-workspace, lesson extraction, the full regression suite) deliberately
 stays in workflow.py - out of scope for this slice.
 """
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -26,6 +27,7 @@ from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
@@ -4613,6 +4615,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     from kriya.tools.validate import PolymorphicValidator
 
     state.attempt_number += 1
+    attempt_evidence_scope.attempt_opened({"mode": "verification_only", "operation": None})
     state.candidate_gates_succeeded = False
     validator = PolymorphicValidator(
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
@@ -6245,6 +6248,22 @@ def _verified_no_change_proposal(
     return paths
 
 
+def _attempt_evidence_boundary(func):
+    """LR-R1-M1: run one attempt inside its attempt-evidence scope
+    (observational). The attempt's number is read from
+    ``state.attempt_number`` at each record - it is incremented first thing
+    inside the attempt, never predicted here."""
+    @functools.wraps(func)
+    async def wrapper(state: GenerationState, ctx: AttemptContext) -> None:
+        with attempt_evidence_scope.attempt_scope(lambda: state.attempt_number) as closing:
+            await func(state, ctx)
+            closing.update(outcome="PASSED" if state.overall_attempt_succeeded else "RETURNED",
+                           candidate_gates_passed=state.candidate_gates_succeeded,
+                           terminal_regression_passed=state.terminal_regression_succeeded)
+    return wrapper
+
+
+@_attempt_evidence_boundary
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
@@ -6330,6 +6349,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         operation=attempt_operation.value,
         details={"mode": state.last_attempt_mode},
     ))
+    attempt_evidence_scope.attempt_opened({
+        "mode": state.last_attempt_mode, "operation": attempt_operation.value,
+        "attempts_by_mode_before": dict(state.attempts_by_mode),
+        "reserved_fallback": bool(retry_decision.reserved_fallback),
+    })
     state.attempts_by_mode[state.last_attempt_mode] = state.attempts_by_mode.get(state.last_attempt_mode, 0) + 1
     if retry_decision.reserved_fallback:
         # STATE-RESERVED-FALLBACK-001: only the fallback's own allowance in

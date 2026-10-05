@@ -271,7 +271,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
 # can neither disable nor soften it.
 # So is model_qualification.* (QUAL-CONFIG-001): it decides whether a model
 # may run in production, so a repository can never change it.
-_BLANKET_SECURITY_TOP_KEYS = ("mcp", "static_analysis", "model_qualification")
+# So is evidence.* (LR-R1-M1): a repository must never turn off, reduce or
+# widen the audit trail of what is done to it.
+_BLANKET_SECURITY_TOP_KEYS = ("mcp", "static_analysis", "model_qualification", "evidence")
 
 
 def classify_field(top_key: Optional[str], leaf_key: str) -> FieldClassification:

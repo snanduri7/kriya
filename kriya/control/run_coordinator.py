@@ -26,6 +26,7 @@ from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.logging_setup import run_log
 
 logger = logging.getLogger(__name__)
@@ -412,7 +413,10 @@ def begin_mutating_run(
         lease.record = record
         # The run log wraps the whole run, so terminal-record and retention
         # lines land in it; it never alters the run (see run_log).
-        with run_log(context.run_id, canonical):
+        # LR-R1-M1: the attempt-evidence run scope spans the whole run. It is
+        # observational (never raises, never alters the run); its store opens
+        # at the first scope that knows the configuration.
+        with run_log(context.run_id, canonical), attempt_evidence_scope.run_scope(context):
             token = _ACTIVE_RUN.set(context)
             try:
                 yield context
@@ -431,6 +435,7 @@ def begin_mutating_run(
                     from kriya.control.retention import prune_after_run
                     prune_after_run(canonical, context.run_id)
                 finally:
+                    attempt_evidence_scope.close_run(context, lambda: load_run_record(canonical, context.run_id))
                     # Always expire the capability with the lock, so a same-process
                     # caller (e.g. the REPL) can never reuse it without ownership.
                     lease.active = False

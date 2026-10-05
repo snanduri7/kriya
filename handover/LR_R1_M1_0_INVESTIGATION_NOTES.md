@@ -132,3 +132,13 @@ through) plus `fit_developer_request`, so no fitter is missed.
 
 **Verdict:** no major design assumption is invalidated, so M1.1 may proceed. The only change is the M1.6 hook point
 above.
+
+## 7. Implementation deviations from the design (recorded as they are made)
+
+| # | Where | Deviation | Why |
+|---|---|---|---|
+| DEV-1 | M1.2, design §5.1 | **Phases of non-attempt calls are not opened by per-phase scopes.** A call's `phase` is the attempt scope's `attempt` when one is active. Otherwise it is mapped from the role the code already sets for that call (`role_metrics.model_role`: planner → `planning`, reviewer → `review`, spec_compliance/run_verifier → `requirement_verification`, ...). `phase.opened/closed` stay schema kinds that no producer emits in M1 | Eight call sites would each need an extra scope. The role ContextVar is set by those same sites for every call, so it is observed attribution, not a guess, and it adds no new hook |
+| DEV-2 | M1.2, design §3.3 | **The goal is recorded in `unit.opened`** (content), not in `run.opened`. The run scope opens before any goal is known, and a run's units can have different goals (enforce subtask goals, milestone goals) | The record carries the goal that unit actually ran under |
+| DEV-3 | M1.2, I-2 | **The `evidence` config section is excluded from every execution-identity fingerprint**: the RunRecord's `effective_config_fingerprint`, the checkpoint `config_fingerprint` and the resume `config` bucket (`checkpoint.OBSERVATIONAL_CONFIG_SECTIONS`). It stays in SEC-009 approval digests | MEASURED by T3: with it included, `full` vs `off` changed `effective_config_fingerprint`, so a capture-mode change between a run and its resume would have been config drift (a resume refusal). That is a behavioural effect, which I-2 forbids. Negative control: a log-level change still changes both fingerprints (test) |
+| DEV-4 | M1.2 | The store opens **lazily**, at the first scope that knows the configuration: the unit scope in `run_generation_workflow`, or `ensure_store` at the start of enforce structured planning (which runs before any unit). `begin_mutating_run` has no configuration | No new parameter on the 5 CLI entry points |
+| DEV-5 | M1.2, T3 | The equivalence suite **measures volatility** (two `off` runs; differing JSON paths are masked) instead of listing volatile keys. It also normalizes duration text (`in <n>s`) in every compared text, request bytes included | MEASURED: pytest's summary and Kriya's own "completed ... in 0.01s" messages vary between two identical runs, independently of the recorder. A flaky failure (1 in 8) was traced to this before the normalization; 10/10 passes after |

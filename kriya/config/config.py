@@ -1487,6 +1487,35 @@ class ModelQualificationConfig(BaseModel):
     measurement: QualificationMeasurementPolicy = Field(default_factory=QualificationMeasurementPolicy)
 
 
+class AttemptEvidenceRetentionConfig(BaseModel):
+    """LR-R1-M1 §10: pruning of sealed attempt-evidence stores at run close."""
+
+    model_config = ConfigDict(extra="forbid")
+    keep_runs: int = Field(default=200, ge=1)
+    max_bytes: int = Field(default=5 * 1024 ** 3, ge=1)
+
+
+class AttemptRecorderConfig(BaseModel):
+    """LR-R1-M1 attempt evidence recorder (kriya/core/attempt_evidence/).
+
+    ``capture``: ``full`` (default, D4) records prompts, responses, diffs and
+    gate output as local-only blobs; ``digest_only`` records digests and
+    lengths only; ``full_with_reasoning`` also keeps separately returned
+    reasoning text; ``off`` opens no store (reported, never refused - D5).
+    There is deliberately no path field: the store lives under the state
+    directory. SECURITY_AUTHORITY as a whole (kriya/config/authority.py): a
+    repository can never disable, reduce or widen capture."""
+
+    model_config = ConfigDict(extra="forbid")
+    capture: Literal["full", "digest_only", "full_with_reasoning", "off"] = "full"
+    retention: AttemptEvidenceRetentionConfig = Field(default_factory=AttemptEvidenceRetentionConfig)
+
+
+class EvidenceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_recorder: AttemptRecorderConfig = Field(default_factory=AttemptRecorderConfig)
+
+
 class AppConfig(BaseModel):
     """runtime_profile (2026-08-25, external review P2) - a named
     preset in place of remembering which combination of independent
@@ -1544,6 +1573,7 @@ class AppConfig(BaseModel):
     workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
     static_analysis: StaticAnalysisConfig = Field(default_factory=StaticAnalysisConfig)
     model_qualification: ModelQualificationConfig = Field(default_factory=ModelQualificationConfig)
+    evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     runtime_profile: Optional[str] = Field(default=None)
     # PRD-019: the routing plan a workflow command applied to this (routed)
     # configuration, recorded by the run as model.route events. Not a

@@ -17,6 +17,7 @@ from kriya.control.state import CURRENT_SCHEMA_VERSION, ControlState
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.workflow.checkpoint import (
+    OBSERVATIONAL_CONFIG_SECTIONS,
     RESUME_INVALIDATION_MATRIX,
     ResumeStatus,
     load_checkpoint,
@@ -260,9 +261,16 @@ def test_config_split_partitions_every_leaf_exactly_once():
     owned = split_config_by_owner(dump)
     remainder_leaves = set(_leaves(owned["config"]))
     owned_paths = set(CONFIG_FIELD_OWNERS)
+    observational = 0
     for leaf in _leaves(dump):
         in_owned = any(leaf[:len(path)] == path for path in owned_paths)
+        if leaf[0] in OBSERVATIONAL_CONFIG_SECTIONS:
+            # LR-R1-M1 I-2: what Kriya records is in no execution-identity bucket.
+            assert not in_owned and leaf not in remainder_leaves, leaf
+            observational += 1
+            continue
         assert in_owned != (leaf in remainder_leaves), leaf
+    assert observational > 0
 
 
 def test_an_unlisted_config_field_stays_in_config():

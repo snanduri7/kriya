@@ -34,6 +34,7 @@ from kriya.control.run_coordinator import (
     owning_run_work_unit,
 )
 from kriya.control.run_record import RunLifecycle
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.kernel import Kernel
 from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
@@ -1822,6 +1823,13 @@ class WorkflowEngine:
             ))
         except Exception as exc:  # never blocks the run; the gap is logged loudly
             logger.warning(f"Could not record the run's egress authority: {exc}")
+        # LR-R1-M1: where this run's attempt evidence lives (or why it does
+        # not). The only change the recorder makes to a trace row.
+        state.record_event(RunEvent(
+            kind="evidence.attempt_store", attempt=0, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUXILIARY, message="attempt evidence store",
+            details=attempt_evidence_scope.store_pointer(),
+        ))
         # PRD-013/014: the exact runtime of the primary model and its
         # qualification state, persisted with the run. Every call also adds
         # its own fingerprint id to the RunRecord (LLMClient).

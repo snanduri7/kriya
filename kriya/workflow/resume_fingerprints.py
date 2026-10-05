@@ -424,8 +424,12 @@ _ABSENT = object()
 
 
 def split_config_by_owner(config_dump: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """{"config": remainder, owner: {"a.b": value}} - each leaf in one bucket."""
-    remainder = copy.deepcopy(dict(config_dump))
+    """{"config": remainder, owner: {"a.b": value}} - each leaf in one bucket.
+    Observational configuration (what Kriya records, never what it does) is
+    in no bucket: LR-R1-M1 invariant I-2."""
+    from kriya.workflow.checkpoint import without_observational_config
+
+    remainder = copy.deepcopy(without_observational_config(dict(config_dump)))
     owned: Dict[str, Dict[str, Any]] = {
         "config": remainder, "model_runtime": {}, "containment": {}, "verification_policy": {},
     }

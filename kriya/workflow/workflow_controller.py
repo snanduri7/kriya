@@ -121,6 +121,7 @@ from kriya.control.run_coordinator import (
 from kriya.control.run_record import RunLifecycle
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import json_document_is_ownerless
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.static_analysis.service import (
@@ -4054,6 +4055,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         ledger = DecisionLedger()
 
         kernel = getattr(self.workflow_engine, "kernel", None)
+        # LR-R1-M1: structured planning runs before any work unit; open the
+        # run's attempt-evidence store now (observational, never blocks).
+        attempt_evidence_scope.ensure_store(getattr(kernel, "config", None))
         available_tool_names = None
         if kernel is not None:
             try:
