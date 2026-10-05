@@ -169,5 +169,18 @@ def list_runs(state_dir: str) -> List[str]:
                   if not name.startswith(".") and os.path.isfile(os.path.join(root, name, _MANIFEST)))
 
 
+def newest_run(state_dir: str) -> Optional[str]:
+    """The most recently created run store (by its manifest, written once at
+    creation), or None."""
+    root = store_root(state_dir)
+    created = []
+    for run_id in list_runs(state_dir):
+        try:
+            created.append((os.path.getmtime(os.path.join(root, run_id, _MANIFEST)), run_id))
+        except OSError:
+            continue
+    return max(created)[1] if created else None
+
+
 def open_run(state_dir: str, run_id: str) -> EvidenceRun:
     return EvidenceRun(state_dir, run_id)
