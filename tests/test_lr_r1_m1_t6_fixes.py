@@ -601,11 +601,18 @@ def _shop_integration_plan():
 
 
 def test_h_a_failed_terminal_gate_outranks_a_successful_last_unit(tmp_path, monkeypatch):
-    """LR-R1-P5's shape: every unit passes (s2 verified NO_CHANGE), then the
-    terminal obligations gate fails. The terminal gate is the cause."""
-    from _t6_harness import shop_enforce
+    """Every unit passes (s2 verified NO_CHANGE), then the terminal
+    obligations gate fails on a genuine integration violation: the
+    controller satisfies the shop test without ever using the service the
+    relationship says it uses. The terminal gate is the cause. (This first
+    used LR-R1-P5's defect - the same NO_CHANGE consumer falsely judged on
+    empty evidence while its controller DID use the service - which P5
+    fixed; the precedence asserted below is unchanged.)"""
+    import test_enforce_verified_no_change as shape
+    from _t6_harness import enforce_run, shop_files, shop_responder
 
-    observed = shop_enforce(tmp_path, monkeypatch, plans=[_shop_integration_plan])
+    files = {**shop_files(), shape.CONTROLLER: "def populate_pet_types():\n    return ('cat', 'dog')\n"}
+    observed = enforce_run(tmp_path, monkeypatch, shop_responder, files, shape.GOAL, [_shop_integration_plan])
     assert all(r.status.value == "completed" for r in observed.result.subtask_results)
     q9 = observed.explained["Q9"]
     assert q9["units"][-1]["quality_gates_passed"] is True
