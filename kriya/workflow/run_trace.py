@@ -64,6 +64,8 @@ def write_outcome_trace(
     metrics_event = unreported_role_metrics_event(llm, source=source)
     if metrics_event is not None:
         run_events.append(metrics_event)
+    for event in run_events:  # LR-R1-M1: outcome-row events are mirrored too
+        attempt_evidence_scope.mirror_event(event)
     try:
         from kriya.core.trace import TraceLogger
 

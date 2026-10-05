@@ -357,3 +357,46 @@ def wire_scope() -> Iterator[Optional[int]]:
         yield call.wires
     finally:
         _WIRE.reset(token)
+
+
+# -- mirrors of the existing evidence streams (design §5.2) --------------------
+# The mirrored object travels as content (a blob in ``full``, a digest in
+# ``digest_only``): event messages and evidence payloads can quote source and
+# gate output. Only its content-free identifying fields are in the payload.
+
+
+def _mirror(kind: str, to_dict: Callable[[], Mapping[str, Any]], fields: tuple, name: str) -> None:
+    if _active_writer() is None:
+        return
+    try:
+        value = dict(to_dict())
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: %s not mirrored (%s: %s)", kind, type(error).__name__, error)
+        return
+    emit(kind, {key: value.get(key) for key in fields}, content={name: value}, provenance=model.MIRRORED)
+
+
+def mirror_event(event: Any) -> None:
+    """A RunEvent recorded by GenerationState.record_event (or written into an
+    outcome trace row)."""
+    to_dict = event.to_dict if hasattr(event, "to_dict") else (lambda: event)
+    _mirror("mirror.event", to_dict, ("kind", "attempt", "source", "authority", "failure_type", "operation"),
+            "event")
+
+
+def mirror_decision(decision: Any) -> None:
+    _mirror("mirror.decision", decision.to_dict, ("type",), "decision")
+
+
+def mirror_evidence(record: Any) -> None:
+    _mirror("mirror.evidence", record.to_dict, ("kind", "source", "attempt", "sensitivity"), "evidence")
+
+
+def mirror_gate_outcome(index: int, outcome: Any) -> None:
+    _mirror("mirror.gate_outcome", lambda: {"index": index, **dict(outcome)}, ("index", "type", "success", "attempt"),
+            "outcome")
+
+
+def mirror_gate_outcomes_restored(outcomes: Any, source: str) -> None:
+    _mirror("mirror.gate_outcomes_restored", lambda: {"count": len(outcomes), "source": source,
+                                                       "outcomes": list(outcomes)}, ("count", "source"), "restored")

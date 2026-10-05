@@ -90,7 +90,10 @@ def as_bytes(value: Any) -> bytes:
         return value
     if isinstance(value, str):
         return value.encode("utf-8")
-    return canonical_bytes(value)
+    # Content mirrors existing objects as they are; a value JSON cannot
+    # encode natively is rendered with str() rather than dropped.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                      default=str).encode("utf-8")
 
 
 def content_digest_entry(data: bytes) -> Dict[str, Any]:

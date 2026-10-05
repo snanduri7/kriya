@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.architectural_choice import CandidateArchitecturalChange
 from kriya.workflow.context_package import ContextItem
 from kriya.workflow.edit_safety import content_revision
@@ -738,6 +739,24 @@ class GenerationState:
         self.run_events.append(event)
         if event.failure_type:
             self.failure_ledger.record(event)
+        attempt_evidence_scope.mirror_event(event)
+
+    def record_evidence(self, record: EvidenceRecord) -> None:
+        self.evidence_records.append(record)
+        attempt_evidence_scope.mirror_evidence(record)
+
+    def record_gate_outcome(self, outcome: Dict[str, Any]) -> None:
+        """The one way a gate outcome is added (LR-R1-M1 §5.2): appended exactly
+        as before, then mirrored once into the attempt evidence store. A
+        direct ``gate_outcomes`` mutation outside this module is a tripwire
+        failure (tests/test_lr_r1_m1_mirroring.py)."""
+        self.gate_outcomes.append(outcome)
+        attempt_evidence_scope.mirror_gate_outcome(len(self.gate_outcomes) - 1, outcome)
+
+    def restore_gate_outcomes(self, outcomes: List[Dict[str, Any]], *, source: str) -> None:
+        """Replace the outcomes with a checkpoint's (resume), recorded once."""
+        self.gate_outcomes = list(outcomes)
+        attempt_evidence_scope.mirror_gate_outcomes_restored(self.gate_outcomes, source)
 
     def record_developer_attempt_outcome(self, client: Any, *, passed: bool) -> None:
         """PRD-018: charge this attempt's deterministic gate outcome to the
@@ -949,7 +968,7 @@ class GenerationState:
             details={"likely_files": list(failure.likely_files)},
         )
         self.record_event(event)
-        self.evidence_records.append(EvidenceRecord(
+        self.record_evidence(EvidenceRecord(
             kind="failure",
             source=failure.source,
             attempt=failure.attempt or self.attempt_number,

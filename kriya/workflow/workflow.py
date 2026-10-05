@@ -3615,7 +3615,7 @@ class WorkflowEngine:
             # discarding all prior Plan/Design work.
             logger.debug(f"Failed to build active-skill manifest: {ex}")
             active_skill_manifest = []
-        state.evidence_records.append(EvidenceRecord(
+        state.record_evidence(EvidenceRecord(
             kind="active_skills", source="skill_engine", attempt=0,
             payload={"skills": active_skill_manifest},
         ))
