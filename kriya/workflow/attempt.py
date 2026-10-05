@@ -245,8 +245,14 @@ from kriya.workflow.verification_contract import ContractVerdictState, classify_
 from kriya.workflow.verification_coordinator import (
     VerificationCoordinator,
     VerificationRequest,
-    _directly_executable_runtime_verifiers,
-    _directly_executable_verifiers,
+    is_verification_only_unit,
+)
+from kriya.workflow.verification_coordinator import (
+    # Re-exported: tests and older callers import these from attempt.
+    _directly_executable_runtime_verifiers as _directly_executable_runtime_verifiers,
+)
+from kriya.workflow.verification_coordinator import (
+    _directly_executable_verifiers as _directly_executable_verifiers,
 )
 from kriya.workflow.verifier_evidence import (
     RetainedRuntimeEvidence,
@@ -4749,9 +4755,13 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     execution path) rather than patching the symptom (evidence-matching
     logic) directly."""
     from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.retry_strategy import verification_inputs_digest
 
     state.attempt_number += 1
     attempt_evidence_scope.attempt_opened({"mode": "verification_only", "operation": None})
+    # LR-R1-P4: what this verification verifies, for the retry admission.
+    state.verification_only_inputs = verification_inputs_digest(state, ctx)
+    state.verification_only_inputs_attempt = state.attempt_number
     state.candidate_gates_succeeded = False
     validator = PolymorphicValidator(
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
@@ -6429,10 +6439,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     Raises QualityGateFailure or IncompleteGenerationError on any gate
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
-    if ctx.write_scope_mode == WriteScopeMode.DENY_ALL and (
-        _directly_executable_verifiers(ctx.required_verification)
-        or _directly_executable_runtime_verifiers(ctx.required_verification)
-    ):
+    if is_verification_only_unit(ctx.write_scope_mode, ctx.required_verification):
         # Verification-only subtask with at least one directly-executable
         # verifier (compile/test, or - PRV-06, 2026-08-28 - an explicit
         # application_runtime check) - take the whole rest of this function

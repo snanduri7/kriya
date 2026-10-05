@@ -633,6 +633,11 @@ class GenerationState:
     sampling_resamples: int = 0
     retry_evidence_seen: Dict[str, int] = field(default_factory=dict)
     no_progress_reason: Optional[str] = None
+    # LR-R1-P4: the inputs digest of this invocation's last verification-only
+    # attempt (retry_strategy.verification_inputs_digest) and its attempt
+    # number - what a later retry would have to change to be worth running.
+    verification_only_inputs: Optional[str] = None
+    verification_only_inputs_attempt: Optional[int] = None
     # PRD-028 (kriya/workflow/authority_escalation.py): every member-authority
     # expansion decision this run, GRANTED or INDETERMINATE.
     authority_expansions: List[Any] = field(default_factory=list)

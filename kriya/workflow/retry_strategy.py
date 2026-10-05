@@ -25,6 +25,7 @@ the stop/continue decision (reads only the recorded state). Everything with
 the data dependencies above stays together here as _record_attempt_failure.
 """
 import hashlib
+import json
 import logging
 import os
 from typing import Any, Optional
@@ -79,12 +80,14 @@ from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
     REPEATED_ACTION,
+    VERIFICATION_RETRY_NO_CHANGE_POSSIBLE,
     ProgressVector,
     build_progress_vector,
     classify_progress,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import APIContractRecovery, GenerationState
+from kriya.workflow.verification_coordinator import is_verification_only_unit
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +335,79 @@ def compute_effective_workspace_hash(workspace_path: str, known_files=None) -> s
                 # recovery itself into a new workflow failure.
                 continue
     return digest.hexdigest()
+
+
+def verification_inputs_digest(state: GenerationState, ctx) -> str:
+    """LR-R1-P4: the inputs a verification-only attempt verifies - the
+    effective workspace content (compute_effective_workspace_hash over every
+    file the run wrote or the unit established, the PRD-026 workspace
+    identity) and the unit's declared verifiers. Content only: no attempt
+    number, run id or time, so neither another attempt nor a resumed process
+    is a change."""
+    workspace = compute_effective_workspace_hash(
+        ctx.worktree_path, set(state.all_files_written) | set(ctx.established_files))
+    canonical = json.dumps({"workspace": workspace, "required_verification": ctx.required_verification},
+                           sort_keys=True, default=repr, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _admit_verification_only_retry(state: GenerationState, ctx, failure: Failure) -> None:
+    """LR-R1-P4: a failed verification-only attempt earns another attempt only
+    when something can change what the next verification sees. Its next
+    attempt is again verification-only (no Developer, no write scope), so the
+    only mechanism is a change of its inputs since the failed verification.
+    Remaining retry budget, another attempt number or a new process are not
+    mechanisms. An existing typed route decided first is left alone: an
+    infrastructure/environment stop, a plan-scope conflict (the controller
+    reopens the owner - a recovery that can change the workspace) or the
+    no-progress terminal. Otherwise, with nothing able to change, the
+    attempt ends on the PRD-026 no-progress terminal, typed
+    VERIFICATION_RETRY_NO_CHANGE_POSSIBLE - the same truthful failure,
+    without the equivalent retries. The decision is a
+    ``retry.verification_admission`` run event either way."""
+    if state.verification_only_inputs is None or state.verification_only_inputs_attempt != state.attempt_number:
+        return   # this failure was not a verification-only attempt's
+    if state.environment_failure or state.plan_scope_conflict is not None or state.no_progress_terminated:
+        return
+    next_attempt_verification_only = is_verification_only_unit(ctx.write_scope_mode, ctx.required_verification)
+    now = verification_inputs_digest(state, ctx)
+    workspace_changed = now != state.verification_only_inputs
+    retryable = not next_attempt_verification_only or workspace_changed
+    reason = (None if retryable else VERIFICATION_RETRY_NO_CHANGE_POSSIBLE)
+    state.record_event(RunEvent(
+        kind="retry.verification_admission",
+        attempt=state.attempt_number,
+        source="retry_strategy._admit_verification_only_retry",
+        authority=EventAuthority.ADVISORY,
+        message=("Verification-only retry admitted: its inputs can change." if retryable else
+                 f"{VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}: no mutation authority, no changed input and no "
+                 "recovery route - another attempt would repeat the same verification on the same inputs."),
+        details={
+            "unit_kind": "verification_only", "verification_only": True,
+            "write_scope_mode": getattr(ctx.write_scope_mode, "value", ctx.write_scope_mode),
+            "mutation_possible": not next_attempt_verification_only,
+            "inputs_digest_at_verification": state.verification_only_inputs, "inputs_digest_now": now,
+            "workspace_changed": workspace_changed, "recovery_route": None,
+            "failure_type": failure.type, "retryable": retryable, "reason_code": reason,
+        },
+    ))
+    if retryable:
+        return
+    state.no_progress_terminated = True
+    state.no_progress_reason = VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+    state.record_event(RunEvent(
+        kind="retry.no_progress_terminal",
+        attempt=state.attempt_number,
+        source="retry_strategy._admit_verification_only_retry",
+        authority=EventAuthority.ADVISORY,
+        message=f"{VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}: the verification-only unit cannot change its inputs.",
+        details={"reason_code": VERIFICATION_RETRY_NO_CHANGE_POSSIBLE,
+                 "classification": state.last_progress_classification, "limit": None,
+                 "last_vector_digest": (state.last_progress_vector.digest()
+                                        if state.last_progress_vector is not None else None)},
+    ))
+    logger.error("Quality Gates stopped - %s (verification-only unit, attempt %s).",
+                 VERIFICATION_RETRY_NO_CHANGE_POSSIBLE, state.attempt_number)
 
 
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
@@ -1423,3 +1499,4 @@ async def _record_attempt_failure(
     # defensive path.
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.record_gate_outcome(failure.to_gate_outcome())
+    _admit_verification_only_retry(state, ctx, failure)

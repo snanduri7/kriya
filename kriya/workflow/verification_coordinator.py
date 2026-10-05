@@ -23,6 +23,18 @@ from kriya.tools.validate import execution_evidence
 from kriya.workflow.failure import Failure, QualityGateFailure
 
 
+def is_verification_only_unit(write_scope_mode: Any, required_verification: List[Dict[str, Any]]) -> bool:
+    """A unit whose attempts are verification-only (run_attempt's branch): a
+    DENY_ALL write scope - it owns no file, so the Developer is never asked
+    to mutate anything - with at least one directly executable verifier. Its
+    attempts run only that verification against the existing worktree."""
+    from kriya.policy.filesystem import WriteScopeMode
+
+    return write_scope_mode == WriteScopeMode.DENY_ALL and bool(
+        _directly_executable_verifiers(required_verification)
+        or _directly_executable_runtime_verifiers(required_verification))
+
+
 def _directly_executable_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """type=tool verifiers naming a BUILTIN_QUALITY_GATE_VERIFIERS tool_name
     (compile/test/tests/regression/quality_gates) - the ones
