@@ -153,7 +153,9 @@ def test_a_mirror_failure_never_changes_the_recorded_object(tmp_path, monkeypatc
 def test_no_production_code_reads_the_store():
     """Design §9.1: production imports only ``scope``; the reader is for
     consumers (CLI evidence commands are added in M1.9 and listed here)."""
-    allowed = {"kriya/core/attempt_evidence/reader.py"}
+    allowed = {"kriya/core/attempt_evidence/reader.py",
+               # Consumers (M1.9): the evidence CLI and the explainer it is built on.
+               "kriya/cli.py", "kriya/core/attempt_evidence/explain.py"}
     for path in (ROOT / "kriya").rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
         if rel in allowed:

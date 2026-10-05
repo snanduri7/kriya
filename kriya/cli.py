@@ -8,7 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, Tuple
 
 import click
 
@@ -1302,6 +1302,150 @@ def model_certification(ctx: click.Context, json_output: bool) -> None:
             click.echo(f"      - changed since certification: {field}")
     if status["status"] != CURRENT:
         ctx.exit(1)
+
+
+@main.group(name="evidence")
+def evidence_group() -> None:
+    """LR-R1-M1: the per-run attempt evidence store (local-only). Read-only,
+    except ``prune``; built on the store's reader API."""
+
+
+def _evidence_state_dir(ctx: click.Context) -> str:
+    from kriya.core.state_paths import resolve_state_directory
+
+    return resolve_state_directory(ctx.obj["config"])[0]
+
+
+def _answer_line(label: str, question: str, answer: Mapping[str, Any]) -> str:
+    status = answer.get("status")
+    if status == "RECORDED":
+        return f"  {label} {question} RECORDED ({len(answer.get('items') or [])} record(s))"
+    return f"  {label} {question} {str(status).replace('_', ' ')} ({answer.get('reason')})"
+
+
+@evidence_group.command(name="show")
+@click.argument("run_id", required=False)
+@click.option("--content", "content_ref", help="Print the exact bytes of one content reference (sha256:...).")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_show(ctx: click.Context, run_id: Optional[str], content_ref: Optional[str], json_output: bool) -> None:
+    """List recorded runs, or show one run's identity, integrity and records."""
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.attempt_evidence.explain import run_summary
+
+    state_dir = _evidence_state_dir(ctx)
+    if run_id is None:
+        runs = reader.list_runs(state_dir)
+        if json_output:
+            click.echo(json.dumps({"state_dir": state_dir, "runs": runs}, indent=2))
+        else:
+            click.echo(f"Attempt evidence in {state_dir}: {len(runs)} run(s)")
+            for name in runs:
+                click.echo(f"  {name}")
+        return
+    if content_ref:
+        try:
+            data = reader.open_run(state_dir, run_id).blob(content_ref)
+        except (reader.BlobCorrupt, OSError) as error:
+            click.secho(f"content unavailable: {error}", fg="red", err=True)
+            sys.exit(2)
+        sys.stdout.buffer.write(data)
+        return
+    summary = run_summary(state_dir, run_id)
+    if json_output:
+        click.echo(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    elif summary["verification"] == reader.NOT_FOUND:
+        click.echo(f"Run {run_id}: ATTEMPT EVIDENCE UNAVAILABLE (no store for this run)")
+    else:
+        click.echo(f"Run {run_id}: {summary['verification']}, {summary['records']} record(s), "
+                   f"capture {summary.get('capture')}, sealed {summary['sealed']}")
+        for kind, count in summary.get("kinds", {}).items():
+            click.echo(f"  {kind}: {count}")
+    if summary["verification"] == reader.NOT_FOUND:
+        sys.exit(1)
+
+
+@evidence_group.command(name="explain")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_explain(ctx: click.Context, run_id: str, json_output: bool) -> None:
+    """Answer the nine attempt-evidence questions for each attempt of a run."""
+    from kriya.core.attempt_evidence.explain import QUESTIONS, explain_run
+
+    result = explain_run(_evidence_state_dir(ctx), run_id)
+    if json_output:
+        click.echo(json.dumps(result, indent=2, sort_keys=True, default=str))
+    elif "unavailable" in result:
+        click.echo(f"Run {run_id}: {result['unavailable']}")
+    else:
+        click.echo(f"Run {run_id}: evidence {result['verification']}, capture {result.get('capture')}")
+        for attempt in result["attempts"]:
+            click.echo(f"Attempt {attempt['attempt']} (unit {attempt['unit_id']}, "
+                       f"invocation {attempt['invocation_seq']}):")
+            for label, question in QUESTIONS.items():
+                if label in attempt["answers"]:
+                    click.echo(_answer_line(label, question, attempt["answers"][label]))
+        if result["calls_outside_attempts"]:
+            click.echo("Model calls outside attempts: " + ", ".join(
+                f"{phase} {count}" for phase, count in result["calls_outside_attempts"].items()))
+        click.echo("Run:")
+        click.echo(_answer_line("Q9", QUESTIONS["Q9"], result["Q9"]))
+    if "unavailable" in result:
+        sys.exit(1)
+
+
+@evidence_group.command(name="verify")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_verify(ctx: click.Context, run_id: str, json_output: bool) -> None:
+    """Recompute a run's hash chain, blobs and seal (exit 0 only when VERIFIED)."""
+    from kriya.core.attempt_evidence import reader
+
+    try:
+        verification = reader.open_run(_evidence_state_dir(ctx), run_id).verify()
+    except (reader.UnsupportedEvidenceSchema, ValueError, OSError) as error:
+        click.secho(f"evidence for {run_id} could not be read: {error}", fg="red", err=True)
+        sys.exit(2)
+    payload = {"run_id": run_id, "status": verification.status, "records": verification.record_count,
+               "sealed": verification.sealed, "broken_seq": verification.broken_seq,
+               "detail": verification.detail, "blob_problems": verification.blob_problems}
+    if json_output:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        click.echo(f"{run_id}: {verification.status} ({verification.record_count} record(s)"
+                   + (f"; {verification.detail}" if verification.detail else "") + ")")
+        for problem in verification.blob_problems:
+            click.echo(f"  {problem}")
+    if verification.status != reader.VERIFIED:
+        sys.exit(1 if verification.status in (reader.UNSEALED, reader.NOT_FOUND) else 2)
+
+
+@evidence_group.command(name="prune")
+@click.option("--dry-run", is_flag=True, help="Show what would be pruned; write nothing.")
+@click.option("--workspace", type=click.Path(file_okay=False), default=".",
+              help="Protect the runs this workspace references (default: the current directory).")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_prune(ctx: click.Context, dry_run: bool, workspace: str, json_output: bool) -> None:
+    """Apply evidence.attempt_recorder.retention to the store now."""
+    from kriya.control.retention import workspace_run_references
+    from kriya.core.attempt_evidence.retention import prune_evidence
+
+    cfg: AppConfig = ctx.obj["config"]
+    bounds = cfg.evidence.attempt_recorder.retention
+    report = prune_evidence(_evidence_state_dir(ctx), keep_runs=bounds.keep_runs, max_bytes=bounds.max_bytes,
+                            protect_run_ids=workspace_run_references(os.path.realpath(workspace)),
+                            dry_run=dry_run)
+    if json_output:
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        return
+    verb = "Would prune" if dry_run else "Pruned"
+    click.echo(f"{verb} {len(report.pruned)} run store(s) ({report.freed_bytes} bytes); kept {len(report.kept)}, "
+               f"protected {len(report.protected)}; {report.retained_bytes} bytes retained")
+    for run_id in report.pruned:
+        click.echo(f"  {run_id}")
 
 
 @main.group(name="metrics")
