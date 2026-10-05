@@ -43,6 +43,7 @@ from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
     evaluate_candidate_independent_failure,
 )
+from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSION_UNATTRIBUTED
 from kriya.workflow.edit_capability import ANCHOR_CONTEXT_NOT_ESCALATED
 from kriya.workflow.failure import (
     Failure,
@@ -536,6 +537,8 @@ async def _record_attempt_failure(
             known_files=set(state.all_files_written) | set(ctx.established_files) | set(ctx.expected_files_upfront),
         )
     )
+    if failure.type == "regression_unattributed" and state.environment_failure is not None:
+        state.environment_failure_code = (REGRESSION_UNATTRIBUTED, state.environment_failure)
     if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
         # PRV-17 preflight correction (2026-09-03): stop on the FIRST
         # deterministically unrecoverable denial, not the second - once
@@ -1306,6 +1309,7 @@ async def _record_attempt_failure(
                     "Developer call rather than paying for a full-set retry that cannot "
                     "possibly address it."
                 )
+                state.environment_failure_code = (NO_AUTHORIZED_REPAIR_TARGET, state.environment_failure)
 
     # MA9 (2026-08-29): the ONE place attribution's own output ordinarily
     # already narrows to "which file(s) does THIS failure implicate" - reused

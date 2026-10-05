@@ -654,6 +654,10 @@ class GenerationState:
     # of code regeneration can ever fix a JVM crashing during its own startup
     # or a missing build/run tool binary.
     environment_failure: Optional[str] = None
+    # LR-R1-M1 D7: (typed reason code, the exact environment_failure text it
+    # types) for the stops that are otherwise text only
+    # (kriya/workflow/diagnosis_codes.py). Read only by the evidence recorder.
+    environment_failure_code: Optional[Tuple[str, str]] = None
     # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once per
     # generation run, the first time a PolymorphicValidator confirms the stack
     # is 'java' - toolchain_checked gates that, toolchain_warning persists into
