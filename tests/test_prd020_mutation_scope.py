@@ -137,7 +137,8 @@ def test_an_ambiguous_path_role_leaves_the_requirement_unresolved_even_when_in_s
     assert attempt["closed"] is False and "cannot be determined" in attempt["reason"]
     assert attempt["ambiguous_paths"] == ["tests/test_a.py"]
     assert requirement_outcomes(ledger, reqs)[rid] is RequirementOutcome.UNVERIFIED
-    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == [rid]
+    # REQ-1's model "satisfied" is UNVERIFIED too (FS-1B): only a deterministic closure would clear it.
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", rid]
 
 
 def test_the_demo03_goal_allows_only_the_file_it_asks_to_fix():
@@ -164,7 +165,8 @@ def test_exact_one_file_scope_with_only_that_file_changed_closes(verdict):
         ledger, reqs, tracked_paths=TRACKED, scope_evidence=_scope(["greeting.py"]), source="test", revision=1)
     assert attempt["closed"] is True
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.CLOSED_BY_EVIDENCE
-    assert blocking_requirements(ledger, reqs, **PRODUCTION) == []
+    # Only REQ-1, whose verdict is the model's "satisfied" (UNVERIFIED, FS-1B), still blocks.
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1"]
     evidence = requirement_evidence(ledger, reqs)["REQ-2"]
     assert evidence["kind"] == MUTATION_SCOPE and evidence["requirement"] == "REQ-2"
     assert evidence["authorized_paths"] == ["greeting.py"] and evidence["actual_paths"] == ["greeting.py"]
@@ -191,7 +193,8 @@ def test_a_planner_selected_file_without_an_authoritative_scope_cannot_close():
         ledger, reqs, tracked_paths=TRACKED, scope_evidence=_scope(["greeting.py"]), source="test", revision=1)
     assert attempt["closed"] is False and "no authoritative referent" in attempt["reason"]
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.UNVERIFIED
-    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-2"]
+    # REQ-1's model "satisfied" is UNVERIFIED as well (FS-1B).
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-2"]
 
 
 def test_stale_evidence_from_an_earlier_candidate_never_closes_or_violates_a_later_one():
@@ -303,9 +306,13 @@ async def test_direct_run_decides_the_scope_requirement_from_what_the_candidate_
     evidence = res["requirements"]["evidence"]["REQ-2"]
     assert evidence["kind"] == MUTATION_SCOPE and evidence["authorized_paths"] == ["greeting.py"]
     if closes:
-        assert res["quality_gates_passed"] is True, res.get("environment_failure")
         assert outcome == "closed_by_evidence" and evidence["actual_paths"] == ["greeting.py"]
-        assert (workspace / "greeting.py").read_text() == "GREETING = 'Hello'\n"
+        # REQ-1 has only the verifier's "satisfied" - a model claim, UNVERIFIED (FS-1B) - so the
+        # production policy still blocks the run, on REQ-1 alone; nothing is applied.
+        assert res["requirements"]["outcomes"]["REQ-1"] == "unverified"
+        assert res["quality_gates_passed"] is False
+        assert "REQ-1 (unverified)" in res["environment_failure"] and "REQ-2" not in res["environment_failure"]
+        assert (workspace / "greeting.py").read_text() == "GREETING = 'Hi'\n"
     else:
         assert res["quality_gates_passed"] is False and outcome == "violated"
         assert evidence["out_of_scope_paths"] == ["other.py"]
@@ -373,7 +380,8 @@ async def test_enforce_terminal_gate_decides_the_scope_requirement(tmp_path, mon
     gap = result.legacy_result.get("global_requirement_gap")
     assert outcomes["REQ-2"] == outcome
     if outcome == "closed_by_evidence":
-        assert not gap, gap
+        # REQ-1 (the verifier's "satisfied", a model claim - FS-1B) is what still blocks.
+        assert "REQ-1 (unverified)" in gap and "REQ-2" not in gap, gap
         evidence = result.legacy_result["requirements"]["evidence"]["REQ-2"]
         assert evidence["kind"] == MUTATION_SCOPE and evidence["actual_paths"] == ["app.py"]
         assert evidence["authorized_paths"] == ["app.py"] and evidence["base_revision"]

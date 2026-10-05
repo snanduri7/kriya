@@ -30,6 +30,7 @@ from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAct
 from kriya.workflow.requirements import (
     RequirementOutcome,
     derive_requirements,
+    record_requirement_closure,
     record_requirement_verdicts,
     seed_requirement_obligations,
 )
@@ -120,15 +121,28 @@ def test_no_named_tests_builds_no_validator(tmp_path, authority):
     assert spy.validators == [] and spy.runs == []
 
 
-def test_a_named_test_whose_requirement_needs_no_closure_builds_no_validator(tmp_path):
+@pytest.mark.parametrize("resolved", ["violated", "already_closed"])
+def test_a_named_test_whose_requirement_needs_no_closure_builds_no_validator(tmp_path, resolved):
     """Only an UNVERIFIED requirement is closed by its named tests; one the
-    verifier already satisfied needs nothing, so nothing is built."""
+    verifier reported violated (never closable) or one already closed by
+    deterministic evidence needs nothing, so nothing is built. (A verifier's
+    "satisfied" is a model claim, UNVERIFIED - FS-1B - so it no longer stands
+    for "needs no closure".)"""
     workspace, candidate = _trees(tmp_path, 17, named_test=True)
     reqs = derive_requirements(NAMED_TEST_GOAL)
     ledger = ObligationLedger()
     seed_requirement_obligations(ledger, reqs)
-    record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "") for r in reqs.requirements},
-                                revision=1, evidence_fingerprint="cand", source="test")
+    if resolved == "violated":
+        record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.VIOLATED, "")
+                                                   for r in reqs.requirements},
+                                    revision=1, evidence_fingerprint="cand", source="test")
+    else:
+        record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "")
+                                                   for r in reqs.requirements},
+                                    revision=1, evidence_fingerprint="cand", source="test")
+        for requirement in reqs.requirements:
+            record_requirement_closure(ledger, reqs, requirement.id, evidence_id="cand", method="named_test_run",
+                                       detail={}, source="test", revision=1)
     with _Spy() as spy:
         assert close_requirements_with_named_tests(
             CONTAINED, ledger, reqs, candidate, workspace, modified=["pom.xml"], revision="terminal",

@@ -381,7 +381,10 @@ def test_malformed_no_verdict_and_genuine_insufficient_evidence_are_distinguisha
                                    source="test", missing_reason=missing_reason, missing_detail=missing_detail,
                                    verifier=result["verifier"])
     details = rq.requirement_verdict_details(ledger, reqs)
-    assert (details["REQ-1"]["outcome"], details["REQ-1"]["reason_code"]) == ("satisfied", rq.VERIFIER_CONFIRMED)
+    # FS-1B: the verifier's "satisfied" is kept as its claim and reason, never as the outcome.
+    assert (details["REQ-1"]["outcome"], details["REQ-1"]["reason_code"]) == ("unverified", rq.VERIFIER_CONFIRMED)
+    assert (details["REQ-1"]["model_outcome"], details["REQ-1"]["evidence_class"]) == ("satisfied", rq.MODEL_CLAIMED)
+    assert details["REQ-1"]["detail"] == "greeting.py DEFAULT_NAME"
     assert (details["REQ-2"]["outcome"], details["REQ-2"]["reason_code"]) == (
         "unverified", rq.INSUFFICIENT_CODE_EVIDENCE)
     assert details["REQ-2"]["detail"] == "robustness is behavioural"

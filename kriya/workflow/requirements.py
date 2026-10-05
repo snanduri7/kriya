@@ -114,6 +114,11 @@ def names_a_concrete_literal(text: str) -> bool:
     return bool(_CONCRETE_LITERAL.search(text or ""))
 
 
+# FS-1B: the class of the verifier's verdict - a model's semantic assessment,
+# never authorization (recorded on every verdict record).
+MODEL_CLAIMED = "MODEL_CLAIMED"
+
+
 class RequirementOutcome(str, Enum):
     PENDING = "pending"
     SATISFIED = "satisfied"
@@ -364,6 +369,15 @@ def record_requirement_verdicts(
         else:
             outcome, detail = entry[0], entry[1]
             reason = entry[2] if len(entry) > 2 and entry[2] else _DEFAULT_REASON[outcome.value]
+        # FS-1B: LLM output can authorize nothing. A verifier's positive
+        # verdict is a MODEL_CLAIMED assessment, never proof: it is recorded
+        # UNVERIFIED (its own verdict, reason and detail kept as provenance),
+        # and only deterministic closure evidence for this exact candidate
+        # (record_requirement_closure) can make it CLOSED_BY_EVIDENCE. A
+        # negative verdict (VIOLATED) stays a veto; FS-1 does not change it.
+        model_outcome = outcome
+        if outcome is RequirementOutcome.SATISFIED:
+            outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
         ledger.record(ObligationRecord(
             id=requirement_obligation_id(requirement.id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
@@ -373,6 +387,7 @@ def record_requirement_verdicts(
                 "requirement_set_digest": requirements.digest, "outcome": outcome.value,
                 "reason_code": reason, "detail": detail, "evidence_id": evidence_fingerprint,
                 "gate_evidence": gate_evidence, "verifier": dict(verifier or {}),
+                "model_outcome": model_outcome.value, "evidence_class": MODEL_CLAIMED,
             },
             terminal_required=True,
         ))
@@ -388,10 +403,16 @@ def requirement_verdict_details(ledger: ObligationLedger, requirements: Requirem
     for requirement in requirements.requirements:
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence = (record.evidence or {}) if record is not None else {}
-        outcome = str(evidence.get("outcome") or RequirementOutcome.PENDING.value)
+        recorded = str(evidence.get("outcome") or RequirementOutcome.PENDING.value)
+        # FS-1B: the verifier's own verdict is kept as the model's claim; a
+        # pre-FS-1 "satisfied" record reports as UNVERIFIED, like requirement_outcomes.
+        outcome = (RequirementOutcome.UNVERIFIED.value if recorded == RequirementOutcome.SATISFIED.value
+                   else recorded)
         details[requirement.id] = {
             "outcome": outcome,
-            "reason_code": evidence.get("reason_code") or _DEFAULT_REASON.get(outcome, NOT_YET_VERIFIED),
+            "reason_code": evidence.get("reason_code") or _DEFAULT_REASON.get(recorded, NOT_YET_VERIFIED),
+            "model_outcome": evidence.get("model_outcome") or (recorded if record is not None else None),
+            "evidence_class": evidence.get("evidence_class"),
             "detail": evidence.get("detail") or "",
             "verifier": evidence.get("verifier") or {},
             "evidence_id": evidence.get("evidence_id"),
@@ -478,10 +499,12 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
         closure = requirement_closure(ledger, requirement.id, evidence_id)
         if requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None:
             outcome = RequirementOutcome.VIOLATED
-        elif closure is not None and (
-                outcome is RequirementOutcome.UNVERIFIED
-                or (outcome is RequirementOutcome.SATISFIED and closure.get("kind") == MUTATION_SCOPE)):
+        elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
             outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
+        elif outcome is RequirementOutcome.SATISFIED:
+            # FS-1B: a SATISFIED verdict record without deterministic closure
+            # (a pre-FS-1 record, e.g. read back on resume) authorizes nothing.
+            outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
     return outcomes
 
