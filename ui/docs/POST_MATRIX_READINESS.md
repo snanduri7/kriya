@@ -49,8 +49,14 @@ write-site audit blocker named in `08_REVIEW` N-2 item 2 (`kriya/workflow/orig-a
 
 ```
 cd /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2
-ulimit -n 256; .newvenv/bin/pytest -q -n 2 --dist loadgroup
+ulimit -n 256; .newvenv/bin/pytest -q
 ```
+
+**Corrected 2026-10-05:** pytest-xdist is NOT installed in this checkout's `.newvenv` (pytest 9.1.1, pytest-asyncio 1.4.0 only), so
+`-n 2 --dist loadgroup` is rejected ("unrecognized arguments"). The suite therefore runs sequentially here (about 30 minutes per
+CLAUDE.md). The `xdist_group` marker is now registered in `pyproject.toml`, so a sequential run raises no unknown-mark warning for
+the Docker-pinned tests. The main repository's `.venv` has pytest-xdist 3.8.0; the parallel form applies there
+(`KUP_MERGE_INSTRUCTIONS.md`). Installing pytest-xdist into `.newvenv` is the owner's choice and was not done.
 
 Targeted KUP subset (seconds, may be run first):
 
@@ -72,6 +78,7 @@ satisfy it - report it.
 | 4 | `8065005` KUP: event contract pinned to `RunEvent.to_dict` on the adapter path | `tests/_kup_fixtures.py`, `tests/test_kup_cli.py` | 3 |
 | 5 | `f876f49` KUP: write boundary under the production launch environment, bytecode negative control, GUI/CLI parity | `tests/_kup_fixtures.py`, `tests/test_kup_host_environment.py`, `tests/test_kup_write_boundary.py`, `handover/evidence/KUP/*2026-10-04*.json` | 4 |
 | 6 | `b531404` KUP: explicit child cwd makes resolution independent of the host's launch directory | `tests/test_kup_host_environment.py` | 5 |
+| 7 | `3669717` PRD-034: certification test asserts outcome counts; `xdist_group` marker registered for runs without pytest-xdist (fixes the owner's full-run failure "1 failed, 1 passed, 1 warning, 1 error") | `pyproject.toml`, `tests/test_prd034_certification.py` | independent of 1-6 (test infrastructure) |
 
 `git show --stat` of each commit lists only `kriya/`, `tests/`, `handover/` paths: no UI change rides in any of them. The GUI-C
 commits (`504c3ac` ... `b150cc6`) stay in this checkout. The child-environment policy is duplicated on purpose in

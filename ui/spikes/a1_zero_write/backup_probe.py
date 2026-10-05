@@ -12,12 +12,11 @@ journal database = A1 case C01, the one state measured to read with zero writes.
 import hashlib
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -43,7 +42,8 @@ def acquire(source: str, dest: str, timeout: float = 2.0) -> dict:
         out["journal_mode_dest"] = dst.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
         out["quick_check"] = dst.execute("PRAGMA quick_check").fetchone()[0]
         out["rows"] = dst.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-        dst.close(); src.close()
+        dst.close()
+        src.close()
         out["steps"].append("closed")
         out["ok"] = True
     except sqlite3.Error as e:
@@ -63,13 +63,16 @@ def main():
     python = sys.executable
     work = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.environ.get("TMPDIR", "/tmp"), "kriya-backup-probe")
     os.makedirs(work, exist_ok=True)
-    run_tmp = os.path.join(work, "tmp"); os.makedirs(run_tmp, exist_ok=True)
+    run_tmp = os.path.join(work, "tmp")
+    os.makedirs(run_tmp, exist_ok=True)
     os.makedirs(os.path.join(work, "fake-home"), exist_ok=True)
-    profile = os.path.join(work, "deny.sb"); open(profile, "w").write(harness.PROFILE)
+    profile = os.path.join(work, "deny.sb")
+    open(profile, "w").write(harness.PROFILE)
     start = datetime.now()
     results = []
     for case_id, desc, fx, flags in CASES:
-        case_dir = os.path.join(work, case_id); os.makedirs(case_dir)
+        case_dir = os.path.join(work, case_id)
+        os.makedirs(case_dir)
         source = os.path.join(case_dir, "traces.db")
         harness.build_fixture(python, source, fx)
         writer = None
@@ -78,13 +81,15 @@ def main():
             assert "writer_ready" in writer.stdout.readline()
         if flags.get("delete_before_open"):
             os.remove(source)
-        snap_dir = os.path.join(case_dir, "snapshot"); os.makedirs(snap_dir)
+        snap_dir = os.path.join(case_dir, "snapshot")
+        os.makedirs(snap_dir)
         dest = os.path.join(snap_dir, "traces.snapshot.db")
         before = harness.inventory(case_dir)
         acq = acquire(source, dest)
         after = harness.inventory(case_dir)
         if writer is not None:
-            writer.terminate(); writer.wait(timeout=10)
+            writer.terminate()
+            writer.wait(timeout=10)
         source_changes = [c for c in harness.inventory_diff(before, after) if not c["file"].startswith("snapshot")]
         inspect = None
         if acq.get("ok"):
@@ -111,7 +116,8 @@ def main():
              f"- measured_at {out['measured_at']}, Python {out['python']}, SQLite {out['sqlite']}", "",
              "| case | acquisition | source-side changes (inventory) | snapshot inspection under deny-write | inspection denials | snapshot files changed |", "|---|---|---|---|---|---|"]
     for r in results:
-        a = r["acquisition"]; i = r["inspection"]
+        a = r["acquisition"]
+        i = r["inspection"]
         lines.append(f"| {r['case']} | {'OK' if a.get('ok') else 'REFUSED ' + str(a.get('sqlite_errorname'))} ({a.get('elapsed_ms')} ms; src journal {a.get('journal_mode_source', '-')}; dest journal {a.get('journal_mode_dest', '-')}; quick_check {a.get('quick_check', '-')}; rows {a.get('rows', '-')}) | {'; '.join(c['file'] + ' ' + c['change'] for c in r['source_side_changes']) or 'none'} | {i['outcome'] if i else '-'} | {'; '.join(d['class'] + ': ' + d['op'] + ' ' + os.path.basename(d['path']) for d in i['denials']) if i else '-'} | {'; '.join(c['file'] + ' ' + c['change'] for c in i['snapshot_inventory_changes']) if i and i['snapshot_inventory_changes'] else ('none' if i else '-')} |")
     open(os.path.join(HERE, "results", "backup_probe.md"), "w").write("\n".join(lines) + "\n")
     print("wrote results/backup_probe.{json,md}")

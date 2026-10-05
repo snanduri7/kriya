@@ -17,6 +17,11 @@ branch `codex/fix-demo1-attribution`. Target: `/Users/sriramnanduri/WorkingDirec
 
 Baseline of the series: `61a867f` (also matrix arm A). All six are ancestors of the source HEAD.
 
+Seventh Kriya-side candidate (independent of the KUP series, test infrastructure only): `3669717` PRD-034 - the certification test
+asserts outcome counts instead of a summary substring and `pyproject.toml` registers the `xdist_group` marker (files:
+`pyproject.toml`, `tests/test_prd034_certification.py`). Cherry-pick it after the six; with pytest-xdist installed in the target the
+marker registration is redundant but harmless.
+
 ## 2. Target state observed (read-only, 2026-10-05)
 
 - Checked-out branch `feature/cagc-r1` at `0e12535` ("CAGC-0 matrix-40 corrections (evidence only) ..."), 0 modified tracked
@@ -45,7 +50,8 @@ After the series applies:
 1. Static gates (must exit 0): `.venv/bin/pylint kriya plugins/core_tools tests` and `.venv/bin/ruff check .`
 2. KUP tests: `.venv/bin/pytest -q tests/test_kup_acquisition.py tests/test_kup_cli.py tests/test_kup_write_boundary.py tests/test_kup_host_environment.py tests/test_traces_command.py`
    (the sandbox test needs macOS `sandbox-exec`; the goldens under `tests/golden/kup/` are byte-identical text outputs).
-3. Full suite: `ulimit -n 256; .venv/bin/pytest -q -n 2 --dist loadgroup`
+3. Full suite: `ulimit -n 256; .venv/bin/pytest -q -n 2 --dist loadgroup` (the target's `.venv` has pytest-xdist 3.8.0; without
+   pytest-xdist use the sequential `ulimit -n 256; .venv/bin/pytest -q`)
 4. Keep `tests/_kup_fixtures.py::host_child_env` identical to `ui/standalone/src/main/child_env.ts` (fixed PATH, fixed
    `PYTHONDONTWRITEBYTECODE=1`, HOME, absolute `KRIYA_STATE_DIR` only); a change to one must change the other.
 5. `handover/BACKLOG_REGISTRY.csv`: the series adds no registry rows; the write-site audit row is in
