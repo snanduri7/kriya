@@ -1,0 +1,88 @@
+{
+ "workspace": "r2c-py-inflect",
+ "commit": "262a247d2d99a47a520cdb2d46adb90df88b4326",
+ "stack": "python",
+ "commands": [
+  {
+   "argv": [
+    "python3",
+    "-m",
+    "venv",
+    ".kriya/venv"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-inflect"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-m",
+    "pip",
+    "install",
+    "-q",
+    "more_itertools >= 8.5.0",
+    "typeguard >= 4.0.1",
+    "typing_extensions ; python_version<'3.9'",
+    "pytest"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-inflect"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-c",
+    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; sys.path.extend(['/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-inflect']); import pytest; sys.exit(pytest.main(sys.argv[1:]))",
+    "--"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-inflect"
+  }
+ ],
+ "success": true,
+ "runner": "pytest",
+ "summary": "214 passed, 16 xfailed",
+ "passed": 214,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 0,
+ "duration_seconds": 15.9,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "python",
+   "runtime": "cpython",
+   "runtime_version": "3.12",
+   "build_tool": "pip",
+   "build_tool_version": null,
+   "containment_image": "python:3.12-slim",
+   "requirement_source": "pyproject.toml:project.requires-python",
+   "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+   "observed_runtime_version": "3.12.14",
+   "observed_build_tool_version": null,
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "target": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": "pytest.ini\nplugins: typeguard-4.6.0\ncollected 230 items\n\ninflect/__init__.py .......                                              [  3%]\ntests/test_an.py ..                                                      [  3%]\ntests/test_classical_all.py .                                            [  4%]\ntests/test_classical_ancient.py .                                        [  4%]\ntests/test_classical_herd.py .                                           [  5%]\ntests/test_classical_names.py .                                          [  5%]\ntests/test_classical_person.py .                                         [  6%]\ntests/test_classical_zero.py .                                           [  6%]\ntests/test_compounds.py .........                                        [ 10%]\ntests/test_inflections.py .........                                      [ 14%]\ntests/test_join.py .                                                     [ 14%]\ntests/test_numwords.py ....                                              [ 16%]\ntests/test_pl_si.py ....                                                 [ 18%]\ntests/test_pwd.py .......x...............................xxx............ [ 41%]\n.....xxxx.....xx..........xxx........................................... [ 73%]\n...........................................x............xx...            [ 99%]\ntests/test_unicode.py .                                                  [100%]\n\n======================= 214 passed, 16 xfailed in 2.04s ========================\n\n",
+ "restored_clean": true
+}

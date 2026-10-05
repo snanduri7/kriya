@@ -1,0 +1,85 @@
+{
+ "workspace": "r2c-java-cli",
+ "commit": "d95484f57dfa4b99ac9069bb3f44df680306e8e9",
+ "stack": "java",
+ "commands": [
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-cli"
+  },
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-cli"
+  },
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-cli"
+  }
+ ],
+ "success": true,
+ "runner": "maven-surefire",
+ "summary": "Tests run: 994, Failures: 0, Errors: 0, Skipped: 61",
+ "passed": 933,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 61,
+ "duration_seconds": 37.7,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "java",
+   "runtime": "jdk",
+   "runtime_version": "8",
+   "build_tool": "maven",
+   "build_tool_version": "3.9",
+   "containment_image": "maven:3.9-eclipse-temurin-8",
+   "requirement_source": "pom.xml",
+   "image_digest": "sha256:5f397b4bd0bcea6f283d6f8e535780d40818ca81806eb1fee1716f45f6f24a70",
+   "observed_runtime_version": "8",
+   "observed_build_tool_version": "3.9.16",
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "8",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-8"
+    },
+    "target": {
+     "runtime_version": "8",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-8"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": " Description\n\n Footer\n\n[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.022 s -- in org.apache.commons.cli.help.HelpFormatterTest\n[INFO] Running org.apache.commons.cli.help.TextStyleTest\n[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.apache.commons.cli.help.TextStyleTest\n[INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 994, Failures: 0, Errors: 0, Skipped: 61\n[INFO] \n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  11.782 s\n[INFO] Finished at: 2026-10-05T13:45:08Z\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nException found converting v to desired type: java.net.MalformedURLException: unknown protocol: foo\nException found converting d to desired type: java.lang.ClassNotFoundException: System.DateTime\nException found converting f to desired type: java.io.FileNotFoundException: non-existing.file (No such file or directory)\nException found converting x to desired type: java.lang.NumberFormatException: For input string: \"3,5\"\nException found converting i to desired type: java.lang.NoSuchMethodException: java.util.Calendar.<init>()\nException found converting n to desired type: java.lang.ClassNotFoundException: System.DateTime\n",
+ "restored_clean": true
+}
