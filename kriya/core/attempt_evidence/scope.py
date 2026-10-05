@@ -156,8 +156,8 @@ def emit(kind: str, payload: Mapping[str, Any], *, content: Optional[Mapping[str
         if identity["run_id"] != writer.run_id:
             writer.gap(kind, f"scope run {identity['run_id']!r} differs from the store's run")
             return
-        writer.record(kind, payload, identity=identity, content=content, provenance=provenance)
-        _observe(kind, payload)
+        seq = writer.record(kind, payload, identity=identity, content=content, provenance=provenance)
+        _observe(kind, payload, seq)
     except Exception as error:  # observational: never alters the run
         logger.warning("Attempt evidence: %s not recorded (%s: %s)", kind, type(error).__name__, error)
 
@@ -397,7 +397,7 @@ def attempt_opened(payload: Mapping[str, Any]) -> None:
             "attempt": attempt.attempt_number() if attempt is not None else None,
             "mode": payload.get("mode"), "trigger_failure": inputs.last_failure_signature,
             "retry_evidence": None, "sections": {}, "authority": None, "targets": None,
-            "model_profile": None, "first": None, "last": None, "staged": False,
+            "model_profile": None, "first": None, "last": None, "staged": False, "proposals": [],
         }
 
 
@@ -682,7 +682,7 @@ def _section_digests(segments: Any) -> Dict[str, str]:
     return digests
 
 
-def _observe(kind: str, payload: Mapping[str, Any]) -> None:
+def _observe(kind: str, payload: Mapping[str, Any], seq: Optional[int] = None) -> None:
     """Keep the retry-delta inputs current from records just written."""
     inputs = _unit_inputs()
     if inputs is None:
@@ -702,6 +702,9 @@ def _observe(kind: str, payload: Mapping[str, Any]) -> None:
         current["model_profile"] = payload.get("profile_digest")
     elif kind == "candidate.change" and payload.get("decision") == "STAGED":
         current["staged"] = True
+    elif kind == "developer.parse" and seq is not None:
+        current["proposals"].append({"path": payload.get("path"), "kind": payload.get("kind"),
+                                     "reason_code": payload.get("reason_code"), "seq": seq})
 
 
 def note_retry_evidence(fingerprint_digest: Optional[str]) -> None:
@@ -825,7 +828,18 @@ def record_diagnosis(failure: Any, operation: Optional[str]) -> None:
     _record_refused_candidate(failure, payload["reason_code"] or failure.type)
 
 
+# Parsed Developer answers for a target that a refusal leaves unstaged
+# (response_protocol kinds): a file or edits proposal, or an answer that did
+# not parse as the requested protocol. A NO_CHANGE answer proposes nothing.
+_REFUSABLE_ANSWERS = frozenset({"file", "edits", "invalid"})
+
+
 def _record_refused_candidate(failure: Any, reason_code: str) -> None:
+    """``candidate.change`` REFUSED for what a failed attempt proposed but
+    never staged for its gates: the proposed content when the failure
+    carries it, else each parsed mutation proposal of the attempt (bound to
+    its ``developer.parse`` record). Never invents bytes, a diff or an
+    after-digest: those are NOT_APPLICABLE when no candidate existed."""
     try:
         inputs = _unit_inputs()
         closed = inputs.previous if inputs is not None else None
@@ -833,18 +847,22 @@ def _record_refused_candidate(failure: Any, reason_code: str) -> None:
             return
         proposed = dict(failure.failed_content or {})
         edits = list(failure.attempted_edits or [])
+        parsed = [p for p in closed.get("proposals") or () if p["kind"] in _REFUSABLE_ANSWERS]
     except Exception as error:  # observational
         logger.warning("Attempt evidence: refused candidate not built (%s)", error)
         return
+    common = {"decision": "REFUSED", "candidate_staged": False, "reason_code": reason_code,
+              "attempt": failure.attempt, "diff": "NOT_APPLICABLE", "after_digest": "NOT_APPLICABLE"}
     for relpath in sorted(proposed):
-        emit("candidate.change", {"decision": "REFUSED", "path": relpath, "reason_code": reason_code,
-                                  "attempt": failure.attempt,
-                                  "proposed_digest": _digest_of(proposed[relpath])},
+        emit("candidate.change", {**common, "path": relpath, "proposed_digest": _digest_of(proposed[relpath])},
              content={"proposed": proposed[relpath]})
     if edits and not proposed:
-        emit("candidate.change", {"decision": "REFUSED", "path": None, "reason_code": reason_code,
-                                  "attempt": failure.attempt, "attempted_edits": len(edits)},
+        emit("candidate.change", {**common, "path": None, "attempted_edits": len(edits)},
              content={"attempted_edits": edits})
+    if not proposed and not edits:
+        for proposal in parsed:
+            emit("candidate.change", {**common, "path": proposal["path"], "proposal_kind": proposal["kind"],
+                                      "parse_reason_code": proposal["reason_code"], "parse_seq": proposal["seq"]})
 
 
 def record_fallback_decision(payload: Mapping[str, Any]) -> None:

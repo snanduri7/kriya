@@ -105,9 +105,17 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
         answers["Q3"] = _absent(NOT_RECORDED, "no_model_call: no model response in this attempt"
                                 if not requests else "no response was recorded for this attempt's requests")
     changes = _of(records, "candidate.change")
-    answers["Q4"] = _recorded([_brief(r, "decision", "path", "before_digest", "after_digest", "proposed_digest",
-                                      "reason_code", "lines_added", "lines_removed") for r in changes]) \
-        if changes else _absent(NOT_RECORDED, "no candidate was staged or refused in this attempt")
+    parses = _of(records, "developer.parse")
+    parse_kinds = {(r.get("payload") or {}).get("kind") for r in parses}
+    if changes:
+        answers["Q4"] = _recorded([_brief(r, "decision", "path", "candidate_staged", "before_digest", "after_digest",
+                                          "diff", "proposed_digest", "proposal_kind", "parse_reason_code", "parse_seq",
+                                          "reason_code",
+                                          "lines_added", "lines_removed") for r in changes])
+    elif parses and parse_kinds == {"no_change"}:
+        answers["Q4"] = _absent(NOT_APPLICABLE, "model_proposed_no_change")
+    else:
+        answers["Q4"] = _absent(NOT_RECORDED, "no candidate was staged or refused in this attempt")
     gates = _of(records, "gate.result")
     failed = [r for r in gates if (r.get("payload") or {}).get("success") is not True]
     diagnoses = _of(records, "diagnosis")

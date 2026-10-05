@@ -104,3 +104,41 @@ def assert_answered(answer: Mapping[str, Any]) -> None:
 
 def dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, default=str)
+
+
+# -- the enforce shop fixture (tests/test_enforce_verified_no_change.py's shape) ------------------
+
+SHOP_TEST = ("from shop.controller import populate_pet_types\n\n\n"
+             "def test_pet_types():\n    assert populate_pet_types() == ('cat', 'dog')\n")
+
+
+def shop_files():
+    import test_enforce_verified_no_change as shape
+
+    return {"shop/__init__.py": "", shape.SERVICE: shape.UNCACHED_SERVICE, shape.CONTROLLER: shape.CONTROLLER_SRC,
+            "tests/__init__.py": "", "tests/test_shop.py": SHOP_TEST}
+
+
+def shop_responder(role, request):
+    """s1 caches the service; s2 (the controller) is answered NO CHANGE."""
+    import test_enforce_verified_no_change as shape
+    from _chaos_harness import benign_roles
+    from _protocol_responses import sentinel
+
+    system = next((m["content"] for m in request.messages if m["role"] == "system"), "")
+    user = next((m["content"] for m in request.messages if m["role"] == "user"), "")
+    if role == "file_list":
+        only_service = shape.SERVICE in user and shape.CONTROLLER not in user
+        return '{"files": ["%s"]}' % (shape.SERVICE if only_service else shape.CONTROLLER)
+    if role == "developer":
+        if f'path="{shape.SERVICE}"' in system or "cache find_pet_types" in user:
+            return sentinel(shape.SERVICE, analysis="cache it.", content=shape.SERVICE_SRC)
+        return sentinel(shape.CONTROLLER, analysis="already calls the cached service.", no_change=True)
+    return benign_roles(role, request)
+
+
+def shop_enforce(tmp_path, monkeypatch, *, plans=None, responder=shop_responder, cfg=None, tools=()):
+    import test_enforce_verified_no_change as shape
+
+    return enforce_run(tmp_path, monkeypatch, responder, shop_files(), shape.GOAL,
+                       plans or [lambda: shape._plan(shape.TOOL_CRITERION)], cfg=cfg, tools=tools)
