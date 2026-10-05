@@ -35,15 +35,17 @@ def test_p3a_negative_control_an_anchor_never_sent_is_refused(tmp_path, monkeypa
     assert reason == "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
 
 
-def test_p3b_a_stitched_anchor_leaves_the_capability_unchanged_and_the_retry_is_refused_unsent(tmp_path):
-    """R2-T4 s1 a1 -> a2: the SEARCH joins the two shown member units across
-    the Javadoc between them; the retry is refused before any model call."""
+def test_p3b_the_retry_shows_the_lines_between_the_stitched_parts(tmp_path):
+    """R2-T4 s1 a1 -> a2 (fixed by P3-B): the SEARCH joined two shown member
+    units across the Javadoc between them. The anchor is still refused, but
+    the retry's capability now shows exactly the left-out lines - real new
+    context, so the retry is sent rather than refused unsent."""
     reason, outcome, first, second = stitched_anchor_retry(tmp_path)
     assert reason == "ANCHOR_NOT_IN_FILE"
-    assert [(s.start_line, s.end_line) for s in first.spans] == list(MEMBER_UNITS)
-    assert outcome == "ANCHOR_CONTEXT_NOT_ESCALATED" and second is None
-    gap = ARRAYFILL.splitlines()[MEMBER_UNITS[0][1]:MEMBER_UNITS[1][0] - 1]   # lines 196-204
-    assert any("/**" in line for line in gap)                                 # the Javadoc never shown
+    assert outcome is None and second.digest != first.digest
+    gap = range(MEMBER_UNITS[0][1] + 1, MEMBER_UNITS[1][0])   # 196..204
+    assert all(any(s.start_line <= line <= s.end_line for s in second.spans) for line in gap)
+    assert all(span.text in ARRAYFILL for span in second.spans)
 
 
 def test_p3c_the_prose_check_flags_a_line_of_the_unchanged_base_file():

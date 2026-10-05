@@ -180,8 +180,11 @@ def locate_search_text(lines: Sequence[str], search: str) -> List[int]:
     the file is located whole - every line of the run, including lines that
     alone are too short or too common to place (live: a Java method's
     repeated annotations were never located, so the window never grew to
-    show them). Otherwise: every line it quotes verbatim, else, per quoted
-    line, the unique real line sharing most of its identifiers."""
+    show them). A block stitched from two or more such unique runs with
+    lines left out between them (P3-B) is located from its first run to its
+    last, the lines between included. Otherwise: every line it quotes
+    verbatim, else, per quoted line, the unique real line sharing most of
+    its identifiers."""
     normalized_lines = [_normalize_line(line) for line in lines]
     block = [_normalize_line(raw) for raw in (search or "").splitlines()]
     while block and not block[-1]:
@@ -193,6 +196,11 @@ def locate_search_text(lines: Sequence[str], search: str) -> List[int]:
                 if normalized_lines[start:start + len(block)] == block]
         if len(runs) == 1:
             return list(range(runs[0] + 1, runs[0] + len(block) + 1))
+        stitched = _stitched_runs(normalized_lines, block)
+        if stitched:
+            # P3-B: real source joined across lines it left out - the parts
+            # and every line between them, the one fact the failure carries.
+            return list(range(stitched[0][0] + 1, stitched[-1][1] + 1))
     token_sets = [set(_IDENTIFIER.findall(line)) for line in lines]
     loci: List[int] = []
     for raw in (search or "").splitlines():
@@ -212,6 +220,39 @@ def locate_search_text(lines: Sequence[str], search: str) -> List[int]:
         if best >= _FUZZY_MIN_OVERLAP and len(best_lines) == 1:
             loci.extend(best_lines)
     return loci
+
+
+def _unique_run(normalized_lines: Sequence[str], segment: Sequence[str]) -> Optional[int]:
+    """The 0-based start of the one contiguous run of the file equal to
+    ``segment``, else None."""
+    starts = [start for start in range(len(normalized_lines) - len(segment) + 1)
+              if normalized_lines[start:start + len(segment)] == list(segment)]
+    return starts[0] if len(starts) == 1 else None
+
+
+def _stitched_runs(normalized_lines: Sequence[str], block: Sequence[str]) -> List[Tuple[int, int]]:
+    """P3-B: a SEARCH block that is two or more real, unique, in-order runs of
+    the file with lines left out between them, as [(start, end)) 0-based
+    runs; [] when it is not exactly that (altered text, an ambiguous part,
+    parts out of order or overlapping). Each part is the longest prefix of
+    what is left that occurs exactly once. Called only for a block that does
+    not itself occur exactly once."""
+    parts: List[Tuple[int, int]] = []
+    index = 0
+    while index < len(block):
+        found = None
+        for end in range(len(block), index, -1):
+            start = _unique_run(normalized_lines, block[index:end])
+            if start is not None:
+                found = (start, start + end - index)
+                break
+        if found is None or (parts and found[0] < parts[-1][1]):
+            return []
+        parts.append(found)
+        index += found[1] - found[0]
+    # A single part, or parts with no line left out between them, is the
+    # whole block occurring once - the caller has already located that.
+    return parts
 
 
 # --- spans ---------------------------------------------------------------------------
