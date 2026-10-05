@@ -134,6 +134,10 @@ def _observe(tmp_path: Path, monkeypatch, variant: str, responder: Callable, fil
     state = tmp_path / "states" / variant
     state.mkdir(parents=True)
     monkeypatch.setenv(ENV_STATE_DIR, str(state))
+    # Identical commit hashes in every variant (a commit hash covers its
+    # timestamp; two runs in different seconds would differ for no reason).
+    for name in ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"):
+        monkeypatch.setenv(name, "2026-01-01T00:00:00+00:00")
     if (tmp_path / "ws").exists():
         shutil.rmtree(tmp_path / "ws")
     workspace = git_workspace(tmp_path, files)
