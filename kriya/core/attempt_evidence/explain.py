@@ -11,6 +11,7 @@ Read-only: nothing here writes, and no production decision imports it.
 """
 from __future__ import annotations
 
+import json
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -231,6 +232,79 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
 _UNIT_RESULT_FIELDS = ("failure_category", "quality_gates_passed")
 
 
+# The enforce controller's terminal record (WorkflowController._write_enforce_trace,
+# its only producer, written once at the enforce terminal and mirrored into the
+# store): planning.failed when the run ended on a PLANNING_ERROR, run.exception
+# when it ended on an exception. Its other events (requirement.verdicts,
+# model.role_metrics) also occur on success and are never terminal causes.
+_CONTROLLER_SOURCE = "workflow_controller.enforce"
+_CONTROLLER_TERMINAL_KINDS = frozenset({"planning.failed", "run.exception"})
+
+
+def _content(run: Optional[reader.EvidenceRun], record: Mapping[str, Any], name: str) -> Optional[Dict[str, Any]]:
+    ref = (record.get("blobs") or {}).get(name)
+    if run is None or ref is None:
+        return None
+    try:
+        value = json.loads(run.blob(ref))
+    except (reader.BlobCorrupt, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _run_terminal_cause(records: List[Mapping[str, Any]], units: List[Mapping[str, Any]],
+                        run_closed: Mapping[str, Any], run: Optional[reader.EvidenceRun]) -> Dict[str, Any]:
+    """Why the run ended, by precedence (record kind and sequence, never
+    timing or message text): (1) the controller's terminal record; (2) a
+    failed terminal gate; (3) the last
+    closed unit's own result - never a success-shaped unit for a run whose
+    RunRecord did not end SUCCESS."""
+    controller = [r for r in _of(records, "mirror.event")
+                  if (r.get("payload") or {}).get("source") == _CONTROLLER_SOURCE
+                  and (r.get("payload") or {}).get("kind") in _CONTROLLER_TERMINAL_KINDS]
+    if controller:
+        terminal = controller[-1]
+        cause: Dict[str, Any] = {"source": "controller_terminal_event", "seq": terminal.get("seq"),
+                                 "kind": (terminal.get("payload") or {}).get("kind")}
+        event = _content(run, terminal, "event")
+        if event is None:
+            cause["details"] = "NOT_RECORDED (the event's content is not in this store)"
+        else:
+            details = event.get("details") or {}
+            cause.update({key: details[key] for key in ("reason_codes", "exception_type", "error")
+                          if key in details})
+        deciding = _deciding_subtask(records, terminal.get("seq", 0), run)
+        if deciding is not None:
+            cause["deciding_subtask"] = deciding
+        return cause
+    # TerminalGateService runs once, after the enforce subtask loop: a failed
+    # terminal gate is never followed by a unit of the same run.
+    failed_gates = [r for r in _of(records, "gate.result", stage="terminal")
+                    if (r.get("payload") or {}).get("success") is not True]
+    if failed_gates:
+        return {"source": "terminal_gates", "failed_gates": [_brief(r, "gate") for r in failed_gates]}
+    cause = _terminal_cause(units)
+    succeeded = cause.get("quality_gates_passed") is True or cause.get("tool_status") == "completed"
+    terminal_status = (run_closed.get("payload") or {}).get("terminal_status")
+    if succeeded and terminal_status is not None and terminal_status != "SUCCESS":
+        guarded = _absent(NOT_RECORDED, f"the run ended {terminal_status} but no recorded controller "
+                                        "decision, terminal gate or unit result names why")
+        guarded["last_unit"] = cause
+        return guarded
+    return cause
+
+
+def _deciding_subtask(records: List[Mapping[str, Any]], before_seq: int,
+                      run: Optional[reader.EvidenceRun]) -> Optional[Dict[str, Any]]:
+    """The last recorded subtask attempt that did not complete before the
+    controller's terminal record (its ledger decision, mirrored)."""
+    for record in reversed([r for r in _of(records, "mirror.decision") if r.get("seq", 0) < before_seq]):
+        decision = _content(run, record, "decision")
+        if decision and decision.get("subtask_id") and decision.get("status") not in (None, "completed"):
+            return {key: decision.get(key) for key in ("subtask_id", "status", "error") if key in decision}
+    return None
+
+
 def _terminal_cause(units: List[Mapping[str, Any]]) -> Dict[str, Any]:
     """The run's last closed unit as it recorded its own result (the unit
     scope copies the workflow result's fields at close); never inferred."""
@@ -264,7 +338,8 @@ def _answer_tool_attempt(next_records: Optional[List[Mapping[str, Any]]]) -> Dic
     return answers
 
 
-def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, Any]],
+                run: Optional[reader.EvidenceRun] = None) -> Dict[str, Any]:
     closed = _of(records, "run.closed")
     if not closed:
         return _absent(NOT_RECORDED, "the run never closed (crashed or still running)" if seal is None
@@ -273,7 +348,7 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
                 if (r.get("payload") or {}).get("success") is not True]
     units = _of(records, "unit.closed")
     decisions = _of(records, "recovery.decision")
-    terminal_cause = _terminal_cause(units)
+    terminal_cause = _run_terminal_cause(records, units, closed[-1], run)
     return _recorded(
         [_brief(closed[-1], "terminal_status", "lifecycle_state", "commit_result", "model_calls")],
         terminal_cause=terminal_cause,
@@ -281,7 +356,8 @@ def _answer_run(records: List[Mapping[str, Any]], seal: Optional[Mapping[str, An
                                "attempt": (r.get("payload") or {}).get("attempt"),
                                **(r.get("payload") or {})["plan_scope_conflict"]}
                               for r in decisions if (r.get("payload") or {}).get("plan_scope_conflict")],
-        units=[_brief(r, "outcome", "status", "failure_category", "quality_gates_passed", "error_type")
+        units=[{"unit_id": r.get("unit_id"),
+                **_brief(r, "outcome", "status", "failure_category", "quality_gates_passed", "error_type")}
                for r in units],
         failed_terminal_gates=[_brief(r, "gate") for r in terminal],
         last_recovery_decision=_brief(decisions[-1], "failure_type", "action", "retry",
@@ -323,7 +399,7 @@ def explain_run(state_dir: str, run_id: str) -> Dict[str, Any]:
         phase = record.get("phase") or "unscoped"
         phases[phase] = phases.get(phase, 0) + 1
     result["calls_outside_attempts"] = dict(phases)
-    result["Q9"] = _answer_run(records, verification.seal)
+    result["Q9"] = _answer_run(records, verification.seal, run)
     return result
 
 

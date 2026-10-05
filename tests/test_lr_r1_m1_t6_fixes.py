@@ -565,3 +565,130 @@ def test_g3_an_answer_that_was_returned_is_never_no_model_answer(tmp_path, monke
     q4 = _synthetic_q4(tmp_path, monkeypatch, "run-answered",
                        [{"cancelled": False, "error_type": "InferenceDeadlineError"}, {"finish_reason": "stop"}])
     assert q4["status"] == "NOT_RECORDED"
+
+
+# -- H: Q9's terminal cause follows terminal controller evidence ------------------------------
+
+def test_h_a_controller_terminal_decision_outranks_a_later_successful_unit(tmp_path, monkeypatch):
+    """Units close s1 PASS, s2 FAIL (plan-scope conflict), s1 PASS (owner
+    recovery); the controller then ends the run needs_review /
+    PLAN_SCOPE_REVISION_REQUIRED. That decision is the terminal cause."""
+    from _t6_harness import scope_enforce
+
+    observed = scope_enforce(tmp_path, monkeypatch)
+    q9 = observed.explained["Q9"]
+    assert [(u["unit_id"], u["quality_gates_passed"]) for u in q9["units"]] == [
+        ("s1", True), ("s2", False), ("s1", True)]                   # the rerun stays visible in history
+    cause = q9["terminal_cause"]
+    assert cause["source"] == "controller_terminal_event" and cause["kind"] == "planning.failed"
+    assert cause["reason_codes"] == ["PLAN_SCOPE_REVISION_REQUIRED"]
+    deciding = cause["deciding_subtask"]
+    assert deciding["subtask_id"] == "s2" and deciding["status"] == "needs_review"
+    assert "app/lib.py" in deciding["error"]                         # the out-of-scope file
+    assert q9["plan_scope_conflicts"][0]["required_files"] == ["app/lib.py"]
+
+
+def _shop_integration_plan():
+    import test_enforce_verified_no_change as shape
+
+    from kriya.workflow.plan_schema import EngineeringPlan
+
+    plan = shape._plan(shape.TOOL_CRITERION).model_dump()
+    plan["integration_relationships"] = [{
+        "id": "ir1", "kind": "uses", "producer_subtask_ids": ["s1"], "consumer_subtask_ids": ["s2"],
+        "relationship_statement": "the controller uses the cached service"}]
+    return EngineeringPlan.model_validate(plan)
+
+
+def test_h_a_failed_terminal_gate_outranks_a_successful_last_unit(tmp_path, monkeypatch):
+    """LR-R1-P5's shape: every unit passes (s2 verified NO_CHANGE), then the
+    terminal obligations gate fails. The terminal gate is the cause."""
+    from _t6_harness import shop_enforce
+
+    observed = shop_enforce(tmp_path, monkeypatch, plans=[_shop_integration_plan])
+    assert all(r.status.value == "completed" for r in observed.result.subtask_results)
+    q9 = observed.explained["Q9"]
+    assert q9["units"][-1]["quality_gates_passed"] is True
+    cause = q9["terminal_cause"]
+    assert cause["source"] == "terminal_gates"
+    assert [g["gate"] for g in cause["failed_gates"]] == ["terminal_obligations"]
+
+
+def test_h_a_successful_enforce_run_has_no_manufactured_failure(tmp_path, monkeypatch):
+    from _t6_harness import shop_enforce
+
+    observed = shop_enforce(tmp_path, monkeypatch)
+    late = [r for r in observed.of("mirror.event") if r["payload"].get("source") == "workflow_controller.enforce"]
+    assert late, "the enforce terminal wrote its (non-terminal) events"   # e.g. requirement.verdicts
+    assert observed.explained["Q9"]["terminal_cause"] == {
+        "failure_category": None, "quality_gates_passed": True, "unit_outcome": "RETURNED"}
+
+
+def _synthetic_q9(tmp_path, monkeypatch, run_id, build, terminal_status):
+    from kriya.core.attempt_evidence import scope
+    from kriya.core.attempt_evidence.explain import explain_run
+    from kriya.core.state_paths import ENV_STATE_DIR
+    from tests._strict_doubles import strict_config
+
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
+
+    class _Context:
+        pass
+    context = _Context()
+    context.run_id = run_id
+
+    class _Record:
+        pass
+    run_record = _Record()
+    run_record.terminal_status = terminal_status
+    cfg = strict_config()
+    with scope.run_scope(context):
+        scope.ensure_store(cfg)
+        build(cfg, scope)
+        scope.close_run(context, lambda: run_record)
+    return explain_run(str(tmp_path / "state"), run_id)["Q9"]
+
+
+def _controller_event(scope, kind, reason_codes):
+    scope.mirror_event({"kind": kind, "attempt": 0, "source": "workflow_controller.enforce",
+                        "authority": "authoritative", "details": {"reason_codes": reason_codes}})
+
+
+def test_h_the_latest_controller_terminal_event_wins(tmp_path, monkeypatch):
+    def build(cfg, scope):
+        with scope.unit_scope(cfg, "s1", "structured") as closing:
+            closing.update(failure_category=None, quality_gates_passed=True)
+        _controller_event(scope, "planning.failed", ["EARLIER"])
+        _controller_event(scope, "planning.failed", ["THE_TERMINAL_ONE"])
+    cause = _synthetic_q9(tmp_path, monkeypatch, "run-latest", build, "FAILURE")["terminal_cause"]
+    assert cause["reason_codes"] == ["THE_TERMINAL_ONE"]
+
+
+def test_h_a_success_shaped_last_unit_never_explains_a_failed_run(tmp_path, monkeypatch):
+    """Guard: the run failed, nothing recorded names why - the last unit's
+    success is never presented as the terminal cause."""
+    def build(cfg, scope):
+        with scope.unit_scope(cfg, "s1", "structured") as closing:
+            closing.update(failure_category=None, quality_gates_passed=True)
+    cause = _synthetic_q9(tmp_path, monkeypatch, "run-guard", build, "FAILURE")["terminal_cause"]
+    assert cause["status"] == "NOT_RECORDED"
+    assert cause["last_unit"] == {"failure_category": None, "quality_gates_passed": True, "unit_outcome": "RETURNED"}
+
+
+def test_h_the_deciding_subtask_is_the_last_one_that_did_not_complete(tmp_path, monkeypatch):
+    """A completed subtask decision recorded after the failing one (an owner
+    recovery rerun) never becomes the deciding subtask."""
+    class _Decision:
+        def __init__(self, **value):
+            self.value = value
+
+        def to_dict(self):
+            return dict(self.value)
+
+    def build(cfg, scope):
+        scope.mirror_decision(_Decision(type="subtask_attempt", subtask_id="s2", status="needs_review",
+                                        error="grounded required files ['app/lib.py'] are outside scope"))
+        scope.mirror_decision(_Decision(type="subtask_attempt", subtask_id="s1", status="completed"))
+        _controller_event(scope, "planning.failed", ["PLAN_SCOPE_REVISION_REQUIRED"])
+    cause = _synthetic_q9(tmp_path, monkeypatch, "run-deciding", build, "FAILURE")["terminal_cause"]
+    assert cause["deciding_subtask"]["subtask_id"] == "s2" and cause["deciding_subtask"]["status"] == "needs_review"
