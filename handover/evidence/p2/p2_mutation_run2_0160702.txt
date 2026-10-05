@@ -1,0 +1,14 @@
+baseline 91 passed in 23.31s
+level2-available-guard-dropped KILLED 1 failed, 77 passed in 23.00s
+pre-success-guard-dropped KILLED 3 failed, 69 passed in 22.63s
+locator-files-omitted-from-known-files KILLED 1 failed, 88 passed in 16.79s
+no-loci-carried-by-controller KILLED 1 failed, 88 passed in 16.49s
+no-loci-recorded-on-conflict KILLED 1 failed, 88 passed in 16.85s
+loci-carried-without-revision-check KILLED 1 failed, 80 passed in 23.12s
+ambiguous-resolution-accepted KILLED 1 failed, 76 passed in 22.73s
+attribution-recorded-before-it-is-known KILLED 2 failed, 86 passed in 13.54s
+warnings-counted-as-errors KILLED 3 failed, 68 passed in 10.48s
+unresolved-diagnostic-skipped KILLED 2 failed, 72 passed in 22.92s
+seed-path-escape-accepted KILLED 1 failed, 79 passed in 22.92s
+unattributed-stop-never-set KILLED 1 failed, 89 passed in 22.81s
+TOTAL 12 {'KILLED': 12}
