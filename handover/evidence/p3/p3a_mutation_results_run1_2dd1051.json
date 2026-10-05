@@ -1,0 +1,75 @@
+{
+ "commit": "2dd1051",
+ "tests": [
+  "tests/test_p3a_sent_request_anchor_authority.py",
+  "tests/test_p3_developer_protocol_reproducers.py",
+  "tests/test_context_edit_protocol_001.py",
+  "tests/test_prd016_adaptive_budget.py"
+ ],
+ "mutants": [
+  {
+   "label": "pre-fit-prompt-recorded-as-sent",
+   "file": "kriya/workflow/context_budget.py",
+   "status": "KILLED",
+   "summary": "1 failed, 29 passed in 9.35s",
+   "seconds": 10.2
+  },
+  {
+   "label": "any-anchor-in-the-file-accepted",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "5 failed, 15 passed in 4.88s",
+   "seconds": 5.8
+  },
+  {
+   "label": "revision-of-sent-text-ignored",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 27 passed in 6.06s",
+   "seconds": 6.9
+  },
+  {
+   "label": "stale-member-unit-accepted",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 27 passed in 5.82s",
+   "seconds": 6.7
+  },
+  {
+   "label": "member-unit-need-not-be-sent",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 28 passed in 5.65s",
+   "seconds": 6.5
+  },
+  {
+   "label": "whole-file-need-not-be-sent",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "5 failed, 15 passed in 4.87s",
+   "seconds": 5.7
+  },
+  {
+   "label": "not-in-file-anchor-accepted-from-sent-text",
+   "file": "kriya/workflow/attempt.py",
+   "status": "SURVIVED",
+   "summary": "74 passed in 7.75s",
+   "seconds": 8.6
+  },
+  {
+   "label": "with-section-copy-not-recorded",
+   "file": "kriya/workflow/context_budget.py",
+   "status": "KILLED",
+   "summary": "1 failed, 29 passed in 5.26s",
+   "seconds": 6.1
+  },
+  {
+   "label": "sent-requests-never-kept",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 28 passed in 5.94s",
+   "seconds": 6.8
+  }
+ ],
+ "baseline": "74 passed in 7.67s"
+}

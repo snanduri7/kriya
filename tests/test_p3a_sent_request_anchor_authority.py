@@ -84,6 +84,11 @@ def test_text_of_another_revision_never_authorizes():
 def test_an_anchor_not_in_the_file_is_still_not_in_the_file():
     fabricated = "    int line20 = 99;\n"
     assert _reason(_state(sent=[CURRENT + fabricated]), search=fabricated) == "ANCHOR_NOT_IN_FILE"
+    # Even inside a sent member unit with no recorded revision whose text is
+    # not the file's (a stale rendering): sent text never makes an anchor real.
+    stale_member = MEMBER.replace("int line20 = 20;", "int line20 = 99;")
+    assert _reason(_state(sent=[stale_member], members=[_member(stale_member, None)]),
+                   search=fabricated) == "ANCHOR_NOT_IN_FILE"
 
 
 def test_only_what_the_fit_kept_is_recorded_as_sent():
