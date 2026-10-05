@@ -43,7 +43,7 @@ KINDS = frozenset({
     "unit.opened", "unit.closed",
     "phase.opened", "phase.closed",
     "attempt.opened", "attempt.closed",
-    "model.request", "model.response",
+    "model.request", "model.response", "model.result",
     "prompt.sections",
     "authority.snapshot",
     "developer.parse",

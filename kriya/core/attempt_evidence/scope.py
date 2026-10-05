@@ -353,10 +353,130 @@ def wire_scope() -> Iterator[Optional[int]]:
         return
     call.wires += 1
     token = _WIRE.set(call.wires)
+    dispatched = _WIRE_DISPATCHED.set(False)
     try:
         yield call.wires
     finally:
+        _WIRE_DISPATCHED.reset(dispatched)
         _WIRE.reset(token)
+
+
+_WIRE_DISPATCHED: contextvars.ContextVar[bool] = contextvars.ContextVar("attempt_evidence_wire_sent", default=False)
+_NEXT_WIRE_REASON: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "attempt_evidence_wire_reason", default=None)
+
+
+def next_wire_reason(reason: str) -> None:
+    """Why the next wire request of this call is sent (a resend inside one
+    logical call: ``response_format_dropped``, ``empty_content_floor``)."""
+    _NEXT_WIRE_REASON.set(reason)
+
+
+def _reasoning_summary(text: Optional[str]) -> Dict[str, Any]:
+    if not text:
+        return {"present": False, "chars": 0, "digest": None}
+    return {"present": True, "chars": len(text), "digest": model.digest(text.encode("utf-8"))}
+
+
+def record_wire_request(runtime: Any, request: Any) -> None:
+    """``model.request`` for one wire request: the exact messages, tools and
+    adapter body (``wire_payload``), recorded immediately before dispatch."""
+    if _active_writer() is None:
+        return
+    try:
+        reason = _NEXT_WIRE_REASON.get() or "initial"
+        _NEXT_WIRE_REASON.set(None)
+        stream = getattr(request, "stream_callback", None) is not None
+        body = runtime.wire_payload(request, stream=stream)
+        response_format = getattr(request, "response_format", None) or {}
+        timeout = getattr(request, "timeout", None)
+        payload = {
+            "dispatched": True, "wire_reason": reason, "adapter": getattr(runtime, "name", None),
+            "model": request.model, "stream": stream, "response_format": response_format.get("type"),
+            "temperature": request.temperature, "max_tokens": request.max_tokens,
+            "tools": len(request.tools) if request.tools else 0,
+            "timeout_seconds": timeout if isinstance(timeout, (int, float)) else None,
+            "wire_body": "RECORDED" if body is not None else "NOT_RECORDED (the adapter declares no wire body)",
+        }
+        _WIRE_DISPATCHED.set(True)
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: model.request not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("model.request", payload,
+         content={"messages": request.messages, "tools": request.tools, "wire_body": body})
+
+
+def record_wire_response(response: Any) -> None:
+    """``model.response``: the transport content verbatim (D3) - as the
+    adapter received it when it captures that, else the content it
+    returned, flagged - and the separately returned reasoning as a digest
+    (its text only under ``full_with_reasoning``)."""
+    if _active_writer() is None:
+        return
+    try:
+        raw = getattr(response, "raw_content", None)
+        reasoning = getattr(response, "reasoning_text", None)
+        tool_calls = [{"id": c.id, "name": c.name, "arguments": c.arguments}
+                      for c in getattr(response, "tool_calls", None) or []]
+        payload = {
+            "finish_reason": response.finish_reason, "prompt_tokens": response.prompt_tokens,
+            "completion_tokens": response.completion_tokens, "reasoning_chars": response.reasoning_chars,
+            "reasoning_field": _reasoning_summary(reasoning), "provider_metadata": dict(response.provider_metadata),
+            "tool_calls": len(tool_calls), "raw_content_recorded": raw is not None,
+        }
+        content = {"content": raw if raw is not None else response.content, "tool_calls": tool_calls or None,
+                   "reasoning": reasoning if capture_reasoning() else None}
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: model.response not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("model.response", payload, content=content)
+
+
+def record_wire_error(error: BaseException) -> None:
+    """``model.response`` for a wire request that raised (backend error,
+    timeout, deadline, cancellation); the caller re-raises."""
+    try:
+        payload = {"dispatched": _WIRE_DISPATCHED.get(), "error_type": type(error).__name__,
+                   "error": str(error)[:500], "cancelled": type(error).__name__ == "CancelledError"}
+    except Exception:  # an exception whose str() fails must never replace the run's own
+        payload = {"dispatched": _WIRE_DISPATCHED.get(), "error_type": type(error).__name__, "error": None,
+                   "cancelled": False}
+    emit("model.response", payload)
+
+
+def record_undispatched_call(error: BaseException, messages: Any, tools: Any = None) -> None:
+    """A logical call that ended before any wire request (an egress, budget,
+    schema or deadline refusal): the refused prompt is still recorded."""
+    call = _CALL.get()
+    if call is None or call.wires:
+        return
+    try:
+        payload = {"dispatched": False, "refusal_type": type(error).__name__, "refusal": str(error)[:500],
+                   "reason_code": getattr(error, "reason_code", None)}
+    except Exception:  # never replaces the run's own exception
+        payload = {"dispatched": False, "refusal_type": type(error).__name__, "refusal": None, "reason_code": None}
+    emit("model.request", payload, content={"messages": messages, "tools": tools})
+
+
+def record_call_result(result: Any) -> None:
+    """``model.result``: the logical call's normalized outcome (every
+    terminal path of LLMClient goes through ``_finish``)."""
+    if _active_writer() is None:
+        return
+    try:
+        payload = {key: getattr(result, key, None) for key in (
+            "model", "runtime_fingerprint", "runtime_fingerprint_exact", "inference_settings_digest",
+            "finish_reason", "max_tokens", "prompt_tokens", "prompt_tokens_reported", "completion_tokens",
+            "tokens_estimated", "reasoning_present", "reasoning_chars", "reasoning_source", "elapsed_seconds",
+            "backend_status", "backend_error", "protocol", "budget", "prefix_reuse")}
+        for key in ("status", "parser_status"):
+            value = getattr(result, key, None)
+            payload[key] = getattr(value, "value", value)
+        payload["tool_calls"] = len(getattr(result, "tool_calls", None) or [])
+    except Exception as error:  # observational: never alters the run
+        logger.warning("Attempt evidence: model.result not built (%s: %s)", type(error).__name__, error)
+        return
+    emit("model.result", payload)
 
 
 # -- mirrors of the existing evidence streams (design §5.2) --------------------
