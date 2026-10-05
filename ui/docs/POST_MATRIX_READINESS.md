@@ -115,3 +115,7 @@ state directory, and the recovery workspace setting names the real workspace to 
 
 Stop conditions: any write to the main database attributable to the GUI; a digest verification failure at pin; a `SNAPSHOT_*` error
 on acquire; a panel inferring anything not recorded. Each stops the procedure and is reported with the raw host log.
+
+## 8. Acceptance preparation (2026-10-05)
+
+Resolved inputs and the exact acquisition command for approval: `REAL_STORE_ACCEPTANCE_PLAN.md`. Merge instructions for the main-repository session: `KUP_MERGE_INSTRUCTIONS.md`. Manual accessibility script, every step pending: `A11Y_MANUAL_WALKTHROUGH.md`. Real-store use remains held.
