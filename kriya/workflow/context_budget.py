@@ -1,6 +1,7 @@
 """Context budget allocation and skeletonization tiers for the Graph RAG code context assembled into each generation prompt. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
 import io
+import json
 import logging
 import os
 import re
@@ -10,6 +11,8 @@ from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
+from kriya.core.attempt_evidence import model as attempt_evidence_model
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 
 # Annotation-only names, imported at runtime so typing.get_type_hints()
 # resolves (PRD-001); no cycle.
@@ -18,6 +21,11 @@ from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content
 from kriya.workflow.process_profile import ContextDepth
 
 logger = logging.getLogger(__name__)
+
+
+def digest_text(text: Union[str, bytes]) -> str:
+    """The attempt evidence digest of prompt text (LR-R1-M1)."""
+    return attempt_evidence_model.digest(text if isinstance(text, bytes) else text.encode("utf-8"))
 
 
 @dataclass(frozen=True)
@@ -741,13 +749,26 @@ def fit_variable_section(
     budget = capacity.allocator_units(room)
     for builds in range(1, _MAX_SECTION_BUILDS + 1):
         if budget <= 0:
-            return SectionFit(empty, room, 0, builds - 1, True)
+            return _recorded_section_fit(build, SectionFit(empty, room, 0, builds - 1, True))
         value = build(budget)
         used = measure(value)
         if used <= room:
-            return SectionFit(value, room, used, builds, False)
+            return _recorded_section_fit(build, SectionFit(value, room, used, builds, False))
         budget = int(budget * room / used) - 1
-    return SectionFit(empty, room, 0, _MAX_SECTION_BUILDS, True)
+    return _recorded_section_fit(build, SectionFit(empty, room, 0, _MAX_SECTION_BUILDS, True))
+
+
+def _recorded_section_fit(build: Callable[[int], Any], fit: SectionFit) -> SectionFit:
+    """LR-R1-M1 ``prompt.sections`` for one variable section (observational;
+    the section's text is in the request the store records, so only its
+    digest and length are recorded here)."""
+    if attempt_evidence_scope.capture_mode() is not None:
+        value = fit.value if isinstance(fit.value, (str, bytes)) else json.dumps(fit.value, default=str)
+        attempt_evidence_scope.emit("prompt.sections", {
+            "fitter": "fit_variable_section", "section": getattr(build, "__qualname__", None),
+            **fit.to_dict(), "kept_chars": len(value), "kept_digest": digest_text(value),
+        })
+    return fit
 
 
 def trim_reference_text(text: str, budget: int) -> str:
@@ -986,7 +1007,9 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
     section is left out and the dispatch check refuses the request
     (CONTEXT_BUDGET_UNSATISFIABLE). Returns the prompt and the fit details
     ({} when unchanged)."""
-    if capacity.count(system_prompt) + capacity.count(prompt) <= capacity.tokens:
+    request_tokens = capacity.count(system_prompt) + capacity.count(prompt)
+    if request_tokens <= capacity.tokens:
+        _record_developer_sections(prompt, [], sections, capacity, request_tokens, fitted=False)
         return prompt, {}
     unlocated: List[str] = []
     located: List[Tuple[int, int, OptionalSection]] = []
@@ -1029,17 +1052,58 @@ def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt:
         fits[index] = fit_variable_section(capacity, fixed, build)
         fixed.append(fits[index].value)
     fitted, cursor = [], 0
-    for index, (start, end, _section) in enumerate(spans):
+    segments: List[Tuple[str, Optional[OptionalSection], Optional[SectionFit]]] = []
+    for index, (start, end, section) in enumerate(spans):
         fitted.append(prompt[cursor:start])
+        segments.append((prompt[cursor:start], None, None))
         fitted.append(fits[index].value)
+        segments.append((fits[index].value, section, fits[index]))
         cursor = end
     fitted.append(prompt[cursor:])
+    segments.append((prompt[cursor:], None, None))
+    _record_developer_sections("".join(fitted), segments, sections, capacity, request_tokens, fitted=True,
+                               unlocated=unlocated)
     return "".join(fitted), {
         "request": "developer", "capacity_tokens": capacity.tokens,
         "sections": {spans[index][2].kind: {**fit.to_dict(), "reduced": fit.value != spans[index][2].text}
                      for index, fit in fits.items()},
         "unlocated_sections": unlocated,
     }
+
+
+def _record_developer_sections(prompt: str, segments, sections: Sequence[OptionalSection], capacity: RequestCapacity,
+                               request_tokens: int, *, fitted: bool, unlocated: Sequence[str] = ()) -> None:
+    """LR-R1-M1 ``prompt.sections`` for one Developer request: the ordered
+    segments of the user message as sent (mandatory text and optional
+    sections), each with its offset, length, digest and outcome, so the kept
+    segments reproduce the recorded message byte for byte. Observational."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        if not fitted:
+            segments = [(prompt, None, None)]
+        recorded, offset = [], 0
+        for text, section, fit in segments:
+            entry = {"offset": offset, "chars": len(text), "digest": digest_text(text)}
+            if section is None:
+                entry.update(name="mandatory", mandatory=True, outcome="kept")
+            else:
+                entry.update(name=section.kind, mandatory=False, requested_chars=len(section.text),
+                             requested_digest=digest_text(section.text), **fit.to_dict(),
+                             outcome="dropped" if fit.omitted else ("kept" if text == section.text else "trimmed"))
+            recorded.append(entry)
+            offset += len(text)
+        optional = [{"name": s.kind, "chars": len(s.text), "digest": digest_text(s.text)}
+                    for s in sections if s.text] if not fitted else []
+    except Exception as error:  # observational: never alters the request
+        logger.warning("Attempt evidence: Developer prompt sections not recorded (%s: %s)",
+                       type(error).__name__, error)
+        return
+    attempt_evidence_scope.emit("prompt.sections", {
+        "fitter": "fit_developer_request", "request": "developer", "fitted": fitted,
+        "capacity_tokens": capacity.tokens, "request_tokens": request_tokens, "segments": recorded,
+        "optional_sections_unchanged": optional, "unlocated_sections": list(unlocated),
+    })
 
 
 class DeveloperRequestFit:
