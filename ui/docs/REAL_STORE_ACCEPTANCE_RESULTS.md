@@ -43,7 +43,12 @@ No stop condition occurred: no write to the main database, no digest failure, no
 - **O-5 Run `280bd867` records `status success` with `attempts 0`.** Shown literally; not interpreted.
 - **O-6 Harness correction during the run.** The first attempt at steps 5-7 did not execute (a zsh variable used as a command prefix, then `time` applied to a shell function; exit 127, nothing reached Kriya); both were rerun with the command spelled out. One empty leftover file from a mis-picked run id was deleted from the export directory.
 
-## 3. Pending manual checks (a human at the Electron window; nothing here was verified)
+## 3. Manual checks at the Electron window (OWNER-PERFORMED 2026-10-05: PASS per the owner's record; separate from the automated evidence above)
+
+The owner performed the walkthrough in `MANUAL_WALKTHROUGH_SESSION_2026-10-05.md` (snapshot pinning and switching, Refresh without
+acquisition, the panels for runs `1df27f7a` and `280bd867`, keyboard navigation, VoiceOver spot checks) and confirmed it as a pass.
+This session did not observe the window; the owner's result column is the record. The items originally listed below were the
+scope of that walkthrough:
 
 Launch `KRIYA_UI_ALLOW_REAL_KRIYA=1 npm start -w @kriya-ui/standalone`, enter the executable in Settings (the settings file does not
 exist yet), leave the configuration directory blank, and confirm visually:
@@ -57,6 +62,9 @@ exist yet), leave the configuration directory blank, and confirm visually:
 
 The accessibility walkthrough (`A11Y_MANUAL_WALKTHROUGH.md`) remains pending as well.
 
-## 4. Owner recording (to be filled after steps 10-11)
+## 4. Owner recording
 
-(empty)
+- 2026-10-05: manual walkthrough completed and confirmed as a pass by the owner (owner-performed check; see §3 and the session sheet).
+- Step 10 (workspace assessment): NOT PERFORMED. No recovery workspace has been authorized; the step is neither passed nor failed and does
+  not block the completed history-inspector checks (steps 1-9 automated, manual walkthrough owner-confirmed).
+- Step 11: this record.

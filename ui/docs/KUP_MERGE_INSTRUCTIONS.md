@@ -35,7 +35,14 @@ marker registration is redundant but harmless.
 - `kriya/kup/` does not exist in the target yet.
 
 The target branch is the main-repository session's decision; the observations only say that `feature/cagc-r1` is conflict-free
-for these six commits as of `0e12535`.
+for these commits as of `0e12535`.
+
+**Dry run, 2026-10-05 (MEASURED, nothing written in the main repository):** `0e12535` was fetched into this checkout and all seven
+commits (`db96b12 f4bd13f f4688ea 8065005 f876f49 b531404 3669717`) were cherry-picked in order onto it in a throwaway worktree:
+every one applied cleanly (23 files, +3,436 / -9). On the merged tree: `ruff check` clean, `pylint kriya plugins/core_tools tests`
+exit 0, and `tests/test_kup_acquisition.py tests/test_kup_cli.py tests/test_kup_host_environment.py tests/test_kup_write_boundary.py
+tests/test_traces_command.py tests/test_prd034_certification.py` = 72 passed (imports redirected to the worktree). The full suite
+on the merged tree was not run here (owner's terminal, step 3 below).
 
 ## 3. Steps for the main-repository session (to run there; this session runs none of them)
 
@@ -50,7 +57,7 @@ After the series applies:
 1. Static gates (must exit 0): `.venv/bin/pylint kriya plugins/core_tools tests` and `.venv/bin/ruff check .`
 2. KUP tests: `.venv/bin/pytest -q tests/test_kup_acquisition.py tests/test_kup_cli.py tests/test_kup_write_boundary.py tests/test_kup_host_environment.py tests/test_traces_command.py`
    (the sandbox test needs macOS `sandbox-exec`; the goldens under `tests/golden/kup/` are byte-identical text outputs).
-3. Full suite: `ulimit -n 256; .venv/bin/pytest -q -n 2 --dist loadgroup` (the target's `.venv` has pytest-xdist 3.8.0; without
+3. Full suite: `ulimit -n 256; .venv/bin/pytest -q -n 2 --dist loadgroup`; add `tests/test_prd034_certification.py` to the targeted set in step 2 (commit 7) (the target's `.venv` has pytest-xdist 3.8.0; without
    pytest-xdist use the sequential `ulimit -n 256; .venv/bin/pytest -q`)
 4. Keep `tests/_kup_fixtures.py::host_child_env` identical to `ui/standalone/src/main/child_env.ts` (fixed PATH, fixed
    `PYTHONDONTWRITEBYTECODE=1`, HOME, absolute `KRIYA_STATE_DIR` only); a change to one must change the other.

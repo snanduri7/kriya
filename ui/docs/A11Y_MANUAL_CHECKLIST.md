@@ -1,4 +1,9 @@
-# Manual acceptance checklist: keyboard, VoiceOver, narrow window (status: PENDING a human run)
+# Manual acceptance checklist: keyboard, VoiceOver, narrow window (status: PARTIALLY performed by the owner on the real store, 2026-10-05; see the note below)
+
+**Owner-performed 2026-10-05** (`MANUAL_WALKTHROUGH_SESSION_2026-10-05.md`, confirmed as a pass): the session sheet's steps cover K2 in part
+(initial focus on the title, Escape), K3, K5, K6, K7, K9, V4 and V10 of this checklist. Everything else here - the remaining Settings
+steps (K2 Tab wrap, K4, V1-V3), K8, K10, K11, V5-V9 and the whole narrow-window section N1-N6 - was not part of that walkthrough and
+stays pending. The owner supplied no observations beyond the confirmation; none are added.
 
 Scope: the controls added or changed after the owner's earlier acceptance - the Settings dialog, the timeline search and
 filters, event selection, the Gates and Evidence tabs, the attribution "Why" drawer. Every item below is **pending** until a
