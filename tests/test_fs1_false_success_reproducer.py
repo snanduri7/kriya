@@ -5,8 +5,8 @@ handover/FS1_FALSE_SUCCESS_INVESTIGATION.md).
 The live specimen (commons-lang CharSetUtils.containsOnly): the candidate
 violates an explicit requirement of the goal, the test written for it is never
 executed by the runner (no @Test), the model spec-compliance verifier says the
-requirement is satisfied, every gate passes, and Kriya reports SUCCESS and
-applies the candidate.
+requirement is satisfied, every gate passes, and Kriya reported SUCCESS and
+applied the candidate.
 
 Same shape here, through the real WorkflowController enforce loop with real
 pytest gates; only the model transport is scripted:
@@ -16,11 +16,12 @@ pytest gates; only the model transport is scripted:
   (``check_contains_only``), the Python counterpart of a missing @Test;
 - the spec-compliance verifier answers compliant / REQ satisfied.
 
-``test_the_specimen_reaches_success_on_model_judgment_alone`` pins how it
-reaches SUCCESS today. The required behaviour is asserted by
-handover/evidence/fs1/test_fs1_required_behaviour.py (run explicitly; it fails
-until FS-1 is fixed, and moves here, replacing this pin, when the fix is
-authorized - the P1/P4/P5 reproducer convention; no xfail).
+Before FS-1 the run reached SUCCESS on that model judgment alone (pinned by
+the pre-fix evidence, handover/evidence/fs1/). After FS-1A the test subtask's
+unexecuted test delta is a typed, repairable TEST_NOT_EXECUTED naming the
+identity; after FS-1B the verifier's "satisfied" is a claim (UNVERIFIED) that
+the production policy blocks. The live run had ``runtime_profile:
+production``, so the reproducer runs under its requirement policies.
 """
 import json
 import re
@@ -83,13 +84,51 @@ def _responder(role, request):
     return benign_roles(role, request, target=MODULE)
 
 
-def _run(tmp_path, monkeypatch):
+# What a correct candidate writes: the goal's behaviour, and a test pytest collects.
+RIGHT_MODULE = BASE_MODULE + ("\n\ndef contains_only(text, allowed):\n"
+                              "    return all(ch in allowed for ch in text)\n")
+COLLECTED_TESTS = UNCOLLECTED_TESTS.replace("def check_contains_only", "def test_contains_only")
+
+# The live T3 config: runtime_profile production seals both requirement policies to block.
+PRODUCTION = {"requirement_unknown_policy": "block", "requirement_unverified_policy": "block"}
+RECORD = {"requirement_unknown_policy": "record", "requirement_unverified_policy": "record"}
+
+
+def _run(tmp_path, monkeypatch, policy=None, responder=None):
     from _chaos_harness import chaos_config
 
     cfg = chaos_config()
     cfg.autonomy.spec_compliance_enabled = True
+    for key, value in (policy or RECORD).items():
+        setattr(cfg.autonomy, key, value)
     files = {"textutil/__init__.py": "", MODULE: BASE_MODULE, "tests/__init__.py": "", TESTS: BASE_TESTS}
-    return enforce_run(tmp_path, monkeypatch, _responder, files, GOAL, [_plan] * 4, cfg=cfg)
+    return enforce_run(tmp_path, monkeypatch, responder or _responder, files, GOAL, [_plan] * 4, cfg=cfg)
+
+
+def _correct_responder(role, request):
+    """The same run with a correct candidate (behaviour and a collected test)."""
+    from _protocol_responses import sentinel
+
+    system = next((m["content"] for m in request.messages if m["role"] == "system"), "")
+    if role == "developer":
+        if f'path="{TESTS}"' in system:
+            return sentinel(TESTS, analysis="add tests.", content=COLLECTED_TESTS)
+        return sentinel(MODULE, analysis="add contains_only.", content=RIGHT_MODULE)
+    return _responder(role, request)
+
+
+def _test_subtask_diagnoses(observed):
+    return [r["payload"] for r in observed.of("diagnosis") if r["payload"].get("likely_files") == [TESTS]]
+
+
+def _test_delta_outcomes(observed):
+    outcomes = []
+    for record in observed.of("mirror.gate_outcome"):
+        blob = record.get("blobs", {}).get("outcome")
+        outcome = json.loads(observed.run.blob(blob)) if blob else record["payload"]
+        if outcome.get("type") == "test_delta":
+            outcomes.append(outcome)
+    return outcomes
 
 
 def _applied_contains_only(workspace, text, allowed):
@@ -99,28 +138,59 @@ def _applied_contains_only(workspace, text, allowed):
                           text=True, check=True).stdout.strip()
 
 
-def test_the_specimen_reaches_success_on_model_judgment_alone(tmp_path, monkeypatch):
-    """Pins today's path (it passes now; its assertions describe the defect)."""
-    observed = _run(tmp_path, monkeypatch)
-    workspace = observed.workspace
+def _assert_unexecuted_test_never_succeeds(observed):
+    assert observed.result.legacy_result["status"] != "success"
+    assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
+    diagnoses = _test_subtask_diagnoses(observed)
+    # Every attempt of the test subtask is the typed, repairable TEST_NOT_EXECUTED
+    # naming the test file (retried, never accepted).
+    assert len(diagnoses) >= 2 and {d["reason_code"] for d in diagnoses} == {"TEST_NOT_EXECUTED"}
+    deltas = _test_delta_outcomes(observed)
+    assert deltas and not any(d["success"] for d in deltas)
+    for delta in deltas:
+        assert delta["reason_code"] == "TEST_NOT_EXECUTED"
+        assert [c["identity"] for c in delta["test_delta"]["delta"]] == ["tests.test_charset.check_contains_only"]
+        assert delta["test_execution"]["completeness"] == "COMPLETE"   # judged on a complete report
+    # The test gate itself passed on every attempt: the structured report, not the exit code, decided.
+    gates = [r["payload"] for r in observed.of("gate.result") if r["payload"].get("gate") == "tests"]
+    assert gates and all(g["success"] is True for g in gates)
+    assert all(g["test_execution"]["completeness"] == "COMPLETE" for g in gates)
 
-    # Kriya reports SUCCESS and applies the candidate ...
+
+def test_the_specimen_never_succeeds_under_the_production_policy(tmp_path, monkeypatch):
+    """The live T3 configuration (FS-1A and FS-1B both active)."""
+    _assert_unexecuted_test_never_succeeds(_run(tmp_path, monkeypatch, PRODUCTION))
+
+
+def test_test_execution_integrity_alone_stops_the_specimen(tmp_path, monkeypatch):
+    """Under the record policy no requirement outcome blocks; the unexecuted
+    test delta alone (FS-1A) keeps the run from succeeding."""
+    _assert_unexecuted_test_never_succeeds(_run(tmp_path, monkeypatch, RECORD))
+
+
+def test_a_correct_candidate_executes_its_test_delta(tmp_path, monkeypatch):
+    """Control: a collected test of the right behaviour passes test-execution
+    integrity, and under the record policy the run succeeds."""
+    observed = _run(tmp_path, monkeypatch, RECORD, _correct_responder)
     assert observed.result.legacy_result["status"] == "success"
-    assert (workspace / MODULE).read_text() == WRONG_MODULE
-    # ... which violates the goal (executed, not inferred) ...
-    assert _applied_contains_only(workspace, "hello", "") == "True"   # the goal requires False
-    # ... and the only check that would catch it was never executed by any test gate.
-    test_outputs = [r for r in observed.of("gate.result") if r["payload"].get("gate") == "tests"]
-    assert test_outputs and all(r["payload"]["success"] is True for r in test_outputs)
-    assert "check_contains_only" in (workspace / TESTS).read_text()
-    for record in test_outputs:
-        output = observed.run.blob(record["blobs"]["output"]).decode()
-        assert "check_contains_only" not in output
-    # The success-authorizing evidence: a MODEL verdict recorded as a satisfied requirement.
-    [verdicts] = [json.loads(observed.run.blob(r["blobs"]["event"]))["details"]
-                  for r in observed.of("mirror.event") if r["payload"].get("kind") == "requirement.verdicts"]
-    assert set(verdicts["outcomes"].values()) == {"satisfied"}
-    assert {v["reason_code"] for v in verdicts["verdicts"].values()} == {"VERIFIER_CONFIRMED"}
-    terminal = {r["payload"]["gate"]: r["payload"]["success"] for r in observed.of("gate.result")
-                if r["payload"].get("stage") == "terminal"}
-    assert terminal["original_requirements"] is True and terminal["terminal_obligations"] is True
+    assert _applied_contains_only(observed.workspace, "hello", "") == "False"
+    [delta] = [d for d in _test_delta_outcomes(observed) if d["success"]]
+    assert delta["reason_code"] == "TEST_DELTA_EXECUTED"
+    assert delta["test_delta"]["executed"] == ["tests.test_charset.test_contains_only"]
+
+
+def test_a_correct_candidate_with_only_model_judged_requirements_is_blocked_in_production(tmp_path, monkeypatch):
+    """FS-1B: the same correct candidate under the production policy. Its
+    tests executed (FS-1A passes), but candidate tests close no original
+    requirement and the verifier's "satisfied" is a model claim, so every
+    requirement stays UNVERIFIED and the production policy blocks: the
+    honest outcome is "not verified", never SUCCESS."""
+    observed = _run(tmp_path, monkeypatch, PRODUCTION, _correct_responder)
+    legacy = observed.result.legacy_result
+    assert legacy["status"] != "success"
+    assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
+    assert any(d["success"] for d in _test_delta_outcomes(observed))
+    outcomes = legacy["requirements"]["outcomes"]
+    assert outcomes and set(outcomes.values()) == {"unverified"}
+    assert {v["model_outcome"] for v in legacy["requirements"]["verdicts"].values()} == {"satisfied"}
+    assert "REQUIREMENTS_UNRESOLVED" in json.dumps(legacy, default=str)

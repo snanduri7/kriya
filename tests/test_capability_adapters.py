@@ -384,7 +384,11 @@ def test_the_pytest_gate_passes_each_target_as_its_own_argument(tmp_path):
     assert cmd[0] == "py-under-test" and cmd[-3:] == ["--", "tests/test_a.py", "tests/test b.py"]
     assert repr([str(tmp_path), os.path.join(str(tmp_path), "src")]) in cmd[2]
     with patch.object(PolymorphicValidator, "_resolve_python_interpreter", return_value=("x", "pip install failed")):
-        assert v.run_tests(None) == {"success": False, "output": "pip install failed"}
+        failed = v.run_tests(None)
+    # FS-1A: no test process ran, so its structured evidence is INDETERMINATE.
+    execution = failed.pop("test_execution")
+    assert failed == {"success": False, "output": "pip install failed"}
+    assert (execution["completeness"], execution["reason"]) == ("INDETERMINATE", "TEST_PROCESS_NOT_RUN")
 
 
 # --- javac fallback (Capability Adapters R1, javac slice) ---------------------
@@ -498,8 +502,12 @@ def test_javac_output_roots_are_exactly_its_destination(tmp_path):
 
 def test_a_plain_java_workspace_has_no_test_gate(tmp_path):
     _write(tmp_path, "src/App.java", "class App {}")
-    assert _validator(tmp_path).run_tests("src/AppTest.java") == {
-        "success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
+    result = _validator(tmp_path).run_tests("src/AppTest.java")
+    execution = result.pop("test_execution")
+    assert result == {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
+    # FS-1A: no structured runner report exists for this path - never positive evidence.
+    assert (execution["completeness"], execution["reason"]) == (
+        "INDETERMINATE", "NO_STRUCTURED_REPORT_FOR_RUNNER:javac")
 
 
 @pytest.mark.parametrize("egress, web_lookup, expected", [

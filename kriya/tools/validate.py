@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import json
 import logging
 import os
 import re
@@ -19,6 +20,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.tools import test_execution
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -263,10 +265,17 @@ def _record_gate_result(name: str, result: Any, started: float, *, error: Option
             "error_type": type(error).__name__ if error is not None else None,
             **meta,
         }
+        content = {"output": text}
+        report = test_execution.report_from_result(result)
+        if report is not None:
+            # FS-1A: which test identities this invocation executed (summary in
+            # the payload, the full per-identity report as content).
+            payload["test_execution"] = report.summary()
+            content["test_execution"] = json.dumps(report.to_dict(), sort_keys=True)
     except Exception as record_error:  # observational: never alters the gate
         logger.warning("Attempt evidence: gate.result not built (%s)", record_error)
         return
-    attempt_evidence_scope.emit("gate.result", payload, content={"output": text})
+    attempt_evidence_scope.emit("gate.result", payload, content=content)
 
 
 def _verification_gate(name: str):
@@ -332,6 +341,10 @@ class PolymorphicValidator:
         # (_verification_gate) is followed by a check that the repository
         # content and candidate are exactly what was bound.
         self.tree_binding: Any = None
+        # FS-1A: the structured report destination of the test gate now
+        # running (run_tests); the adapters pass it to the runner and record
+        # the runner process on it.
+        self.test_report_binding: Optional[test_execution.ReportBinding] = None
         self._gate = "command"
         # Whether this run may change the repository's toolchain declaration
         # (the caller's structured write scope - see
@@ -1506,6 +1519,45 @@ class PolymorphicValidator:
 
     @_verification_gate("tests")
     def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+        """The test gate (``_run_tests``), bound to a fresh structured report
+        destination before it runs; the result carries the
+        TestExecutionReport of exactly this invocation as ``test_execution``
+        (FS-1A, kriya/tools/test_execution.py): which test identities ran
+        and how, or INDETERMINATE - never inferred from console text."""
+        binding = self._bind_test_report()
+        self.test_report_binding = binding
+        try:
+            result = self._run_tests(target_test)
+        except BaseException:
+            test_execution.collect(binding)  # removes Kriya's own report destination
+            raise
+        finally:
+            self.test_report_binding = None
+        if isinstance(result, dict):
+            result["test_execution"] = test_execution.collect(binding).to_dict()
+        return result
+
+    def _test_runner(self) -> str:
+        """The runner the test gate will invoke for this workspace."""
+        if self.stack == "python":
+            return "pytest"
+        if self.stack == "java":
+            for adapter in BUILD_ADAPTERS:
+                if adapter.language == "java" and adapter.detects(self.workspace_path):
+                    return adapter.build_system
+            return "javac"
+        return "rspec" if self.stack == "ruby" else "none"
+
+    def _bind_test_report(self) -> "test_execution.ReportBinding":
+        runner = self._test_runner()
+        try:
+            return test_execution.prepare(self.workspace_path, runner)
+        except OSError as error:  # no fresh destination: the invocation has no structured evidence
+            return test_execution.ReportBinding(
+                gate_id="", runner=runner, workspace=self.workspace_path,
+                unsupported=f"REPORT_DESTINATION_UNAVAILABLE:{type(error).__name__}")
+
+    def _run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite.
 
         `target_test` accepts either a single string (unchanged, existing

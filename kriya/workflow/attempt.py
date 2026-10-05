@@ -42,6 +42,12 @@ from kriya.policy.filesystem import (
     trusted_control_path_denial,
 )
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+
+# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
+# names here, imported at runtime so typing.get_type_hints() on this module's
+# dataclasses and functions resolves (PRD-001; none of these modules imports
+# attempt.py, so there is no cycle).
+from kriya.tools import test_execution
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
     ManagedServiceVerificationSpec,
@@ -51,11 +57,6 @@ from kriya.tools.service_runtime import (
     _prepare_required_artifact,
     run_managed_service_verification,
 )
-
-# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
-# names here, imported at runtime so typing.get_type_hints() on this module's
-# dataclasses and functions resolves (PRD-001; none of these modules imports
-# attempt.py, so there is no cycle).
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
 from kriya.workflow.acceptance import (
     CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
@@ -233,6 +234,7 @@ from kriya.workflow.static_checks import (
     run_static_checks,
     validate_stack_contract_artifacts,
 )
+from kriya.workflow.test_delta import TEST_EXECUTION_EVIDENCE_INDETERMINATE, judge_test_delta
 from kriya.workflow.toolchain import (
     _check_java_toolchain_mismatch,
     _pin_exec_plugin_executable_to_resolved_jdk,
@@ -3900,6 +3902,92 @@ def find_ungrounded_java_child_process_tests(
                 "expected_command": expected,
             })
     return findings
+
+
+def _changed_test_sources(state: GenerationState, ctx: "AttemptContext") -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """FS-1A: every runnable test source the candidate changed, as
+    (baseline text or None for a new file, candidate text or None when not
+    strict UTF-8 - which the decision treats as indeterminate)."""
+    def read(path: str) -> Tuple[bool, Optional[str]]:
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except FileNotFoundError:
+            return False, None
+        try:
+            return True, data.decode("utf-8")
+        except UnicodeDecodeError:
+            return True, None
+
+    changed: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    for path in find_runnable_test_files(state.all_files_written):
+        exists, candidate = read(os.path.join(ctx.worktree_path, path))
+        if not exists:
+            continue
+        _, baseline = read(os.path.join(ctx.workspace_path, path))
+        if candidate is None or candidate != baseline:
+            changed[path] = (baseline, candidate)
+    return changed
+
+
+def _raise_unexecuted_test_delta(
+    state: GenerationState, ctx: "AttemptContext", validator: Any,
+    accepted_result: Optional[Dict[str, Any]], selected_test: Optional[str],
+) -> None:
+    """FS-1A test-execution integrity for a subtask explicitly responsible
+    for tests (kriya/workflow/test_delta.py): its changed test sources must
+    have produced test identities that executed and passed in the accepted
+    gate invocation's own structured report. When that invocation did not
+    run every changed test source (a single targeted file) or carries no
+    structured report (a self-corrected result), one covering run supplies
+    the evidence. TEST_NOT_EXECUTED / TEST_NOT_PASSED is a repairable
+    test-acceptance failure naming the identities; INDETERMINATE evidence is
+    a typed stop, never a pass."""
+    changed = _changed_test_sources(state, ctx)
+    if not changed:
+        return
+    covered = selected_test is None or set(changed) == {selected_test}
+    result = accepted_result
+    if not covered or test_execution.report_from_result(result) is None:
+        result = (validator.run_tests(target_test=sorted(changed)) if validator.stack == "python"
+                  else validator.run_tests())
+        if not result.get("success"):
+            failure = _build_test_quality_gate_failure(
+                "test", f"TEST FAILURE:\n{result.get('output', '')}",
+                result.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+            )
+            state.record_gate_outcome(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+    report = test_execution.report_from_result(result)
+    verdict = judge_test_delta(changed, report)
+    state.record_gate_outcome({
+        "attempt": state.attempt_number, "type": "test_delta", "success": verdict.satisfied,
+        "reason_code": verdict.reason_code, "test_delta": verdict.to_dict(),
+        "test_execution": report.summary() if report is not None else None,
+    })
+    if verdict.satisfied:
+        return
+    if verdict.reason_code == TEST_EXECUTION_EVIDENCE_INDETERMINATE:
+        failure = Failure(
+            type="verification_infrastructure_failure",
+            message=f"{TEST_EXECUTION_EVIDENCE_INDETERMINATE}: {verdict.detail}",
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    else:
+        failure = Failure(
+            type="test_acceptance",
+            message=(
+                f"TEST ACCEPTANCE FAILURE ({verdict.reason_code}): the goal requires tests, and the "
+                f"changed test code must run as tests and pass. {verdict.detail}. A test the runner "
+                "does not execute (for example a method without its test annotation, or a function "
+                "the runner does not collect) verifies nothing."
+            ),
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 def _raise_ungrounded_child_process_test_candidate(
@@ -9006,6 +9094,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         }
 
         accepted_test_output: Optional[str] = None
+        accepted_test_result: Optional[Dict[str, Any]] = None
         runnable_test_files = find_runnable_test_files(state.all_files_written)
         _raise_unsafe_process_boundary_test_candidate(
             state, ctx, runnable_test_files,
@@ -9062,6 +9151,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
 
             if target_test and not test_res["success"]:
                 if ctx.kernel.config.autonomy.self_correction_loop_enabled:
@@ -9136,6 +9226,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 })
             if target_test:
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
         else:
             # The repository's own suite also runs when the plan declares a
             # test verification for this stage: an edit of existing source
@@ -9167,6 +9258,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
 
         # PRV-11 (2026-08-30): obligation/ownership-aware, not a blind scan
         # over ctx.goal - see subtask_owns_test_obligation's own docstring
@@ -9216,6 +9308,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+
+        if accepted_test_output is not None and this_subtask_owns_tests:
+            _raise_unexecuted_test_delta(state, ctx, validator, accepted_test_result, target_test)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
         # exist only proves the code is valid - it says nothing about whether it does
