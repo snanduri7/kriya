@@ -155,7 +155,10 @@ def test_no_production_code_reads_the_store():
     consumers (CLI evidence commands are added in M1.9 and listed here)."""
     allowed = {"kriya/core/attempt_evidence/reader.py",
                # Consumers (M1.9): the evidence CLI and the explainer it is built on.
-               "kriya/cli.py", "kriya/core/attempt_evidence/explain.py"}
+               "kriya/cli.py", "kriya/core/attempt_evidence/explain.py",
+               # The doctor's evidence.attempt_recorder row (read-only diagnostics, outside the
+               # workflow/control/policy/agents/tools/core packages design §9.1 forbids).
+               "kriya/production_doctor.py"}
     for path in (ROOT / "kriya").rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
         if rel in allowed:
