@@ -195,3 +195,16 @@ the attempt-identity fix).
 regression, approval, static analysis, requirements) were recorded without an attempt number. Fixed with an
 identity-only scope for the whole retry-loop iteration plus `attempt.concluded`; regression test fails without the
 fix.
+
+## 9. M1.11 legacy importer (2026-10-05)
+
+`benchmarks/reliability/import_legacy.py`; T16 in `tests/test_lr_r1_m1_legacy_import.py`.
+- Read-only run on **copies** of `A/evidence/java-behavior-accents.r1` and `B/evidence/python-symbol-valuechain.r2`:
+  both import to `VERIFIED` stores (139 / 153 records). The originals' SHA-256 file listings were identical before
+  and after (MEASURED).
+- **Finding (MEASURED, CONFIRMED):** the CAGC-v2 `untracked.tar` archives contain macOS AppleDouble members
+  (`.kriya/control/runs/._<id>.json`, a "Mac OS X" resource-fork header), written by the archiver that packed the
+  evidence. They are an OS/toolchain artifact, not Kriya evidence. The first import refused with a decode error
+  (fail closed); the importer now skips `._*` members, and the fixture carries one (the test fails without the skip).
+- The explainer answers a question from a `not_recorded` record's reason when no evidence answers it, and never
+  overrides evidence that is present.

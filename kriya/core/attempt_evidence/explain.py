@@ -142,6 +142,13 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     else:
         answers["Q8"] = _absent(NOT_RECORDED, "no_model_call: no Developer call in this attempt"
                                 if not developer_requests else "no model decision was recorded")
+    # An explicit not_recorded record (the legacy importer, invariant I-3)
+    # names why a question cannot be answered; it replaces any inferred
+    # absence ("no model call") but never evidence that is present.
+    for record in _of(records, "not_recorded"):
+        for label in (record.get("payload") or {}).get("questions") or ():
+            if label in answers and answers[label].get("status") != RECORDED:
+                answers[label] = _absent(NOT_RECORDED, (record.get("payload") or {}).get("reason"))
     return answers
 
 
