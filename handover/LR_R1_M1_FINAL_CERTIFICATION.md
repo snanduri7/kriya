@@ -9,12 +9,15 @@ BASE
 61a867fc31a7b5ff5d7f21d1ea15e4eac43f2e03   (= origin/main)
 
 FINAL HEAD
-58853ad3772cbc936b59904b85f44a4adbbebe56   (branch feature/lr-r1-m1; worktree ~/kriya-wt/lr-r1-m1; not pushed)
+ceb9943   (branch feature/lr-r1-m1; worktree ~/kriya-wt/lr-r1-m1; not pushed)
 ```
+
+This report supersedes the first certification (`af5b383`, which certified `58853ad` with T6 PARTIAL and READY FOR
+MERGE REVIEW NO). Every gate below was re-run at `ceb9943`.
 
 ## COMMITS
 
-In order. Four commits are fixes of my own earlier work, each committed separately with a regression that fails
+In order. Five commits are fixes of my own earlier work, each committed separately with a regression that fails
 without it.
 
 | # | Commit | Step |
@@ -44,6 +47,19 @@ without it.
 | 23 | `90f9c44` | M1.11 legacy importer |
 | 24 | `74796bd` | D7 review: dedicated `StopReasonEvidence` carrier |
 | 25 | `58853ad` | OBS-1: native request-body parity + exact pin (test-only) |
+| — | `af5b383` | first certification report (evidence only; superseded by this report) |
+| 26 | `f3d5c8f` | T6-A: no-progress terminal evidence in `recovery.decision` |
+| 27 | `5b1013e` | T6-B: refused answers and NO_CHANGE are distinct candidate facts |
+| 28 | `7dd40b7` | T6-C: Q9 names the recorded terminal cause (explain only) |
+| 29 | `765a981` | T6-D: an enforce TOOL subtask is its own evidence unit |
+| 30 | `73b52be` | T6-E: pre-dispatch refusals and no-model-call are not missing evidence |
+| 31 | `ab39589` | T6-F: authority is per call across a within-attempt protocol fallback |
+| 32 | `cb0c367` | T6-G1: the recorded plan-scope conflict is explained (explain only) |
+| 33 | `a3e0d89` | T6-G2: the recorded authorized write scope is explained (explain only) |
+| 34 | `85383bb` | T6-G3: a Developer call that ended without an answer (explain only) |
+| 35 | `ec68134` | T6-H: Q9's terminal cause follows terminal controller evidence (explain only) |
+| 36 | `ecc6b01` | T6: the ten design paths end to end through `explain` |
+| 37 | `ceb9943` | fix (own T6 test): the TOOL path no longer mutates its matrix row (test-only) |
 
 ## DESIGN DEVIATIONS
 
@@ -123,13 +139,14 @@ command   cd ~/kriya-wt/lr-r1-m1; ulimit -n 256;
           PYTHONPATH=$PWD <main checkout>/.venv/bin/pytest -q -n 8 --dist loadgroup
           (the worktree has no .venv of its own; the main checkout's venv with PYTHONPATH pointed at the
           worktree is how every run in this work was made)
-passed    8608
+passed    8658
 failed    0
 errors    0
-duration  533.33 s (wall 535 s)
+duration  540.05 s (wall 541 s)
 ```
 
-Evidence: `handover/evidence/lr-r1-m1/final_full_suite_summary.txt`. No exclusions, single run, at FINAL HEAD.
+Evidence: `handover/evidence/lr-r1-m1/final2_full_suite_summary.txt` (the first certification's 8608/0 run is kept in
+`final_full_suite_summary.txt`). No exclusions, no xfails, single run, at FINAL HEAD (MEASURED).
 
 ## RUFF
 
@@ -141,14 +158,17 @@ Evidence: `handover/evidence/lr-r1-m1/final_full_suite_summary.txt`. No exclusio
 
 ## MUTATION TESTS
 
-Consolidated campaign at FINAL HEAD: `handover/evidence/lr-r1-m1/m1_mutation_campaign.py`, with results in
-`m1_mutation_results.json` and `m1_mutation_campaign.log`.
-- **Method.** Each mutant runs every `tests/test_lr_r1_m1_*.py` (baseline: 179 passed). The file is restored and
+Consolidated campaign v2 at FINAL HEAD (`ceb9943`; started 11:02:48, after the 11:02:07 commit):
+`handover/evidence/lr-r1-m1/m1_mutation_campaign_v2.py`, with results in `m1_mutation_results_v2.json` and
+`m1_mutation_campaign_v2.log` (the `.log` files are git-ignored and stay in the worktree; the committed JSON carries
+every mutant's outcome). It contains every mutant of the first campaign (`m1_mutation_campaign.py`, 52/52, kept
+as evidence) plus the T6 mutants.
+- **Method.** Each mutant runs every `tests/test_lr_r1_m1_*.py` (baseline: 229 passed). The file is restored and
   checked clean after every mutant.
 
 ```text
-mutants run     52
-mutants killed  52
+mutants run     91
+mutants killed  91
 survivors       0
 ```
 
@@ -176,6 +196,17 @@ Coverage by guarantee:
 | I-3 | 4 |
 | D7 | 3 |
 | explain | 2 |
+| T6-A no-progress terminal evidence | 3 |
+| T6-B refused / NO_CHANGE candidates | 5 |
+| T6-C Q9 terminal cause | 2 |
+| T6-D TOOL evidence unit | 5 |
+| T6-E pre-dispatch refusal / no-model-call | 4 |
+| T6-F per-call authority | 4 |
+| T6-G1 plan-scope conflict | 2 |
+| T6-G2 authorized write scope | 1 |
+| T6-G3 no model answer | 4 |
+| T6-H controller terminal precedence | 7 |
+| T6 path harness | 2 |
 
 Earlier per-commit mutation rounds (listed in each commit message) found these survivors:
 - **Weak tests, then strengthened:**
@@ -183,10 +214,12 @@ Earlier per-commit mutation rounds (listed in each commit message) found these s
   - M1.8b evidence class, call substitution and refused-call record;
   - M1.9a symlink and age guard;
   - M1.9b Q5, Q6 and Q7;
-  - M1.11 absence list.
+  - M1.11 absence list;
+  - T6-B no-change-refused and any-parse; T6-C first-unit; T6-F unchanged-counted; T6-H deciding-any-status.
 - **Redundant code, then removed:**
   - M1.8b `delta_emitted`;
-  - M1.9b's payload-attempt fallback.
+  - M1.9b's payload-attempt fallback;
+  - T6-H's seq restriction on failed terminal gates (gates-any-time survived because the condition never decided).
 
 No unclassified survivor remains.
 
@@ -201,7 +234,8 @@ PASS
 - `test_no_production_code_reads_the_store`: the reader's consumers are only the CLI, `explain.py` and the doctor.
 - `test_metrics_never_import_the_recorder`.
 
-5 passed (MEASURED).
+5 passed at FINAL HEAD (MEASURED): the tripwire file plus `test_lr_r1_m1_mirroring.py::test_no_production_code_reads_the_store`
+and `::test_metrics_never_import_the_recorder`.
 
 ## I-2
 
@@ -209,10 +243,13 @@ PASS
 PASS
 ```
 
-`tests/test_lr_r1_m1_equivalence.py` and `tests/test_lr_r1_m1_equivalence_scenarios.py`, 9 passed (MEASURED).
+`tests/test_lr_r1_m1_equivalence.py` and `tests/test_lr_r1_m1_equivalence_scenarios.py`, 12 passed at FINAL HEAD
+(MEASURED; 9 at the first certification, plus the three scenarios T6-D and T6-F added).
 - **Variants.** `off` ×2, `full`, `digest_only`, store open refused, every append failing.
-- **Scenarios.** Direct success; retried until the no-progress stop; fallback refused; fallback substituted at the
-  call; resume; enforce success; enforce refused verified-no-change; enforce Planner repair.
+- **Scenarios.** Direct success; retried until the no-progress stop; output-budget lower-protocol fallback (T6-F);
+  fallback refused; fallback substituted at the call; resume; enforce success; enforce refused verified-no-change;
+  enforce Planner repair; enforce TOOL subtask; enforce TOOL subtask failed (T6-D). Plus
+  `test_capture_mode_is_part_of_no_execution_identity`.
 - **Identical across variants.** Request bytes, workspace bytes, result, trace run events (minus the pointer),
   RunRecords and the decision ledger.
 - **Planted recorder effects.** A candidate byte, the prompt, and the retry budget: each is caught (also in the
@@ -224,7 +261,7 @@ PASS
 PASS
 ```
 
-`tests/test_lr_r1_m1_legacy_import.py`, 7 passed (MEASURED).
+`tests/test_lr_r1_m1_legacy_import.py`, 7 passed at FINAL HEAD (MEASURED).
 - **Absences.** Every absent field (prompt, raw response, per-attempt diff, authority snapshot, recovery decision,
   retry delta, fallback decision, per-attempt outcome, and passing-gate output where absent) is an explicit
   `not_recorded` record with its reason, and nothing else is.
@@ -250,27 +287,114 @@ Per question: answered from recorded evidence on real pipeline runs.
 | Q8 fallback | PASS | `test_lr_r1_m1_recovery.py::test_an_escalation_records_...`, `::test_an_incompatible_fallback_records_...`, `::test_a_call_substituted_to_the_next_fallback_records_both_models`, `::test_a_call_no_fallback_can_serve_records_the_refused_call` |
 | Q9 final outcome | PASS | `test_lr_r1_m1_cli.py::test_a_passing_run_answers_every_question`, `::test_an_incompatible_fallback_is_explained_with_its_rejection` |
 
-**T6 path matrix: PARTIAL.** The design (§12 T6) asks `kriya evidence explain` to answer Q1-Q9 for each of a list of
-paths.
-- **Asserted through `explain`:** passing direct, retried direct, fallback-incompatible, a no-model-call attempt
-  (synthetic), multiple invocations (synthetic) and legacy runs.
-- **Recorded and covered by I-2 or unit tests, but not asserted through `explain`:**
-  - iterative per-file Developer;
-  - investigation turns;
-  - output-budget lower-protocol retry;
-  - the `REPEATED_VECTOR` terminal;
-  - plan-scope conflict;
-  - Planner repair rounds;
-  - an enforce TOOL subtask (only the synthetic no-model-call shape);
-  - final review refusal;
-  - exception escape;
-  - deadline stop.
-- **Asserted at `LLMClient` level, not through `explain`:**
-  - context-budget refusal before dispatch;
-  - cancellation;
-  - the two-wire call.
+## T6 PATH MATRIX
 
-This is an open M1 item (below).
+```text
+T6 PATHS 10/10
+T6 Q1-Q9 FULL
+```
+
+`tests/test_lr_r1_m1_t6_paths.py` (`ecc6b01`, fixed in `ceb9943`): the ten paths the first certification listed as
+"recorded but not asserted through `explain`", each run deterministically through the real pipeline (only the model
+runtime scripted, `tests/_t6_harness.py`) and read back through the evidence reader and `explain`, never from logs.
+Every cell is asserted. With `KRIYA_T6_MATRIX` set the suite writes the matrix below; regenerated at FINAL HEAD
+(`handover/evidence/lr-r1-m1/t6_matrix.json`, 10 passed, MEASURED). The focused T6 suite (paths + A-H fixes) is
+47 passed.
+
+PASS = RECORDED with content and asserted. N/A = a typed `NOT_APPLICABLE(reason)`; no cell is blank or NOT_RECORDED.
+
+| Path | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9 |
+|---|---|---|---|---|---|---|---|---|---|
+| iterative per-file Developer | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| investigation turns | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| output-budget lower-protocol retry | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| `REPEATED_VECTOR` terminal | PASS | PASS | PASS | PASS | PASS | PASS | N/A ³ | PASS | PASS |
+| plan-scope conflict | PASS | PASS | PASS | PASS | PASS | PASS | N/A ³ | PASS | PASS |
+| Planner repair rounds | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| enforce TOOL subtask | N/A ⁴ | N/A ⁴ | N/A ⁴ | N/A ⁵ | N/A ⁶ | N/A ⁷ | N/A ³ | N/A ⁴ | PASS |
+| final review refusal | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| exception escape | PASS | PASS | PASS | PASS | N/A ¹ | N/A ² | N/A ³ | PASS | PASS |
+| deadline stop | PASS | PASS | PASS | N/A ⁸ | PASS | PASS | N/A ³ | PASS | PASS |
+
+1. `every recorded check passed (N gate result(s))`
+2. `no failure was recorded for this attempt; nothing was retried`
+3. `no later attempt in this unit invocation`. A row is the path's last attempt, and Q7 is the change into the
+   *next* attempt. On `REPEATED_VECTOR` (four attempts), every earlier attempt is also checked PASS-or-typed for every
+   question; the plan-scope row is the conflicting attempt itself, whose decision is `retry: false`. The Q7 delta's content is asserted by
+   `test_lr_r1_m1_cli.py::test_a_retried_run_explains_the_failure_the_decision_and_the_delta` and
+   `test_lr_r1_m1_recovery.py::test_each_retry_records_its_delta_at_its_first_developer_request`.
+4. `no_model_call: a tool subtask makes no model call`
+5. `tool_action: no Developer candidate`
+6. `no_verification_gate`
+7. `tool_subtask: executed once, never retried`
+8. `no_model_answer: InferenceDeadlineError` (G3)
+
+**The rest of the design's T6 list (§12)** was already asserted through `explain` at the first certification
+(single-shot batch Developer, retried direct, `FALLBACK_MODEL_INCOMPATIBLE`) or is now:
+- **Context-budget refusal before dispatch:** a real run, through `explain` (T6-E, T6-G3:
+  `test_e_a_call_refused_before_dispatch_is_not_a_missing_response`, Q1 `dispatched: false`, Q3
+  `NOT_APPLICABLE(provider_not_dispatched: OutputBudgetUnsatisfiableError)`).
+- **Cancellation:** `explain`'s answer is asserted on recorded `model.response` shapes
+  (`test_g3_a_cancelled_call_has_no_model_answer`); the real cancellation is asserted at `LLMClient` level
+  (`test_lr_r1_m1_model_calls.py`), not end to end through a pipeline run.
+- **Two-wire calls** (`response_format_dropped`, `empty_content_floor`): asserted at `LLMClient` level and by the
+  native parity suite (both wires recorded and labelled), not through `explain`.
+
+These two are coverage depth, not known recording or explain defects; they are outside the ten-path T6 gate this
+round authorized.
+
+## T6 DEFECTS A-H
+
+```text
+A-F CLOSED
+G1-G3 CLOSED
+H CLOSED
+```
+
+Each was found while writing the T6 path tests, stopped and reported, then fixed only after the owner authorized it.
+Each fix has a test that fails without it and its mutants are in the v2 campaign (all killed).
+
+| ID | Commit | Defect (MEASURED on the T6 run) | Fix | Kind |
+|---|---|---|---|---|
+| A | `f3d5c8f` | `REPEATED_VECTOR` stop: Q6/Q9 could not say the stop was no-progress | `recovery.decision` gains `progress_classification`/`no_progress_reason`; explain shows them | recorder payload (additive) |
+| B | `5b1013e` | A parsed proposal refused before staging, and NO_CHANGE, both read as missing candidate evidence | REFUSED candidate from the parsed answer (`parse_seq`, `proposal_kind`, `parse_reason_code`, `candidate_staged: false`, diff NOT_APPLICABLE, no invented bytes); Q4 `NOT_APPLICABLE(model_proposed_no_change)` | recorder payload + explain |
+| C | `7dd40b7` | Q9 did not name the terminal cause (final-review refusal, exception) | Q9 `terminal_cause` from the last unit; EXCEPTION branch | explain only |
+| D | `765a981` | An enforce TOOL subtask had no evidence unit of its own | `scope.tool_unit`, `tool.execution` kind; the controller's TOOL branch is wrapped; explain answers a tool attempt | recorder payload (additive), I-2 TOOL scenarios |
+| E | `73b52be` | A call refused before dispatch, and an attempt with no model call, read as NOT_RECORDED | Q3 `provider_not_dispatched` + `not_dispatched`/`missing_responses`; `no_model_call` is NOT_APPLICABLE | explain only |
+| F | `ab39589` | Authority shown once per attempt across a within-attempt lower-protocol fallback | `scope.record_authority_transition` after `_lower_output_protocol_retry`; explain shows per-call authority | recorder payload (additive), I-2 scenario |
+| G1 | `cb0c367` | A recorded plan-scope conflict was not explained | Q6 `plan_scope_conflict`, `Q9.plan_scope_conflicts` | explain only |
+| G2 | `a3e0d89` | The recorded authorized write scope was not shown | Q2 `authorized_write_scope` | explain only |
+| G3 | `85383bb` | A Developer call that ended without an answer read as missing candidate evidence | Q4 `NOT_APPLICABLE(no_model_answer: <cause>)` for errors, CANCELLED and refusal-before-dispatch; a missing response record, or an answer that was returned, stays NOT_RECORDED | explain only |
+| H | `ec68134` | Q9's terminal cause came from the last closed unit even when the controller recorded the terminal decision (a failed enforce run explained by a later successful unit) | Q9 precedence below | explain only; no recorder payload or workflow change |
+
+**H: controller terminal inventory (TRACED, enumerated before the fix).**
+
+| Record (in store) | Producer | Terminal status | Reason codes | Always terminal? | Also non-terminal? |
+|---|---|---|---|---|---|
+| `mirror.event planning.failed`, source `workflow_controller.enforce` | `_write_enforce_trace`, only when `failure_type == PLANNING_ERROR` | not carried | yes (`details.reason_codes` in content) | yes, written once at the enforce terminal | no (only producer) |
+| `mirror.event run.exception`, source `workflow_controller.enforce` | `_write_enforce_trace`, status `error` | `error` implied | exception type + message | yes | no |
+| `mirror.event run.exception`, source `workflow.run_generation_workflow` | `_record_run_exception` | one invocation's exception | type + message | terminal for that unit (unit also closes EXCEPTION) | — |
+| `requirement.verdicts`, `model.role_metrics` | enforce trace / `write_outcome_trace` | no | no | no | yes (also on success) |
+| `mirror.decision` `subtask_attempt` | `record_subtask_attempt` | that subtask's status/error | no | no (per subtask) | yes |
+| `gate.result` stage `terminal` | `TerminalGateService`, once after the subtask loop | per gate | the gate's message | run-level terminal checks | no |
+| `run.closed` | `begin_mutating_run` exit | RunRecord status | none | yes | no |
+| `unit.closed` | unit scope | the unit's own result | `failure_category` | no | yes |
+
+`write_outcome_trace` mirrors only events; the row's own status and failure_category are not in the store.
+
+**H: Q9 precedence (`explain._run_terminal_cause`).**
+1. Explicit controller terminal decision: the latest `planning.failed`/`run.exception` mirrored from
+   `workflow_controller.enforce` (`source: controller_terminal_event`, with `seq`, `kind`, `reason_codes` or
+   exception type/message from content, and the deciding subtask: the last one that did not complete).
+2. Explicit terminal workflow result: failed terminal gates (`source: terminal_gates`, `failed_gates`).
+3. The last closed unit's terminal cause. Guard: a success-shaped last unit never explains a run whose RunRecord is
+   not SUCCESS (NOT_RECORDED, with the last unit as context).
+
+Tests: `test_h_*` in `tests/test_lr_r1_m1_t6_fixes.py`. Required negative controls, all KILLED in the v2 campaign:
+"always use last closed unit" (`always-last-unit`, 6 failed), "ignore controller reason_codes"
+(`ignore-reason-codes`, 4), "treat any late controller event as terminal" (`any-controller-event-terminal`, 7),
+"prefer an earlier controller record" (`earliest-controller-record`, 1); plus `ignore-terminal-gates`, `no-guard`,
+`deciding-any-status`.
 
 ## PERFORMANCE
 
@@ -306,16 +430,24 @@ This is an open M1 item (below).
 
 ## OPEN ISSUES
 
-1. **T6 path matrix PARTIAL** (above). `explain`-level assertions are missing for the listed paths. The records
-   exist, so this is test coverage, not a known recording defect, but the design names T6 as the definition of done.
-2. **Live overhead NOT_MEASURED.** It belongs to the first live run with the recorder.
+```text
+OPEN M1 CORRECTNESS DEFECTS 0
+```
+
+- **T6 path matrix:** CLOSED (10/10, Q1-Q9 full; was PARTIAL at the first certification).
+- **Defects A-H:** all CLOSED. No further recorder or explain correctness defect appeared during this final
+  certification.
+- **Live overhead NOT_MEASURED.** Deferred to the bounded live operational validation (the first live run with the
+  recorder); not a merge-review blocker, by owner decision.
+- **Coverage depth, not defects:** real cancellation and the two-wire calls are asserted at `LLMClient` level, not
+  end to end through `explain` (see T6 PATH MATRIX).
 
 Outside M1, and not open items of this milestone:
 - the LR-R1-P1/P4/P5 fixes (not implemented, by instruction);
 - P2 and P3;
 - ANALYZER-RULE7-MEDIAN-DEFINITION;
-- `node_modules/`, `package.json` and `package-lock.json` appearing untracked in the worktree root after full-suite
-  runs (a test-harness artifact; they existed in the main checkout before M1; not M1 output).
+- `node_modules/`, `package.json` and `package-lock.json`: pre-existing untracked test-harness artifacts in the
+  worktree root (they existed in the main checkout before M1; not M1 output; left in place, not committed).
 
 ## PRODUCTION BEHAVIOR CHANGED
 
@@ -330,25 +462,45 @@ Those additive changes:
 - the additive `ChatResponse.raw_content`/`reasoning_text` and `RecoveryDecision.retry_decision` (compare=False);
 - `GenerationState.stop_reason_evidence` (evidence only);
 - the `kriya evidence` commands;
-- the never-required doctor row `evidence.attempt_recorder`.
+- the never-required doctor row `evidence.attempt_recorder`;
+- T6 (authorized): the additive `recovery.decision` progress fields (A), REFUSED candidate records (B), the
+  `tool.execution` unit around the controller's TOOL branch (D) and the per-call `authority.snapshot` after a
+  lower-protocol fallback (F). C, E, G1-G3 and H change `explain` only. H changed no recorder payload and no
+  workflow behaviour (`ec68134` touches only `kriya/core/attempt_evidence/explain.py` and its tests).
 
 I-2 proves that request bytes, workspace bytes, results, retry/fallback behaviour and control-plane outcomes are
-unchanged across all recorder modes, faults included.
+unchanged across all recorder modes, faults included. It now also covers the TOOL and output-budget-fallback
+scenarios.
 
-## READY FOR MERGE REVIEW
+## FINAL STATUS
+
+Every line below was measured at FINAL HEAD `ceb9943`.
 
 ```text
-NO
+A-F CLOSED
+G1-G3 CLOSED
+H CLOSED
+T6 PATHS 10/10
+T6 Q1-Q9 FULL
+FULL SUITE PASS
+RUFF PASS
+PYLINT PASS
+I-1 PASS
+I-2 PASS
+I-3 PASS
+MUTATION PASS
+OPEN M1 CORRECTNESS DEFECTS 0
+READY FOR MERGE REVIEW YES
+LIVE OVERHEAD NOT_MEASURED
 ```
 
-Every gate run here passes:
-- the full suite (8608/0/0);
-- Ruff and Pylint;
-- 52/52 mutants killed;
-- I-1, I-2 and I-3;
-- D7 isolation;
-- OBS-1.
+| Gate | Result at `ceb9943` |
+|---|---|
+| Full suite | 8658 passed, 0 failed, 0 errors (540 s) |
+| Ruff | exit 0, zero findings |
+| Pylint | exit 0 |
+| I-1 / I-2 / I-3 | 5 / 12 / 7 passed |
+| Focused T6 (paths + A-H) | 47 passed; matrix 10 rows, every cell PASS or typed NOT_APPLICABLE |
+| Mutation v2 | 91/91 killed, 0 survivors (baseline 229 passed) |
 
-But the design names T6 as M1's definition of done, and T6 is PARTIAL. Closing it means adding the missing
-`explain`-level path tests (test-only). That would make this YES, unless the owner accepts T6 as PARTIAL for merge
-review.
+Nothing was pushed or merged. No live model was run.

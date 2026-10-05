@@ -1,0 +1,736 @@
+{
+ "baseline": {
+  "exit": 0,
+  "summary": "229 passed in 54.63s"
+ },
+ "mutants": [
+  {
+   "group": "chain",
+   "label": "prev-not-advanced",
+   "file": "kriya/core/attempt_evidence/writer.py",
+   "status": "KILLED",
+   "summary": "62 failed, 167 passed in 55.52s",
+   "seconds": 56.4
+  },
+  {
+   "group": "chain",
+   "label": "reader-skips-seq-prev",
+   "file": "kriya/core/attempt_evidence/reader.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 54.72s",
+   "seconds": 55.6
+  },
+  {
+   "group": "chain",
+   "label": "reader-skips-blob-rehash",
+   "file": "kriya/core/attempt_evidence/reader.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.28s",
+   "seconds": 57.1
+  },
+  {
+   "group": "chain",
+   "label": "reader-skips-seal-check",
+   "file": "kriya/core/attempt_evidence/reader.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 57.90s",
+   "seconds": 58.7
+  },
+  {
+   "group": "chain",
+   "label": "not-append-only",
+   "file": "kriya/core/attempt_evidence/writer.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 58.88s",
+   "seconds": 59.8
+  },
+  {
+   "group": "capture",
+   "label": "blobs-in-digest-only",
+   "file": "kriya/core/attempt_evidence/writer.py",
+   "status": "KILLED",
+   "summary": "6 failed, 223 passed in 58.73s",
+   "seconds": 59.5
+  },
+  {
+   "group": "security",
+   "label": "store-not-private",
+   "file": "kriya/core/attempt_evidence/writer.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.29s",
+   "seconds": 57.1
+  },
+  {
+   "group": "raw-response",
+   "label": "stripped-content-recorded",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.69s",
+   "seconds": 57.6
+  },
+  {
+   "group": "raw-response",
+   "label": "reasoning-always-kept",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 57.12s",
+   "seconds": 58.0
+  },
+  {
+   "group": "identity",
+   "label": "wire-seq-not-advanced",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "4 failed, 225 passed in 56.50s",
+   "seconds": 57.4
+  },
+  {
+   "group": "identity",
+   "label": "iteration-identity-missing",
+   "file": "kriya/workflow/workflow.py",
+   "status": "KILLED",
+   "summary": "12 failed, 217 passed in 56.69s",
+   "seconds": 57.6
+  },
+  {
+   "group": "prompt",
+   "label": "developer-sections-unrecorded",
+   "file": "kriya/workflow/context_budget.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.71s",
+   "seconds": 57.6
+  },
+  {
+   "group": "prompt",
+   "label": "recorder-wrong-stream",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "9 failed, 220 passed in 56.43s",
+   "seconds": 57.3
+  },
+  {
+   "group": "prompt",
+   "label": "native-posted-body-diverges",
+   "file": "kriya/core/model_runtime.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.20s",
+   "seconds": 57.1
+  },
+  {
+   "group": "prompt",
+   "label": "native-unknown-key",
+   "file": "kriya/core/model_runtime.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.48s",
+   "seconds": 57.4
+  },
+  {
+   "group": "prompt",
+   "label": "resend-unlabelled",
+   "file": "kriya/core/llm.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.18s",
+   "seconds": 57.1
+  },
+  {
+   "group": "authority",
+   "label": "authority-unrecorded",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "16 failed, 213 passed in 56.24s",
+   "seconds": 57.1
+  },
+  {
+   "group": "parse",
+   "label": "parse-unrecorded",
+   "file": "kriya/agents/agent.py",
+   "status": "KILLED",
+   "summary": "9 failed, 220 passed in 56.24s",
+   "seconds": 57.1
+  },
+  {
+   "group": "candidate",
+   "label": "digests-swapped",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 57.28s",
+   "seconds": 58.2
+  },
+  {
+   "group": "candidate",
+   "label": "no-newline-marker",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.52s",
+   "seconds": 57.4
+  },
+  {
+   "group": "candidate",
+   "label": "refused-even-if-staged",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.39s",
+   "seconds": 57.2
+  },
+  {
+   "group": "gates",
+   "label": "gate-outcome-unmirrored",
+   "file": "kriya/workflow/state.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.46s",
+   "seconds": 57.3
+  },
+  {
+   "group": "gates",
+   "label": "validator-pass-unrecorded",
+   "file": "kriya/tools/validate.py",
+   "status": "KILLED",
+   "summary": "12 failed, 217 passed in 56.24s",
+   "seconds": 57.1
+  },
+  {
+   "group": "gates",
+   "label": "terminal-unrecorded",
+   "file": "kriya/workflow/terminal_gate_service.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.17s",
+   "seconds": 57.0
+  },
+  {
+   "group": "retry-delta",
+   "label": "first-guard-removed",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.38s",
+   "seconds": 57.2
+  },
+  {
+   "group": "retry-delta",
+   "label": "always-present",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.25s",
+   "seconds": 57.1
+  },
+  {
+   "group": "retry-delta",
+   "label": "failure-dimension-dropped",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.36s",
+   "seconds": 57.2
+  },
+  {
+   "group": "fallback",
+   "label": "escalation-selected-wrong",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.30s",
+   "seconds": 57.2
+  },
+  {
+   "group": "fallback",
+   "label": "call-selected-wrong",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.37s",
+   "seconds": 57.2
+  },
+  {
+   "group": "fallback",
+   "label": "refused-call-unrecorded",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.67s",
+   "seconds": 57.6
+  },
+  {
+   "group": "recovery",
+   "label": "decision-unrecorded",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "17 failed, 212 passed in 56.68s",
+   "seconds": 57.6
+  },
+  {
+   "group": "recovery",
+   "label": "retry-flag-wrong",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.42s",
+   "seconds": 57.2
+  },
+  {
+   "group": "non-interference",
+   "label": "emit-raises",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.51s",
+   "seconds": 57.4
+  },
+  {
+   "group": "non-interference",
+   "label": "unavailable-store-raises",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "12 failed, 217 passed in 43.50s",
+   "seconds": 44.4
+  },
+  {
+   "group": "I-2",
+   "label": "planted-prompt-change",
+   "file": "kriya/core/llm.py",
+   "status": "KILLED",
+   "summary": "12 failed, 217 passed in 66.22s (0:01:06)",
+   "seconds": 67.1
+  },
+  {
+   "group": "I-2",
+   "label": "planted-decision-change",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "8 failed, 221 passed in 55.20s",
+   "seconds": 56.2
+  },
+  {
+   "group": "retention",
+   "label": "named-unprotected",
+   "file": "kriya/core/attempt_evidence/retention.py",
+   "status": "KILLED",
+   "summary": "4 failed, 225 passed in 56.29s",
+   "seconds": 57.2
+  },
+  {
+   "group": "retention",
+   "label": "unsealed-young-unprotected",
+   "file": "kriya/core/attempt_evidence/retention.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.43s",
+   "seconds": 57.3
+  },
+  {
+   "group": "retention",
+   "label": "size-bound-ignored",
+   "file": "kriya/core/attempt_evidence/retention.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.24s",
+   "seconds": 57.1
+  },
+  {
+   "group": "retention",
+   "label": "dry-run-writes",
+   "file": "kriya/core/attempt_evidence/retention.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.57s",
+   "seconds": 57.5
+  },
+  {
+   "group": "retention",
+   "label": "run-close-prune-missing",
+   "file": "kriya/control/run_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.56s",
+   "seconds": 57.4
+  },
+  {
+   "group": "I-1",
+   "label": "reader-lists-staging",
+   "file": "kriya/core/attempt_evidence/reader.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.27s",
+   "seconds": 57.1
+  },
+  {
+   "group": "I-1",
+   "label": "consumer-names-layout",
+   "file": "scripts/pinned_images.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.30s",
+   "seconds": 57.1
+  },
+  {
+   "group": "I-3",
+   "label": "final-diff-to-attempt",
+   "file": "benchmarks/reliability/import_legacy.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.23s",
+   "seconds": 57.1
+  },
+  {
+   "group": "I-3",
+   "label": "absence-dropped",
+   "file": "benchmarks/reliability/import_legacy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.31s",
+   "seconds": 57.2
+  },
+  {
+   "group": "I-3",
+   "label": "explain-overrides-evidence",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.42s",
+   "seconds": 57.3
+  },
+  {
+   "group": "I-3",
+   "label": "output-inside-evidence",
+   "file": "benchmarks/reliability/import_legacy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.44s",
+   "seconds": 57.3
+  },
+  {
+   "group": "D7",
+   "label": "planted-decision-read",
+   "file": "kriya/workflow/retry_policy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.82s",
+   "seconds": 57.7
+  },
+  {
+   "group": "D7",
+   "label": "stale-code-reported",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.57s",
+   "seconds": 57.5
+  },
+  {
+   "group": "D7",
+   "label": "code-on-any-stop",
+   "file": "kriya/workflow/retry_strategy.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.18s",
+   "seconds": 57.0
+  },
+  {
+   "group": "explain",
+   "label": "q6-always-not-applicable",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.37s",
+   "seconds": 57.2
+  },
+  {
+   "group": "explain",
+   "label": "q7-crosses-invocations",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "5 failed, 224 passed in 56.26s",
+   "seconds": 57.1
+  },
+  {
+   "group": "T6-A",
+   "label": "classification-dropped",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.55s",
+   "seconds": 57.4
+  },
+  {
+   "group": "T6-A",
+   "label": "reason-constant",
+   "file": "kriya/workflow/recovery_coordinator.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.21s",
+   "seconds": 57.1
+  },
+  {
+   "group": "T6-A",
+   "label": "q9-drops-progress",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.23s",
+   "seconds": 57.1
+  },
+  {
+   "group": "T6-B",
+   "label": "no-parsed-refusal",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.46s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-B",
+   "label": "no-change-refusable",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.60s",
+   "seconds": 57.6
+  },
+  {
+   "group": "T6-B",
+   "label": "invented-null-bytes",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.24s",
+   "seconds": 57.1
+  },
+  {
+   "group": "T6-B",
+   "label": "no-change-unexplained",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.52s",
+   "seconds": 57.4
+  },
+  {
+   "group": "T6-B",
+   "label": "any-parse-is-no-change",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.19s",
+   "seconds": 57.0
+  },
+  {
+   "group": "T6-C",
+   "label": "first-unit",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.74s",
+   "seconds": 57.6
+  },
+  {
+   "group": "T6-C",
+   "label": "exception-hidden",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.46s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-D",
+   "label": "no-tool-record",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.37s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-D",
+   "label": "no-tool-status",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.65s",
+   "seconds": 57.5
+  },
+  {
+   "group": "T6-D",
+   "label": "wrong-unit-kind",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.78s",
+   "seconds": 57.7
+  },
+  {
+   "group": "T6-D",
+   "label": "result-not-handed",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.13s",
+   "seconds": 57.0
+  },
+  {
+   "group": "T6-D",
+   "label": "explain-generic",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.38s",
+   "seconds": 57.2
+  },
+  {
+   "group": "T6-E",
+   "label": "undispatched-as-missing",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.55s",
+   "seconds": 57.5
+  },
+  {
+   "group": "T6-E",
+   "label": "missing-as-undispatched",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.76s",
+   "seconds": 57.6
+  },
+  {
+   "group": "T6-E",
+   "label": "hide-undispatched",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.80s",
+   "seconds": 57.7
+  },
+  {
+   "group": "T6-E",
+   "label": "no-call-as-missing",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.54s",
+   "seconds": 57.4
+  },
+  {
+   "group": "T6-F",
+   "label": "no-transition-call",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 57.02s",
+   "seconds": 57.9
+  },
+  {
+   "group": "T6-F",
+   "label": "unchanged-counted",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 58.61s",
+   "seconds": 59.5
+  },
+  {
+   "group": "T6-F",
+   "label": "payload-not-updated",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.77s",
+   "seconds": 57.7
+  },
+  {
+   "group": "T6-F",
+   "label": "binds-first-snapshot",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.61s",
+   "seconds": 57.5
+  },
+  {
+   "group": "T6-G1",
+   "label": "q6-conflict-suppressed",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.47s",
+   "seconds": 57.4
+  },
+  {
+   "group": "T6-G1",
+   "label": "q9-conflict-suppressed",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.33s",
+   "seconds": 57.2
+  },
+  {
+   "group": "T6-G2",
+   "label": "scope-dropped",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.96s",
+   "seconds": 57.9
+  },
+  {
+   "group": "T6-G3",
+   "label": "missing-as-no-answer",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.64s",
+   "seconds": 57.5
+  },
+  {
+   "group": "T6-G3",
+   "label": "answer-as-no-answer",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.45s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-G3",
+   "label": "refusal-excluded",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 57.26s",
+   "seconds": 58.1
+  },
+  {
+   "group": "T6-G3",
+   "label": "cancel-unlabelled",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.12s",
+   "seconds": 57.0
+  },
+  {
+   "group": "T6-H",
+   "label": "always-last-unit",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "6 failed, 223 passed in 56.41s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-H",
+   "label": "ignore-reason-codes",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "4 failed, 225 passed in 56.34s",
+   "seconds": 57.2
+  },
+  {
+   "group": "T6-H",
+   "label": "any-controller-event-terminal",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "7 failed, 222 passed in 56.87s",
+   "seconds": 57.7
+  },
+  {
+   "group": "T6-H",
+   "label": "earliest-controller-record",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.45s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-H",
+   "label": "ignore-terminal-gates",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.69s",
+   "seconds": 57.5
+  },
+  {
+   "group": "T6-H",
+   "label": "no-guard",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 228 passed in 56.74s",
+   "seconds": 57.6
+  },
+  {
+   "group": "T6-H",
+   "label": "deciding-any-status",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "2 failed, 227 passed in 56.34s",
+   "seconds": 57.2
+  },
+  {
+   "group": "T6-paths",
+   "label": "investigation-wire-collapse",
+   "file": "kriya/core/attempt_evidence/scope.py",
+   "status": "KILLED",
+   "summary": "3 failed, 226 passed in 56.46s",
+   "seconds": 57.3
+  },
+  {
+   "group": "T6-paths",
+   "label": "deadline-error-unbound",
+   "file": "kriya/core/llm.py",
+   "status": "KILLED",
+   "summary": "4 failed, 225 passed in 56.55s",
+   "seconds": 57.4
+  }
+ ]
+}
