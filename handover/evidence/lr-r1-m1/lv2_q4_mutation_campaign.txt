@@ -1,0 +1,6 @@
+branch-removed KILLED 3 failed, 233 passed in 55.27s
+any-call-counts-as-developer KILLED 1 failed, 235 passed in 55.45s
+developer-call-ignored KILLED 4 failed, 232 passed in 57.86s
+gate-consumed-candidate-ignored KILLED 1 failed, 235 passed in 57.66s
+verification-only-not-recognised KILLED 1 failed, 235 passed in 58.83s
+typed-as-not-recorded KILLED 3 failed, 233 passed in 59.77s

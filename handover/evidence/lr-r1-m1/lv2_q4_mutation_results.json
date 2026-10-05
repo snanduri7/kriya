@@ -1,0 +1,35 @@
+{
+ "baseline": "236 passed in 55.43s",
+ "mutants": [
+  {
+   "label": "branch-removed",
+   "status": "KILLED",
+   "summary": "3 failed, 233 passed in 55.27s"
+  },
+  {
+   "label": "any-call-counts-as-developer",
+   "status": "KILLED",
+   "summary": "1 failed, 235 passed in 55.45s"
+  },
+  {
+   "label": "developer-call-ignored",
+   "status": "KILLED",
+   "summary": "4 failed, 232 passed in 57.86s"
+  },
+  {
+   "label": "gate-consumed-candidate-ignored",
+   "status": "KILLED",
+   "summary": "1 failed, 235 passed in 57.66s"
+  },
+  {
+   "label": "verification-only-not-recognised",
+   "status": "KILLED",
+   "summary": "1 failed, 235 passed in 58.83s"
+  },
+  {
+   "label": "typed-as-not-recorded",
+   "status": "KILLED",
+   "summary": "3 failed, 233 passed in 59.77s"
+  }
+ ]
+}
