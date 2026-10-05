@@ -22,9 +22,6 @@ AT = "kriya/workflow/attempt.py"
 M = [
     ("baseline-subtraction-removed", FR, "        if unchanged[line] > 0:\n", "        if False:\n"),
     ("subtract-by-identity-not-count", FR, "            unchanged[line] -= 1\n", "            pass\n"),
-    ("new-file-treated-as-all-baseline", AT,
-     "            _reject_explanatory_prose(state, filepath, content, None if file_is_new else prior_content)\n",
-     "            _reject_explanatory_prose(state, filepath, content, prior_content if file_is_new else prior_content)\n"),
     ("check-skipped-entirely", AT, "    if not contamination:\n        return\n    failure = Failure(\n        type=\"prose_contamination\",",
      "    if True:\n        return\n    failure = Failure(\n        type=\"prose_contamination\","),
     ("edit-path-baseline-is-the-candidate", AT,

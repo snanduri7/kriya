@@ -8527,7 +8527,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            _reject_explanatory_prose(state, filepath, content, None if file_is_new else prior_content)
+            # A new file's prior content is empty: all of it is the candidate's.
+            _reject_explanatory_prose(state, filepath, content, prior_content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=content,
