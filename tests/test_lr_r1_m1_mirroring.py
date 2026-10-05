@@ -11,6 +11,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from kriya.control.decisions import DecisionLedger
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core.attempt_evidence import reader, scope
@@ -168,3 +170,66 @@ def test_no_production_code_reads_the_store():
 def test_metrics_never_import_the_recorder():
     for path in (ROOT / "kriya/metrics").rglob("*.py"):
         assert "attempt_evidence" not in path.read_text(encoding="utf-8"), path
+
+
+# -- T13 tripwire: gate outcomes have one producer ------------------------------
+
+_MUTATORS = {"append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse", "__setitem__",
+             "__delitem__", "__iadd__"}
+
+
+def _direct_gate_outcome_mutations(source: str):
+    """(line, form) for every direct mutation or reassignment of a
+    ``.gate_outcomes`` attribute."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _MUTATORS:
+            owner = node.func.value
+            if isinstance(owner, ast.Attribute) and owner.attr == "gate_outcomes":
+                found.append((node.lineno, f".gate_outcomes.{node.func.attr}()"))
+        targets = []
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        elif isinstance(node, ast.Delete):
+            targets = node.targets
+        for target in targets:
+            base = target.value if isinstance(target, ast.Subscript) else target
+            if isinstance(base, ast.Attribute) and base.attr == "gate_outcomes":
+                found.append((node.lineno, f"{type(node).__name__} to .gate_outcomes"))
+    return found
+
+
+def test_gate_outcomes_are_only_mutated_inside_generation_state():
+    offenders = {}
+    for path in (ROOT / "kriya").rglob("*.py"):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == "kriya/workflow/state.py":
+            continue
+        hits = _direct_gate_outcome_mutations(path.read_text(encoding="utf-8"))
+        if hits:
+            offenders[rel] = hits
+    assert offenders == {}, ("record gate outcomes with GenerationState.record_gate_outcome (or "
+                             f"restore_gate_outcomes on resume), never directly: {offenders}")
+
+
+@pytest.mark.parametrize("planted", [
+    "state.gate_outcomes.append(x)\n",
+    "state.gate_outcomes.extend(xs)\n",
+    "state.gate_outcomes.insert(0, x)\n",
+    "state.gate_outcomes += [x]\n",
+    "state.gate_outcomes = list(old)\n",
+    "state.gate_outcomes[0] = x\n",
+    "del state.gate_outcomes[0]\n",
+])
+def test_tripwire_catches_every_direct_form(planted):
+    assert _direct_gate_outcome_mutations(planted), planted
+
+
+def test_state_py_mutates_gate_outcomes_only_in_its_two_producers():
+    tree = ast.parse((ROOT / "kriya/workflow/state.py").read_text(encoding="utf-8"))
+    owners = set()
+    for function in ast.walk(tree):
+        if isinstance(function, ast.FunctionDef):
+            if _direct_gate_outcome_mutations(ast.unparse(function)):
+                owners.add(function.name)
+    assert owners == {"record_gate_outcome", "restore_gate_outcomes"}

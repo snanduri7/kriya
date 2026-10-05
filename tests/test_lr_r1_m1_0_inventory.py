@@ -147,6 +147,8 @@ def test_inventory_counts_the_design_relies_on():
     appends = {}
     for rel in ("kriya/workflow/attempt.py", "kriya/workflow/workflow.py", "kriya/workflow/retry_strategy.py"):
         appends[rel] = (ROOT / rel).read_text(encoding="utf-8").count("state.gate_outcomes.append(")
-    # Before M1.3 these are the 85 sites; M1.3 converts them and this pin moves to the tripwire.
-    assert sum(appends.values()) in (85, 0), appends
+    # M1.3b converted all 85; the tripwire (test_lr_r1_m1_mirroring.py) keeps it at 0.
+    assert sum(appends.values()) == 0, appends
+    records = sum((ROOT / rel).read_text(encoding="utf-8").count("state.record_gate_outcome(") for rel in appends)
+    assert records == 85, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")
