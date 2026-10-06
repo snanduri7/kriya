@@ -246,6 +246,8 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
 
 
 RUNTIME_VERIFICATION_GATE = "runtime_verification"
+# FS-1C2 B2-a: the operator acceptance file (PolymorphicValidator.run_acceptance).
+ACCEPTANCE_GATE = "acceptance"
 
 
 def _record_gate_result(name: str, result: Any, started: float, *, error: Optional[BaseException] = None) -> None:
@@ -1516,6 +1518,34 @@ class PolymorphicValidator:
                 "stack (Java/Python/Ruby). Quality gate skipped, NOT confirmed to compile."
             ),
         }
+
+    @_verification_gate(ACCEPTANCE_GATE)
+    def run_acceptance(self, runner_script: str, arguments: Sequence[str]) -> Dict[str, Any]:
+        """FS-1C2 B2-a: the operator's acceptance file, run by Kriya's own
+        runner script (``runner_script``, workspace-relative, staged by
+        kriya/workflow/acceptance_oracle.py) in the project's interpreter, never the
+        repository's test configuration. ``python -I -B``: no environment
+        paths, no script directory on ``sys.path``, no bytecode written into
+        the candidate. The ordinary test gate (``run_tests``) is untouched.
+        The result carries this invocation's TestExecutionReport."""
+        binding = self._bind_test_report()
+        try:
+            interpreter, install_error = self._resolve_python_interpreter()
+            if install_error:
+                return {"success": False, "output": install_error, "acceptance_environment_error": True,
+                        "test_execution": test_execution.collect(binding).to_dict()}
+            cmd = [interpreter, "-I", "-B", runner_script]
+            if binding.pytest_argument:
+                cmd.append(binding.pytest_argument)
+            cmd.extend(arguments)
+            res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+        except BaseException:
+            test_execution.collect(binding)  # removes Kriya's own report destination
+            raise
+        binding.observe(res)
+        result = self._validation_result(res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res)
+        result["test_execution"] = test_execution.collect(binding).to_dict()
+        return result
 
     @_verification_gate("tests")
     def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:

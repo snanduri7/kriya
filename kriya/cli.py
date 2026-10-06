@@ -2597,16 +2597,30 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
 @click.option('--from-milestones', type=click.Path(exists=True), default=None, help="Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.")
+@click.option('--acceptance', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
-                       resume, resume_id, json_output, from_milestones, output)
+                       resume, resume_id, json_output, from_milestones, output, acceptance=acceptance)
+
+
+def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str) -> Any:
+    """FS-1C2 B2-a: reads, validates and stores the operator's acceptance file
+    before any model call, bound to the requirements derived from
+    ``requirement_goal`` (the goal the run verifies: the direct goal, or a
+    milestone plan's original goal). Raises AcceptanceError on refusal."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.acceptance_oracle import load_acceptance
+    from kriya.workflow.requirements import derive_requirements
+
+    return load_acceptance(acceptance_path, derive_requirements(requirement_goal),
+                           resolve_state_directory(cfg)[0])
 
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
-                   resume, resume_id, json_output, from_milestones, output):
+                   resume, resume_id, json_output, from_milestones, output, acceptance=None):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -2627,9 +2641,28 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd(),
                                       milestone_plan=from_milestones)
 
+    acceptance_artifact = None
+    if acceptance:
+        from kriya.workflow.acceptance_oracle import AcceptanceError
+        try:
+            if from_milestones:
+                with open(from_milestones, "r", encoding="utf-8") as fh:
+                    requirement_goal = json.load(fh)["original_goal"]
+            else:
+                requirement_goal = goal
+            acceptance_artifact = _bind_acceptance(cfg, acceptance, requirement_goal)
+        except (AcceptanceError, OSError, ValueError, KeyError) as e:
+            click.secho(f"[Acceptance file refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        click.secho(f"Acceptance file bound: {acceptance_artifact.source_name} sha256 "
+                    f"{acceptance_artifact.digest[:12]} ({len(acceptance_artifact.cases)} case(s) for "
+                    f"{', '.join(acceptance_artifact.requirement_ids)})", dim=True, err=True)
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
+    we.acceptance = acceptance_artifact
     
     current_step = None
 

@@ -1023,6 +1023,41 @@ Four things can pause a `generate` run beyond the usual human-approval gate:
 *   **Skill conflict detection**: if two or more skills matched for this goal turn out to have rules that genuinely contradict each other (e.g. two broker skills each pinning a different port for what must be a single shared setting), Kriya pauses and asks which one should govern this run - see [Section 4.4](#44-resolving-skill-conflicts) below. Your answer is remembered, so the same pair of skills is never asked about again. `-y` skips the prompt for that run without excluding either rule and without remembering anything.
 *   **Live lookup batch confirmation**: if `autonomy.web_lookup_enabled` is on and Kriya auto-resolved one or more skill gaps via search, it shows you everything it found in one batch and asks for a single confirm/decline before using any of it - see [Section 4.6](#46-live-lookup) below.
 
+#### Proving behaviour requirements: the acceptance file (`--acceptance`)
+A requirement that asks for new behaviour ("`freeze_time(0)` freezes time at the epoch") is never closed by the
+model's own verdict, by tests the run writes, or by a pre-existing test the goal names (that only proves the old
+behaviour still works). Under `runtime_profile: production` such a requirement therefore stays UNVERIFIED and blocks,
+unless you give Kriya an acceptance file - a pytest module you write before the run, whose cases name the requirement
+they prove:
+
+```python
+import datetime
+
+import pytest
+from freezegun import freeze_time
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_freeze_time_at_epoch():
+    with freeze_time(0):
+        assert datetime.datetime.now() == datetime.datetime(1970, 1, 1)
+```
+
+```bash
+kriya -c kriya.yaml generate -f goal.txt --acceptance acceptance.py
+```
+
+The requirement ids are the ones Kriya derives from the goal (`REQ-1`, `REQ-2`, ... in statement order; the run prints
+them). The file is checked, digested and copied into Kriya's state directory before any model call: an unknown id, a
+case without `kriya_requirement`, a `skip`/`xfail` mark or a requirement that only limits which files may change is
+refused (exit 1). Kriya runs it on the final candidate with its own pytest configuration - never the project's
+`conftest.py`, pytest settings or installed plugins. Every case of a requirement passing closes its behaviour claim; a
+case observing the behaviour contradicted (an assertion against the candidate's result, or an exception raised by the
+candidate's code) makes the requirement VIOLATED; anything else (an import error, a case that did not run, no report)
+leaves it UNVERIFIED. Supported today: Python projects whose package or module sits at the repository root (a flat
+layout, with or without a `tests/` package); a `src/` layout, a namespace package, or importing test code is refused
+with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come from the plan's original goal.
+
 #### Resuming an interrupted run
 `generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint of a plain `generate`/`fix` run (a milestone's checkpoint is never picked up here - see §3.4.1), or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):
 ```bash

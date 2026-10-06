@@ -132,6 +132,7 @@ from kriya.static_analysis.service import (
 )
 from kriya.workflow import subtask_executor
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
 from kriya.workflow.checkpoint import (
     ResumeStatus,
@@ -6728,6 +6729,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         unit_id=control_state.current_milestone_id or run_id,
                         in_place=plan_workspace_path == workspace_path,
                     ),
+                    acceptance=bound_acceptance(self.workflow_engine),
                 ), _emit_gate_outcome)
                 all_completed = gate_report.commit_eligible
 

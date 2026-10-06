@@ -54,6 +54,7 @@ from kriya.static_analysis.service import (
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
+from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
     classify_ownership_violations,
@@ -910,6 +911,82 @@ def _settle_future_owner_verification_obligations(
     return settled
 
 
+def _candidate_test_files(candidate_root: str) -> List[str]:
+    """The runnable test files of the candidate tree (a requirement's own
+    words may name them)."""
+    from kriya.workflow.file_resolution import is_runnable_test_file
+
+    test_files: List[str] = []
+    for root, dirs, files in os.walk(candidate_root):
+        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
+                                                "__pycache__", "target", "build", "dist"}]
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), candidate_root)
+            if is_runnable_test_file(rel):
+                test_files.append(rel)
+    return test_files
+
+
+def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[List[str]]:
+    """The test files that existed before this run: the real workspace's
+    (untouched until apply) and the run base's. A statement naming one of
+    them claims regression preservation even when the candidate deleted it.
+    None when that cannot be established (an in-place candidate with no
+    readable base): the caller then assumes the statement claims both."""
+    import subprocess
+
+    from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.named_test_oracle import BaseTree
+
+    in_place = os.path.realpath(candidate_root) == os.path.realpath(workspace_path)
+    files = [] if in_place else _candidate_test_files(workspace_path)
+    base_revision = _oracle_base_revision(candidate_root, workspace_path)
+    if base_revision:
+        try:
+            files += [path for path in BaseTree(candidate_root, base_revision).paths if is_runnable_test_file(path)]
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            logger.info(f"Acceptance: base test files unavailable: {exc}")
+            return None
+    elif in_place:
+        return None
+    return sorted(set(files))
+
+
+def close_requirements_with_acceptance_tests(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    acceptance: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
+    tree_binding: Any = None,
+) -> List[Dict[str, Any]]:
+    """FS-1C2 B2-a: judges the BEHAVIOR claims the operator's acceptance file
+    (bound before generation; ``acceptance`` None = none was given) covers,
+    by running it once, under Kriya's own runner, on the candidate at
+    ``candidate_root`` - see kriya/workflow/acceptance_oracle.py. Shared by the
+    direct/milestone pre-apply boundary and enforce's terminal gate, before
+    the named-test closure. With no artifact it only supersedes an earlier
+    acceptance judgment of the same candidate (never runs anything)."""
+    from kriya.workflow.acceptance_oracle import close_requirements_with_acceptance, run_acceptance
+
+    modified = list(modified)
+    test_files = _candidate_test_files(candidate_root)
+    reference = _reference_test_files(candidate_root, workspace_path)
+
+    def validator() -> PolymorphicValidator:
+        built = PolymorphicValidator(
+            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+            toolchain_declaration_mutable=toolchain_declaration_mutable,
+        )
+        built.tree_binding = tree_binding
+        return built
+
+    return close_requirements_with_acceptance(
+        ledger, requirement_set, acceptance,
+        test_files=None if reference is None else sorted(set(test_files) | set(reference)),
+        execute=lambda artifact: run_acceptance(artifact, candidate_root, candidate_paths=modified,
+                                                validator_factory=validator),
+        source="requirement_closure.acceptance", revision=revision,
+    )
+
+
 def close_requirements_with_named_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
@@ -928,7 +1005,6 @@ def close_requirements_with_named_tests(
     its own gates were): this step verifies the already-authorized
     candidate; it never re-decides a toolchain change. Without that
     authority a changed declaration still fails closed here."""
-    from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import judge_named_tests
     from kriya.workflow.requirements import (
         RequirementOutcome,
@@ -937,14 +1013,7 @@ def close_requirements_with_named_tests(
         requirement_outcomes,
     )
 
-    test_files: List[str] = []
-    for root, dirs, files in os.walk(candidate_root):
-        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
-                                                "__pycache__", "target", "build", "dist"}]
-        for name in files:
-            rel = os.path.relpath(os.path.join(root, name), candidate_root)
-            if is_runnable_test_file(rel):
-                test_files.append(rel)
+    test_files = _candidate_test_files(candidate_root)
     outcomes = requirement_outcomes(ledger, requirement_set)
     if not any(outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED
                and named_existing_tests(requirement.text, test_files)
@@ -1257,6 +1326,9 @@ class WorkflowEngine:
     def __init__(self, kernel: Kernel, llm_client: LLMClient) -> None:
         self.kernel = kernel
         self.llm = llm_client
+        # FS-1C2 B2-a: the operator's acceptance file for this run, bound
+        # before generation (`kriya generate --acceptance`); None = none.
+        self.acceptance: Any = None
         # PRD-024: the last applied candidate's terminal full-suite result
         # (full_suite_evidence_for_reuse), offered to the next run as its
         # baseline; reused only if it describes that run's exact start.
@@ -2009,6 +2081,7 @@ class WorkflowEngine:
                 runtime_verification_required=runtime_verification_required,
                 strict_spec_compliance=strict_spec_compliance,
                 strict_dependency_index=strict_dependency_index,
+                acceptance_digest=getattr(bound_acceptance(self), "digest", None),
             )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -4175,6 +4248,21 @@ class WorkflowEngine:
                     except Exception as exc:
                         scope_closures = []
                         logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
+                    # FS-1C2 B2-a: the operator's acceptance file judges the
+                    # behaviour claims it covers on this candidate.
+                    try:
+                        acceptance_closures = await asyncio.to_thread(
+                            close_requirements_with_acceptance_tests, self.kernel.config.autonomy,
+                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                            acceptance=bound_acceptance(self),
+                            modified=state.all_files_written, revision=state.attempt_number,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan,
+                            ),
+                        )
+                    except Exception as exc:
+                        acceptance_closures = []
+                        logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
                     # An UNVERIFIED (cannot confirm from code) requirement whose
                     # own text names existing tests is closed only by running
                     # exactly those tests on this candidate.
@@ -4191,7 +4279,7 @@ class WorkflowEngine:
                     except Exception as exc:
                         closures = []
                         logger.warning(f"Requirement closure by named tests unavailable: {exc}")
-                    closures = scope_closures + closures
+                    closures = scope_closures + acceptance_closures + closures
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,

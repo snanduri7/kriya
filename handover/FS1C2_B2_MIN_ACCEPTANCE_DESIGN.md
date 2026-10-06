@@ -1,7 +1,9 @@
 # FS-1C2 / B2-min: executable acceptance evidence for BEHAVIOR claims (DESIGN ONLY)
 
-**Status:** design for owner review. FS-1C1 is implemented (`feature/lr-r1-fs1c1`); B2 is **not** implemented: per
-the brief, it stops here because a safe minimum is not a bounded change (§4).
+**Status:** B2-a (Python, flat layouts) IMPLEMENTED on `feature/lr-r1-b2a` after owner authorization - see
+`handover/FS1C2_B2A_IMPLEMENTATION.md` (the runner is acceptance-specific: §4's launcher concern does not apply because
+Kriya's own runner appends the project root itself; the ordinary test gate is unchanged). B2-b, B2-c, B3: design only,
+not authorized. The text below is the original design.
 **Labels:** MEASURED, TRACED, INFERRED, PROPOSED.
 
 ## 1. What B2 must provide

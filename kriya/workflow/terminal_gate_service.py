@@ -203,6 +203,9 @@ class TerminalGateRequest:
     # PRD-031A: the batch the commit will write, materialized only when
     # static analysis is enabled.
     static_analysis_candidate: Optional[StaticAnalysisCandidate] = None
+    # FS-1C2 B2-a: the operator's acceptance file bound before generation
+    # (kriya/workflow/acceptance_oracle.py AcceptanceArtifact), None when none.
+    acceptance: Any = None
 
 
 @dataclass(frozen=True)
@@ -460,6 +463,7 @@ class TerminalGateService:
                 from kriya.workflow.toolchain import toolchain_declaration_mutable
                 from kriya.workflow.workflow import (
                     close_requirements_by_mutation_scope,
+                    close_requirements_with_acceptance_tests,
                     close_requirements_with_named_tests,
                 )
 
@@ -483,6 +487,20 @@ class TerminalGateService:
                     request.candidate_root, repository_content_paths(request.workspace_path),
                     _terminal_candidate_paths(request.plan),
                 )
+                # FS-1C2 B2-a: the operator's acceptance file judges the
+                # behaviour claims it covers on this final candidate.
+                acceptance_closures = await asyncio.to_thread(
+                    close_requirements_with_acceptance_tests, autonomy, ledger,
+                    requirement_set, request.candidate_root, request.workspace_path,
+                    acceptance=request.acceptance, modified=_terminal_candidate_paths(request.plan),
+                    revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        WriteScopeMode.DENY_ALL, (), request.plan,
+                    ),
+                    tree_binding=tree_binding,
+                )
+                if acceptance_closures:
+                    logger.info("Original requirement acceptance evidence: %s", acceptance_closures)
                 # D8: the terminal writes nothing; the toolchain authority is
                 # the approved plan's (the same derivation its units used).
                 closures = await asyncio.to_thread(
@@ -496,7 +514,7 @@ class TerminalGateService:
                 )
                 if closures:
                     logger.info("Original requirement closure by named tests: %s", closures)
-                closure_attempts = scope_closures + closures
+                closure_attempts = scope_closures + acceptance_closures + closures
                 # The terminal migration gate just judged this same final
                 # candidate; a requirement stating the migration itself
                 # is closed by it (attempt._close_requirements_by_migration_gate).

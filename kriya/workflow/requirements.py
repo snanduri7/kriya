@@ -435,8 +435,9 @@ REGRESSION_PRESERVATION = "REGRESSION_PRESERVATION"
 BEHAVIOR = "BEHAVIOR"
 # Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
 # ever proves regression preservation. BEHAVIOR needs independent acceptance
-# evidence (FS-1C B2 executable acceptance, B3 human-bound acceptance tests);
-# neither has a producer yet, so no behaviour claim is closable today.
+# evidence: the operator's executable acceptance file (FS-1C2 B2-a,
+# kriya/workflow/acceptance_oracle.py, ``acceptance_oracle``) or human-bound acceptance
+# tests (B3, no producer yet).
 NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle"})
 BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_tests"})
 REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
@@ -482,22 +483,34 @@ def requirement_claim_id(requirement_id: str, claim: str) -> str:
     return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}.claim.{claim.lower()}"
 
 
+# What one claim judgment recorded: SATISFIED closes the claim, VIOLATED is
+# deterministic counter-evidence (the requirement becomes VIOLATED), and
+# INDETERMINATE says the evidence could not be obtained - it closes nothing and
+# revokes any earlier judgment of the same claim on the same candidate.
+_CLAIM_STATUSES = frozenset({ObligationStatus.SATISFIED, ObligationStatus.VIOLATED, ObligationStatus.INDETERMINATE})
+
+
 def record_requirement_claim(
     ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, claim: str, *,
     evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
+    status: ObligationStatus = ObligationStatus.SATISFIED,
 ) -> None:
-    """Deterministic evidence closing one claim of ``requirement_id`` for the
-    candidate ``evidence_id``. Only the producer kinds allowed for that claim
-    may record it: a regression oracle can never close BEHAVIOR."""
+    """Deterministic evidence about one claim of ``requirement_id`` for the
+    candidate ``evidence_id`` (``status``: SATISFIED closes it, VIOLATED is
+    counter-evidence, INDETERMINATE closes nothing). Only the producer kinds
+    allowed for that claim may record it: a regression oracle can never judge
+    BEHAVIOR. The latest record for a candidate is its judgment."""
     allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS}
     if method not in allowed.get(claim, frozenset()):
         raise ValueError(f"method {method!r} cannot close a {claim} claim")
+    if status not in _CLAIM_STATUSES:
+        raise ValueError(f"a claim judgment is SATISFIED, VIOLATED or INDETERMINATE, not {status}")
     requirement = requirements.get(requirement_id)
     if requirement is None:
         raise ValueError(f"unknown requirement id {requirement_id!r}")
     ledger.record(ObligationRecord(
         id=requirement_claim_id(requirement_id, claim), kind=ObligationKind.ORIGINAL_REQUIREMENT,
-        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        status=status, authority=ObligationAuthority.DETERMINISTIC,
         description=requirement.text, source=source, revision=revision,
         evidence={"requirement_set_digest": requirements.digest, "evidence_id": evidence_id,
                   "claim": claim, "method": method, **detail},
@@ -505,17 +518,40 @@ def record_requirement_claim(
     ))
 
 
+def requirement_claim_record(
+    ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
+) -> Optional[ObligationRecord]:
+    """The latest judgment of ``claim`` of ``requirement_id`` on the candidate
+    ``evidence_id`` (any status), if any. A later judgment of the same
+    candidate replaces an earlier one: a failed or unobtainable re-run never
+    leaves an older closure standing."""
+    if not evidence_id:
+        return None
+    for record in reversed(ledger.history(requirement_claim_id(requirement_id, claim))):
+        if (record.evidence or {}).get("evidence_id") == evidence_id:
+            return record
+    return None
+
+
 def requirement_claim(
     ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
 ) -> Optional[Dict[str, Any]]:
     """The evidence closing ``claim`` of ``requirement_id`` on the candidate
-    ``evidence_id``, if any."""
-    if not evidence_id:
-        return None
-    for record in reversed(ledger.history(requirement_claim_id(requirement_id, claim))):
-        evidence = record.evidence or {}
-        if record.status is ObligationStatus.SATISFIED and evidence.get("evidence_id") == evidence_id:
-            return evidence
+    ``evidence_id``, if its latest judgment closed it."""
+    record = requirement_claim_record(ledger, requirement_id, claim, evidence_id)
+    if record is not None and record.status is ObligationStatus.SATISFIED:
+        return record.evidence or {}
+    return None
+
+
+def _claim_counter_evidence(
+    ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """BEHAVIOR counter-evidence: the latest acceptance judgment of this
+    candidate observed the behaviour contradicted (B2-a)."""
+    record = requirement_claim_record(ledger, requirement_id, BEHAVIOR, evidence_id)
+    if record is not None and record.status is ObligationStatus.VIOLATED:
+        return record.evidence or {}
     return None
 
 
@@ -526,7 +562,9 @@ def _effective_closure(
     closure record - except a named-test closure of a statement that also
     claims BEHAVIOR (a pre-FS-1C1 record read back on resume, or any other
     writer), which proves only regression preservation - or else every claim
-    the statement makes closed by its own kind of evidence."""
+    the statement makes closed by its own kind of evidence. Which claims the
+    statement makes is what the BEHAVIOR producer decided from the statement
+    and the repository's test files (``required_claims``); without it, both."""
     closure = requirement_closure(ledger, requirement.id, evidence_id)
     if (closure is not None and closure.get("method") in NAMED_TEST_CLOSURE_METHODS
             and BEHAVIOR in requirement_claims(requirement.text, closure.get("tests") or ())):
@@ -535,8 +573,10 @@ def _effective_closure(
         return closure
     claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
               for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
-    if all(claims.values()):
-        return {"method": "claims", "claims": claims}
+    behavior = claims[BEHAVIOR]
+    required = tuple((behavior or {}).get("required_claims") or (BEHAVIOR, REGRESSION_PRESERVATION))
+    if BEHAVIOR in required and all(claims.get(claim) for claim in required):
+        return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
 
 
@@ -615,7 +655,8 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
         evidence_id = evidence.get("evidence_id")
         closure = _effective_closure(ledger, requirement, evidence_id)
-        if requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None:
+        if (requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None
+                or _claim_counter_evidence(ledger, requirement.id, evidence_id) is not None):
             outcome = RequirementOutcome.VIOLATED
         elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
             outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
@@ -636,6 +677,7 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
         evidence = (requirement_counter_evidence(ledger, requirement.id, evidence_id)
+                    or _claim_counter_evidence(ledger, requirement.id, evidence_id)
                     or _effective_closure(ledger, requirement, evidence_id))
         if evidence is None:
             # FS-1C1: an open requirement whose claims are partly proven shows

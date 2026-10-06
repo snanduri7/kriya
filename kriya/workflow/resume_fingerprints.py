@@ -809,11 +809,23 @@ def generation_resume_fingerprints(
     input_obligation_fingerprint: Optional[Fingerprint] = None,
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
     candidate_files: Optional[Mapping[str, str]] = None,
+    acceptance_digest: Optional[str] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
     validate a checkpoint and to save one, so the two cannot diverge.
-    ``effective_obligation_ledger`` None means the run's starting ledger."""
+    ``effective_obligation_ledger`` None means the run's starting ledger.
+    ``acceptance_digest`` (FS-1C2 B2-a: the operator acceptance file bound
+    to the run) joins the verification inputs only when there is one, so a
+    run without it keeps its fingerprints byte-identical."""
+    verification_inputs: Dict[str, Any] = {
+        "required_verification": required_verification,
+        "runtime_verification_required": runtime_verification_required,
+        "strict_spec_compliance": strict_spec_compliance,
+        "strict_dependency_index": strict_dependency_index,
+    }
+    if acceptance_digest is not None:
+        verification_inputs["acceptance_digest"] = acceptance_digest
     if skill_engine_override is None:
         from kriya.skills.skill import SkillEngine
 
@@ -861,12 +873,7 @@ def generation_resume_fingerprints(
             "write_scope_mode": write_scope_mode,
             "protected_source_file": protected_source_file,
         },
-        verification_inputs={
-            "required_verification": required_verification,
-            "runtime_verification_required": runtime_verification_required,
-            "strict_spec_compliance": strict_spec_compliance,
-            "strict_dependency_index": strict_dependency_index,
-        },
+        verification_inputs=verification_inputs,
     )
 
 
