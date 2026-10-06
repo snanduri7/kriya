@@ -1,0 +1,88 @@
+# QWEN3.8 HISTORICAL-PROFILE QUALIFICATION config (GR-R1 follow-up, 2026-10-06; operator-owned, outside every
+# workspace). Derived from ~/.kriya/operator/graphify-qwen38-production.yaml with ONLY: inference_runtime
+# ollama_native (llm + llm_chain; /8 over_context_refusal), llm.context_window 32768 (the window, carried per
+# request as options.num_ctx), and paths.skills/state/memory. Sampling unchanged: temperature 0.2,
+# reasoning true, max_tokens 4096, extra_body {}.
+# Graphify canonical acceptance config (operator-owned, outside every workspace).
+# Derived from ~/.kriya/operator/prd036-production.yaml (sha256 a5be2e83...) - every
+# production control kept byte-identical (runtime_profile, autonomy, skills, paths,
+# embedding, static_analysis, llm.capabilities, reviewer_temperature). Changed ONLY
+# the model-identity fields, set to the historical Graphify qwen3.8 validation values
+# recovered from val001-g1-graphify-c3406/g1_devinv_evidence/campaign_kriya.yaml
+# (rounds 7ec06f51 @6c1791a and 2ad87038 @1891ba0):
+#   llm.model qwen3.8:27b, temperature 0.2, reasoning true, max_tokens 4096,
+#   extra_body {} (no num_ctx/top_p/top_k/reasoning_effort sent historically),
+#   llm_chain = same-model qwen3.8:27b with identical settings.
+runtime_profile: production
+autonomy:
+  mode: human-in-the-loop
+  web_lookup_enabled: false
+  web_lookup_auto_approve: false
+  run_verification_enabled: true
+  self_correction_loop_enabled: false
+search:
+  base_url: ''
+skills:
+  load_global: false
+  load_cwd: false
+paths:
+  skills: /Users/sriramnanduri/kriya-m1-live/skills-qwen38
+  state: /Users/sriramnanduri/kriya-m1-live/state
+  memory: /Users/sriramnanduri/kriya-m1-live/memory/qwen38-qual
+llm:
+  provider: openai
+  model: qwen3.8:27b
+  inference_runtime: ollama_native
+  context_window: 32768
+  api_key: local-key
+  base_url: http://localhost:11434/v1
+  temperature: 0.2
+  reasoning: true
+  reviewer_temperature: 0.7
+  max_tokens: 4096
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: small_native_tools
+  extra_body: {}
+# Developer fallback: historical same-model retry (qwen3.8:27b, identical settings).
+llm_chain:
+- model: qwen3.8:27b
+  inference_runtime: ollama_native
+  base_url: http://localhost:11434/v1
+  api_key: local-key
+  context_window: 32768
+  temperature: 0.2
+  reasoning: true
+  max_tokens: 4096
+  extra_body: {}
+embedding:
+  model: nomic-embed-text:latest
+  base_url: http://localhost:11434/v1
+# PRD-031A static-analysis gate, enabled and required (Semgrep 1.178.0 from the
+# digest-pinned image under production OCI containment; rule pack outside every workspace).
+static_analysis:
+  enabled: true
+  provider: semgrep
+  requirement: required
+  providers:
+    semgrep:
+      version: "1.178.0"
+      image: semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+      rule_packs:
+        - /Users/sriramnanduri/.kriya/operator/prd036/semgrep-rules/java-security.yml
+# QUAL-CAPACITY-REASONING-001 calibration (2026-09-29, evidence:
+# graphify-canonical-qwen38/evidence/qualification_investigation/capacity_calibration_n5.json):
+# 5 samples, max total completion 130 tokens (reasoning 97-113 + answer 15-17).
+# reasoning_max_tokens = ceil(130 x 4 / 64) x 64 = 576 (4x margin: the calibration
+# prompt was ~546 tokens, the real probe ~31.9k; reasoning growth with context is unmeasured).
+# reasoning_headroom_tokens = 576 + 320 (the historical template allowance, 384 - 64) = 896.
+# Only context_capacity; every other qualification value keeps its default.
+model_qualification:
+  cases:
+    context_capacity:
+      reasoning_max_tokens: 576
+      reasoning_headroom_tokens: 896

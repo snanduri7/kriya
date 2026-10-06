@@ -1,0 +1,78 @@
+{
+ "runtime_profile": "production",
+ "bindings": [
+  {
+   "binding": "primary",
+   "profile": {
+    "model": "qwen3.8:27b",
+    "endpoint": "http://localhost:11434/v1",
+    "runtime_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+    "runtime_exact": true,
+    "qualification": "NOT_QUALIFIED",
+    "failed_cases": [
+     "tool_argument_integrity"
+    ],
+    "capability_source": "explicit_primary",
+    "native_tool_calls": true,
+    "json_mode": true,
+    "reliable_multiline_json": false,
+    "streaming": true,
+    "edit_protocol": "small_native_tools",
+    "reasoning": true,
+    "context_window": 32768,
+    "allocation_window": 12298,
+    "output_tokens": 4270,
+    "context_policy": "adaptive",
+    "retry_inference_settings_digest": null,
+    "retry_qualification": null,
+    "digest": "1c7b25561bda4ba289a7463759ee7d03286fe17bdc987845ce6599373dcf37c7"
+   },
+   "generic_attempt_incompatibilities": [
+    "qualification of runtime b9acd699817e failed Developer case(s): tool_argument_integrity",
+    "the production runtime profile requires a QUALIFIED Developer runtime; qwen3.8:27b is NOT_QUALIFIED"
+   ],
+   "patch_only_attempt_incompatibilities": [
+    "qualification of runtime b9acd699817e failed Developer case(s): tool_argument_integrity",
+    "the production runtime profile requires a QUALIFIED Developer runtime; qwen3.8:27b is NOT_QUALIFIED"
+   ],
+   "compatible": false
+  },
+  {
+   "binding": "llm_chain[0]",
+   "profile": {
+    "model": "qwen3.8:27b",
+    "endpoint": "http://localhost:11434/v1",
+    "runtime_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+    "runtime_exact": true,
+    "qualification": "NOT_QUALIFIED",
+    "failed_cases": [
+     "tool_argument_integrity"
+    ],
+    "capability_source": "explicit_primary",
+    "native_tool_calls": true,
+    "json_mode": true,
+    "reliable_multiline_json": false,
+    "streaming": true,
+    "edit_protocol": "small_native_tools",
+    "reasoning": true,
+    "context_window": 32768,
+    "allocation_window": 12298,
+    "output_tokens": 4270,
+    "context_policy": "adaptive",
+    "retry_inference_settings_digest": null,
+    "retry_qualification": null,
+    "digest": "1c7b25561bda4ba289a7463759ee7d03286fe17bdc987845ce6599373dcf37c7"
+   },
+   "generic_attempt_incompatibilities": [
+    "qualification of runtime b9acd699817e failed Developer case(s): tool_argument_integrity",
+    "the production runtime profile requires a QUALIFIED Developer runtime; qwen3.8:27b is NOT_QUALIFIED"
+   ],
+   "patch_only_attempt_incompatibilities": [
+    "qualification of runtime b9acd699817e failed Developer case(s): tool_argument_integrity",
+    "the production runtime profile requires a QUALIFIED Developer runtime; qwen3.8:27b is NOT_QUALIFIED"
+   ],
+   "compatible": false
+  }
+ ],
+ "status": "FAIL"
+}

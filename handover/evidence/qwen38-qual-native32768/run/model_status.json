@@ -1,0 +1,292 @@
+{
+  "architect": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ],
+  "developer": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ],
+  "planner": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ],
+  "reviewer": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:0adea169a61eeebc895d1feabf9ee3b80f8b985f9e5a7d34c152a465bdfdb14a",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "run_verifier": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ],
+  "skill_gap": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ],
+  "spec_compliance": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [
+        "tool_argument_integrity"
+      ],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:e5c6017a70564ba0c396e13936b66df0381c2eb47ecbade42f36fd245165b0b7",
+        "extra_body": {
+          "truncate": false
+        },
+        "output_ceiling": 4096,
+        "reasoning": true,
+        "server_config": {},
+        "temperature": 0.2,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [
+        "tool_argument_integrity: FAIL"
+      ],
+      "status": "NOT_QUALIFIED"
+    }
+  ]
+}

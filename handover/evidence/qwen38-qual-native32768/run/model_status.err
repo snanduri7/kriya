@@ -1,0 +1,1 @@
+2026-10-06 22:09:39,943 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.8:27b, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
