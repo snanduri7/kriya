@@ -1,0 +1,70 @@
+{
+ "BASE-1 vs BASE-2": {
+  "S0": [],
+  "S1": [],
+  "S2": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S3": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S4": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S5": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo"
+  ]
+ },
+ "CANDIDATE-1 vs CANDIDATE-2": {
+  "S0": [],
+  "S1": [],
+  "S2": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S3": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S4": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S5": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo"
+  ]
+ },
+ "BASE-1 vs CANDIDATE-1": {
+  "S0": [],
+  "S1": [],
+  "S2": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S3": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S4": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S5": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo"
+  ]
+ },
+ "BASE-2 vs CANDIDATE-2": {
+  "S0": [],
+  "S1": [],
+  "S2": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S3": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S4": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files"
+  ],
+  "S5": [
+   "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo"
+  ]
+ }
+}

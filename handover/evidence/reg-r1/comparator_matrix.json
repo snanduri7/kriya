@@ -1,0 +1,164 @@
+{
+ "BASE-1 vs BASE-2": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "72ecc79d77234766b0373026611ffffea0a28588c3c4135447ddac94b1f0ccb0",
+  "post_fingerprint": "b4fe311b55eea84fd4f3588685a3c56dc121a9a18b1b291540bcdafd3dbf653d",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ },
+ "CANDIDATE-1 vs CANDIDATE-2": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "27e1261590098db05fb04507f6d68e20d8547361f80006c7d3331f4fe71cb292",
+  "post_fingerprint": "ea5e121ca55f13626f327ff05f29311d93cc7ae6076ea29fee9ed337615f74ed",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ },
+ "BASE-1 vs CANDIDATE-1": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "72ecc79d77234766b0373026611ffffea0a28588c3c4135447ddac94b1f0ccb0",
+  "post_fingerprint": "27e1261590098db05fb04507f6d68e20d8547361f80006c7d3331f4fe71cb292",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ },
+ "BASE-2 vs CANDIDATE-2": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "b4fe311b55eea84fd4f3588685a3c56dc121a9a18b1b291540bcdafd3dbf653d",
+  "post_fingerprint": "ea5e121ca55f13626f327ff05f29311d93cc7ae6076ea29fee9ed337615f74ed",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ },
+ "BASE-1 vs CANDIDATE-2": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "72ecc79d77234766b0373026611ffffea0a28588c3c4135447ddac94b1f0ccb0",
+  "post_fingerprint": "ea5e121ca55f13626f327ff05f29311d93cc7ae6076ea29fee9ed337615f74ed",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ },
+ "BASE-2 vs CANDIDATE-1": {
+  "whole_output_level1": "CHANGED_FAILURE",
+  "pre_fingerprint": "b4fe311b55eea84fd4f3588685a3c56dc121a9a18b1b291540bcdafd3dbf653d",
+  "post_fingerprint": "27e1261590098db05fb04507f6d68e20d8547361f80006c7d3331f4fe71cb292",
+  "per_test_level2": {
+   "PRE_EXISTING_FAILURE": 217
+  },
+  "per_test_non_preexisting": {},
+  "pre_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "post_counts": {
+   "failed": 217,
+   "passed": 4896,
+   "skipped": 257
+  },
+  "pre_parsed_failures": 217,
+  "post_parsed_failures": 217,
+  "aggregate_drop_detected": false,
+  "blocking": true,
+  "blocking_reasons": [
+   "level1:CHANGED_FAILURE"
+  ],
+  "level2_available": true
+ }
+}
