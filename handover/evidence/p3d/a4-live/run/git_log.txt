@@ -1,0 +1,3 @@
+d95484f Revert "Revert: Replace GH CI Java 26 with 27."
+340b50c Bump github/codeql-action from 4.38.1 to 4.38.2
+3d33356 Protect main branches

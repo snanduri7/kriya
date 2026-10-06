@@ -1,0 +1,9 @@
+acceptance args: --acceptance /Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a4-java-cli/KriyaAcceptanceTest.java --acceptance-approval /Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a4-java-cli/approval.json
+== p3v-a4-java-cli start 17:44:17 base d95484f kriya bcb0c1db8
+analyze exit=0 seconds=37
+generate exit=0 wall_seconds=345.6
+run_id=20261006T174455-d5de8fa7
+verify exit=0
+explain exit=0
+692	/Users/sriramnanduri/kriya-m1-live/state/attempt-evidence/20261006T174455-d5de8fa7
+== p3v-a4-java-cli end 17:50:43

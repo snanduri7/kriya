@@ -1,0 +1,29 @@
+diff --git a/src/main/java/org/apache/commons/cli/CommandLine.java b/src/main/java/org/apache/commons/cli/CommandLine.java
+index 2942d5f..ebd3f02 100644
+--- a/src/main/java/org/apache/commons/cli/CommandLine.java
++++ b/src/main/java/org/apache/commons/cli/CommandLine.java
+@@ -1003,6 +1003,24 @@ public class CommandLine implements Serializable {
+         return hasOption(resolveOption(optionName));
+     }
+ 
++    /**
++     * Returns {@code true} if any of the given option names is present in this command line.
++     *
++     * @param optNames the option names to check
++     * @return {@code true} if any of the given option names is present, {@code false} otherwise
++     */
++    public boolean hasAnyOption(final String... optNames) {
++        if (optNames == null || optNames.length == 0) {
++            return false;
++        }
++        for (final String optName : optNames) {
++            if (hasOption(optName)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
+     /**
+      * Returns an iterator over the Option members of CommandLine.
+      *

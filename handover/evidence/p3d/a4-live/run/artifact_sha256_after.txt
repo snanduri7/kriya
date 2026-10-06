@@ -1,0 +1,2 @@
+2ae4a2e9d0aee72ea55d1aef5cab897dc3738208ba86c2e5e94f9ed967ad7ae2  acceptance/p3v-a4-java-cli/approval.json
+84fae0a6527f8ca5cb78e363e61f2f3a84925ed250304a6cd50384f2b3474883  acceptance/p3v-a4-java-cli/KriyaAcceptanceTest.java
