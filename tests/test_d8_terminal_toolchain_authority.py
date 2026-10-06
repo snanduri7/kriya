@@ -156,19 +156,23 @@ def test_no_named_tests_builds_no_validator(tmp_path, authority):
 
 @pytest.mark.parametrize("resolved", ["violated", "already_closed"])
 def test_a_named_test_whose_requirement_needs_no_closure_builds_no_validator(tmp_path, resolved):
-    """Only an UNVERIFIED requirement is closed by its named tests; one the
-    verifier reported violated (never closable) or one already closed by
-    deterministic evidence needs nothing, so nothing is built. (A verifier's
-    "satisfied" is a model claim, UNVERIFIED - FS-1B - so it no longer stands
-    for "needs no closure".)"""
+    """Only an UNVERIFIED requirement is closed by its named tests; one made
+    VIOLATED by deterministic counter-evidence (never closable) or one already
+    closed by deterministic evidence needs nothing, so nothing is built. (A
+    verifier's "satisfied" is a model claim, UNVERIFIED - FS-1B - so it no
+    longer stands for "needs no closure"; GR-R0: neither is its "missing",
+    which deterministic evidence may now close.)"""
     workspace, candidate = _trees(tmp_path, 17, named_test=True)
     reqs = derive_requirements(NAMED_TEST_GOAL)
     ledger = ObligationLedger()
     seed_requirement_obligations(ledger, reqs)
     if resolved == "violated":
-        record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.VIOLATED, "")
+        record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "")
                                                    for r in reqs.requirements},
                                     revision=1, evidence_fingerprint="cand", source="test")
+        for requirement in reqs.requirements:  # deterministic counter-evidence, e.g. a mutation out of scope
+            record_requirement_closure(ledger, reqs, requirement.id, evidence_id="cand", method="mutation_scope",
+                                       detail={}, source="test", revision=1, violated=True)
     else:
         record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "")
                                                    for r in reqs.requirements},

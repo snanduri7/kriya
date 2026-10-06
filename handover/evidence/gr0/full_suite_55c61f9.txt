@@ -1,0 +1,19 @@
+55c61f9
+ M handover/evidence/gr0/gr0_mutation_results.json
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_real_two_process_contention_second_process_rejected
+tests/test_run_ownership.py::test_resume_flag_contends_the_same_as_a_fresh_run
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=10951) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_losing_process_makes_zero_source_mutation
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=10952) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_d8_terminal_toolchain_authority.py::test_a_named_test_whose_requirement_needs_no_closure_builds_no_validator[violated]
+1 failed, 9172 passed, 14 warnings in 539.26s (0:08:59)
+
+[exited with code 0]

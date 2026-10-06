@@ -1,0 +1,17 @@
+baseline 190 passed in 14.59s
+refusal-does-not-transition-at-once KILLED 3 failed, 55 passed in 9.00s
+every-failure-transitions-at-once KILLED 5 failed, 50 passed in 8.99s
+transition-rule-ignores-immediate KILLED 3 failed, 55 passed in 9.88s
+repeat-flag-not-forwarded KILLED 3 failed, 64 passed in 9.51s
+repeat-never-detected KILLED 3 failed, 61 passed in 9.57s
+first-refusal-treated-as-repeat KILLED 3 failed, 55 passed in 9.43s
+repeat-does-not-reach-the-limit KILLED 3 failed, 29 passed in 9.13s
+refusal-key-ignores-model-and-operation KILLED 1 failed, 63 passed in 9.97s
+model-negative-recorded-violated KILLED 1 failed, 35 passed in 9.69s
+legacy-violated-record-is-a-veto KILLED 1 failed, 36 passed in 9.67s
+model-negative-alone-does-not-block KILLED 2 failed, 34 passed in 9.67s
+every-unverified-treated-as-model-negative KILLED 1 failed, 45 passed in 9.83s
+deterministic-counter-evidence-ignored KILLED 1 failed, 46 passed in 9.85s
+acceptance-counter-evidence-ignored KILLED 2 failed, 41 passed in 10.08s
+model-negative-outranks-trusted-closure KILLED 2 failed, 45 passed in 9.66s
+TOTAL 15 {'KILLED': 15}

@@ -1,5 +1,5 @@
 {
-  "commit": "15c990d",
+  "commit": "55c61f9",
   "tests": [
     "tests/test_gr0_retry_no_information_gain.py",
     "tests/test_gr0_negative_model_authority.py",
@@ -14,111 +14,110 @@
       "name": "refusal-does-not-transition-at-once",
       "file": "kriya/workflow/retry_strategy.py",
       "status": "KILLED",
-      "tail": "2 failed, 50 passed in 8.45s",
-      "seconds": 9.3
+      "tail": "3 failed, 55 passed in 9.00s",
+      "seconds": 9.9
     },
     {
       "name": "every-failure-transitions-at-once",
       "file": "kriya/workflow/retry_strategy.py",
       "status": "KILLED",
-      "tail": "4 failed, 43 passed in 8.23s",
-      "seconds": 9.1
+      "tail": "5 failed, 50 passed in 8.99s",
+      "seconds": 9.8
     },
     {
       "name": "transition-rule-ignores-immediate",
       "file": "kriya/workflow/retry_policy.py",
       "status": "KILLED",
-      "tail": "2 failed, 50 passed in 8.94s",
-      "seconds": 9.8
+      "tail": "3 failed, 55 passed in 9.88s",
+      "seconds": 10.7
     },
     {
       "name": "repeat-flag-not-forwarded",
       "file": "kriya/workflow/retry_strategy.py",
       "status": "KILLED",
-      "tail": "3 failed, 58 passed in 8.97s",
-      "seconds": 9.9
+      "tail": "3 failed, 64 passed in 9.51s",
+      "seconds": 10.4
     },
     {
       "name": "repeat-never-detected",
       "file": "kriya/workflow/attempt.py",
       "status": "KILLED",
-      "tail": "3 failed, 58 passed in 8.88s",
-      "seconds": 9.8
+      "tail": "3 failed, 61 passed in 9.57s",
+      "seconds": 10.4
     },
     {
       "name": "first-refusal-treated-as-repeat",
       "file": "kriya/workflow/attempt.py",
       "status": "KILLED",
-      "tail": "2 failed, 50 passed in 8.44s",
-      "seconds": 9.3
+      "tail": "3 failed, 55 passed in 9.43s",
+      "seconds": 10.3
     },
     {
       "name": "repeat-does-not-reach-the-limit",
       "file": "kriya/workflow/retry_strategy.py",
       "status": "KILLED",
-      "tail": "4 failed, 31 passed in 8.58s",
-      "seconds": 9.5
+      "tail": "3 failed, 29 passed in 9.13s",
+      "seconds": 10.0
     },
     {
       "name": "refusal-key-ignores-model-and-operation",
       "file": "kriya/workflow/attempt.py",
-      "status": "SURVIVED",
-      "tail": "189 passed in 14.91s",
-      "seconds": 15.8
+      "status": "KILLED",
+      "tail": "1 failed, 63 passed in 9.97s",
+      "seconds": 10.9
     },
     {
       "name": "model-negative-recorded-violated",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "1 failed, 39 passed in 9.74s",
+      "tail": "1 failed, 35 passed in 9.69s",
       "seconds": 10.6
     },
     {
       "name": "legacy-violated-record-is-a-veto",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "1 failed, 46 passed in 9.60s",
-      "seconds": 10.5
+      "tail": "1 failed, 36 passed in 9.67s",
+      "seconds": 10.6
     },
     {
       "name": "model-negative-alone-does-not-block",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "2 failed, 32 passed in 9.82s",
-      "seconds": 10.7
+      "tail": "2 failed, 34 passed in 9.67s",
+      "seconds": 10.5
     },
     {
       "name": "every-unverified-treated-as-model-negative",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "1 failed, 37 passed in 9.79s",
+      "tail": "1 failed, 45 passed in 9.83s",
       "seconds": 10.7
     },
     {
       "name": "deterministic-counter-evidence-ignored",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "1 failed, 38 passed in 9.70s",
-      "seconds": 10.5
+      "tail": "1 failed, 46 passed in 9.85s",
+      "seconds": 10.7
     },
     {
       "name": "acceptance-counter-evidence-ignored",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "1 failed, 54 passed in 9.85s",
-      "seconds": 10.7
+      "tail": "2 failed, 41 passed in 10.08s",
+      "seconds": 11.0
     },
     {
       "name": "model-negative-outranks-trusted-closure",
       "file": "kriya/workflow/requirements.py",
       "status": "KILLED",
-      "tail": "2 failed, 42 passed in 9.58s",
-      "seconds": 10.4
+      "tail": "2 failed, 45 passed in 9.66s",
+      "seconds": 10.5
     }
   ],
-  "baseline": "189 passed in 14.72s",
+  "baseline": "190 passed in 14.59s",
   "counts": {
-    "KILLED": 14,
-    "SURVIVED": 1
+    "KILLED": 15
   }
 }
