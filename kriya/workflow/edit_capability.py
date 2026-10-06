@@ -26,18 +26,25 @@ per locus: its enclosing member, else enclosing indentation block, when that
 fits an equal share of the budget; otherwise a local window, every window of
 one radius - the largest that fits, up to one that doubles with each anchor
 failure on that file. Every span is bound to the revision of the
-source it was cut from; a span of an older revision authorizes nothing."""
+source it was cut from; a span of an older revision authorizes nothing.
+
+P3-D: a structural insertion locus (kriya/workflow/insertion_locus.py) is a
+separate, narrower authority: its carrier lines make ANCHORED_EDIT feasible,
+but an anchor found only in the carrier is ``INSERTION_ONLY`` - the edit is
+accepted only as a pure insertion at the locus (verify_insertion), never as a
+rewrite of the carrier, a neighbour or anything else."""
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 from kriya.workflow.context_source import member_boundaries_for
 from kriya.workflow.edit_safety import content_revision, normalize_whitespace
 from kriya.workflow.file_integrity import ANCHOR_NOT_IN_FILE as ANCHOR_NOT_IN_FILE
+from kriya.workflow.insertion_locus import INSERTION_UNIT, TIER_OWNER_CLOSING_DELIMITER
 
 ANCHORED_EDIT = "anchored_edit"
 FULL_FILE_REPLACEMENT = "full_file_replacement"
@@ -45,6 +52,8 @@ FULL_FILE_REPLACEMENT = "full_file_replacement"
 CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE = "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE"
 ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT = "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
 ANCHOR_CONTEXT_NOT_ESCALATED = "ANCHOR_CONTEXT_NOT_ESCALATED"
+# anchor_status: the SEARCH lies only in a structural insertion carrier.
+INSERTION_ONLY = "INSERTION_ONLY"
 
 # Share of the Developer allocation window reserved for exact windows; the
 # windows are mandatory text sized before the request is fitted.
@@ -91,11 +100,13 @@ class EditCapability:
     loci: Tuple[int, ...] = ()
     uncovered_loci: Tuple[int, ...] = ()
     level: int = 0
+    # P3-D: an InsertionLocus of this revision, or None.
+    insertion: Any = None
     _normalized_spans: Tuple[str, ...] = field(default=(), compare=False, repr=False)
 
     @property
     def anchored(self) -> bool:
-        return bool(self.spans) and not self.uncovered_loci
+        return (bool(self.spans) or self.insertion is not None) and not self.uncovered_loci
 
     @property
     def operations(self) -> Tuple[str, ...]:
@@ -113,6 +124,8 @@ class EditCapability:
             "revision": self.revision, "operations": list(self.operations),
             "spans": [[s.start_line, s.end_line, s.unit, content_revision(s.text)] for s in self.spans],
         }
+        if self.insertion is not None:
+            payload["insertion"] = self.insertion.digest
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
     def anchor_status(self, search: str, current_content: str) -> Optional[str]:
@@ -131,6 +144,8 @@ class EditCapability:
         normalized = self._normalized_spans or tuple(normalize_whitespace(s.text) for s in self.spans)
         if any(norm_search in span for span in normalized):
             return None
+        if self.insertion is not None and norm_search in normalize_whitespace(self.insertion.carrier):
+            return INSERTION_ONLY
         return ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT
 
     def summary(self) -> dict:
@@ -139,6 +154,7 @@ class EditCapability:
             "operations": list(self.operations), "level": self.level,
             "spans": [{"start_line": s.start_line, "end_line": s.end_line, "unit": s.unit} for s in self.spans],
             "loci": list(self.loci), "uncovered_loci": list(self.uncovered_loci), "digest": self.digest,
+            "insertion": self.insertion.summary() if self.insertion is not None else None,
         }
 
 
@@ -374,11 +390,14 @@ def _shown_span(path, content, lines_keepends, unit: str, text: str, revision: s
 
 def build_edit_capability(
     path: str, content: str, *, full_file: bool, loci: Iterable[int], budget_chars: int,
-    level: int = 0, shown: Iterable[Tuple[str, str]] = (),
+    level: int = 0, shown: Iterable[Tuple[str, str]] = (), insertion: Any = None,
 ) -> EditCapability:
     """The capability for one existing target of one Developer invocation.
-    ``shown`` is the exact pieces already in the prompt (shown_exact_texts)."""
+    ``shown`` is the exact pieces already in the prompt (shown_exact_texts).
+    ``insertion`` is a structural insertion locus of this revision (P3-D)."""
     revision = content_revision(content)
+    if insertion is not None and insertion.revision != revision:
+        insertion = None
     lines_keepends = content.splitlines(keepends=True)
     lines = [line.rstrip("\r\n") for line in lines_keepends]
     ordered = sorted({locus for locus in loci if 1 <= locus <= len(lines)})
@@ -397,7 +416,7 @@ def build_edit_capability(
     spans.sort(key=lambda s: s.start_line)
     return EditCapability(
         path=path, revision=revision, full_file=full_file, spans=tuple(spans), loci=tuple(ordered),
-        uncovered_loci=tuple(uncovered), level=level,
+        uncovered_loci=tuple(uncovered), level=level, insertion=insertion,
         _normalized_spans=tuple(normalize_whitespace(s.text) for s in spans),
     )
 
@@ -429,4 +448,23 @@ def render_exact_spans(capability: EditCapability) -> str:
             f"\n\n{EXACT_SOURCE_HEADER}: {span.path} lines {span.start_line}-{span.end_line} "
             f"[{span.unit}] ===\n{body}=== END EXACT SOURCE {span.path} lines {span.start_line}-{span.end_line} ===\n"
         )
+    locus = capability.insertion
+    if locus is not None:
+        body = locus.carrier if locus.carrier.endswith("\n") else locus.carrier + "\n"
+        members = ", ".join(locus.planned_members)
+        parts.append(
+            f"\n\n{INSERTION_HEADER}: {locus.path} - new member(s) {members} of {locus.owner_lookup_key} ===\n"
+            "You may ADD the new member(s) here and nowhere else in this file: SEARCH exactly the lines below and "
+            "REPLACE them with the same lines, unchanged, plus the new member placed "
+            + ("before the owner's closing brace (the last line below)" if locus.tier == TIER_OWNER_CLOSING_DELIMITER
+               else "between the grounded member and the next declaration (the last line below)")
+            + ". Every existing line stays byte-identical; this authorizes no change to existing code, imports or "
+            "any other place.\n"
+            f"{EXACT_SOURCE_HEADER}: {locus.path} lines {locus.start_line}-{locus.end_line} [{INSERTION_UNIT}] ===\n"
+            f"{body}=== END EXACT SOURCE {locus.path} lines {locus.start_line}-{locus.end_line} ===\n"
+        )
     return "".join(parts)
+
+
+INSERTION_HEADER = "=== STRUCTURAL INSERTION POINT (zero-width: ADD bytes only)"
+

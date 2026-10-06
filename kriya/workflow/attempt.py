@@ -2569,13 +2569,15 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
                 shown.extend(shown_exact_texts(member.tier, member.content))
         if content.strip() and content in mandatory_context:
             shown = [("shown_full", content)]
+        full_file = _is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state)
         capabilities[path] = build_edit_capability(
             path, content,
-            full_file=_is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state),
+            full_file=full_file,
             loci=_edit_capability_loci(state, ctx, path, content.splitlines()),
             budget_chars=budget_chars,
             level=state.budgets.anchor_failure_counts.get(path, 0),
             shown=shown,
+            insertion=None if full_file else _structural_insertion_locus(state, ctx, path, content),
         )
     if state.edit_capabilities_attempt != state.attempt_number:
         state.edit_capabilities = {}
@@ -2633,6 +2635,25 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
     return capabilities
 
 
+def _structural_insertion_locus(state: GenerationState, ctx: "AttemptContext", path: str, content: str) -> Any:
+    """P3-D: the zero-width insertion locus for a new member the user's goal
+    names (kriya/workflow/insertion_locus.py), decided from the bytes this
+    invocation read and the members localization grounded - never from the
+    plan or the model. None when there is none (recorded, never a guess)."""
+    from kriya.workflow.insertion_locus import resolve_insertion_locus
+
+    grounded = []
+    for item in [state.known_target_context_items.get(path), *state.known_target_member_items.get(path, ())]:
+        if item is not None:
+            grounded.extend(key for key in (item.type_id, item.member_id) if key)
+    locus, reason = resolve_insertion_locus(
+        path, content, goal=ctx.grounding_goal or ctx.goal, revision=content_revision(content),
+        grounded_keys=grounded)
+    if locus is None and reason:
+        logger.info("Structural insertion locus for %s: none (%s)", path, reason)
+    return locus
+
+
 def _requested_operation(kwargs: Dict[str, Any], path: str) -> Optional[str]:
     """The operation this invocation's contract requests for ``path``."""
     operation = (kwargs.get("operation_by_file") or {}).get(path, kwargs.get("default_operation"))
@@ -2661,7 +2682,7 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
     in the exact source this invocation was authorized to rely on. An anchor
     that is real but was never shown records its lines as loci for the next
     window; one that is not in the file at all is fabricated or stale."""
-    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT
+    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT, INSERTION_ONLY
 
     capability = _current_edit_capability(state, path)
     if capability is None:
@@ -2669,6 +2690,9 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
     for index, edit in enumerate(edits, 1):
         status = capability.anchor_status(edit.get("search", ""), current)
         if status is None:
+            continue
+        if status == INSERTION_ONLY:
+            _authorize_structural_insertion(state, capability, path, index, edit, current)
             continue
         if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT and _sent_exact_source_covers(
                 state, capability, path, edit.get("search", ""), current):
@@ -2683,6 +2707,29 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
             f"{status}: Anchor matching failed for edit #{index}: the search block does not occur in the "
             "current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
         )
+
+
+def _authorize_structural_insertion(
+    state: GenerationState, capability: Any, path: str, index: int, edit: Dict[str, str], current: str,
+) -> None:
+    """P3-D: an edit anchored only on a structural insertion carrier is
+    accepted only when, applied alone to the current bytes, it is a pure
+    insertion at the locus of exactly this revision whose carrier the
+    dispatched request carried (verify_insertion); anything else is refused
+    with its typed reason and the existing source is never touched."""
+    from kriya.workflow.insertion_locus import verify_insertion
+
+    locus = capability.insertion
+    after = apply_anchored_edits(current, [edit], "")
+    problem = verify_insertion(locus, current, after, state.edit_capability_sent.get(path) or ())
+    if problem is not None:
+        raise ValueError(f"{problem} (edit #{index})")
+    state.record_event(RunEvent(
+        kind="context.structural_insertion_authorized", attempt=state.attempt_number,
+        source="attempt._authorize_anchors", authority=EventAuthority.AUTHORITATIVE,
+        message=f"edit #{index} in {path} is a pure insertion at the structural locus of {locus.owner_lookup_key}",
+        details={"path": path, "locus": locus.summary(), "capability": capability.digest},
+    ))
 
 
 def _sent_exact_source_covers(state: GenerationState, capability: Any, path: str, search: str, current: str) -> bool:

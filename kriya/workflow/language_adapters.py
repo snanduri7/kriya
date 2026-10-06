@@ -36,6 +36,9 @@ class Capability(str, Enum):
     EXACT_SOURCE = "exact_source"
     EDITABLE_REGION = "editable_region"
     VERIFICATION_HOOKS = "verification_hooks"
+    # P3-D: a deterministic zero-width locus for a brand-new member of an
+    # existing type (kriya/workflow/insertion_locus.py).
+    STRUCTURAL_INSERTION = "structural_insertion"
 
 
 class CapabilityStatus(str, Enum):
@@ -75,9 +78,12 @@ JAVA_ADAPTER = LanguageAdapter(
         Capability.EXACT_SOURCE: CapabilityStatus.SUPPORTED,
         Capability.EDITABLE_REGION: CapabilityStatus.SUPPORTED,
         Capability.VERIFICATION_HOOKS: CapabilityStatus.SUPPORTED,
+        Capability.STRUCTURAL_INSERTION: CapabilityStatus.PARTIAL,
     },
     limitations={
         Capability.REFERENCES: "dependency-graph call/import edges are name-based, not type-resolved",
+        Capability.STRUCTURAL_INSERTION: "V1 owners are classes, interfaces and records; an enum or annotation type is "
+                                         "refused (typed), never approximated",
     },
     member_boundaries=java_member_boundaries,
 )
@@ -96,6 +102,7 @@ PYTHON_ADAPTER = LanguageAdapter(
     limitations={
         Capability.REFERENCES: "dependency-graph call/import edges are name-based, not type-resolved",
         Capability.EDITABLE_REGION: "semantic-region authority covers Java only; Python edits have file-level authority",
+        Capability.STRUCTURAL_INSERTION: "structural new-member insertion covers Java only",
     },
     member_boundaries=python_member_boundaries,
 )
