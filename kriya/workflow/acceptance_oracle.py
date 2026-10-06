@@ -369,7 +369,7 @@ def load_acceptance(path: str, requirements: Any, state_root: str) -> Acceptance
     unknown = sorted({rid for case in cases for rid in case.requirement_ids if rid not in known})
     if unknown:
         raise AcceptanceError(ACCEPTANCE_UNKNOWN_REQUIREMENT,
-                              f"requirement id(s) not in the goal's derived requirements "
+                              f"requirement id(s) not in this run's requirements "
                               f"({', '.join(requirements.ids) or 'none'}): {', '.join(unknown)}")
     scope_only = sorted({rid for case in cases for rid in case.requirement_ids
                          if is_mutation_scope_requirement(requirements.get(rid).text)})
