@@ -1,0 +1,34 @@
+== base 67f99bd
+calls edges: [('.C()', '.GetRaw()'), ('.D()', '.GetRaw()')]
+== reference fix A
+calls edges: [('.A()', '.Get()'), ('.B()', '.Get()'), ('.C()', '.GetRaw()'), ('.D()', '.GetRaw()'), ('.E()', '.Make()')]
+== candidate 8a0f23e9
+Traceback (most recent call last):
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extract.py", line 175, in _safe_extract
+    return extractor(path)
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extract.py", line 2405, in extract_csharp
+    return _extract_generic(path, _CSHARP_CONFIG)
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extractors/engine.py", line 6010, in _extract_generic
+    walk_calls(
+    ~~~~~~~~~~^
+        body_node,
+        ^^^^^^^^^^
+    ...<2 lines>...
+        frozenset(closure_locals_by_body.get(id(body_node), ())),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extractors/engine.py", line 5975, in walk_calls
+    walk_calls(child, caller_nid, receiver_types, extra_locals)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extractors/engine.py", line 5975, in walk_calls
+    walk_calls(child, caller_nid, receiver_types, extra_locals)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extractors/engine.py", line 5368, in walk_calls
+    callee_name = _read_text(mname.child_by_field_name("name"), source)
+  File "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/forensic/cand/graphify/extractors/base.py", line 85, in _read_text
+    return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+                  ^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'start_byte'
+  warning: skipped Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+calls edges: []

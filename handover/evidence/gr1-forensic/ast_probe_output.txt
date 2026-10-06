@@ -1,0 +1,42 @@
+grammar field names containing name/ident/type: ['name', 'type', 'type_parameters']
+============================================================
+invocation_expression  text='Get<int>("port")'
+  generic_name [field=function]  text='Get<int>'
+    identifier  text='Get'
+    type_argument_list  text='<int>'
+      predefined_type  text='int'
+  argument_list [field=arguments]  text='("port")'
+    argument  text='"port"'
+      string_literal  text='"port"'
+        string_literal_content  text='port'
+generic_name.child_by_field_name -> {'name': None, 'identifier': None, 'type_arguments': None, 'type_argument_list': None}
+generic_name children (type, field): [('identifier', None), ('type_argument_list', None)]
+============================================================
+invocation_expression  text='this.Get<int>("port")'
+  member_access_expression [field=function]  text='this.Get<int>'
+    generic_name [field=name]  text='Get<int>'
+      identifier  text='Get'
+      type_argument_list  text='<int>'
+        predefined_type  text='int'
+  argument_list [field=arguments]  text='("port")'
+    argument  text='"port"'
+      string_literal  text='"port"'
+        string_literal_content  text='port'
+generic_name.child_by_field_name -> {'name': None, 'identifier': None, 'type_arguments': None, 'type_argument_list': None}
+generic_name children (type, field): [('identifier', None), ('type_argument_list', None)]
+============================================================
+invocation_expression  text='Make<int>()'
+  generic_name [field=function]  text='Make<int>'
+    identifier  text='Make'
+    type_argument_list  text='<int>'
+      predefined_type  text='int'
+  argument_list [field=arguments]  text='()'
+generic_name.child_by_field_name -> {'name': None, 'identifier': None, 'type_arguments': None, 'type_argument_list': None}
+generic_name children (type, field): [('identifier', None), ('type_argument_list', None)]
+============================================================
+invocation_expression  text='GetRaw("host")'
+  identifier [field=function]  text='GetRaw'
+  argument_list [field=arguments]  text='("host")'
+    argument  text='"host"'
+      string_literal  text='"host"'
+        string_literal_content  text='host'
