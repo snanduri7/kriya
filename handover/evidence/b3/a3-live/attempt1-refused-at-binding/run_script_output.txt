@@ -1,0 +1,8 @@
+acceptance args: --acceptance /Users/sriramnanduri/kriya-m1-live/acceptance/b3-a3-java-lang/KriyaAcceptanceTest.java --acceptance-approval /Users/sriramnanduri/kriya-m1-live/acceptance/b3-a3-java-lang/approval.json
+== b3-a3-java-lang start 15:55:02 base 4ee346e59 kriya 5ab9d69f9
+analyze exit=0 seconds=284
+generate exit=1 wall_seconds=0.7
+run_id=NONE
+== b3-a3-java-lang end 15:59:48
+
+[exited with code 0]
