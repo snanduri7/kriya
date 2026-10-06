@@ -1054,7 +1054,7 @@ refused (exit 1). Kriya runs it on the final candidate with its own pytest confi
 `conftest.py`, pytest settings or installed plugins. Every case of a requirement passing closes its behaviour claim; a
 case observing the behaviour contradicted (an assertion against the candidate's result, or an exception raised by the
 candidate's code) makes the requirement VIOLATED; anything else (an import error, a case that did not run, no report)
-leaves it UNVERIFIED. Supported today: Python projects whose package or module sits at the repository root (a flat
+leaves it UNVERIFIED. Evidence counts only at the strength it shows: a requirement stated as concrete examples ("`freeze_time(0)` freezes time at the epoch") closes when its cases pass, but one stated as a rule ("accepts strings of the form +HH:MM", "raises ValueError for any other string", "returns 2 * x") never closes from a finite list of passing cases - they are recorded as supporting evidence and the requirement stays UNVERIFIED - while a single case that contradicts the rule still makes it VIOLATED. Supported today: Python projects whose package or module sits at the repository root (a flat
 layout, with or without a `tests/` package); a `src/` layout, a namespace package, or importing test code is refused
 with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come from the plan's original goal.
 

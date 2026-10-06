@@ -1,0 +1,19 @@
+"""Pre-fix reproducer (b8809cd): the preserved A2 candidate, its three passing operator cases, the C0 regression claim
+and mutation scope close REQ-1 - the live false success, replayed deterministically."""
+import sys, tempfile, pathlib
+sys.path.insert(0, "tests")
+from _b2a_fixtures import A2_ACCEPTANCE, A2_GOAL, a2_project
+from _fs1c1_a1_specimen import TARGET, TRACKED, live_c0_judgment
+from kriya.config.config import AutonomyConfig
+from kriya.tools.validate import PolymorphicValidator
+from kriya.workflow import acceptance_oracle as ao
+from kriya.workflow.obligations import ObligationLedger
+from kriya.workflow.requirements import *  # noqa
+t = pathlib.Path(tempfile.mkdtemp()); root = a2_project(t / "ws"); (t / "a.py").write_text(A2_ACCEPTANCE)
+reqs = derive_requirements(A2_GOAL); ledger = ObligationLedger(); seed_requirement_obligations(ledger, reqs)
+record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "m") for r in reqs.requirements}, revision=1, evidence_fingerprint="c", source="t")
+close_mutation_scope_requirements(ledger, reqs, tracked_paths=TRACKED, scope_evidence={"actual_paths": [TARGET], "foreign_paths": []}, source="t", revision=1)
+art = ao.load_acceptance(str(t / "a.py"), reqs, str(t / "st"))
+print(ao.close_requirements_with_acceptance(ledger, reqs, art, test_files=["tests/test_operations.py"], execute=lambda a: ao.run_acceptance(a, str(root), candidate_paths=[TARGET], validator_factory=lambda: PolymorphicValidator(str(root), autonomy_cfg=AutonomyConfig())), source="t", revision=1)[0]["reason_code"])
+close_unverified_requirements_with_named_tests(ledger, reqs, test_files=["tests/test_operations.py"], modified=[TARGET], judge=live_c0_judgment, source="t", revision=1)
+print({k: v.value for k, v in requirement_outcomes(ledger, reqs).items()}, "blocking:", [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="block", unverified_policy="block")])

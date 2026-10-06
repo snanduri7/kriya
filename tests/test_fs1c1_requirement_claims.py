@@ -37,7 +37,8 @@ from kriya.workflow.requirements import (
 PRODUCTION = {"unknown_policy": "block", "unverified_policy": "block"}
 LEGACY = "tests/test_legacy.py"
 PURE = "tests/test_legacy.py must continue to pass\n"
-COMPOUND = "Add a scale(x) function to app.py that returns 2 * x, keeping tests/test_legacy.py passing\n"
+# Enumerated behaviour (B2-COV: an EXACT statement acceptance cases can close) plus preservation.
+COMPOUND = "Add a scale(x) function to app.py so that scale(3) returns 6, keeping tests/test_legacy.py passing\n"
 
 
 def _judge(named):

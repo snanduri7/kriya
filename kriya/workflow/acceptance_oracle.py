@@ -107,6 +107,9 @@ ACCEPTANCE_FOREIGN_PLUGIN = "ACCEPTANCE_FOREIGN_PLUGIN"
 ACCEPTANCE_IDENTITY_NOT_EXECUTED = "ACCEPTANCE_IDENTITY_NOT_EXECUTED"
 ACCEPTANCE_FAILED_WITHOUT_CONTRADICTION = "ACCEPTANCE_FAILED_WITHOUT_CONTRADICTION"
 ACCEPTANCE_SUPERSEDED = "ACCEPTANCE_SUPERSEDED"
+# B2-COV: every case passed, but the statement is a general rule finite cases
+# cannot prove; the cases are recorded as supporting evidence only.
+ACCEPTANCE_GENERAL_RULE_UNPROVEN = "ACCEPTANCE_GENERAL_RULE_UNPROVEN"
 
 # The staged module's name is fixed, so every case identity is known from the
 # file alone: ``kriya_acceptance.<test>`` / ``kriya_acceptance.<Class>.<test>``.
@@ -681,8 +684,11 @@ def close_requirements_with_acceptance(
     from kriya.workflow.obligations import ObligationStatus
     from kriya.workflow.requirements import (
         BEHAVIOR,
+        BEHAVIOR_EXACT,
+        BEHAVIOR_EXAMPLES,
         REGRESSION_PRESERVATION,
         RequirementOutcome,
+        behavior_strength,
         named_existing_tests,
         record_requirement_claim,
         requirement_claim_record,
@@ -696,8 +702,8 @@ def close_requirements_with_acceptance(
     attempts: List[Dict[str, Any]] = []
     pending: List[Tuple[Any, str, Tuple[str, ...], Dict[str, Any]]] = []
 
-    def record(requirement: Any, evidence_id: str, status: Any, detail: Dict[str, Any]) -> None:
-        record_requirement_claim(ledger, requirements, requirement.id, BEHAVIOR, evidence_id=evidence_id,
+    def record(requirement: Any, evidence_id: str, status: Any, detail: Dict[str, Any], claim: str = BEHAVIOR) -> None:
+        record_requirement_claim(ledger, requirements, requirement.id, claim, evidence_id=evidence_id,
                                  method=ACCEPTANCE_METHOD, detail=detail, source=source, revision=revision,
                                  status=status)
 
@@ -752,14 +758,26 @@ def close_requirements_with_acceptance(
         judgments = judge_acceptance(acceptance, run)
         for requirement, evidence_id, claims, entry in pending:
             judgment = judgments[requirement.id]
-            status = (ObligationStatus.SATISFIED if judgment.passed
+            # B2-COV: a counterexample disproves any statement; passing cases
+            # close only an EXACT (enumerated) one.
+            strength, why = behavior_strength(requirement.text,
+                                              regression_covered=REGRESSION_PRESERVATION in claims)
+            code, reason = judgment.code, judgment.reason
+            detail = {**judgment.evidence, "required_claims": list(claims), "strength": strength,
+                      "strength_reasons": why["reasons"]}
+            if judgment.passed and strength != BEHAVIOR_EXACT:
+                code = ACCEPTANCE_GENERAL_RULE_UNPROVEN
+                reason = ("every acceptance case passed, but the statement is a general rule that finite cases "
+                          "cannot prove (" + "; ".join(why["reasons"]) + ") - recorded as supporting evidence")
+                record(requirement, evidence_id, ObligationStatus.SATISFIED,
+                       {**detail, "reason_code": judgment.code}, claim=BEHAVIOR_EXAMPLES)
+            status = (ObligationStatus.SATISFIED if code == ACCEPTANCE_PASSED
                       else ObligationStatus.VIOLATED if judgment.violated else ObligationStatus.INDETERMINATE)
-            record(requirement, evidence_id, status,
-                   {**judgment.evidence, "reason_code": judgment.code, "required_claims": list(claims)})
-            entry.update({"reason_code": judgment.code, "behavior": status.value,
+            record(requirement, evidence_id, status, {**detail, "reason_code": code})
+            entry.update({"reason_code": code, "behavior": status.value, "strength": strength,
                           "case_results": judgment.evidence.get("case_results")})
-            if judgment.reason:
-                entry["reason"] = judgment.reason
+            if reason:
+                entry["reason"] = reason
         outcomes = requirement_outcomes(ledger, requirements)
         for requirement, _, _, entry in pending:
             entry["closed"] = outcomes[requirement.id] is RequirementOutcome.CLOSED_BY_EVIDENCE

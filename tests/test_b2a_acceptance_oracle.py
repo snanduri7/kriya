@@ -573,7 +573,7 @@ def test_a_failed_rerun_never_leaves_an_earlier_pass_standing(tmp_path):
 def test_an_artifact_bound_to_another_requirement_set_closes_nothing(tmp_path):
     root = calc_project(tmp_path / "ws", True)
     artifact = _artifact(tmp_path, CALC_ACCEPTANCE, CALC_GOAL)
-    other_goal = CALC_GOAL.replace("2 * x", "x * 2")
+    other_goal = CALC_GOAL.replace("double(5) returns 10", "double(6) returns 12")
     reqs, ledger = _ledger(other_goal)
     [attempt] = _close(ledger, reqs, artifact, root)
     assert attempt["reason_code"] == ao.ACCEPTANCE_REQUIREMENT_SET_MISMATCH
@@ -589,8 +589,8 @@ def test_claims_record_only_judgments(tmp_path):
 
 # ---------------------------------------------------------------- 19: direct path
 
-WRONG_GREETING_GOAL = "Create greeting.py with a greet(name) function that returns 'Hello, <name>!'\n"
-GREETING_GOAL = "Create greeting.py with a greet(name) function that returns 'Hello, <name>'\n"
+WRONG_GREETING_GOAL = "Create greeting.py with a greet(name) function so that greet('Ann') returns 'Hello, Ann!'\n"
+GREETING_GOAL = "Create greeting.py with a greet(name) function so that greet('Ann') returns 'Hello, Ann'\n"
 GREETING_ACCEPTANCE = ("import pytest\n\nfrom greeting import greet\n\n\n"
                        "@pytest.mark.kriya_requirement(\"REQ-1\")\n"
                        "def test_greets_by_name():\n    assert greet('Ann') == EXPECTED\n")
@@ -599,6 +599,8 @@ GREETING_ACCEPTANCE = ("import pytest\n\nfrom greeting import greet\n\n\n"
 @pytest.mark.parametrize("goal, expected, outcome", [
     (WRONG_GREETING_GOAL, "Hello, Ann!", "violated"),
     (GREETING_GOAL, "Hello, Ann", "closed_by_evidence"),
+    # B2-COV: a general rule ("<name>") - the passing case only supports it, never applied
+    ("Create greeting.py with a greet(name) function that returns 'Hello, <name>'\n", "Hello, Ann", "unverified"),
 ])
 @pytest.mark.asyncio
 async def test_direct_path_the_acceptance_file_decides_the_behaviour_requirement(tmp_path, goal, expected, outcome):
@@ -619,7 +621,8 @@ async def test_direct_path_the_acceptance_file_decides_the_behaviour_requirement
     assert (workspace / "greeting.py").exists() is succeeded  # never applied without success
     [closure] = [c for e in _events(cfg, "requirement.closure") for c in e["closures"]
                  if c.get("kind") == ao.ACCEPTANCE_METHOD][-1:]
-    assert closure["reason_code"] == (ao.ACCEPTANCE_PASSED if succeeded else ao.ACCEPTANCE_VIOLATED)
+    assert closure["reason_code"] == {"closed_by_evidence": ao.ACCEPTANCE_PASSED, "violated": ao.ACCEPTANCE_VIOLATED,
+                                      "unverified": ao.ACCEPTANCE_GENERAL_RULE_UNPROVEN}[outcome]
 
 
 # ---------------------------------------------------------------- 20: enforce path
@@ -716,11 +719,14 @@ def test_milestone_path_the_integration_unit_judges_the_plans_acceptance_file(tm
     cfg, result = _run(tmp_path, monkeypatch, Transport(), requirement_unverified_policy="record")
     closures = {c["requirement"]: c for e in _events(cfg, "requirement.closure") for c in e["closures"]
                 if c.get("kind") == ao.ACCEPTANCE_METHOD}
-    assert closures["REQ-3"]["reason_code"] == ao.ACCEPTANCE_PASSED, result.output
-    assert closures["REQ-2"]["reason_code"] == (ao.ACCEPTANCE_PASSED if correct else ao.ACCEPTANCE_VIOLATED)
+    # "m1.py defines VALUE" states no concrete case: GENERAL (B2-COV). Passing
+    # cases only support it; a contradicting case still disproves it.
+    assert closures["REQ-3"]["reason_code"] == ao.ACCEPTANCE_GENERAL_RULE_UNPROVEN, result.output
+    assert closures["REQ-2"]["reason_code"] == (ao.ACCEPTANCE_GENERAL_RULE_UNPROVEN if correct
+                                                else ao.ACCEPTANCE_VIOLATED)
     assert "REQ-1" not in closures  # "Build a two-module project.": no acceptance case
-    assert closures["REQ-3"]["closed"] is True
-    assert (closures["REQ-2"]["closed"], closures["REQ-2"]["violated"]) == (correct, not correct)
+    assert closures["REQ-3"]["closed"] is False
+    assert (closures["REQ-2"]["closed"], closures["REQ-2"]["violated"]) == (False, not correct)
     assert (result.exit_code == 0) is correct, result.output  # VIOLATED blocks under any policy
 
 

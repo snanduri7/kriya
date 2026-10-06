@@ -1,0 +1,7 @@
+b8809cd (pre-fix):
+ACCEPTANCE_PASSED
+{"REQ-1": "closed_by_evidence", "REQ-2": "closed_by_evidence"} blocking: []
+
+B2-COV working tree:
+ACCEPTANCE_GENERAL_RULE_UNPROVEN
+{"REQ-1": "unverified", "REQ-2": "closed_by_evidence"} blocking: ["REQ-1"]

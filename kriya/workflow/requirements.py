@@ -477,6 +477,83 @@ def requirement_claims(text: str, named_tests: Iterable[str]) -> Tuple[str, ...]
             + ((REGRESSION_PRESERVATION,) if named else ()))
 
 
+# ------------------------------------------------------------ claim strength (B2-COV)
+#
+# Evidence closes a claim only at the strength it demonstrates. A trusted
+# counterexample disproves a general rule; finite passing examples never prove
+# one. So a BEHAVIOR statement is EXACT (enumerated: every observable
+# expectation is a stated concrete case, e.g. "`f(0)` returns X") or GENERAL (a
+# rule over a domain: "of the form", "any other string", "returns 2 * x").
+# Deterministic, from the user's words only; anything uncertain is GENERAL.
+# Acceptance cases (finite examples) close only an EXACT statement; for a
+# GENERAL one they are supporting evidence (BEHAVIOR_EXAMPLES) and the claim
+# stays open - only a counterexample (VIOLATED) is decisive. Another authority
+# for a general rule (B3: a human approving a suite as sufficient) is separate.
+
+BEHAVIOR_EXACT = "EXACT"
+BEHAVIOR_GENERAL = "GENERAL"
+# Supporting evidence for a GENERAL statement: the operator's cases passed. Never
+# a closure claim (``_effective_closure`` never requires or accepts it).
+BEHAVIOR_EXAMPLES = "BEHAVIOR_EXAMPLES"
+# Producers whose positive evidence is a finite set of cases.
+FINITE_EVIDENCE_METHODS = frozenset({"acceptance_oracle"})
+
+_UNIVERSAL_WORDS = frozenset({
+    "any", "anything", "every", "everything", "all", "each", "only", "never", "always", "whatever", "whichever",
+    "arbitrary", "regardless", "otherwise", "none", "nothing",
+})
+_UNIVERSAL_PHRASES = ("of the form", "no other", "for any", "for all", "for every", "in any", "in all",
+                      "match", "pattern", "range", "between", "at least", "at most", "up to")
+_PRESERVATION_MARKER = re.compile(
+    r"\b(?:as before|unchanged|keeps? working|keeps? passing|keeping\b.*\bpassing|continues? to (?:work|pass)"
+    r"|still (?:works?|passes|pass)|stays? the same|remains? the same)\b")
+_CODE_SPAN = re.compile(r"`[^`]*`|\"[^\"]*\"|'[^']*'")
+_LITERAL = r"(?:-?\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\"|None|True|False)"
+_EXAMPLE_CALL = re.compile(r"[A-Za-z_][\w.]*\(\s*" + _LITERAL + r"(?:\s*,\s*" + _LITERAL + r")*\s*\)")
+_EMPTY_CALL_EXAMPLE = re.compile(r"`[A-Za-z_][\w.]*\(\s*\)`")
+_SIGNATURE = re.compile(r"\b[A-Za-z_]\w*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)")
+_PLACEHOLDER = re.compile(r"<[^<>\s]+>")
+_CLAUSE_SPLIT = re.compile(r"[,;:()]|\bwhile\b")
+
+
+def behavior_strength(text: str, *, regression_covered: bool) -> Tuple[str, Dict[str, Any]]:
+    """EXACT or GENERAL for a requirement's BEHAVIOR claim, with why.
+
+    GENERAL when any behaviour clause carries a universal quantifier or domain
+    phrase, a ``<placeholder>``, or a declared parameter used as a formula
+    ("double(x) returns 2 * x"); when the statement states no concrete example
+    call; or when it has a preservation clause ("keeps working as before") that
+    no named regression oracle covers (``regression_covered``). Preservation
+    clauses covered by the regression claim are that claim's, not behaviour's.
+    Quoted text and code spans are content, never quantifiers."""
+    raw = text or ""
+    reasons: List[str] = []
+    parameters = {name.strip() for match in _SIGNATURE.finditer(raw) for name in match.group(1).split(",")}
+    parameters -= {"None", "True", "False"}
+    # Example calls, signatures and quoted/code text are content, never prose.
+    prose = _CODE_SPAN.sub(" CODE ", _SIGNATURE.sub(" CODE ", _EXAMPLE_CALL.sub(" CODE ", raw)))
+    for clause in _CLAUSE_SPLIT.split(prose):
+        lowered = clause.lower()
+        words = set(re.findall(r"[a-z]+", lowered))
+        if _PRESERVATION_MARKER.search(lowered):
+            if not regression_covered:
+                reasons.append(f"preservation without a regression oracle: {clause.strip()!r}")
+            continue
+        cues = sorted(words & _UNIVERSAL_WORDS) + [p for p in _UNIVERSAL_PHRASES if re.search(rf"\b{p}", lowered)]
+        if cues:
+            reasons.append(f"general rule ({', '.join(cues)}): {clause.strip()!r}")
+        formula = sorted(name for name in parameters if re.search(rf"(?<![\w(]){re.escape(name)}(?![\w(])", clause))
+        if formula:
+            reasons.append(f"formula over parameter(s) {', '.join(formula)}: {clause.strip()!r}")
+    if _PLACEHOLDER.search(raw):
+        reasons.append("placeholder pattern: " + ", ".join(sorted(set(_PLACEHOLDER.findall(raw)))))
+    examples = sorted(set(_EXAMPLE_CALL.findall(raw)) | set(m.strip("`") for m in _EMPTY_CALL_EXAMPLE.findall(raw)))
+    if not examples:
+        reasons.append("no concrete example case is stated")
+    strength = BEHAVIOR_GENERAL if reasons else BEHAVIOR_EXACT
+    return strength, {"strength": strength, "reasons": reasons, "examples": examples}
+
+
 def requirement_claim_id(requirement_id: str, claim: str) -> str:
     """The obligation id one claim's evidence is recorded under (never the
     verdict's or the whole requirement's closure id)."""
@@ -500,7 +577,8 @@ def record_requirement_claim(
     counter-evidence, INDETERMINATE closes nothing). Only the producer kinds
     allowed for that claim may record it: a regression oracle can never judge
     BEHAVIOR. The latest record for a candidate is its judgment."""
-    allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS}
+    allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
+               BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS}
     if method not in allowed.get(claim, frozenset()):
         raise ValueError(f"method {method!r} cannot close a {claim} claim")
     if status not in _CLAIM_STATUSES:
@@ -569,15 +647,30 @@ def _effective_closure(
     if (closure is not None and closure.get("method") in NAMED_TEST_CLOSURE_METHODS
             and BEHAVIOR in requirement_claims(requirement.text, closure.get("tests") or ())):
         closure = None
+    if (closure is not None and closure.get("method") in FINITE_EVIDENCE_METHODS
+            and not _finite_evidence_may_close(requirement, tuple(closure.get("required_claims") or ()))):
+        closure = None
     if closure is not None:
         return closure
     claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
               for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
     behavior = claims[BEHAVIOR]
     required = tuple((behavior or {}).get("required_claims") or (BEHAVIOR, REGRESSION_PRESERVATION))
+    if (behavior is not None and behavior.get("method") in FINITE_EVIDENCE_METHODS
+            and not _finite_evidence_may_close(requirement, required)):
+        return None  # B2-COV: finite cases never close a general rule, whatever a record says
     if BEHAVIOR in required and all(claims.get(claim) for claim in required):
         return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
+
+
+def _finite_evidence_may_close(requirement: Requirement, required: Sequence[str]) -> bool:
+    """B2-COV, decided again at read time from the user's words (a resumed or
+    pre-B2-COV record cannot carry a broader closure than they allow): finite
+    cases close only an EXACT statement. A preservation clause counts as
+    covered only when the closure also requires the regression claim."""
+    covered = REGRESSION_PRESERVATION in required
+    return behavior_strength(requirement.text, regression_covered=covered)[0] == BEHAVIOR_EXACT
 
 
 def record_requirement_closure(
@@ -683,7 +776,7 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
             # FS-1C1: an open requirement whose claims are partly proven shows
             # which (e.g. regression preserved, behaviour unverified).
             claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
-                      for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
+                      for claim in (BEHAVIOR, BEHAVIOR_EXAMPLES, REGRESSION_PRESERVATION)}
             if any(claims.values()):
                 evidence = {"method": "claims", "closed": False, "claims": claims}
         if evidence is not None:

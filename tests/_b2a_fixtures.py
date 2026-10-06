@@ -75,7 +75,8 @@ def freezegun_project(root: Path, variant: str) -> Path:
 
 
 # A small flat package for the generic cases.
-CALC_GOAL = "Add a double(x) function to calc/__init__.py that returns 2 * x.\n"
+# Enumerated (B2-COV EXACT): the acceptance case is exactly the stated example.
+CALC_GOAL = "Add a double(x) function to calc/__init__.py so that double(5) returns 10.\n"
 CALC = {True: "def double(x):\n    return 2 * x\n", False: "def double(x):\n    return x + 2\n"}
 CALC_ACCEPTANCE = (
     "import pytest\n\nfrom calc import double\n\n\n"
@@ -87,3 +88,25 @@ CALC_ACCEPTANCE = (
 
 def calc_project(root: Path, correct: bool, extra: dict = None) -> Path:
     return write_files(root, {"calc/__init__.py": CALC[correct], **(extra or {})})
+
+
+# A2 (post-B2-a live run 20261006T114958-a24c9436): the goal, the operator acceptance file
+# (sha256 a945ee26...) and the applied candidate (live workspace api.py sha256 b41e90a5...).
+A2_GOAL = (FIXTURES / "a2_goal.txt").read_text()
+A2_ACCEPTANCE = (FIXTURES / "a2_acceptance.py.txt").read_text()
+A2_LIVE_CANDIDATE_DIGEST = "b41e90a59a91d6a84876e39c690f1e74ef298372a500948ce4cde93b682528db"
+
+
+def a2_live_api() -> str:
+    import json
+
+    replace = json.loads((FIXTURES / "a2_live_candidate.replace.json").read_text())
+    source = freezegun_api("base")
+    assert source.count(replace["old"]) == 1
+    return source.replace(replace["old"], replace["new"])
+
+
+def a2_project(root: Path) -> Path:
+    freezegun_project(root, "base")
+    (root / "freezegun" / "api.py").write_text(a2_live_api())
+    return root
