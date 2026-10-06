@@ -2599,35 +2599,48 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--from-milestones', type=click.Path(exists=True), default=None, help="Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.")
 @click.option('--acceptance', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.")
 @click.option('--acceptance-approval', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator approval (JSON, outside the workspace) that the --acceptance suite is SUFFICIENT evidence for named GENERAL requirements - human authority, not a proof (B3). Every binding (goal, requirement text, acceptance digest, cases, runner contract, base revision) must match.")
+@click.option('--requirements', 'requirements_file', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                        resume, resume_id, json_output, from_milestones, output, acceptance=acceptance,
-                       acceptance_approval=acceptance_approval)
+                       acceptance_approval=acceptance_approval, requirements_file=requirements_file)
 
 
-def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str) -> Any:
+def _bind_requirement_contract(cfg: AppConfig, contract_path: str, requirement_goal: str) -> Any:
+    """GR-R1A: reads, validates and stores the operator's explicit requirement
+    contract before any model call, bound to ``requirement_goal``. Raises
+    RequirementContractError."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.requirement_contract import load_requirement_contract
+
+    return load_requirement_contract(contract_path, requirement_goal, state_root=resolve_state_directory(cfg)[0],
+                                     workspace=os.getcwd())
+
+
+def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str, contract: Any = None) -> Any:
     """FS-1C2 B2-a: reads, validates and stores the operator's acceptance file
     before any model call, bound to the requirements derived from
     ``requirement_goal`` (the goal the run verifies: the direct goal, or a
     milestone plan's original goal). Raises AcceptanceError on refusal."""
     from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.acceptance_oracle import load_acceptance
-    from kriya.workflow.requirements import derive_requirements
+    from kriya.workflow.requirement_contract import requirement_set_for
 
-    return load_acceptance(acceptance_path, derive_requirements(requirement_goal),
+    return load_acceptance(acceptance_path, requirement_set_for(requirement_goal, contract),
                            resolve_state_directory(cfg)[0])
 
 
-def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, acceptance: Any) -> Any:
+def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, acceptance: Any,
+                   contract: Any = None) -> Any:
     """FS-1C2 B3: reads, validates and stores the operator's approval before
     any model call, bound to this goal's requirements, the bound acceptance
     artifact and the workspace's base revision. Raises AcceptanceError."""
     from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.acceptance_approval import load_approval
-    from kriya.workflow.requirements import derive_requirements
+    from kriya.workflow.requirement_contract import requirement_set_for
     from kriya.workflow.worktree import git_read_lines
 
     workspace = os.getcwd()
@@ -2635,13 +2648,13 @@ def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, ac
         base_revision = git_read_lines(workspace, "rev-parse", "HEAD")[0]
     except Exception:  # no repository: no base to bind; load_approval refuses
         base_revision = None
-    return load_approval(approval_path, derive_requirements(requirement_goal), acceptance,
+    return load_approval(approval_path, requirement_set_for(requirement_goal, contract), acceptance,
                          state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=base_revision)
 
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
-                   acceptance_approval=None):
+                   acceptance_approval=None, requirements_file=None):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -2664,6 +2677,30 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
 
     acceptance_artifact = None
     approval_artifact = None
+    contract_artifact = None
+    requirement_goal = goal
+    if from_milestones and (acceptance or requirements_file):
+        try:
+            with open(from_milestones, "r", encoding="utf-8") as fh:
+                requirement_goal = json.load(fh)["original_goal"]
+        except (OSError, ValueError, KeyError) as e:
+            click.secho(f"[Milestone plan refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+    if requirements_file:
+        # GR-R1A: the operator's closed requirement set, bound before any model
+        # call and before the acceptance file (whose ids must resolve in it).
+        from kriya.workflow.requirement_contract import RequirementContractError
+        try:
+            contract_artifact = _bind_requirement_contract(cfg, requirements_file, requirement_goal or "")
+        except RequirementContractError as e:
+            click.secho(f"[Requirement contract refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        click.secho(f"Requirement contract bound: {contract_artifact.source_name} sha256 "
+                    f"{contract_artifact.digest[:12]} ({len(contract_artifact.requirement_set.requirements)} "
+                    f"requirement(s), closed set: {', '.join(contract_artifact.requirement_set.ids)})",
+                    dim=True, err=True)
     if acceptance_approval and not acceptance:
         click.secho("[Acceptance approval refused] --acceptance-approval needs the --acceptance suite it approves",
                     bold=True, fg="red")
@@ -2672,14 +2709,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     if acceptance:
         from kriya.workflow.acceptance_oracle import AcceptanceError
         try:
-            if from_milestones:
-                with open(from_milestones, "r", encoding="utf-8") as fh:
-                    requirement_goal = json.load(fh)["original_goal"]
-            else:
-                requirement_goal = goal
-            acceptance_artifact = _bind_acceptance(cfg, acceptance, requirement_goal)
+            acceptance_artifact = _bind_acceptance(cfg, acceptance, requirement_goal, contract_artifact)
             if acceptance_approval:
-                approval_artifact = _bind_approval(cfg, acceptance_approval, requirement_goal, acceptance_artifact)
+                approval_artifact = _bind_approval(cfg, acceptance_approval, requirement_goal, acceptance_artifact,
+                                                   contract_artifact)
         except (AcceptanceError, OSError, ValueError, KeyError) as e:
             click.secho(f"[Acceptance file refused] {e}", bold=True, fg="red")
             output.fail(str(e))
@@ -2693,6 +2726,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     we = WorkflowEngine(kernel, llm)
     we.acceptance = acceptance_artifact
     we.acceptance_approval = approval_artifact
+    we.requirement_contract = contract_artifact
     if approval_artifact is not None:
         click.secho(f"Acceptance approval bound: {approval_artifact.source_name} sha256 {approval_artifact.digest[:12]} "
                     f"(human acceptance authority for {', '.join(sorted(approval_artifact.entries))}; not a proof)",

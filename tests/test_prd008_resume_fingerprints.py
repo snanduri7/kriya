@@ -771,9 +771,11 @@ def test_an_unset_completion_scope_leaves_the_control_state_hash_unchanged():
 
     state = ControlState(schema_version=CURRENT_SCHEMA_VERSION, run_id="r", subtask_states={"s1": "completed"})
     pre_prd008 = state.to_dict()
-    # Both optional fields added later (PRD-008 scope, FS-1C2 B3 approval
-    # digest) are absent from the earlier form when unset.
-    for key in ("created_at", "updated_at", "subtask_completion_scope", "acceptance_approval_digest"):
+    # The optional fields added later (PRD-008 scope, FS-1C2 B3 approval
+    # digest, GR-R1A requirement contract digest) are absent from the earlier
+    # form when unset.
+    for key in ("created_at", "updated_at", "subtask_completion_scope", "acceptance_approval_digest",
+                "requirement_contract_digest"):
         pre_prd008.pop(key)
     expected = hashlib.sha256(json.dumps(pre_prd008, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     assert state.content_hash() == expected
@@ -781,6 +783,7 @@ def test_an_unset_completion_scope_leaves_the_control_state_hash_unchanged():
     assert expected == "d5209ad7399c8c50428c4a36d22e43452fc23039119d4826c1c7e187b8822614"
     assert state.with_updates(subtask_completion_scope="workspace").content_hash() != expected
     assert state.with_updates(acceptance_approval_digest="a" * 64).content_hash() != expected
+    assert state.with_updates(requirement_contract_digest="a" * 64).content_hash() != expected
 
 
 def test_a_skill_change_reopens_the_knowledge_gate_so_nothing_is_reused():

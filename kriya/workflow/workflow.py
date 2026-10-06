@@ -249,11 +249,11 @@ from kriya.workflow.planner_repair import (
     planner_response_model,
     record_planner_outcome,
 )
+from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     blocking_requirements,
     cited_requirement_ids,
-    derive_requirements,
     requirement_evidence,
     requirement_lineage,
     requirement_outcomes,
@@ -1345,6 +1345,9 @@ class WorkflowEngine:
         # FS-1C2 B3: the operator's approval of that suite for GENERAL
         # requirements (`--acceptance-approval`), bound at the same time.
         self.acceptance_approval: Any = None
+        # GR-R1A: the operator's explicit requirement contract, bound by the CLI
+        # before any model call (kriya/workflow/requirement_contract.py).
+        self.requirement_contract: Any = None
         # PRD-024: the last applied candidate's terminal full-suite result
         # (full_suite_evidence_for_reuse), offered to the next run as its
         # baseline; reused only if it describes that run's exact start.
@@ -2023,7 +2026,10 @@ class WorkflowEngine:
         # not the user's statements - there is nothing to fix as a
         # requirement.
         requirement_goal = getattr(work_unit, "requirement_goal", None) if requirements_from_goal else None
-        requirement_set = derive_requirements(requirement_goal) if requirement_goal else None
+        # GR-R1A: the operator's explicit, closed requirement contract when one
+        # is bound (never merged with requirements derived from the goal).
+        requirement_set = (requirement_set_for(requirement_goal, bound_requirement_contract(self))
+                           if requirement_goal else None)
         if requirement_set is not None:
             state.record_event(RunEvent(
                 kind="requirement.derived", attempt=0, source="workflow.run_generation_workflow",
@@ -2099,6 +2105,7 @@ class WorkflowEngine:
                 strict_dependency_index=strict_dependency_index,
                 acceptance_digest=getattr(bound_acceptance(self), "digest", None),
                 approval_digest=getattr(bound_approval(self), "digest", None),
+                requirement_contract_digest=getattr(bound_requirement_contract(self), "digest", None),
             )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)

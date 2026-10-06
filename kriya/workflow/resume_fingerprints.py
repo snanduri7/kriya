@@ -811,6 +811,7 @@ def generation_resume_fingerprints(
     candidate_files: Optional[Mapping[str, str]] = None,
     acceptance_digest: Optional[str] = None,
     approval_digest: Optional[str] = None,
+    requirement_contract_digest: Optional[str] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -822,7 +823,11 @@ def generation_resume_fingerprints(
     (B3: the operator's human approval of that suite) is authority, not
     evidence: it joins the goal inputs (planning and the candidate depend on
     them), so an approval added or changed after a candidate was generated
-    never reaches that candidate - the resumed run regenerates it."""
+    never reaches that candidate - the resumed run regenerates it.
+    ``requirement_contract_digest`` (GR-R1A: the operator's explicit
+    requirement contract) is authority the same way: it joins the goal
+    inputs only when there is one, so a changed contract - or a contract
+    added to or removed from a run - never reuses a candidate."""
     verification_inputs: Dict[str, Any] = {
         "required_verification": required_verification,
         "runtime_verification_required": runtime_verification_required,
@@ -845,6 +850,8 @@ def generation_resume_fingerprints(
         config_dump=config.model_dump(),
         goal_inputs={
             **({"acceptance_approval_digest": approval_digest} if approval_digest is not None else {}),
+            **({"requirement_contract_digest": requirement_contract_digest}
+               if requirement_contract_digest is not None else {}),
             "goal": goal,
             "error_context": error_context or "",
             "supplementary_context": supplementary_context,

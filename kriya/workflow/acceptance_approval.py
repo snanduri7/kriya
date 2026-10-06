@@ -40,6 +40,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 APPROVAL_FORMAT = "kriya.acceptance_approval/1"
+# GR-R1A: /2 adds requirement_set_sha256, the authoritative requirement set's
+# digest. Required for a run bound to an explicit requirement contract (an
+# approval made against another set - including the one derived from the
+# goal - never applies to it); /1 stays valid for derived requirement sets.
+APPROVAL_FORMAT_V2 = "kriya.acceptance_approval/2"
 HUMAN_ACCEPTANCE_METHOD = "human_bound_acceptance"
 ACCEPTANCE_HUMAN_ACCEPTED = "ACCEPTANCE_HUMAN_ACCEPTED"
 ACCEPTANCE_APPROVAL_INVALID = "ACCEPTANCE_APPROVAL_INVALID"
@@ -47,6 +52,7 @@ ACCEPTANCE_APPROVAL_MISMATCH = "ACCEPTANCE_APPROVAL_MISMATCH"
 
 _FIELDS = ("requirement_id", "requirement_text_sha256", "goal_sha256", "acceptance_sha256", "expected_cases",
            "runner_contract_sha256", "base_revision", "accept_suite_as_sufficient")
+_FIELDS_V2 = _FIELDS + ("requirement_set_sha256",)
 _REQ_ID = re.compile(r"^REQ-C?\d+$")
 
 
@@ -59,12 +65,15 @@ class ApprovalEntry:
     expected_cases: Tuple[str, ...]
     runner_contract_sha256: str
     base_revision: str
+    requirement_set_sha256: Optional[str] = None  # GR-R1A, format /2
 
     def to_dict(self) -> Dict[str, Any]:
         return {"requirement_id": self.requirement_id, "requirement_text_sha256": self.requirement_text_sha256,
                 "goal_sha256": self.goal_sha256, "acceptance_sha256": self.acceptance_sha256,
                 "expected_cases": list(self.expected_cases), "runner_contract_sha256": self.runner_contract_sha256,
-                "base_revision": self.base_revision, "accept_suite_as_sufficient": True}
+                "base_revision": self.base_revision, "accept_suite_as_sufficient": True,
+                **({"requirement_set_sha256": self.requirement_set_sha256}
+                   if self.requirement_set_sha256 is not None else {})}
 
 
 @dataclass(frozen=True)
@@ -118,16 +127,22 @@ def load_approval(
         document = json.loads(data.decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as error:
         raise _refuse(f"unreadable approval file: {error}") from error
-    if not isinstance(document, dict) or document.get("format") != APPROVAL_FORMAT or set(document) != {
-            "format", "approvals"} or not isinstance(document.get("approvals"), list) or not document["approvals"]:
-        raise _refuse(f"expected {{'format': '{APPROVAL_FORMAT}', 'approvals': [...]}} with at least one approval")
+    if not isinstance(document, dict) or document.get("format") not in (APPROVAL_FORMAT, APPROVAL_FORMAT_V2) or set(
+            document) != {"format", "approvals"} or not isinstance(document.get("approvals"), list) or not document[
+            "approvals"]:
+        raise _refuse(f"expected {{'format': '{APPROVAL_FORMAT_V2}', 'approvals': [...]}} with at least one "
+                      "approval")
+    fields = _FIELDS_V2 if document["format"] == APPROVAL_FORMAT_V2 else _FIELDS
+    if getattr(requirements, "contract_digest", None) is not None and fields is not _FIELDS_V2:
+        raise _refuse(f"an explicit requirement contract needs an approval in {APPROVAL_FORMAT_V2}, bound to its "
+                      "requirement set (requirement_set_sha256)")
     if not base_revision:
         raise _refuse("the workspace has no base revision to bind the approval to")
     entries: Dict[str, ApprovalEntry] = {}
     runner = runner_contract_digest(acceptance)
     for raw in document["approvals"]:
-        if not isinstance(raw, dict) or set(raw) != set(_FIELDS):
-            raise _refuse("each approval has exactly these fields: " + ", ".join(_FIELDS))
+        if not isinstance(raw, dict) or set(raw) != set(fields):
+            raise _refuse("each approval has exactly these fields: " + ", ".join(fields))
         rid = raw["requirement_id"]
         if not isinstance(rid, str) or not _REQ_ID.match(rid):
             raise _refuse(f"requirement_id must be one REQ id, never a pattern: {rid!r}")
@@ -144,7 +159,8 @@ def load_approval(
         if not isinstance(cases, list) or not all(isinstance(case, str) for case in cases):
             raise _refuse(f"{rid}: expected_cases must be a list of case identities")
         entry = ApprovalEntry(rid, raw["requirement_text_sha256"], raw["goal_sha256"], raw["acceptance_sha256"],
-                              tuple(sorted(cases)), raw["runner_contract_sha256"], raw["base_revision"])
+                              tuple(sorted(cases)), raw["runner_contract_sha256"], raw["base_revision"],
+                              raw.get("requirement_set_sha256"))
         mismatch = _entry_mismatch(entry, requirement, requirements, acceptance, runner, base_revision)
         if mismatch:
             raise _refuse(f"{rid}: {mismatch}")
@@ -173,6 +189,11 @@ def _entry_mismatch(
          "the approved cases are not exactly the acceptance cases for this requirement"),
         (entry.runner_contract_sha256 == runner, "the acceptance runner contract differs"),
         (bool(base_revision) and entry.base_revision == base_revision, "the base revision differs"),
+        # GR-R1A: an approval bound to a requirement set binds exactly that one;
+        # an explicit contract's set accepts no approval without the binding.
+        (entry.requirement_set_sha256 == requirements.digest if entry.requirement_set_sha256 is not None
+         else getattr(requirements, "contract_digest", None) is None,
+         "the approval is bound to another requirement set"),
     )
     problems = [message for ok, message in checks if not ok]
     return "; ".join(problems) if problems else None
@@ -202,11 +223,13 @@ def approval_template(requirements: Any, acceptance: Any, requirement_ids: List[
     """An UNAPPROVED approval document for the operator to review: every
     binding filled in, ``accept_suite_as_sufficient`` false - only the
     operator flips it."""
+    explicit = getattr(requirements, "contract_digest", None) is not None
     entries = []
     for rid in requirement_ids:
         requirement = requirements.get(rid)
         entries.append({**ApprovalEntry(rid, text_sha256(requirement.text), requirements.goal_digest,
                                         acceptance.digest, tuple(sorted(acceptance.identities_for(rid))),
-                                        runner_contract_digest(acceptance), base_revision).to_dict(),
+                                        runner_contract_digest(acceptance), base_revision,
+                                        requirements.digest if explicit else None).to_dict(),
                         "accept_suite_as_sufficient": False})
-    return {"format": APPROVAL_FORMAT, "approvals": entries}
+    return {"format": APPROVAL_FORMAT_V2 if explicit else APPROVAL_FORMAT, "approvals": entries}

@@ -230,9 +230,9 @@ from kriya.workflow.recovery_plan import (
     RecoveryParticipant,
     RecoveryParticipantRole,
 )
+from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
     blocking_requirements,
-    derive_requirements,
     requirement_evidence,
     requirement_outcomes,
     requirement_verdict_details,
@@ -4336,7 +4336,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         localization_block = render_localization_candidates(localization)
         if localization_block:
             authoritative_planner_request += "\n" + localization_block
-        requirement_set = derive_requirements(goal)
+        # GR-R1A: the operator's explicit, closed requirement contract when one
+        # is bound; else the requirements derived from the goal.
+        requirement_set = requirement_set_for(goal, bound_requirement_contract(self.workflow_engine))
         authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
             "Never drop, merge or reword a requirement: one no subtask serves stays open."
@@ -4933,7 +4935,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "reason": None,
             }
             current_approval_digest = getattr(bound_approval(self.workflow_engine), "digest", None)
-            if prior_control_state.acceptance_approval_digest != current_approval_digest:
+            current_contract_digest = getattr(bound_requirement_contract(self.workflow_engine), "digest", None)
+            if prior_control_state.requirement_contract_digest != current_contract_digest:
+                # GR-R1A: subtasks recorded under another (or no) explicit
+                # requirement contract are never reused under this one.
+                enforce_resume_decision["reason"] = "REQUIREMENT_CONTRACT_CHANGED"
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the requirement "
+                    "contract differs from the one the recorded subtasks ran under. Starting the plan fresh."
+                )
+            elif prior_control_state.acceptance_approval_digest != current_approval_digest:
                 # B3: human acceptance authority is bound before generation; a
                 # candidate produced under another (or no) approval is never
                 # reused under this one - the plan runs fresh.
@@ -5083,6 +5094,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # "candidate" once a separate plan sandbox is created below.
             subtask_completion_scope="workspace" if resumed_subtask_states else None,
             acceptance_approval_digest=getattr(bound_approval(self.workflow_engine), "digest", None),
+            requirement_contract_digest=getattr(bound_requirement_contract(self.workflow_engine), "digest", None),
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
             workspace_content_hash=compute_workspace_content_hash(workspace_path),

@@ -1060,6 +1060,16 @@ with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come fro
 
 For a Maven project with JUnit 5, the acceptance file can be one Java test class instead (`--acceptance KriyaAcceptanceTest.java`): one `package`, one class, and every `@Test` method preceded by a `// kriya_requirement: REQ-1` comment. Kriya runs it in a private copy of the candidate (never in your workspace), only when the candidate left the build and test configuration (poms, `.mvn`, `src/test`, ...) exactly as it was, and never overwrites an existing file at `src/test/java/<package>/<Class>.java`. Gradle projects are not supported yet.
 
+When the goal is written as an issue report (headings, a reproducer, version notes, a description of the current bug), every sentence of it would otherwise become a requirement the run must close. Name the requirements yourself instead with a requirement contract kept outside the repository (`--requirements requirements.json`):
+
+```json
+{"format": "kriya.requirements/1",
+ "requirements": [{"id": "REQ-1", "text": "double(5) returns 10.", "kind": "requirement"},
+                  {"id": "REQ-2", "text": "double(x) returns 2 * x for any number x.", "kind": "requirement"}]}
+```
+
+The contract is the complete set: nothing derived from the goal is added. The goal is still what the agents read and plan from. `kind` is `requirement` or `constraint`; an empty set, a duplicate id or another kind is refused before any model call. Acceptance files and approvals must name these ids; an approval for a contract run uses format `kriya.acceptance_approval/2` with the contract's `requirement_set_sha256`, so an approval made for another requirement set never applies. Changing the contract (or the goal it was bound to) on a resumed run regenerates the candidate.
+
 A requirement stated as a general rule cannot be closed by any finite list of passing cases. If you decide that a specific acceptance suite is good enough evidence for such a requirement, say so explicitly with an approval file kept outside the repository (`--acceptance-approval approval.json`). Each approval names one requirement and binds the goal, that requirement's exact text, the acceptance file's digest, its exact cases, the runner contract and the starting revision, with `"accept_suite_as_sufficient": true`; any mismatch refuses it. The requirement is then reported `human_accepted` - your decision, recorded as such, not a proof. A failing case still makes it VIOLATED, and changing or dropping the approval on a resumed run regenerates the candidate.
 
 #### Resuming an interrupted run

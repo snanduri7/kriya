@@ -187,12 +187,17 @@ class RequirementSet:
     goal_digest: str
     version: int
     requirements: Tuple[Requirement, ...]
+    # GR-R1A: the digest of the operator's explicit requirement contract this
+    # closed set came from (kriya/workflow/requirement_contract.py); None for
+    # a set derived from the goal, whose digest stays byte-identical.
+    contract_digest: Optional[str] = None
 
     @property
     def digest(self) -> str:
         payload = json.dumps(
             {"version": self.version, "goal_digest": self.goal_digest,
-             "requirements": [asdict(r) for r in self.requirements]},
+             "requirements": [asdict(r) for r in self.requirements],
+             **({"contract_digest": self.contract_digest} if self.contract_digest is not None else {})},
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -208,11 +213,19 @@ class RequirementSet:
         return {
             "version": self.version, "goal_digest": self.goal_digest, "digest": self.digest,
             "requirements": [asdict(r) for r in self.requirements],
+            **({"contract_digest": self.contract_digest} if self.contract_digest is not None else {}),
         }
 
 
 def _goal_digest(goal: str) -> str:
     return hashlib.sha256(goal.encode("utf-8")).hexdigest()
+
+
+def goal_identity(goal: str) -> str:
+    """The goal digest a requirement set derived from ``goal`` (with no
+    clarifications) carries - the identity an explicit requirement contract
+    binds (GR-R1A)."""
+    return _goal_digest(goal + "\x00")
 
 
 def _clean(text: str) -> str:
