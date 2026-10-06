@@ -1,0 +1,1 @@
+Add a method `selector_count(self)` to the `cssselect2.Matcher` class in cssselect2/__init__.py that returns the number of selectors added with `add_selector` so far, including selectors that can never match, and add tests for it in a new file tests/test_selector_count.py.

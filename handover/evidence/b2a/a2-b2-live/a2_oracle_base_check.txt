@@ -1,0 +1,3 @@
+'+05:30' -> TypeError unsupported type for timedelta hours component: str
+'-02:00' -> TypeError unsupported type for timedelta hours component: str
+'abc' -> TypeError unsupported type for timedelta hours component: str
