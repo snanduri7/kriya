@@ -454,6 +454,11 @@ class GenerationState:
     edit_capability_sent: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     edit_anchor_loci: Dict[str, List[int]] = field(default_factory=dict)
     edit_failure_capability: Dict[str, Tuple[str, str, Any]] = field(default_factory=dict)
+    # GR-R0 (RETRY-NO-INFORMATION-GAIN): every (path, capability digest, (model,
+    # requested operation)) already refused as ANCHOR_CONTEXT_NOT_ESCALATED. The
+    # same key refused again means no strategy change altered the request, so
+    # no further attempt can either.
+    edit_refused_capabilities: Set[Tuple[str, str, Any]] = field(default_factory=set)
     edit_capability_models: Dict[str, Tuple[str, Optional[str]]] = field(default_factory=dict)
     # PRD-017: the request profile (kriya/workflow/model_transition.py) of the
     # last Developer call, so a model change between attempts is recorded

@@ -171,6 +171,7 @@ def record_workspace_progress(
     action: Optional[str] = None,
     vector: Optional[ProgressVector] = None,
     capability_unchanged: bool = False,
+    refusal_repeated: bool = False,
 ) -> bool:
     """Classify every failed attempt and bound retries without progress.
 
@@ -183,7 +184,10 @@ def record_workspace_progress(
     ``capability_unchanged`` (CONTEXT-EDIT-PROTOCOL-001): the attempt stopped
     before inference because the edit capability for the same model and
     failure could not change; a strategy change that cannot change it is
-    not a transition, so it always counts."""
+    not a transition, so it always counts. ``refusal_repeated`` (GR-R0): the
+    very same refusal (path, capability, model, requested operation) came
+    back after a strategy change, so no remaining attempt can change the
+    request either; the no-progress limit is reached now."""
     normalized_files = tuple(sorted(set(files or ())))
     same_workspace = workspace_hash == state.last_failed_workspace_hash
     stage_order = {
@@ -216,6 +220,8 @@ def record_workspace_progress(
         state.consecutive_no_progress_attempts += 1
     else:
         state.consecutive_no_progress_attempts = 0
+    if refusal_repeated:
+        state.consecutive_no_progress_attempts = max(state.consecutive_no_progress_attempts, limit)
     if vector is not None:
         previous = state.last_progress_vector
         state.progress_vector_digests.setdefault(vector.digest(), state.attempt_number)
@@ -814,6 +820,10 @@ async def _record_attempt_failure(
     no_progress_limit = max(
         3, ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts,
     )
+    capability_unchanged = (
+        isinstance(getattr(failure, "diagnostics", None), dict)
+        and failure.diagnostics.get("reason_code") == ANCHOR_CONTEXT_NOT_ESCALATED
+    )
     if not record_workspace_progress(
         state,
         current_workspace_hash,
@@ -829,10 +839,8 @@ async def _record_attempt_failure(
             state, ctx, failure, current_failure_signature, current_workspace_hash,
             e.missing_files if is_incomplete_generation else (),
         ),
-        capability_unchanged=(
-            isinstance(getattr(failure, "diagnostics", None), dict)
-            and failure.diagnostics.get("reason_code") == ANCHOR_CONTEXT_NOT_ESCALATED
-        ),
+        capability_unchanged=capability_unchanged,
+        refusal_repeated=capability_unchanged and bool(failure.diagnostics.get("refusal_repeated")),
     ):
         logger.error(
             "Quality Gates stopped after %s consecutive attempts produced no "
@@ -842,6 +850,9 @@ async def _record_attempt_failure(
         )
     elif force_strategy_transition(
         state.budgets, consecutive_no_progress=state.consecutive_no_progress_attempts,
+        # GR-R0: a pre-inference refusal proves the same model cannot be sent
+        # anything new, so another attempt on it would be the same refusal.
+        immediate=capability_unchanged,
         targeted_max_retries=ctx.targeted_max_retries,
         # LR-R1-P1: a fallback proven unable to serve the patch-only next
         # attempt is not requested (Option b); the retry decision after this
@@ -856,6 +867,7 @@ async def _record_attempt_failure(
             message="No material progress on consecutive attempts - forcing a strategy transition.",
             details={
                 "reason": state.last_progress_classification,
+                "refused_before_inference": capability_unchanged,
                 "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
                 "from_mode": state.last_attempt_mode,
                 "targeted_budget_closed": True,

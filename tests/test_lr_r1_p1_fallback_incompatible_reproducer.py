@@ -158,12 +158,15 @@ def test_a_patch_only_run_skips_the_unservable_fallback_and_continues_on_the_pri
         events = [e for (raw,) in db.execute("SELECT run_events FROM runs") for e in json.loads(raw)]
     modes = [e["details"]["mode"] for e in events if e["kind"] == "attempt.started"]
     failures = [e["details"]["failure_type"] for e in events if e["kind"] == "attempt.failed"]
-    # Same primary trajectory as live up to the transition; then the primary's full-set route, not a dead fallback.
-    assert modes == ["full_set", "targeted", "targeted", "targeted", "full_set"]
-    assert failures == ["anchored_edit", "anchored_edit", "no_progress_retry", "no_progress_retry",
-                        "no_progress_retry"]
+    # Same primary trajectory as live up to the first refusal; then the primary's full-set route, not a dead
+    # fallback. GR-R0 (RETRY-NO-INFORMATION-GAIN): the live run spent a second, identical targeted refusal
+    # before the transition; the transition now fires at the first refusal, and the full-set route's identical
+    # repeat of it ends the run.
+    assert modes == ["full_set", "targeted", "targeted", "full_set"]
+    assert failures == ["anchored_edit", "anchored_edit", "no_progress_retry", "no_progress_retry"]
     [transition] = [e for e in events if e["kind"] == "retry.strategy_transition"]
-    assert transition["details"]["reason"] == "REPEATED_ACTION"
+    assert transition["details"]["refused_before_inference"] is True
+    assert transition["details"]["reason"] == "NO_PROGRESS"  # the first refusal's own classification
     assert transition["details"]["fallback_targeted_requested"] is False
     assert transition["details"]["fallback_routing"]["requirement"] == "PATCH_ONLY_PROVEN"
     [routing] = [e["details"] for e in events

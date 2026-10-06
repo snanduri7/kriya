@@ -2618,6 +2618,9 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
     for path, capability in capabilities.items():
         previous = state.edit_failure_capability.get(path)
         if previous is not None and previous[1:] == (capability.digest, (model, requested[path])):
+            refusal = (path, capability.digest, (model, requested[path]))
+            repeated = refusal in state.edit_refused_capabilities
+            state.edit_refused_capabilities.add(refusal)
             message = (f"{ANCHOR_CONTEXT_NOT_ESCALATED}: the last {previous[0]} failure in {path} would be "
                        f"retried on {model} with the same authoritative context, the same feasible operations "
                        f"({', '.join(capability.operations)}) and the same requested operation "
@@ -2625,7 +2628,8 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
             raise QualityGateFailure(Failure(
                 type="no_progress_retry", message=message, raw_output=f"edit_capability={capability.digest}",
                 source="orchestrator", attempt=state.attempt_number, mode=state.last_attempt_mode,
-                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED},
+                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED,
+                                                  "refusal_repeated": repeated},
             ))
 
     windows = "".join(render_exact_spans(capability) for capability in capabilities.values())
