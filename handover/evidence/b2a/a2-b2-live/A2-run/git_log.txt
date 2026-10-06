@@ -1,0 +1,3 @@
+92d61b3 Merge pull request #583 from atsuoishimoto/fix-as_arg
+6aa2826 Add type definitions
+8df3495 @freeze_time("2012-01-14", as_arg=True) is not working since 1.5.4
