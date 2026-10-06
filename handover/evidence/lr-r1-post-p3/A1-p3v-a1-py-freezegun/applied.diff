@@ -1,0 +1,15 @@
+diff --git a/freezegun/api.py b/freezegun/api.py
+index 5ba9f40..80dd1fd 100644
+--- a/freezegun/api.py
++++ b/freezegun/api.py
+@@ -481,7 +481,9 @@ def _parse_time_to_freeze(time_to_freeze_str: Optional[_Freezable]) -> datetime.
+     if time_to_freeze_str is None:
+         time_to_freeze_str = datetime.datetime.now(datetime.timezone.utc)
+ 
+-    if isinstance(time_to_freeze_str, datetime.datetime):
++    if isinstance(time_to_freeze_str, (int, float)):
++        time_to_freeze = datetime.datetime.fromtimestamp(time_to_freeze_str, tz=datetime.timezone.utc)
++    elif isinstance(time_to_freeze_str, datetime.datetime):
+         time_to_freeze = time_to_freeze_str
+     elif isinstance(time_to_freeze_str, datetime.date):
+         time_to_freeze = datetime.datetime.combine(time_to_freeze_str, datetime.time())

@@ -1,0 +1,7 @@
+_parse_time_to_freeze(0) -> datetime.datetime(1970, 1, 1, 0, 0)
+freeze_time(0) raised TypeError
+_parse_time_to_freeze(86400.5) -> datetime.datetime(1970, 1, 2, 0, 0, 0, 500000)
+freeze_time(86400.5) raised TypeError
+# TypeError: freeze_time() expected None, a string, date instance, datetime instance, MayaDT, timedelta
+# instance, function or a generator, but got type <class 'int'>.   (freezegun/api.py freeze_time(), line 986-987)
+# Full suite on the applied candidate: 145 passed, 4 skipped (the change breaks nothing it does not reach).

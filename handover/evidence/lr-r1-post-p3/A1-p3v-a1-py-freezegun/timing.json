@@ -1,0 +1,118 @@
+{
+ "process_wall_seconds": 210.60252320789732,
+ "recorder_seconds": 0.2256835442967713,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 3,
+   "seconds": 0.00026987388264387846
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 3,
+   "seconds": 2.4170149117708206e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0005069170147180557
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 12,
+   "seconds": 0.002930128015577793
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 4,
+   "seconds": 0.0022402090253308415
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 3,
+   "seconds": 6.825011223554611e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 3,
+   "seconds": 0.0006279998924583197
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 5,
+   "seconds": 0.0034215000923722982
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 61,
+   "seconds": 0.056238749297335744
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 3,
+   "seconds": 0.0037469168892130256
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 7,
+   "seconds": 0.004652040195651352
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 1,
+   "seconds": 1.9170111045241356e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.0760710829636082
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 9,
+   "seconds": 0.0012133339187130332
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 1,
+   "seconds": 0.0008715420262888074
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 1,
+   "seconds": 4.454201553016901e-05
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 9,
+   "seconds": 0.019870292278937995
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 9,
+   "seconds": 0.022507666726596653
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 3,
+   "seconds": 2.5791930966079235e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 9,
+   "seconds": 0.020743874134495854
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 1,
+   "seconds": 0.0001004999503493309
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 1,
+   "seconds": 0.00833550002425909
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 1,
+   "seconds": 7.762503810226917e-05
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 7,
+   "seconds": 0.0008387088309973478
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 3,
+   "seconds": 1.6791047528386116e-05
+  },
+  "kriya.workflow.terminal_gate_service._record_terminal_report": {
+   "calls": 1,
+   "seconds": 0.00025937496684491634
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p3c/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/p3v-a1-py-freezegun.yaml",
+  "generate",
+  "Change `_parse_time_to_freeze` in freezegun/api.py so that it also accepts an int or float POSIX timestamp (seconds since the epoch, interpreted as UTC), so that `freeze_time(0)` freezes time at 1970-01-01 00:00:00 and `freeze_time(86400.5)` freezes it at 1970-01-02 00:00:00.500000, while every input it already accepts keeps working exactly as before, following the existing tests and keeping tests/test_operations.py passing.\n- Do not modify any other file.",
+  "-y"
+ ]
+}

@@ -1,0 +1,187 @@
+{
+  "_run_record": {
+    "classification": "derived",
+    "revision": 10,
+    "run_id": "20261006T082942-595796b8"
+  },
+  "_workspace": {
+    "version": "1",
+    "workspace_id": "e7d06f491357bcff8abbb94e358ca7242bd83eb4b4f579ec8b381fe2395e151f"
+  },
+  "approval_basis": "authoritative_validation",
+  "approval_status": "approved",
+  "lifecycle_state": "completed",
+  "plan": {
+    "acceptance_criteria": [
+      {
+        "description": "_parse_time_to_freeze correctly parses int/float POSIX timestamps.",
+        "id": "ac1",
+        "method": "judgment",
+        "tool_name": null
+      },
+      {
+        "description": "tests/test_operations.py passes without errors.",
+        "id": "ac2",
+        "method": "judgment",
+        "tool_name": null
+      },
+      {
+        "description": "All existing tests pass, confirming backward compatibility.",
+        "id": "ac3",
+        "method": "judgment",
+        "tool_name": null
+      }
+    ],
+    "extension_points": [
+      "freezegun/api.py"
+    ],
+    "global_invariants": [
+      {
+        "id": "gi1",
+        "statement": "The function _parse_time_to_freeze must accept int/float POSIX timestamps in addition to existing types, interpreting them as UTC epoch seconds."
+      },
+      {
+        "id": "gi2",
+        "statement": "All existing functionality of freeze_time and _parse_time_to_freeze must remain unchanged (backward compatibility)."
+      },
+      {
+        "id": "gi3",
+        "statement": "tests/test_operations.py must pass after the change."
+      }
+    ],
+    "integration_relationships": [],
+    "kind": "enhancement",
+    "plan_id": "20261006T082942-595796b8",
+    "refactor_baseline": null,
+    "subtasks": [
+      {
+        "acceptance_criteria_ids": [
+          "ac1"
+        ],
+        "depends_on": [],
+        "description": "Modify freezegun/api.py to update _parse_time_to_freeze to handle int/float POSIX timestamps.",
+        "execution_method": "model",
+        "execution_role": "implementation",
+        "id": "s1",
+        "ownership_justification": {},
+        "planned_files": [
+          {
+            "action": "modify",
+            "environment_requirements": [
+              "python"
+            ],
+            "path": "freezegun/api.py",
+            "preserved_references": [],
+            "reason": "",
+            "requires_capabilities": []
+          }
+        ],
+        "provides": [
+          "modified_api_py"
+        ],
+        "relevant_global_invariant_ids": [
+          "gi1",
+          "gi2"
+        ],
+        "requirement_ids": [],
+        "requires": [],
+        "tool_arguments": {},
+        "tool_name": null,
+        "verification": [
+          {
+            "description": "Verify syntax and basic importability of freezegun.api.",
+            "requires_runtime_execution": false,
+            "tool_name": "compile",
+            "type": "tool",
+            "verifier_kind": "compile"
+          }
+        ]
+      },
+      {
+        "acceptance_criteria_ids": [
+          "ac2"
+        ],
+        "depends_on": [
+          "s1"
+        ],
+        "description": "Run tests/test_operations.py to ensure regression compliance.",
+        "execution_method": "model",
+        "execution_role": "verification",
+        "id": "s2",
+        "ownership_justification": {},
+        "planned_files": [],
+        "provides": [
+          "verified_test_operations"
+        ],
+        "relevant_global_invariant_ids": [
+          "gi2",
+          "gi3"
+        ],
+        "requirement_ids": [],
+        "requires": [
+          "modified_api_py"
+        ],
+        "tool_arguments": {},
+        "tool_name": null,
+        "verification": [
+          {
+            "description": "Run pytest on tests/test_operations.py.",
+            "requires_runtime_execution": true,
+            "tool_name": "test",
+            "type": "tool",
+            "verifier_kind": "test"
+          }
+        ]
+      },
+      {
+        "acceptance_criteria_ids": [
+          "ac3"
+        ],
+        "depends_on": [
+          "s1"
+        ],
+        "description": "Run the full test suite to ensure backward compatibility across all tests.",
+        "execution_method": "model",
+        "execution_role": "verification",
+        "id": "s3",
+        "ownership_justification": {},
+        "planned_files": [],
+        "provides": [
+          "verified_full_suite"
+        ],
+        "relevant_global_invariant_ids": [
+          "gi2"
+        ],
+        "requirement_ids": [],
+        "requires": [
+          "modified_api_py"
+        ],
+        "tool_arguments": {},
+        "tool_name": null,
+        "verification": [
+          {
+            "description": "Run pytest on the entire tests directory.",
+            "requires_runtime_execution": true,
+            "tool_name": "test",
+            "type": "tool",
+            "verifier_kind": "test"
+          }
+        ]
+      }
+    ]
+  },
+  "plan_hash": "3daf41c6afaa4a5e9f5bb24c2f8db2a81cc52e1b190f3cd3346310a341222a8e",
+  "plan_id": "20261006T082942-595796b8",
+  "repair_attempts": 0,
+  "schema_version": 1,
+  "stage_order": [
+    "s1",
+    "s2",
+    "s3"
+  ],
+  "stage_states": {
+    "s1": "completed",
+    "s2": "completed",
+    "s3": "completed"
+  }
+}

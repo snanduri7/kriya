@@ -1,0 +1,2 @@
+Change `_parse_time_to_freeze` in freezegun/api.py so that it also accepts an int or float POSIX timestamp (seconds since the epoch, interpreted as UTC), so that `freeze_time(0)` freezes time at 1970-01-01 00:00:00 and `freeze_time(86400.5)` freezes it at 1970-01-02 00:00:00.500000, while every input it already accepts keeps working exactly as before, following the existing tests and keeping tests/test_operations.py passing.
+- Do not modify any other file.
