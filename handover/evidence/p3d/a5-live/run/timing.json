@@ -1,0 +1,131 @@
+{
+ "process_wall_seconds": 316.6026568330126,
+ "recorder_seconds": 0.3316714612301439,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 5,
+   "seconds": 0.0002845838898792863
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 5,
+   "seconds": 4.49910294264555e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0005086249439045787
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 16,
+   "seconds": 0.0021696650655940175
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 3,
+   "seconds": 0.0021185840014368296
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 5,
+   "seconds": 4.6332948841154575e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 5,
+   "seconds": 0.0004406670341268182
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 5,
+   "seconds": 0.004185250028967857
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 76,
+   "seconds": 0.06402287574019283
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 5,
+   "seconds": 0.003709831857122481
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 8,
+   "seconds": 0.0081506670685485
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 4,
+   "seconds": 6.501097232103348e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.17033025005366653
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 10,
+   "seconds": 0.0011452091857790947
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 2,
+   "seconds": 0.0014590000500902534
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 3,
+   "seconds": 0.0042269580299034715
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 5,
+   "seconds": 0.0003186671528965235
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 10,
+   "seconds": 0.026966876001097262
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 10,
+   "seconds": 0.02074237517081201
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 2,
+   "seconds": 1.3666925951838493e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 9,
+   "seconds": 0.0168230818817392
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 4,
+   "seconds": 0.0003792089410126209
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 1,
+   "seconds": 0.0020517080556601286
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 2,
+   "seconds": 0.00017583405133336782
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 8,
+   "seconds": 0.0008297099266201258
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 3,
+   "seconds": 0.000301457941532135
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 2,
+   "seconds": 1.2541073374450207e-05
+  },
+  "kriya.workflow.terminal_gate_service._record_terminal_report": {
+   "calls": 1,
+   "seconds": 0.00024683400988578796
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p3d/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/p3v-a5-spring-xml.yaml",
+  "generate",
+  "-f",
+  "/Users/sriramnanduri/kriya-m1-live/goals/p3v-a5-spring-xml.txt",
+  "-y",
+  "--acceptance",
+  "/Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a5-spring-xml/KriyaAcceptanceTest.java",
+  "--acceptance-approval",
+  "/Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a5-spring-xml/approval.json"
+ ]
+}

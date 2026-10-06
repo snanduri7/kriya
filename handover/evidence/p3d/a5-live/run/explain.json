@@ -1,0 +1,823 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "COMMITTED",
+        "lifecycle_state": "SUCCESS",
+        "model_calls": 10,
+        "seq": 198,
+        "terminal_status": "SUCCESS"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "fallback_targeted",
+      "failure_type": "no_progress_retry",
+      "progress_classification": "REPEATED_ACTION",
+      "retry": true,
+      "seq": 93
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": null,
+      "quality_gates_passed": true,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 147,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 179,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 33,
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:ebc9b286217a9ce835d145185ceafca3b297f0aeb6031e8713e69a021c2eb7c6",
+                "wire_body": "sha256:1ac735c7bbe0ef6e44a251c331d9c64eee214a7ed55f36c1d38b982d7abbb0b4"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 36,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "seq": 33,
+              "targets": [
+                {
+                  "digest": "7dc1f20700ef3a18b310f80426a4650473b57b68edc5b17477d2b88d1c1597e4",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_is_exact": true,
+                  "shown_member_id": "PetTypeFormatter.parse",
+                  "shown_revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 63,
+                      "start_line": 55,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 3,
+              "completion_tokens": 414,
+              "content": {
+                "content": "sha256:21323b8b049557a42322f35394b007dd8e1e1c352338f53d2bf2d7dafac07ad2"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 37,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 3,
+              "content": {
+                "analysis_model_claimed": "sha256:5bdf565dd0a23bbea4f405715db4a4666cc0073266dc62d777dffabbad3f7333"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+              "seq": 39
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+              "proposed_digest": "sha256:3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+              "reason_code": "INDENTATION_STYLE_MISMATCH",
+              "seq": 51
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:83914ae3505bc9f79be8fccb0cf60da7a3dc3a4532669f35bafb1ed8b49a1bd5",
+                "raw_output": "sha256:b604aa63bb6c7c89ab5be34b53ba3f8fc2a41b7757252b53d68e987e46a2f014"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "reason_code": "INDENTATION_STYLE_MISMATCH",
+              "seq": 50,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 52,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the current attempt",
+              "seq": 65
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 30
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "seq": 63,
+              "targets": [
+                {
+                  "digest": "7dc1f20700ef3a18b310f80426a4650473b57b68edc5b17477d2b88d1c1597e4",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    55,
+                    56,
+                    57,
+                    58,
+                    59,
+                    60,
+                    61,
+                    62,
+                    63
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_is_exact": true,
+                  "shown_member_id": "PetTypeFormatter.parse",
+                  "shown_revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 63,
+                      "start_line": 55,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:82df4537208d2b01351452855c7d51a72c6362e720fc6e1c452f909bb9dc6639",
+                "raw_output": "sha256:a2224a736ce59ed3ee2157525410c1fad03ea9fa6c612db42a888bcb8ad8fdac"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 71,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 73,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 84
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 61
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "seq": 82,
+              "targets": [
+                {
+                  "digest": "7dc1f20700ef3a18b310f80426a4650473b57b68edc5b17477d2b88d1c1597e4",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    55,
+                    56,
+                    57,
+                    58,
+                    59,
+                    60,
+                    61,
+                    62,
+                    63
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_is_exact": true,
+                  "shown_member_id": "PetTypeFormatter.parse",
+                  "shown_revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 63,
+                      "start_line": 55,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:82df4537208d2b01351452855c7d51a72c6362e720fc6e1c452f909bb9dc6639",
+                "raw_output": "sha256:a2224a736ce59ed3ee2157525410c1fad03ea9fa6c612db42a888bcb8ad8fdac"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 91,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 93,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 4,
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "role": "developer",
+              "seq": 109,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 80
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 104,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:58e88f30850a4e783899b860897f9b0e2d1668f6850e770eced691fbb91d3e18",
+                "wire_body": "sha256:8f52aa5bb75befa47473a1c7d28209a2b1931ead56b3c2b7109fccb25c056f84"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 108,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:0ab6beadfabaae8c3b42db6d680435016696bc021ab2fa19a01790ffda41cab8",
+                "wire_body": "sha256:d444669d1a20b88f182cf0d8fe17611002b35c3977ad45d32031535cac75add5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 120,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:879cf618316c9345937c110ec1c105e55461c265b4d516ef7d526408a197f0b2",
+                "wire_body": "sha256:d90e27beece89b509ce5fef4cd27b26e25da258d09369e68ddca861427a8b443"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 124,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:e73e83fe1166d3536c677688ad444a645a34dc4b008e2c6a745060ba727af78e",
+                "wire_body": "sha256:cee4af7134fc77be5392394a0cf6b831133cfa6a22339f7d5e4b74fe54e5c599"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 133,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:e7e4769bcdd8f72c62af7bb07543e787f004da3a03a9ecb1dc57af1f6b5e910f",
+                "wire_body": "sha256:1de3381310e49883f9900a9055b00236e8f5a6fd31cff90f3702e3cc88746f61"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "role": "unattributed",
+              "seq": 142,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+              ],
+              "seq": 104,
+              "targets": [
+                {
+                  "digest": "7dc1f20700ef3a18b310f80426a4650473b57b68edc5b17477d2b88d1c1597e4",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    55,
+                    56,
+                    57,
+                    58,
+                    59,
+                    60,
+                    61,
+                    62,
+                    63
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_is_exact": true,
+                  "shown_member_id": "PetTypeFormatter.parse",
+                  "shown_revision": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 63,
+                      "start_line": 55,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 317,
+              "content": {
+                "content": "sha256:6d67046b01887111f95f17c43a3c89454b252a65655a525272674768c31f4a16"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 110,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 144,
+              "content": {
+                "content": "sha256:21ff0bf90d2c96e837fae097beb1c1a54f25e398a89e61a0acf1ff7fdba2d7c2"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 121,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 80,
+              "content": {
+                "content": "sha256:72d74d7a1020785b73152c7ba1ca7c7c2337963833328fee184bcc606d632fbe"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 125,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 278,
+              "content": {
+                "content": "sha256:4871f11e51d0bfc31a0386ba8956189810dc65264256f1bc06a1f46356fa2696"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 134,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 59,
+              "content": {
+                "content": "sha256:c163c0e5b097e38dfec09d6f4d1a2b4b0d41f33bf99700815765ef5b0e694e16"
+              },
+              "finish_reason": "stop",
+              "role": "unattributed",
+              "seq": 143,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:8945bfa1ff8ad7e2aedbc6b946a5543c1d308f1bbb73a2bfde85cbe2069c70b5"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+              "seq": 112
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "8b2eb5a76b94b8181e288f3c521eeb6471e548c482782e33c24f016d076535c5",
+              "before_digest": "3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+              "content": {
+                "after": "sha256:8b2eb5a76b94b8181e288f3c521eeb6471e548c482782e33c24f016d076535c5",
+                "before": "sha256:3aa21641b3767163c13a193892d57ce6ba7e26fb46fd10d267ea1fde773a5eb9",
+                "diff": "sha256:2b7361ccf8ffbe0fd247dfa612039685bd84bb6d51a5824eee01e3f76e7769f4"
+              },
+              "decision": "STAGED",
+              "lines_added": 2,
+              "lines_removed": 1,
+              "path": "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java",
+              "seq": 117
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 97
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 101
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "reason": "no_model_call: no Developer call in this attempt",
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 1,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T175548-2b834bc0",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

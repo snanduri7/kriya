@@ -1,0 +1,3 @@
+09351b3 Add DEP-001 patch candidate (#280)
+21fcc0e Bump tools.jackson.core:jackson-databind from 3.2.1 to 3.2.2 (#294)
+cd43fc0 Bump org.apache.maven:apache-maven from 3.8.4 to 3.9.16 (#292)

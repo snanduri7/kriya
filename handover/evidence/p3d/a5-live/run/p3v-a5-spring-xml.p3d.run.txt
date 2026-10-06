@@ -1,0 +1,9 @@
+acceptance args: --acceptance /Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a5-spring-xml/KriyaAcceptanceTest.java --acceptance-approval /Users/sriramnanduri/kriya-m1-live/acceptance/p3v-a5-spring-xml/approval.json
+== p3v-a5-spring-xml start 17:55:15 base 09351b3 kriya bcb0c1db8
+analyze exit=0 seconds=32
+generate exit=0 wall_seconds=316.8
+run_id=20261006T175548-2b834bc0
+verify exit=0
+explain exit=0
+928	/Users/sriramnanduri/kriya-m1-live/state/attempt-evidence/20261006T175548-2b834bc0
+== p3v-a5-spring-xml end 18:01:07
