@@ -363,7 +363,10 @@ def test_j10_18_an_existing_file_at_the_injection_path_is_refused_never_overwrit
         cand = candidate(ws, tmp_path / "c", "correct")
     else:
         cand = candidate(ws, tmp_path / "c", "correct", {INJECTION: mine})
-    run = _run(_artifact(tmp_path), ws, cand, paths=[TARGET] + ([INJECTION] if where == "candidate" else []))
+    with patch.object(PolymorphicValidator, "run_compile_check") as compiled, \
+         patch.object(PolymorphicValidator, "run_tests") as tested:
+        run = _run(_artifact(tmp_path), ws, cand, paths=[TARGET] + ([INJECTION] if where == "candidate" else []))
+    assert compiled.call_count == 0 and tested.call_count == 0  # refused before any repository code runs
     assert run.refusal.reason_code in (jvm.ACCEPTANCE_PATH_COLLISION, jvm.ACCEPTANCE_TRUST_SURFACE_CHANGED)
     assert run.refusal.reason_code == (jvm.ACCEPTANCE_TRUST_SURFACE_CHANGED if where == "candidate"
                                        else jvm.ACCEPTANCE_PATH_COLLISION)

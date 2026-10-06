@@ -16,7 +16,7 @@ SRC = os.path.expanduser("~/kriya-wt/b2a")
 PYTEST = os.path.expanduser("~/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/pytest")
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "b2c_mutation_results.json")
 TESTS = ["tests/test_b2c_jvm_acceptance.py", "tests/test_b2cov_claim_strength.py", "tests/test_b2a_acceptance_oracle.py",
-         "tests/test_fs1c1_requirement_claims.py"]
+         "tests/test_fs1c1_requirement_claims.py", "tests/test_prd020_requirement_lineage.py"]
 JV = "kriya/workflow/acceptance_jvm.py"
 AO = "kriya/workflow/acceptance_oracle.py"
 RQ = "kriya/workflow/requirements.py"
@@ -27,7 +27,10 @@ M = [
     ("candidate-tests-treated-as-acceptance", JV, SURFACE,
      "        changed = [p for p in changed_surface(base_digests, candidate_digests) if \"/test/\" not in \"/\" + p]"
      " + surface.output_root_writes(candidate_paths)"),
-    ("model-claim-closes-behavior", RQ, "        elif outcome is RequirementOutcome.SATISFIED:\n            # FS-1B",
+    ("model-claim-closes-behavior-write", RQ,
+     "        if outcome is RequirementOutcome.SATISFIED:\n            outcome = RequirementOutcome.UNVERIFIED\n",
+     "        if False:\n            outcome = RequirementOutcome.UNVERIFIED\n"),
+    ("model-claim-closes-behavior-read", RQ, "        elif outcome is RequirementOutcome.SATISFIED:\n            # FS-1B",
      "        elif False:\n            # FS-1B"),
     ("c0-closes-behavior", RQ, "            elif BEHAVIOR not in claims:", "            elif True:"),
     ("finite-jvm-examples-close-general-claim", AO,
