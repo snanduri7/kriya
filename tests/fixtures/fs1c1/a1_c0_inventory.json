@@ -1,0 +1,23 @@
+{
+ "base_revision": "92d61b3f5c31942a1039713574487bdcfcdbbfff",
+ "expected_cases": [
+  "tests.test_operations::test_addition",
+  "tests.test_operations::test_as_arg",
+  "tests.test_operations::test_as_kwarg",
+  "tests.test_operations::test_astimezone",
+  "tests.test_operations::test_astimezone_tz_none",
+  "tests.test_operations::test_auto_and_manual_tick[1-1]",
+  "tests.test_operations::test_auto_and_manual_tick[1.5-1.5]",
+  "tests.test_operations::test_auto_and_manual_tick[tick0-1.5]",
+  "tests.test_operations::test_auto_and_manual_tick[tick3-1.5]",
+  "tests.test_operations::test_auto_tick",
+  "tests.test_operations::test_datetime_timezone_none",
+  "tests.test_operations::test_datetime_timezone_real",
+  "tests.test_operations::test_datetime_timezone_real_with_offset",
+  "tests.test_operations::test_replace",
+  "tests.test_operations::test_subtraction"
+ ],
+ "tests": [
+  "tests/test_operations.py"
+ ]
+}
