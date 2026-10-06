@@ -206,6 +206,8 @@ class TerminalGateRequest:
     # FS-1C2 B2-a: the operator's acceptance file bound before generation
     # (kriya/workflow/acceptance_oracle.py AcceptanceArtifact), None when none.
     acceptance: Any = None
+    # FS-1C2 B3: the operator's approval of that suite (acceptance_approval.py).
+    acceptance_approval: Any = None
 
 
 @dataclass(frozen=True)
@@ -492,7 +494,8 @@ class TerminalGateService:
                 acceptance_closures = await asyncio.to_thread(
                     close_requirements_with_acceptance_tests, autonomy, ledger,
                     requirement_set, request.candidate_root, request.workspace_path,
-                    acceptance=request.acceptance, modified=_terminal_candidate_paths(request.plan),
+                    acceptance=request.acceptance, approval=request.acceptance_approval,
+                    modified=_terminal_candidate_paths(request.plan),
                     revision="terminal",
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
                         WriteScopeMode.DENY_ALL, (), request.plan,

@@ -810,6 +810,7 @@ def generation_resume_fingerprints(
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
     candidate_files: Optional[Mapping[str, str]] = None,
     acceptance_digest: Optional[str] = None,
+    approval_digest: Optional[str] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -817,7 +818,11 @@ def generation_resume_fingerprints(
     ``effective_obligation_ledger`` None means the run's starting ledger.
     ``acceptance_digest`` (FS-1C2 B2-a: the operator acceptance file bound
     to the run) joins the verification inputs only when there is one, so a
-    run without it keeps its fingerprints byte-identical."""
+    run without it keeps its fingerprints byte-identical. ``approval_digest``
+    (B3: the operator's human approval of that suite) is authority, not
+    evidence: it joins the goal inputs (planning and the candidate depend on
+    them), so an approval added or changed after a candidate was generated
+    never reaches that candidate - the resumed run regenerates it."""
     verification_inputs: Dict[str, Any] = {
         "required_verification": required_verification,
         "runtime_verification_required": runtime_verification_required,
@@ -839,6 +844,7 @@ def generation_resume_fingerprints(
         effective_obligation_fingerprint=effective_obligation_fingerprint,
         config_dump=config.model_dump(),
         goal_inputs={
+            **({"acceptance_approval_digest": approval_digest} if approval_digest is not None else {}),
             "goal": goal,
             "error_context": error_context or "",
             "supplementary_context": supplementary_context,

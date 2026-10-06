@@ -691,7 +691,7 @@ def judge_acceptance(artifact: AcceptanceArtifact, run: AcceptanceRun) -> Dict[s
 def close_requirements_with_acceptance(
     ledger: Any, requirements: Any, acceptance: Optional[AcceptanceArtifact], *,
     test_files: Optional[Iterable[str]], execute: Callable[[AcceptanceArtifact], AcceptanceRun], source: str,
-    revision: Any,
+    revision: Any, approval: Any = None, base_revision: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Judge every requirement the acceptance artifact covers on the
     candidate its verdict judged (``evidence_id``), recording the BEHAVIOR
@@ -705,7 +705,18 @@ def close_requirements_with_acceptance(
     the candidate - which claims a statement makes (and so whether behaviour
     alone may close it) is decided against them, so a candidate deleting a
     named regression test never drops that claim. None (unknown): every
-    statement is held to both claims."""
+    statement is held to both claims.
+
+    B3 (``approval``, kriya/workflow/acceptance_approval.py): a GENERAL claim
+    whose approved suite executed and fully passed is HUMAN_ACCEPTED (method
+    ``human_bound_acceptance``) when the approval binds exactly this goal,
+    requirement, artifact, case list, runner contract and ``base_revision``;
+    a contradicting case stays VIOLATED and anything INDETERMINATE stays so."""
+    from kriya.workflow.acceptance_approval import (
+        ACCEPTANCE_HUMAN_ACCEPTED,
+        HUMAN_ACCEPTANCE_METHOD,
+        approval_problem,
+    )
     from kriya.workflow.obligations import ObligationStatus
     from kriya.workflow.requirements import (
         BEHAVIOR,
@@ -727,10 +738,10 @@ def close_requirements_with_acceptance(
     attempts: List[Dict[str, Any]] = []
     pending: List[Tuple[Any, str, Tuple[str, ...], Dict[str, Any]]] = []
 
-    def record(requirement: Any, evidence_id: str, status: Any, detail: Dict[str, Any], claim: str = BEHAVIOR) -> None:
+    def record(requirement: Any, evidence_id: str, status: Any, detail: Dict[str, Any], claim: str = BEHAVIOR,
+               method: str = ACCEPTANCE_METHOD) -> None:
         record_requirement_claim(ledger, requirements, requirement.id, claim, evidence_id=evidence_id,
-                                 method=ACCEPTANCE_METHOD, detail=detail, source=source, revision=revision,
-                                 status=status)
+                                 method=method, detail=detail, source=source, revision=revision, status=status)
 
     for requirement in requirements.requirements:
         verdict = ledger.current(requirement_obligation_id(requirement.id))
@@ -740,7 +751,8 @@ def close_requirements_with_acceptance(
         covered = acceptance is not None and requirement.id in acceptance.requirement_ids
         if not covered:
             if (prior is not None and prior.status is not ObligationStatus.INDETERMINATE
-                    and (prior.evidence or {}).get("method") == ACCEPTANCE_METHOD and prior_digest != current_digest):
+                    and (prior.evidence or {}).get("method") in (ACCEPTANCE_METHOD, HUMAN_ACCEPTANCE_METHOD)
+                    and prior_digest != current_digest):
                 record(requirement, evidence_id, ObligationStatus.INDETERMINATE,
                        {"reason_code": ACCEPTANCE_SUPERSEDED, "acceptance_digest": current_digest,
                         "superseded_digest": prior_digest})
@@ -787,24 +799,39 @@ def close_requirements_with_acceptance(
             # close only an EXACT (enumerated) one.
             strength, why = behavior_strength(requirement.text,
                                               regression_covered=REGRESSION_PRESERVATION in claims)
-            code, reason = judgment.code, judgment.reason
+            code, reason, method = judgment.code, judgment.reason, ACCEPTANCE_METHOD
             detail = {**judgment.evidence, "required_claims": list(claims), "strength": strength,
                       "strength_reasons": why["reasons"]}
             if judgment.passed and strength != BEHAVIOR_EXACT:
-                code = ACCEPTANCE_GENERAL_RULE_UNPROVEN
-                reason = ("every acceptance case passed, but the statement is a general rule that finite cases "
-                          "cannot prove (" + "; ".join(why["reasons"]) + ") - recorded as supporting evidence")
                 record(requirement, evidence_id, ObligationStatus.SATISFIED,
                        {**detail, "reason_code": judgment.code}, claim=BEHAVIOR_EXAMPLES)
-            status = (ObligationStatus.SATISFIED if code == ACCEPTANCE_PASSED
+                problem = approval_problem(approval, requirement, requirements, acceptance, base_revision)
+                if problem is None:
+                    # B3: human authority over this exact suite - not a proof.
+                    code, method = ACCEPTANCE_HUMAN_ACCEPTED, HUMAN_ACCEPTANCE_METHOD
+                    reason = ("the approved acceptance suite passed in full; the operator accepted it as sufficient "
+                              "for this general requirement (human authority, not a proof)")
+                    detail.update({"approval_digest": approval.digest, "closure_method": HUMAN_ACCEPTANCE_METHOD,
+                                   "approval": approval.entries[requirement.id].to_dict(),
+                                   "base_revision": base_revision})
+                else:
+                    code = ACCEPTANCE_GENERAL_RULE_UNPROVEN
+                    reason = ("every acceptance case passed, but the statement is a general rule that finite cases "
+                              "cannot prove (" + "; ".join(why["reasons"]) + ") - recorded as supporting evidence"
+                              + ("" if approval is None else f"; human approval not applicable: {problem}"))
+                    if approval is not None:
+                        detail["approval_problem"] = problem
+            status = (ObligationStatus.SATISFIED if code in (ACCEPTANCE_PASSED, ACCEPTANCE_HUMAN_ACCEPTED)
                       else ObligationStatus.VIOLATED if judgment.violated else ObligationStatus.INDETERMINATE)
-            record(requirement, evidence_id, status, {**detail, "reason_code": code})
+            record(requirement, evidence_id, status, {**detail, "reason_code": code}, method=method)
             entry.update({"reason_code": code, "behavior": status.value, "strength": strength,
                           "case_results": judgment.evidence.get("case_results")})
             if reason:
                 entry["reason"] = reason
         outcomes = requirement_outcomes(ledger, requirements)
         for requirement, _, _, entry in pending:
-            entry["closed"] = outcomes[requirement.id] is RequirementOutcome.CLOSED_BY_EVIDENCE
+            entry["closed"] = outcomes[requirement.id] in (RequirementOutcome.CLOSED_BY_EVIDENCE,
+                                                           RequirementOutcome.HUMAN_ACCEPTED)
+            entry["outcome"] = outcomes[requirement.id].value
             entry["violated"] = outcomes[requirement.id] is RequirementOutcome.VIOLATED
     return attempts

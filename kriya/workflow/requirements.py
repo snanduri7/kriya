@@ -128,6 +128,10 @@ class RequirementOutcome(str, Enum):
     # UNVERIFIED by the verifier, then positively verified for this exact
     # requirement and candidate by deterministic evidence (a test run).
     CLOSED_BY_EVIDENCE = "closed_by_evidence"
+    # B3: a GENERAL behaviour claim an operator accepted on the exact approved
+    # acceptance suite (kriya/workflow/acceptance_approval.py) - human
+    # authority, never a proof. Derived only, like CLOSED_BY_EVIDENCE.
+    HUMAN_ACCEPTED = "human_accepted"
 
 
 # MODEL-EVIDENCE-HARDENING-001: why a requirement has its verdict.
@@ -162,6 +166,7 @@ _OUTCOME_STATUS = {
     RequirementOutcome.UNVERIFIED: ObligationStatus.INDETERMINATE,
     RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
     RequirementOutcome.CLOSED_BY_EVIDENCE: ObligationStatus.SATISFIED,
+    RequirementOutcome.HUMAN_ACCEPTED: ObligationStatus.SATISFIED,
 }
 
 
@@ -437,9 +442,10 @@ BEHAVIOR = "BEHAVIOR"
 # ever proves regression preservation. BEHAVIOR needs independent acceptance
 # evidence: the operator's executable acceptance file (FS-1C2 B2-a,
 # kriya/workflow/acceptance_oracle.py, ``acceptance_oracle``) or human-bound acceptance
-# tests (B3, no producer yet).
+# authority over an exact approved suite (B3, ``human_bound_acceptance``,
+# kriya/workflow/acceptance_approval.py).
 NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle"})
-BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_tests"})
+BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance"})
 REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
 
 # Words a pure regression-preservation statement is made of besides the test
@@ -497,6 +503,9 @@ BEHAVIOR_GENERAL = "GENERAL"
 BEHAVIOR_EXAMPLES = "BEHAVIOR_EXAMPLES"
 # Producers whose positive evidence is a finite set of cases.
 FINITE_EVIDENCE_METHODS = frozenset({"acceptance_oracle"})
+# B3: human authority over an exact approved suite (not finite-evidence gated;
+# only ever a BEHAVIOR claim, never a whole-requirement closure record).
+HUMAN_ACCEPTANCE_METHOD = "human_bound_acceptance"
 
 _UNIVERSAL_WORDS = frozenset({
     "any", "anything", "every", "everything", "all", "each", "only", "never", "always", "whatever", "whichever",
@@ -650,6 +659,8 @@ def _effective_closure(
     if (closure is not None and closure.get("method") in FINITE_EVIDENCE_METHODS
             and not _finite_evidence_may_close(requirement, tuple(closure.get("required_claims") or ()))):
         closure = None
+    if closure is not None and closure.get("method") == HUMAN_ACCEPTANCE_METHOD:
+        closure = None  # B3 closes only the BEHAVIOR claim, never a whole requirement
     if closure is not None:
         return closure
     claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
@@ -659,9 +670,21 @@ def _effective_closure(
     if (behavior is not None and behavior.get("method") in FINITE_EVIDENCE_METHODS
             and not _finite_evidence_may_close(requirement, required)):
         return None  # B2-COV: finite cases never close a general rule, whatever a record says
+    if (behavior is not None and behavior.get("method") == HUMAN_ACCEPTANCE_METHOD
+            and not _human_acceptance_binds(requirement, behavior)):
+        return None  # B3: the approval was for other words (a resumed or altered record)
     if BEHAVIOR in required and all(claims.get(claim) for claim in required):
         return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
+
+
+def _human_acceptance_binds(requirement: Requirement, evidence: Mapping[str, Any]) -> bool:
+    """B3, re-checked at read time: the approval was granted for exactly this
+    requirement's words (the closure site checks every other binding)."""
+    entry = evidence.get("approval") or {}
+    return (bool(evidence.get("approval_digest")) and entry.get("requirement_id") == requirement.id
+            and entry.get("requirement_text_sha256")
+            == hashlib.sha256((requirement.text or "").encode("utf-8")).hexdigest())
 
 
 def _finite_evidence_may_close(requirement: Requirement, required: Sequence[str]) -> bool:
@@ -744,7 +767,7 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
         except ValueError:
             outcome = RequirementOutcome.UNKNOWN
-        if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE:
+        if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED):
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
         evidence_id = evidence.get("evidence_id")
         closure = _effective_closure(ledger, requirement, evidence_id)
@@ -752,7 +775,8 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
                 or _claim_counter_evidence(ledger, requirement.id, evidence_id) is not None):
             outcome = RequirementOutcome.VIOLATED
         elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
-            outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
+            human = ((closure.get("claims") or {}).get(BEHAVIOR) or {}).get("method") == HUMAN_ACCEPTANCE_METHOD
+            outcome = RequirementOutcome.HUMAN_ACCEPTED if human else RequirementOutcome.CLOSED_BY_EVIDENCE
         elif outcome is RequirementOutcome.SATISFIED:
             # FS-1B: a SATISFIED verdict record without deterministic closure
             # (a pre-FS-1 record, e.g. read back on resume) authorizes nothing.
@@ -1158,8 +1182,8 @@ def close_unverified_requirements_with_named_tests(
                     revision=revision,
                 )
                 entry["regression_preserved"] = True
-                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] is (
-                    RequirementOutcome.CLOSED_BY_EVIDENCE)
+                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] in (
+                    RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED)
                 if not entry["closed"]:
                     entry["reason_code"] = REQUIREMENT_BEHAVIOR_UNVERIFIED
                     entry["reason"] = ("the named pre-existing test(s) still pass (regression preserved), but they "

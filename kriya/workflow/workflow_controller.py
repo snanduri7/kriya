@@ -132,6 +132,7 @@ from kriya.static_analysis.service import (
 )
 from kriya.workflow import subtask_executor
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.acceptance_approval import bound_approval
 from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
 from kriya.workflow.checkpoint import (
@@ -4931,7 +4932,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "reused_subtasks": [],
                 "reason": None,
             }
-            if prior_control_state.current_plan_hash != current_plan_hash:
+            current_approval_digest = getattr(bound_approval(self.workflow_engine), "digest", None)
+            if prior_control_state.acceptance_approval_digest != current_approval_digest:
+                # B3: human acceptance authority is bound before generation; a
+                # candidate produced under another (or no) approval is never
+                # reused under this one - the plan runs fresh.
+                enforce_resume_decision["reason"] = "ACCEPTANCE_APPROVAL_CHANGED"
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the acceptance "
+                    "approval differs from the one the recorded subtasks ran under. Starting the plan fresh."
+                )
+            elif prior_control_state.current_plan_hash != current_plan_hash:
                 enforce_resume_decision["reason"] = "PLAN_CHANGED"
                 logger.warning(
                     f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the "
@@ -5071,6 +5082,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             # Reused completions are in the real workspace; the scope becomes
             # "candidate" once a separate plan sandbox is created below.
             subtask_completion_scope="workspace" if resumed_subtask_states else None,
+            acceptance_approval_digest=getattr(bound_approval(self.workflow_engine), "digest", None),
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
             workspace_content_hash=compute_workspace_content_hash(workspace_path),
@@ -6730,6 +6742,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         in_place=plan_workspace_path == workspace_path,
                     ),
                     acceptance=bound_acceptance(self.workflow_engine),
+                    acceptance_approval=bound_approval(self.workflow_engine),
                 ), _emit_gate_outcome)
                 all_completed = gate_report.commit_eligible
 

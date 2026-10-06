@@ -54,6 +54,7 @@ from kriya.static_analysis.service import (
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
+from kriya.workflow.acceptance_approval import bound_approval
 from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
@@ -953,7 +954,7 @@ def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[
 def close_requirements_with_acceptance_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     acceptance: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
-    tree_binding: Any = None,
+    tree_binding: Any = None, approval: Any = None,
 ) -> List[Dict[str, Any]]:
     """FS-1C2 B2-a: judges the BEHAVIOR claims the operator's acceptance file
     (bound before generation; ``acceptance`` None = none was given) covers,
@@ -983,17 +984,19 @@ def close_requirements_with_acceptance_tests(
         # declaration may differ there.
         return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
 
+    base_revision = _oracle_base_revision(candidate_root, workspace_path) if acceptance is not None else None
+
     def execute(artifact: Any) -> Any:
         if artifact.language == "java":
             return run_java_acceptance(artifact, candidate_root, candidate_paths=modified,
-                                       base_revision=_oracle_base_revision(candidate_root, workspace_path),
-                                       validator_factory=export_validator)
+                                       base_revision=base_revision, validator_factory=export_validator)
         return run_acceptance(artifact, candidate_root, candidate_paths=modified, validator_factory=validator)
 
     return close_requirements_with_acceptance(
         ledger, requirement_set, acceptance,
         test_files=None if reference is None else sorted(set(test_files) | set(reference)),
         execute=execute, source="requirement_closure.acceptance", revision=revision,
+        approval=approval, base_revision=base_revision,
     )
 
 
@@ -1339,6 +1342,9 @@ class WorkflowEngine:
         # FS-1C2 B2-a: the operator's acceptance file for this run, bound
         # before generation (`kriya generate --acceptance`); None = none.
         self.acceptance: Any = None
+        # FS-1C2 B3: the operator's approval of that suite for GENERAL
+        # requirements (`--acceptance-approval`), bound at the same time.
+        self.acceptance_approval: Any = None
         # PRD-024: the last applied candidate's terminal full-suite result
         # (full_suite_evidence_for_reuse), offered to the next run as its
         # baseline; reused only if it describes that run's exact start.
@@ -2092,6 +2098,7 @@ class WorkflowEngine:
                 strict_spec_compliance=strict_spec_compliance,
                 strict_dependency_index=strict_dependency_index,
                 acceptance_digest=getattr(bound_acceptance(self), "digest", None),
+                approval_digest=getattr(bound_approval(self), "digest", None),
             )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -4264,7 +4271,7 @@ class WorkflowEngine:
                         acceptance_closures = await asyncio.to_thread(
                             close_requirements_with_acceptance_tests, self.kernel.config.autonomy,
                             resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                            acceptance=bound_acceptance(self),
+                            acceptance=bound_acceptance(self), approval=bound_approval(self),
                             modified=state.all_files_written, revision=state.attempt_number,
                             toolchain_declaration_mutable=toolchain_declaration_mutable(
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
