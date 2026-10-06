@@ -1,0 +1,80 @@
+{
+ "commit": "dfe22f8",
+ "tests": [
+  "tests/test_fs1c1_requirement_claims.py",
+  "tests/test_prd020_requirement_lineage.py",
+  "tests/test_fs1_false_success_reproducer.py",
+  "tests/test_fs1a_test_execution_evidence.py",
+  "tests/test_d8_terminal_toolchain_authority.py",
+  "tests/test_fs1c0_named_test_oracle.py",
+  "tests/test_model_evidence_hardening_001.py",
+  "tests/test_prd020_mutation_scope.py",
+  "tests/test_prd020_milestone_requirements.py"
+ ],
+ "mutants": [
+  {
+   "label": "c0-closes-entire-compound-requirement",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "2 failed, 96 passed in 21.07s",
+   "seconds": 22.0
+  },
+  {
+   "label": "textual-test-mention-closes-behavioral-claim",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "3 failed, 71 passed in 26.89s",
+   "seconds": 27.8
+  },
+  {
+   "label": "regression-pass-copied-to-behavior-obligation",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "2 failed, 96 passed in 22.17s",
+   "seconds": 23.0
+  },
+  {
+   "label": "model-claim-fills-missing-behavior-evidence-write",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "3 failed, 88 passed in 8.87s",
+   "seconds": 9.7
+  },
+  {
+   "label": "model-claim-fills-missing-behavior-evidence-read",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "1 failed, 258 passed in 22.91s",
+   "seconds": 23.8
+  },
+  {
+   "label": "candidate-or-regression-evidence-closes-behavior",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "1 failed, 104 passed in 20.84s",
+   "seconds": 21.7
+  },
+  {
+   "label": "resume-restores-old-broad-c0-closure",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "1 failed, 108 passed in 21.18s",
+   "seconds": 22.1
+  },
+  {
+   "label": "preservation-vocabulary-ignored",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "5 failed, 69 passed in 6.87s",
+   "seconds": 7.8
+  },
+  {
+   "label": "claim-not-bound-to-candidate",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "1 failed, 103 passed in 21.04s",
+   "seconds": 21.9
+  }
+ ],
+ "baseline": "259 passed in 25.35s"
+}
