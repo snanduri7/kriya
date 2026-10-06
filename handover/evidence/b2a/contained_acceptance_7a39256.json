@@ -1,0 +1,54 @@
+{
+  "helper_only": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya_acceptance.test_freeze_time_at_epoch, kriya_acceptance.test_freeze_time_fractional_timestamp",
+    "case_results": {
+      "kriya_acceptance.test_freeze_time_at_epoch": [
+        "failed"
+      ],
+      "kriya_acceptance.test_freeze_time_fractional_timestamp": [
+        "failed"
+      ]
+    },
+    "report_complete": true,
+    "observed_root": "/kriya/workspace",
+    "candidate_module": "/kriya/workspace/freezegun/__init__.py",
+    "plugins_outside_pytest": [],
+    "containment": {
+      "egress": {
+        "capability": "denied",
+        "network_authority": "denied",
+        "destinations": [],
+        "authority_source": "containment profile (no network)",
+        "backend": "OCIContainmentBackend"
+      }
+    },
+    "pycache_in_candidate": []
+  },
+  "correct": {
+    "code": "ACCEPTANCE_PASSED",
+    "reason": "",
+    "case_results": {
+      "kriya_acceptance.test_freeze_time_at_epoch": [
+        "passed"
+      ],
+      "kriya_acceptance.test_freeze_time_fractional_timestamp": [
+        "passed"
+      ]
+    },
+    "report_complete": true,
+    "observed_root": "/kriya/workspace",
+    "candidate_module": "/kriya/workspace/freezegun/__init__.py",
+    "plugins_outside_pytest": [],
+    "containment": {
+      "egress": {
+        "capability": "denied",
+        "network_authority": "denied",
+        "destinations": [],
+        "authority_source": "containment profile (no network)",
+        "backend": "OCIContainmentBackend"
+      }
+    },
+    "pycache_in_candidate": []
+  }
+}

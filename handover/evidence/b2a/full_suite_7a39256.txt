@@ -1,0 +1,308 @@
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  0%]
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 32%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+..F..................................................................... [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+....................................................F................... [ 72%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+............................................................F........... [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+...........................................................              [100%]
+=================================== FAILURES ===================================
+__ test_run_app_sequence_multi_package_test_file_target_hits_module_not_found __
+[gw7] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python3.14
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-3516/popen-gw7/test_run_app_sequence_multi_pa0')
+
+    def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(tmp_path):
+        """Deterministic reproducer for a real live-evidence incident (VER-005/
+        RECV-002 E4 campaign, 2026-09-13, see docs/assurance/
+        KRIYA_VER005_RECV002_LIVE_EVIDENCE.md, run_id 20260913T230532-ea0f24f7):
+        a correct, real multi-package Python candidate (real sibling top-level
+        packages, no CLI/service entrypoint) failed terminal verification twice
+        live, on two different goals, because RunVerifierAgent's own judgment
+        (contrary to its own system prompt's explicit "do NOT return ... a test
+        command as proof of observable runtime behavior" instruction) selected a
+        test file as the runtime-verification target, and Kriya's execution
+        layer then ran it via a bare `python <relative-path>` subprocess - which
+        only puts the script's OWN containing directory on sys.path[0], never
+        the process cwd/repository root, so any test file importing a sibling
+        top-level package fails with ModuleNotFoundError regardless of whether
+        that package's own content is correct.
+    
+        This test exercises the REAL, non-mocked PolymorphicValidator.
+        run_app_sequence() (no model involved - the judge's own selection isn't
+        deterministically reproducible; what's pinned here is that WHEN this
+        exact command shape occurs against a real multi-package layout, it (a)
+        genuinely reproduces the failure and (b) is still correctly classified
+        as a verifier-infrastructure failure, not an application-logic defect -
+        exactly as observed live, so a real correct candidate is never
+        misattributed to the Developer.
+    
+        VER-005 implementation (2026-09-13): prevention of this exact incident
+        now lives UPSTREAM of run_app_sequence() - see kriya/workflow/
+        file_resolution.py::ground_python_runtime_target() and kriya/workflow/
+        attempt.py's own two call sites, which deterministically reject a
+        test-shaped verifier target before it ever reaches here (proven in
+        tests/test_ver005_python_runtime_target_grounding.py). This test is kept
+        UNCHANGED and still passes - it documents that IF this exact bad command
+        is ever handed to run_app_sequence() directly (e.g. a future bypass of
+        the upstream grounding), the underlying OS-level failure mode and its
+        correct infrastructure classification are still exactly as described
+        above; it is no longer the only thing standing between a bad target and
+        a spurious candidate failure."""
+        (tmp_path / "validation").mkdir()
+        (tmp_path / "validation" / "__init__.py").write_text("")
+        (tmp_path / "validation" / "email_rules.py").write_text(
+            "def is_valid_email(email):\n"
+            "    return bool(email) and '@' in email\n"
+        )
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "__init__.py").write_text("")
+        (tmp_path / "tests" / "test_email_rules.py").write_text(
+            "from validation.email_rules import is_valid_email\n"
+            "\n"
+            "def test_valid_email():\n"
+            "    assert is_valid_email('user@example.com')\n"
+        )
+    
+        validator = PolymorphicValidator(str(tmp_path))
+        result = validator.run_app_sequence(
+            [[sys.executable, "tests/test_email_rules.py"]], timeout=10
+        )
+    
+>       assert result["success"] is False
+E       assert True is False
+
+tests/test_polymorphic_validation.py:1765: AssertionError
+_________ test_qualify_covers_the_retry_identity_and_status_reports_it _________
+[gw5] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python3.14
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1104faeb0>
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-3516/popen-gw5/test_qualify_covers_the_retry_0')
+
+    def test_qualify_covers_the_retry_identity_and_status_reports_it(monkeypatch, tmp_path):
+        from kriya.cli import main
+    
+        _exact_ollama(monkeypatch)
+        cfg = _cfg()
+        cfg.llm_chain = []
+        monkeypatch.setattr("kriya.cli._model_cfg", lambda ctx: cfg)
+        seen = []
+    
+        async def fake_run(config, model, **kwargs):
+            seen.append(kwargs["settings"])
+            runtime = resolve_configured_model_runtime(cfg, PRIMARY)
+            return mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES],
+                                   settings=kwargs["settings"])
+    
+        monkeypatch.setattr(mq, "run_qualification", fake_run)
+        out = tmp_path / "q.json"
+        result = CliRunner().invoke(main, ["model", "qualify", "--model", PRIMARY, "--out", str(out)])
+        assert result.exit_code == 0, result.output
+        assert sorted(s.temperature for s in seen) == [0.1, 0.7]
+        assert any(role == "developer (retry)" for r in json.loads(out.read_text())["records"] for role in r["roles"])
+    
+        status = CliRunner().invoke(main, ["model", "status", "--json"])
+>       developer = json.loads(status.output)["developer"]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_retry_inference_identity.py:176: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py:352: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <json.decoder.JSONDecoder object at 0x1061c6660>
+s = '{\n  "architect": [\n    {\n      "exact": true,\n      "execution_environment": {\n        "accelerator_backend": "c...all(b)\n    ~~~~~~~~~~~~~~~~~~^^^\nBrokenPipeError: [Errno 32] Broken pipe\n----------------------------------------\n'
+_w = <built-in method match of re.Pattern object at 0x10619e4d0>
+
+    def decode(self, s, _w=WHITESPACE.match):
+        """Return the Python representation of ``s`` (a ``str`` instance
+        containing a JSON document).
+    
+        """
+        obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+        end = _w(s, end).end()
+        if end != len(s):
+>           raise JSONDecodeError("Extra data", s, end)
+E           json.decoder.JSONDecodeError: Extra data: line 305 column 1 (char 9707)
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py:348: JSONDecodeError
+__________ test_no_direct_subprocess_from_tool_subtask_orchestration ___________
+[gw3] darwin -- Python 3.14.6 /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python3.14
+
+    def test_no_direct_subprocess_from_tool_subtask_orchestration():
+        for name, source in _workflow_module_sources().items():
+>           assert "subprocess." not in source, f"{name} uses subprocess directly"
+E           AssertionError: workflow.py uses subprocess directly
+E           assert 'subprocess.' not in 'import asyn...n        }\n'
+E             
+E             'subprocess.' is contained here:
+E               (OSError, subprocess.CalledProcessError, ValueError) as exc:
+E             ?           +++++++++++
+E                           logger.info(f"Acceptance: base test files unavailable: {exc}")
+E                           return None
+E                   elif in_place:...
+E             
+E             ...Full output truncated (5196 lines hidden), use '-vv' to show
+
+tests/test_tool001_autonomous_tool_execution.py:600: AssertionError
+=============================== warnings summary ===============================
+tests/test_prd007_run_lifecycle.py::test_crash_between_intent_and_result_is_recognized_and_blocks_enforce
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87646) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_symlink_alias_contends_with_real_path
+tests/test_run_ownership.py::test_pid_reuse_is_never_consulted_for_the_ownership_decision
+tests/test_run_ownership.py::test_generate_vs_generate_real_cross_process_contention
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87645) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_relative_path_alias_contends_with_absolute_path
+tests/test_run_ownership.py::test_two_git_worktrees_do_not_contend
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87643) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_real_two_process_contention_second_process_rejected
+tests/test_run_ownership.py::test_milestone_execution_holds_lock_across_the_whole_command
+tests/test_run_record.py::test_process_crash_preserves_last_durable_lifecycle_state
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87647) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_contention_fails_promptly_not_blocking
+tests/test_run_ownership.py::test_proposal_execute_vs_generate_real_cross_process_contention
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87644) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_run_ownership.py::test_owner_sigkill_releases_lock_for_next_acquirer
+tests/test_run_ownership.py::test_resume_flag_contends_the_same_as_a_fresh_run
+tests/test_run_ownership.py::test_losing_process_makes_zero_source_mutation
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=87641) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_polymorphic_validation.py::test_run_app_sequence_multi_package_test_file_target_hits_module_not_found
+FAILED tests/test_retry_inference_identity.py::test_qualify_covers_the_retry_identity_and_status_reports_it
+FAILED tests/test_tool001_autonomous_tool_execution.py::test_no_direct_subprocess_from_tool_subtask_orchestration
+3 failed, 8984 passed, 14 warnings in 540.89s (0:09:00)

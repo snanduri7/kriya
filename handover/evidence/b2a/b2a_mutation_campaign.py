@@ -2,7 +2,7 @@
 replacement per mutant, KILLED iff the test set fails). Each mutant runs in its
 own fresh clone of the commit under test (never the working tree - rule 19).
 
-usage: python b2a_mutation_campaign.py <commit>    -> b2a_mutation_results.json
+usage: python b2a_mutation_campaign.py <commit>    -> b2a_mutation_results.json (overwritten per run; the run log is kept)
 """
 import json
 import os
