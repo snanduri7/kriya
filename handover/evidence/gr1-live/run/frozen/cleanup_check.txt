@@ -1,0 +1,13 @@
+== containers
+kriya-searxng-demo Up 5 days searxng/searxng:latest
+happy_thompson Exited (0) 7 days ago searxng/searxng:latest
+eloquent_greider Exited (0) 7 weeks ago searxng/searxng:latest
+reverent_lehmann Exited (0) 5 days ago searxng/searxng
+== networks
+bridge
+host
+none
+sec006-net2
+== processes naming the workspace
+== workspace lock
+-rwxr-xr-x@ 1 sriramnanduri  staff  256  6 Oct 20:44 /Users/sriramnanduri/kriya-m1-live/ws/gr1-graphify/.kriya/run.lock
