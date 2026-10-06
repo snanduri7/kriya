@@ -1,0 +1,22 @@
+{
+ "input_A_sha256": "c734c21cb507c387a81e40d95a4b9496d0be7bc9fcf0ef8bf47977a716715e9c",
+ "input_B_sha256": "4d052ead19d4f17d6f3117a83d35381dda3aae559d846cb650178704075d187a",
+ "added_section_sha256": "41fa0448bd536bbbc2101f7a33c17fd8d1aaa2bf515f546a9dc7f6ed678ea502",
+ "added_source_span": "graphify/extractors/engine.py lines 215-232",
+ "added_source_sha256": "ac9b349a85fb5d5b18f6a4775e3a6d819715b08f93de95cb2eb22716c9edbddb",
+ "base_engine_sha256": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+ "added_chars": 1057,
+ "settings": {
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "options": {
+   "num_ctx": 32768,
+   "num_predict": 16384,
+   "temperature": 0.7,
+   "top_k": 20,
+   "top_p": 0.8
+  },
+  "stream": true,
+  "think": false,
+  "truncate": false
+ }
+}

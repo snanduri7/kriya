@@ -1,0 +1,33 @@
+--- a/graphify/extractors/engine.py
++++ b/graphify/extractors/engine.py
+@@ -5362,7 +5362,15 @@
+                     mname = fn_node.child_by_field_name("name")
+                     recv = fn_node.child_by_field_name("expression")
+                     if mname is not None:
+-                        callee_name = _read_text(mname, source)
++                        # Handle generic_name nodes by extracting the bare method name
++                        if mname.type == "generic_name":
++                            name_child = mname.child_by_field_name("name")
++                            if name_child is not None:
++                                callee_name = _read_text(name_child, source)
++                            else:
++                                callee_name = _read_text(mname, source)
++                        else:
++                            callee_name = _read_text(mname, source)
+                         is_member_call = True
+                         if recv is not None and recv.type == "identifier":
+                             member_receiver = _read_text(recv, source)
+@@ -5388,6 +5396,13 @@
+                                 member_receiver = _read_text(fname, source)
+                 elif fn_node is not None and fn_node.type == "identifier":
+                     callee_name = _read_text(fn_node, source)
++                elif fn_node is not None and fn_node.type == "generic_name":
++                    # Handle direct generic calls like Make<int>() by extracting the bare method name
++                    name_child = fn_node.child_by_field_name("name")
++                    if name_child is not None:
++                        callee_name = _read_text(name_child, source)
++                    else:
++                        callee_name = _read_text(fn_node, source)
+                 else:
+                     # Fallback: original name-field / first-named-child scan.
+                     name_node = node.child_by_field_name("name")

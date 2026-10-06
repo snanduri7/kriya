@@ -1,0 +1,9 @@
+{
+ "arm": "A",
+ "wall_seconds": 42.64,
+ "content_sha256": "f46ab71f6286ae55bdc5c105311887f2ed371a8010c93b46e3f7a089fdd0d6e2",
+ "done_reason": "stop",
+ "prompt_eval_count": 8111,
+ "eval_count": 1095,
+ "model": "qwen3-coder:30b-kriya-e52213655394"
+}

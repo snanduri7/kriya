@@ -1,0 +1,38 @@
+--- a/graphify/extractors/engine.py
++++ b/graphify/extractors/engine.py
+@@ -5362,7 +5362,16 @@
+                     mname = fn_node.child_by_field_name("name")
+                     recv = fn_node.child_by_field_name("expression")
+                     if mname is not None:
+-                        callee_name = _read_text(mname, source)
++                        # Handle generic_name nodes by extracting just the identifier part
++                        if mname.type == "generic_name":
++                            # Extract the base method name from generic_name (e.g., "Get" from "Get<int>")
++                            identifier = mname.child_by_field_name("identifier")
++                            if identifier is not None:
++                                callee_name = _read_text(identifier, source)
++                            else:
++                                callee_name = _read_text(mname, source)
++                        else:
++                            callee_name = _read_text(mname, source)
+                         is_member_call = True
+                         if recv is not None and recv.type == "identifier":
+                             member_receiver = _read_text(recv, source)
+@@ -5392,7 +5401,16 @@
+                     # Fallback: original name-field / first-named-child scan.
+                     name_node = node.child_by_field_name("name")
+                     if name_node:
+-                        callee_name = _read_text(name_node, source)
++                        # Handle generic_name nodes in fallback case as well
++                        if name_node.type == "generic_name":
++                            # Extract the base method name from generic_name (e.g., "Get" from "Get<int>")
++                            identifier = name_node.child_by_field_name("identifier")
++                            if identifier is not None:
++                                callee_name = _read_text(identifier, source)
++                            else:
++                                callee_name = _read_text(name_node, source)
++                        else:
++                            callee_name = _read_text(name_node, source)
+                     else:
+                         for child in node.children:
+                             if child.is_named:

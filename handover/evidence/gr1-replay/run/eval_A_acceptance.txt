@@ -1,0 +1,43 @@
+FFF..                                                                    [100%]
+=================================== FAILURES ===================================
+_ test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge _
+
+graph = ({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".A()", "reader", ".Get()", "settings")
+E       AssertionError: assert False
+E        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.A()', 'reader', '.Get()', 'settings')
+
+kriya_acceptance.py:66: AssertionError
+____________ test_case2_generic_call_through_this_gets_a_calls_edge ____________
+
+graph = ({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case2_generic_call_through_this_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".B()", "reader", ".Get()", "settings")
+E       AssertionError: assert False
+E        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.B()', 'reader', '.Get()', 'settings')
+
+kriya_acceptance.py:72: AssertionError
+_ test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge _
+
+graph = ({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".E()", "local", ".Make()", "local")
+E       AssertionError: assert False
+E        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.E()', 'local', '.Make()', 'local')
+
+kriya_acceptance.py:78: AssertionError
+=========================== short test summary info ============================
+FAILED kriya_acceptance.py::test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge
+FAILED kriya_acceptance.py::test_case2_generic_call_through_this_gets_a_calls_edge
+FAILED kriya_acceptance.py::test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge
+3 failed, 2 passed in 0.37s
