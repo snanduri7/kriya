@@ -118,3 +118,18 @@ Maven/Surefire: unaffected (already summary-based; not touched).
 `runs/` (raw stdout/stderr per command, gate outputs, JUnit XML, meta with argv/profile/result, venv inventories, pre/post
 worktree state, docker image list), `normalized/`, `signatures/`, `comparator_matrix.json`, `diff_categories.json`,
 `live/` (live venv inventories).
+
+## CORRECTION (2026-10-07, my own error, reported)
+
+I stated (OBS-4 note, REG-R1 Phases 1/5 and the return report) that the live raw gate outputs were not retained, so the
+live delta was UNKNOWN / INFERRED and "RAW TEST EVIDENCE CURRENTLY RETAINED = NO". That was wrong: LR-R1-M1 records
+every gate's bounded combined output as sealed `gate.result` content. Run 20261006T231821-fb31caad holds both full-suite
+outputs untruncated: baseline `sha256:49b84d84…` (887,129 B, seq 22) and POST `sha256:ba2ceb5a…` (887,108 B, seq 92);
+copies in `live/LIVE-*.gate_output.txt.gz`. What is NOT retained is raw stdout/stderr separately and the per-invocation
+JUnit report (only its parsed identities/statuses).
+
+MEASURED on the live bytes (a049c02 comparator): level 1 CHANGED_FAILURE (`4bff245d…` -> `6c1e76e9…`); raw differing lines
+44 = 40 memory addresses, 2 timing values in `test_ts_normalizer_scales_linearly_on_large_files`' assertion
+(3.4x -> 3.2x), 1 env repr in `test_built_at_commit_comes_from_the_target_repo` (container HOSTNAME; the baseline
+container env also carried `JAVA_TOOL_OPTIONS`), 1 summary line (`(0:01:00)` appears only when the session reaches 60 s).
+Same categories as the reproduction; no candidate-caused difference. LIVE STOP CORRECT = NO is now MEASURED, not inferred.
