@@ -1,0 +1,1 @@
+Add `public static boolean isAsciiHexDigit(final char ch)` to org.apache.commons.lang3.CharUtils that returns true for the characters 0-9, a-f and A-F and false otherwise, and add unit tests for it in CharUtilsTest.

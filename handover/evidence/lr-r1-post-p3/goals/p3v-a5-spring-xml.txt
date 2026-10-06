@@ -1,0 +1,2 @@
+Change the Spring formatter org.springframework.samples.petclinic.web.PetTypeFormatter in src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java so that it parses pet type names case-insensitively and ignores leading and trailing whitespace in the parsed text (for example "  bird " parses to the "Bird" pet type), still throwing ParseException when no pet type matches, keeping PetTypeFormatterTests passing.
+- Do not modify any other file.

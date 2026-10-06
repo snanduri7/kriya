@@ -1,0 +1,2 @@
+Add a method `ordinal_words(self, num)` to the `inflect.engine` class in inflect/__init__.py that returns the ordinal of the integer `num` in words (for example `ordinal_words(1)` returns "first", `ordinal_words(21)` returns "twenty-first" and `ordinal_words(100)` returns "one hundredth"), reusing the engine's existing `ordinal` and `number_to_words` methods, keeping tests/test_numwords.py passing.
+- Do not modify any other file.

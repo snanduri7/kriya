@@ -1,0 +1,2 @@
+Add support for the `:required` and `:optional` pseudo-classes to the selector compiler in cssselect2/compiler.py, where `:required` matches `input`, `select` and `textarea` elements that have a `required` attribute and `:optional` matches `input`, `select` and `textarea` elements that do not, following the existing pseudo-class handling there and keeping tests/test_cssselect2.py passing.
+- Do not modify any other file.

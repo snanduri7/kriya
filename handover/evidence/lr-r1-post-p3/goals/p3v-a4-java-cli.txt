@@ -1,0 +1,2 @@
+Add `public boolean hasAnyOption(final String... optNames)` to org.apache.commons.cli.CommandLine in src/main/java/org/apache/commons/cli/CommandLine.java that returns true when at least one of the given option names is present (exactly as the existing `hasOption(String)` decides it) and false when none is present or no names are given, keeping CommandLineTest passing.
+- Do not modify any other file.

@@ -1,0 +1,88 @@
+{
+ "workspace": "p3v-b2-py-cssselect2",
+ "commit": "dc2690c6b434d87634ed5dc208c9de4038755463",
+ "stack": "python",
+ "commands": [
+  {
+   "argv": [
+    "python3",
+    "-m",
+    "venv",
+    ".kriya/venv"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-b2-py-cssselect2"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-m",
+    "pip",
+    "install",
+    "-q",
+    "tinycss2",
+    "webencodings",
+    "pytest"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-b2-py-cssselect2"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-c",
+    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; sys.path.extend(['/Users/sriramnanduri/kriya-m1-live/ws/p3v-b2-py-cssselect2']); \ntry:\n    import _pytest.junitxml as _kriya_junitxml\n    _kriya_junitxml.LogXML.pytest_terminal_summary = lambda *args, **kwargs: None\nexcept Exception:\n    pass\nimport pytest; sys.exit(pytest.main(sys.argv[1:]))",
+    "--junitxml=.kriya/test-reports/922e1f8f6339455a8a70b4cf506671c5.xml",
+    "--"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-b2-py-cssselect2"
+  }
+ ],
+ "success": true,
+ "runner": "pytest",
+ "summary": "446 passed, 9 xfailed",
+ "passed": 446,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 0,
+ "duration_seconds": 13.6,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "python",
+   "runtime": "cpython",
+   "runtime_version": "3.12",
+   "build_tool": "pip",
+   "build_tool_version": null,
+   "containment_image": "python:3.12-slim",
+   "requirement_source": "pyproject.toml:project.requires-python",
+   "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+   "observed_runtime_version": "3.12.14",
+   "observed_build_tool_version": null,
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "target": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": "============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /kriya/workspace\nconfigfile: pyproject.toml\ncollected 455 items\n\ntests/test_cssselect2.py .....................................x......x.. [ 10%]\n........................................................................ [ 26%]\n....................xx.....x............................................ [ 41%]\n.........................................xx............................. [ 57%]\n..................xx.................................................... [ 73%]\n........................................................................ [ 89%]\n................................................                         [100%]\n\n======================== 446 passed, 9 xfailed in 0.46s ========================\n\n",
+ "restored_clean": true
+}

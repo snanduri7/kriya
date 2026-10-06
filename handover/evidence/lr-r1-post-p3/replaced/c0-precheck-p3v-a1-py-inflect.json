@@ -1,0 +1,23 @@
+{
+ "workspace": "p3v-a1-py-inflect",
+ "base": "262a247d2d99a47a520cdb2d46adb90df88b4326",
+ "named_oracle": [
+  "tests/test_numwords.py"
+ ],
+ "named_at_base": true,
+ "runner": "pytest",
+ "report_complete": false,
+ "runner_success": false,
+ "case_count": 0,
+ "case_statuses": [
+  "error"
+ ],
+ "inventory": null,
+ "change_targets": [
+  "inflect.engine",
+  "inflect/__init__.py"
+ ],
+ "targets_on_surface": [],
+ "surface_entries": 17,
+ "c0_precondition": false
+}

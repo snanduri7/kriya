@@ -1,0 +1,88 @@
+{
+ "workspace": "p3v-a2-py-freezegun",
+ "commit": "92d61b3f5c31942a1039713574487bdcfcdbbfff",
+ "stack": "python",
+ "commands": [
+  {
+   "argv": [
+    "python3",
+    "-m",
+    "venv",
+    ".kriya/venv"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-a2-py-freezegun"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-m",
+    "pip",
+    "install",
+    "-q",
+    "-r",
+    "requirements.txt",
+    "pytest"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-a2-py-freezegun"
+  },
+  {
+   "argv": [
+    ".kriya/venv/bin/python",
+    "-c",
+    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; sys.path.extend(['/Users/sriramnanduri/kriya-m1-live/ws/p3v-a2-py-freezegun']); \ntry:\n    import _pytest.junitxml as _kriya_junitxml\n    _kriya_junitxml.LogXML.pytest_terminal_summary = lambda *args, **kwargs: None\nexcept Exception:\n    pass\nimport pytest; sys.exit(pytest.main(sys.argv[1:]))",
+    "--junitxml=.kriya/test-reports/7889637312eb43bfa5c8dc618e3ced97.xml",
+    "--"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-a2-py-freezegun"
+  }
+ ],
+ "success": true,
+ "runner": "pytest",
+ "summary": "143 passed, 6 skipped, 4 warnings",
+ "passed": 143,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 6,
+ "duration_seconds": 16.8,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "python",
+   "runtime": "cpython",
+   "runtime_version": "3.12",
+   "build_tool": "pip",
+   "build_tool_version": null,
+   "containment_image": "python:3.12-slim",
+   "requirement_source": "default:python-runtime-policy",
+   "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+   "observed_runtime_version": "3.12.14",
+   "observed_build_tool_version": null,
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "default:python-runtime-policy",
+     "containment_image": "python:3.12-slim"
+    },
+    "target": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "default:python-runtime-policy",
+     "containment_image": "python:3.12-slim"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": " removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).\n    assert datetime.datetime.utcnow() != datetime.datetime(2012, 1, 14)\n\ntests/test_datetimes.py::test_compare_datetime_and_time_with_timezone\n  /kriya/workspace/tests/test_datetimes.py:795: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).\n    assert now == datetime.datetime.utcfromtimestamp(time.time())\n\ntests/test_datetimes.py::test_timestamp_with_tzoffset\n  /kriya/workspace/tests/test_datetimes.py:812: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).\n    assert utcnow == datetime.datetime.utcfromtimestamp(time.time())\n\ntests/test_pickle.py::test_pickle\n  /kriya/workspace/tests/test_pickle.py:13: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).\n    utc_now = datetime.datetime.utcnow()\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================== 143 passed, 6 skipped, 4 warnings in 1.02s ==================\n\n",
+ "restored_clean": true
+}

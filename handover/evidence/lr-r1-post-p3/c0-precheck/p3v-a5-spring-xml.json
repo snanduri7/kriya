@@ -1,0 +1,26 @@
+{
+ "workspace": "p3v-a5-spring-xml",
+ "base": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+ "named_oracle": [
+  "src/test/java/org/springframework/samples/petclinic/web/PetTypeFormatterTests.java"
+ ],
+ "named_at_base": true,
+ "runner": "maven",
+ "report_complete": true,
+ "runner_success": true,
+ "case_count": 3,
+ "case_statuses": [
+  "passed"
+ ],
+ "inventory": [
+  "org.springframework.samples.petclinic.web.PetTypeFormatterTests::shouldParse",
+  "org.springframework.samples.petclinic.web.PetTypeFormatterTests::shouldThrowParseException",
+  "org.springframework.samples.petclinic.web.PetTypeFormatterTests::testPrint"
+ ],
+ "change_targets": [
+  "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+ ],
+ "targets_on_surface": [],
+ "surface_entries": 84,
+ "c0_precondition": true
+}
