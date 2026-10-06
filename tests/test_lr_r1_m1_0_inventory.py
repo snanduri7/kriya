@@ -150,6 +150,7 @@ def test_inventory_counts_the_design_relies_on():
     # M1.3b converted all 85; the tripwire (test_lr_r1_m1_mirroring.py) keeps it at 0.
     assert sum(appends.values()) == 0, appends
     records = sum((ROOT / rel).read_text(encoding="utf-8").count("state.record_gate_outcome(") for rel in appends)
-    # 85 at M1.3b; FS-1A added three (the test-delta verdict and its two failures).
-    assert records == 88, records
+    # 85 at M1.3b; FS-1A added three (the test-delta verdict and its two failures); GR-R1B removed two (the
+    # model-only goal_spec_compliance and spec_compliance_indeterminate failures, now advisory).
+    assert records == 86, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")
