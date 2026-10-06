@@ -1,0 +1,18 @@
+{
+  "format": "kriya.acceptance_approval/1",
+  "approvals": [
+    {
+      "requirement_id": "REQ-1",
+      "requirement_text_sha256": "ecc1359f6303c9d51f77b74184e44ba72a22a6bfbfde0d4a1946976c5f2bb2cb",
+      "goal_sha256": "3ee13b2500a3632bc93e95cc8946586ca014a43f9dfd689ba0db3cd4541c7efc",
+      "acceptance_sha256": "26cac2dbb8f869e3816da5655a55348d74bcfe2838addb8135367b19e9b602f6",
+      "expected_cases": [
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace",
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.stillThrowsParseExceptionWhenNoPetTypeMatches"
+      ],
+      "runner_contract_sha256": "36363c7dd4eb591a19d8d09e41eea1c7fe85092efc22cb8aadb28551dd19c77c",
+      "base_revision": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+      "accept_suite_as_sufficient": false
+    }
+  ]
+}

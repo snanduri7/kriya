@@ -190,6 +190,19 @@ def test_h5_7_8_a_changed_goal_or_base_revision_invalidates_a_bound_approval(tmp
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
 
 
+def test_h5_7_a_changed_goal_invalidates_the_approval_even_when_the_requirement_text_is_the_same(tmp_path):
+    root, base = _repo(tmp_path)
+    acceptance = _acceptance(tmp_path)
+    approval = _approval(tmp_path, GENERAL_GOAL, acceptance, base, root)
+    goal = GENERAL_GOAL + "- Keep the module importable.\n"  # REQ-1 text unchanged, goal different
+    reqs, ledger = _ledger(goal)
+    assert reqs.requirements[0].text == derive_requirements(GENERAL_GOAL).requirements[0].text
+    moved = ao.load_acceptance(str(tmp_path / "acceptance.py"), reqs, str(tmp_path / "state"))
+    [attempt] = _close(ledger, reqs, moved, root, approval=approval, base=base)
+    assert attempt["reason_code"] == ao.ACCEPTANCE_GENERAL_RULE_UNPROVEN and "goal differs" in attempt["reason"]
+    assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
 # ---------------------------------------------------------------- H7, 9-12: who can create authority
 
 def test_h7_9_the_approval_never_lives_where_a_candidate_can_write(tmp_path):

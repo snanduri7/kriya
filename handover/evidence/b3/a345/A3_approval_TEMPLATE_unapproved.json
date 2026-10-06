@@ -1,0 +1,20 @@
+{
+  "format": "kriya.acceptance_approval/1",
+  "approvals": [
+    {
+      "requirement_id": "REQ-1",
+      "requirement_text_sha256": "bb2bd57ecd5720cf9a6bf0887465dd3ac3078e9c32d9d420c0c9aab70f564b19",
+      "goal_sha256": "06f0f1e9950a01d3aaa567e7a58d6de03b9f81f77efee52e02aabf1deb84b447",
+      "acceptance_sha256": "a40b975f0f0edb7b52e67b1b8268e832a9ec41b9b5a9b79aecf81d5270a8f65f",
+      "expected_cases": [
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMaxWhenValueIsGreaterThanMax",
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMinWhenValueIsLessThanMin",
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsValueOtherwise",
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.throwsIllegalArgumentExceptionWhenMinIsGreaterThanMax"
+      ],
+      "runner_contract_sha256": "36363c7dd4eb591a19d8d09e41eea1c7fe85092efc22cb8aadb28551dd19c77c",
+      "base_revision": "4ee346e59eecccdaefbdd74ac53698da4a1f348a",
+      "accept_suite_as_sufficient": false
+    }
+  ]
+}

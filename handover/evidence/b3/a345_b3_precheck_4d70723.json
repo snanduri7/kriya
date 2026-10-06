@@ -1,0 +1,128 @@
+{
+  "A3": {
+    "goal_unchanged_from": "~/kriya-m1-live/goals/p3v-a3-java-lang.txt",
+    "claim": "GENERAL",
+    "claim_reasons": [
+      "general rule (otherwise): 'max when value is greater than max and value otherwise'",
+      "no concrete example case is stated"
+    ],
+    "acceptance_sha256": "a40b975f0f0edb7b52e67b1b8268e832a9ec41b9b5a9b79aecf81d5270a8f65f",
+    "cases": [
+      "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMaxWhenValueIsGreaterThanMax",
+      "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMinWhenValueIsLessThanMin",
+      "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsValueOtherwise",
+      "org.apache.commons.lang3.math.KriyaAcceptanceTest.throwsIllegalArgumentExceptionWhenMinIsGreaterThanMax"
+    ],
+    "approval_template": "a345/A3_approval_TEMPLATE_unapproved.json",
+    "base_revision": "4ee346e59eecccdaefbdd74ac53698da4a1f348a",
+    "base": {
+      "code": "ACCEPTANCE_HARNESS_COMPILE_FAILED",
+      "reason": "the operator acceptance class did not compile against the candidate (harness integration, not a requirement violation)",
+      "case_results": null,
+      "seconds": 21.9
+    },
+    "reference_DIAGNOSTIC_ONLY": {
+      "code": "ACCEPTANCE_PASSED",
+      "reason": "",
+      "case_results": {
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMaxWhenValueIsGreaterThanMax": [
+          "passed"
+        ],
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsMinWhenValueIsLessThanMin": [
+          "passed"
+        ],
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.returnsValueOtherwise": [
+          "passed"
+        ],
+        "org.apache.commons.lang3.math.KriyaAcceptanceTest.throwsIllegalArgumentExceptionWhenMinIsGreaterThanMax": [
+          "passed"
+        ]
+      },
+      "seconds": 22.0
+    }
+  },
+  "A4": {
+    "goal_unchanged_from": "~/kriya-m1-live/goals/p3v-a4-java-cli.txt",
+    "claim": "GENERAL",
+    "claim_reasons": [
+      "general rule (at least): 'Add  CODE  to org.apache.commons.cli.CommandLine in src/main/java/org/apache/commons/cli/CommandLine.java that returns true when at least one of the given option names is present'",
+      "general rule (none): 'and false when none is present or no names are given'",
+      "no concrete example case is stated"
+    ],
+    "acceptance_sha256": "227b8b35fb842a57a98cdaa68f028f70957f1d3035ba119b53fd8f0bb3f3519f",
+    "cases": [
+      "org.apache.commons.cli.KriyaAcceptanceTest.decidesExactlyAsHasOption",
+      "org.apache.commons.cli.KriyaAcceptanceTest.falseWhenNoNamesAreGiven",
+      "org.apache.commons.cli.KriyaAcceptanceTest.falseWhenNoneIsPresent",
+      "org.apache.commons.cli.KriyaAcceptanceTest.trueWhenAtLeastOneGivenNameIsPresent"
+    ],
+    "approval_template": "a345/A4_approval_TEMPLATE_unapproved.json",
+    "base_revision": "d95484f57dfa4b99ac9069bb3f44df680306e8e9",
+    "base": {
+      "code": "ACCEPTANCE_HARNESS_COMPILE_FAILED",
+      "reason": "the operator acceptance class did not compile against the candidate (harness integration, not a requirement violation)",
+      "case_results": null,
+      "seconds": 8.5
+    },
+    "reference_DIAGNOSTIC_ONLY": {
+      "code": "ACCEPTANCE_PASSED",
+      "reason": "",
+      "case_results": {
+        "org.apache.commons.cli.KriyaAcceptanceTest.decidesExactlyAsHasOption": [
+          "passed"
+        ],
+        "org.apache.commons.cli.KriyaAcceptanceTest.falseWhenNoNamesAreGiven": [
+          "passed"
+        ],
+        "org.apache.commons.cli.KriyaAcceptanceTest.falseWhenNoneIsPresent": [
+          "passed"
+        ],
+        "org.apache.commons.cli.KriyaAcceptanceTest.trueWhenAtLeastOneGivenNameIsPresent": [
+          "passed"
+        ]
+      },
+      "seconds": 9.0
+    }
+  },
+  "A5": {
+    "goal_unchanged_from": "~/kriya-m1-live/goals/p3v-a5-spring-xml.txt",
+    "claim": "GENERAL",
+    "claim_reasons": [
+      "general rule (match): 'still throwing ParseException when no pet type matches'",
+      "no concrete example case is stated"
+    ],
+    "acceptance_sha256": "26cac2dbb8f869e3816da5655a55348d74bcfe2838addb8135367b19e9b602f6",
+    "cases": [
+      "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace",
+      "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.stillThrowsParseExceptionWhenNoPetTypeMatches"
+    ],
+    "approval_template": "a345/A5_approval_TEMPLATE_unapproved.json",
+    "base_revision": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+    "base": {
+      "code": "ACCEPTANCE_VIOLATED",
+      "reason": "acceptance case(s) observed the behaviour contradicted: org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace",
+      "case_results": {
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace": [
+          "error"
+        ],
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.stillThrowsParseExceptionWhenNoPetTypeMatches": [
+          "passed"
+        ]
+      },
+      "seconds": 6.5
+    },
+    "reference_DIAGNOSTIC_ONLY": {
+      "code": "ACCEPTANCE_PASSED",
+      "reason": "",
+      "case_results": {
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace": [
+          "passed"
+        ],
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.stillThrowsParseExceptionWhenNoPetTypeMatches": [
+          "passed"
+        ]
+      },
+      "seconds": 6.3
+    }
+  }
+}
