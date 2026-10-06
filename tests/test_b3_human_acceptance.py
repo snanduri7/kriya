@@ -176,6 +176,20 @@ def test_6_an_approval_for_req_a_never_closes_req_b(tmp_path):
     assert outcomes == {"REQ-1": RequirementOutcome.HUMAN_ACCEPTED, "REQ-2": RequirementOutcome.UNVERIFIED}
 
 
+def test_6_an_approval_binds_the_requirement_id_even_when_another_requirement_has_the_same_words(tmp_path):
+    """REQ-1 and REQ-2 with identical text and one shared case: the REQ-1
+    approval must never stand for REQ-2 (id lookup and id binding, two guards)."""
+    root, base = _repo(tmp_path)
+    acceptance = _acceptance(tmp_path)
+    approval = _approval(tmp_path, GENERAL_GOAL, acceptance, base, root)
+    reqs = derive_requirements(GENERAL_GOAL)
+    twin = SimpleNamespace(id="REQ-2", text=reqs.requirements[0].text)
+    shared = SimpleNamespace(digest=acceptance.digest, language="python",
+                             identities_for=lambda rid: acceptance.identities_for("REQ-1"))
+    assert b3.approval_problem(approval, reqs.requirements[0], reqs, shared, base) is None
+    assert b3.approval_problem(approval, twin, reqs, shared, base) is not None
+
+
 @pytest.mark.parametrize("change", ["goal", "base"])
 def test_h5_7_8_a_changed_goal_or_base_revision_invalidates_a_bound_approval(tmp_path, change):
     root, base = _repo(tmp_path)

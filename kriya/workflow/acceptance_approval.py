@@ -165,6 +165,7 @@ def _entry_mismatch(
     entry: ApprovalEntry, requirement: Any, requirements: Any, acceptance: Any, runner: str, base_revision: Optional[str],
 ) -> Optional[str]:
     checks = (
+        (entry.requirement_id == requirement.id, "the approval is for another requirement"),
         (entry.requirement_text_sha256 == text_sha256(requirement.text), "the requirement text differs"),
         (entry.goal_sha256 == requirements.goal_digest, "the goal differs"),
         (entry.acceptance_sha256 == acceptance.digest, "the acceptance artifact differs"),

@@ -31,8 +31,13 @@ M = [
     ("wrong-acceptance-digest-in-approval-accepted", AP,
      "        (entry.acceptance_sha256 == acceptance.digest, \"the acceptance artifact differs\"),",
      "        (True, \"the acceptance artifact differs\"),"),
-    ("approval-for-req-a-closes-req-b", AP, "    entry = approval.entries.get(requirement.id)",
-     "    entry = next(iter(approval.entries.values()))"),
+    # Two independent guards bind the requirement id (the entry lookup and the
+    # explicit id check); each alone is masked by the other (measured), so the
+    # target mutates both (a list of exact replacements, all applied).
+    ("approval-for-req-a-closes-req-b", AP, [
+        ("    entry = approval.entries.get(requirement.id)", "    entry = next(iter(approval.entries.values()))"),
+        ("        (entry.requirement_id == requirement.id, \"the approval is for another requirement\"),",
+         "        (True, \"the approval is for another requirement\"),")], None),
     ("approval-survives-changed-goal", AP, "        (entry.goal_sha256 == requirements.goal_digest, \"the goal differs\"),",
      "        (True, \"the goal differs\"),"),
     ("approval-survives-changed-requirement-text", AP,
@@ -105,11 +110,15 @@ def main(commit):
         try:
             target = os.path.join(repo, path)
             source = open(target).read()
-            if source.count(old) != 1:
-                results["mutants"].append({"name": name, "status": "NOT_APPLIED", "count": source.count(old)})
-                print(name, "NOT_APPLIED", source.count(old), flush=True)
+            pairs = old if isinstance(old, list) else [(old, new)]
+            counts = [source.count(o) for o, _ in pairs]
+            if counts != [1] * len(pairs):
+                results["mutants"].append({"name": name, "status": "NOT_APPLIED", "count": counts})
+                print(name, "NOT_APPLIED", counts, flush=True)
                 continue
-            open(target, "w").write(source.replace(old, new))
+            for o, n in pairs:
+                source = source.replace(o, n)
+            open(target, "w").write(source)
             started = time.time()
             code, tail = run_tests(repo)
             status = "KILLED" if code != 0 else "SURVIVED"
