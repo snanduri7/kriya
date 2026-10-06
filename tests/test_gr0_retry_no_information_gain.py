@@ -110,3 +110,20 @@ def test_a_repeated_refusal_reaches_the_no_progress_limit_and_a_first_one_does_n
     assert not record_workspace_progress(state, "h", 3, failure_signature="s", stage="no_progress_retry",
                                          capability_unchanged=True, refusal_repeated=True)
     assert state.no_progress_terminated and state.consecutive_no_progress_attempts == 3
+
+
+def test_a_refusal_on_another_model_is_a_first_refusal_not_a_repeat(tmp_path, monkeypatch):
+    """The fallback is refused under the same capability digest the primary
+    was refused under (equal output budgets, as in the v5 production bindings
+    and the measured Graphify preflight); that is the fallback's own first
+    refusal (another model, so another request), so the strategy changes once
+    more instead of the run stopping as an identical repeat."""
+    run = run_edit_protocol(tmp_path, monkeypatch, [FABRICATED_EDIT], probe=_probe, max_tokens=16384,
+                            fallback=FALLBACK, fallback_answers=[FABRICATED_EDIT])
+    trajectory = _trajectory(run)
+    refused = [row for row in trajectory if row[3]]
+    first_fallback = next(row for row in refused if row[1] == FALLBACK)
+    assert any(row[1] == "dev-model" and row[2] == first_fallback[2] for row in refused), trajectory
+    assert first_fallback[0] in [e.attempt for e in run.kinds("retry.strategy_transition")]
+    assert trajectory[-1][0] > first_fallback[0], trajectory  # the run went on after it
+    assert run.result["failure_category"] == "no_progress"
