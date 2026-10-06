@@ -69,6 +69,7 @@ TWO_CASES = CALC_ACCEPTANCE + ('\n\n@pytest.mark.kriya_requirement("REQ-1")\n'
     ("it must never return None, so that get(1) returns 2", BEHAVIOR_GENERAL),
     ("Add a double(x) function that returns 2 * x, so that double(5) returns 10.", BEHAVIOR_GENERAL),  # formula
     ("greet(name) returns 'Hello, <name>!'", BEHAVIOR_GENERAL),  # placeholder
+    ("greet returns Hello <name>, so that greet('Ann') returns 'Hello Ann'", BEHAVIOR_GENERAL),  # even with a case
     # 6: nothing concrete stated -> uncertain -> GENERAL
     ("m1.py defines VALUE", BEHAVIOR_GENERAL),
     ("Make the cache faster.", BEHAVIOR_GENERAL),
@@ -231,6 +232,16 @@ def test_10_a_resumed_pre_b2cov_broad_closure_closes_nothing(record):
         record_requirement_closure(ledger, reqs, "REQ-1", evidence_id="cand", method="acceptance_oracle",
                                    detail={"required_claims": [BEHAVIOR, REGRESSION_PRESERVATION]}, source="old",
                                    revision=1)
+    assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
+def test_10_a_record_without_the_regression_claim_cannot_cover_a_preservation_clause():
+    """A1's "every input it already accepts keeps working exactly as before" is
+    the regression claim's to prove; a behaviour record that does not require
+    that claim leaves the clause unproven, so the statement is GENERAL for it."""
+    reqs, ledger = _ledger(A1_GOAL)
+    record_requirement_claim(ledger, reqs, "REQ-1", BEHAVIOR, evidence_id="cand", method="acceptance_oracle",
+                             detail={"required_claims": [BEHAVIOR]}, source="old", revision=1)
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
 
 
