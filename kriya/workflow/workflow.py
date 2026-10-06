@@ -933,8 +933,6 @@ def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[
     them claims regression preservation even when the candidate deleted it.
     None when that cannot be established (an in-place candidate with no
     readable base): the caller then assumes the statement claims both."""
-    import subprocess
-
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
 
@@ -944,8 +942,8 @@ def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[
     if base_revision:
         try:
             files += [path for path in BaseTree(candidate_root, base_revision).paths if is_runnable_test_file(path)]
-        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
-            logger.info(f"Acceptance: base test files unavailable: {exc}")
+        except Exception as exc:  # unreadable base (git error, I/O): unknown, both claims required
+            logger.info(f"Acceptance: base test files unavailable: {type(exc).__name__}: {exc}")
             return None
     elif in_place:
         return None

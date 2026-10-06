@@ -779,3 +779,23 @@ def test_a_raising_run_records_indeterminate_and_revokes_an_earlier_pass(tmp_pat
         ao.close_requirements_with_acceptance(ledger, reqs, artifact, test_files=[], execute=boom, source="test",
                                               revision=2)
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
+def test_reference_test_files_normal_and_unreadable_base(tmp_path, monkeypatch):
+    """The workspace + base test files on the normal path (rule 4: the broad
+    catch must not hide a coding error there); an unreadable base is unknown."""
+    from test_prd020_requirement_lineage import _git_base
+
+    from kriya.workflow import workflow as workflow_module
+
+    workspace = _git_base(tmp_path / "ws", {"calc/__init__.py": "", "tests/test_calc.py": "def test_c():\n    pass\n"})
+    candidate = calc_project(tmp_path / "candidate", True)
+    assert workflow_module._reference_test_files(str(candidate), str(workspace)) == ["tests/test_calc.py"]
+    in_place = workflow_module._reference_test_files(str(workspace), str(workspace))
+    assert in_place == ["tests/test_calc.py"]  # the base's files when the candidate is the workspace
+
+    def unreadable(*_args, **_kwargs):
+        raise OSError("base unreadable")
+
+    monkeypatch.setattr("kriya.workflow.named_test_oracle.BaseTree", unreadable)
+    assert workflow_module._reference_test_files(str(workspace), str(workspace)) is None
