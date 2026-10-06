@@ -1,0 +1,2 @@
+Add `public static int clamp(final int value, final int min, final int max)` to org.apache.commons.lang3.math.NumberUtils in src/main/java/org/apache/commons/lang3/math/NumberUtils.java that returns min when value is less than min, max when value is greater than max and value otherwise, and throws IllegalArgumentException when min is greater than max, keeping NumberUtilsTest passing.
+- Do not modify any other file.
