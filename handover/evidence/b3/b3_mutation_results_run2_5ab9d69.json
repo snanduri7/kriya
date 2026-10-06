@@ -1,0 +1,157 @@
+{
+  "commit": "5ab9d69",
+  "tests": [
+    "tests/test_b3_human_acceptance.py",
+    "tests/test_b2cov_claim_strength.py",
+    "tests/test_b2a_acceptance_oracle.py",
+    "tests/test_fs1c1_requirement_claims.py",
+    "tests/test_prd020_requirement_lineage.py",
+    "tests/test_prd008_resume_fingerprints.py"
+  ],
+  "mutants": [
+    {
+      "name": "general-b2-pass-closes-without-approval",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "7 failed, 39 passed in 7.52s",
+      "seconds": 8.4
+    },
+    {
+      "name": "wrong-acceptance-digest-in-approval-accepted",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "2 failed, 118 passed in 13.75s",
+      "seconds": 14.6
+    },
+    {
+      "name": "approval-for-req-a-closes-req-b",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 79 passed in 12.92s",
+      "seconds": 13.8
+    },
+    {
+      "name": "approval-survives-changed-goal",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "2 failed, 116 passed in 13.63s",
+      "seconds": 14.5
+    },
+    {
+      "name": "approval-survives-changed-requirement-text",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 129 passed in 12.91s",
+      "seconds": 13.8
+    },
+    {
+      "name": "candidate-can-create-approval",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "2 failed, 125 passed in 12.79s",
+      "seconds": 13.7
+    },
+    {
+      "name": "model-can-create-approval",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 197 passed in 14.77s",
+      "seconds": 15.6
+    },
+    {
+      "name": "candidate-test-becomes-approved-oracle",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 144 passed in 13.14s",
+      "seconds": 14.0
+    },
+    {
+      "name": "human-approval-overrides-failing-acceptance",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "4 failed, 103 passed in 12.62s",
+      "seconds": 13.6
+    },
+    {
+      "name": "missing-identity-still-human-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 155 passed in 15.22s",
+      "seconds": 16.1
+    },
+    {
+      "name": "stale-report-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 147 passed in 13.13s",
+      "seconds": 14.0
+    },
+    {
+      "name": "resume-restores-stale-human-closure",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 97 passed in 7.34s",
+      "seconds": 8.2
+    },
+    {
+      "name": "resume-restores-whole-human-closure",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 90 passed in 7.42s",
+      "seconds": 8.3
+    },
+    {
+      "name": "approval-not-in-resume-identity",
+      "file": "kriya/workflow/resume_fingerprints.py",
+      "status": "KILLED",
+      "tail": "1 failed, 96 passed in 7.50s",
+      "seconds": 8.4
+    },
+    {
+      "name": "enforce-resume-ignores-approval-change",
+      "file": "kriya/workflow/workflow_controller.py",
+      "status": "KILLED",
+      "tail": "1 failed, 257 passed in 16.28s",
+      "seconds": 17.2
+    },
+    {
+      "name": "wildcard-extra-field-accepted",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 107 passed in 13.18s",
+      "seconds": 14.0
+    },
+    {
+      "name": "duplicate-approval-accepted",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 98 passed in 12.44s",
+      "seconds": 13.3
+    },
+    {
+      "name": "unapproved-template-accepted",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 108 passed in 13.07s",
+      "seconds": 14.0
+    },
+    {
+      "name": "base-revision-not-bound",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "2 failed, 116 passed in 12.75s",
+      "seconds": 13.6
+    },
+    {
+      "name": "runner-contract-not-bound",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 143 passed in 13.20s",
+      "seconds": 14.1
+    }
+  ],
+  "baseline": "328 passed in 17.79s",
+  "counts": {
+    "KILLED": 20
+  }
+}

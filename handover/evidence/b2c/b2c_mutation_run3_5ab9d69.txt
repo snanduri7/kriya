@@ -1,0 +1,20 @@
+baseline 232 passed in 52.98s
+candidate-pom-config-trusted KILLED 3 failed, 70 passed in 37.17s
+candidate-tests-treated-as-acceptance KILLED 3 failed, 60 passed in 36.75s
+model-claim-closes-behavior-write KILLED 1 failed, 195 passed in 49.98s
+model-claim-closes-behavior-read KILLED 1 failed, 231 passed in 50.94s
+c0-closes-behavior KILLED 2 failed, 68 passed in 37.13s
+finite-jvm-examples-close-general-claim KILLED 2 failed, 63 passed in 42.93s
+counterexample-fails-to-violate KILLED 4 failed, 113 passed in 21.04s
+missing-junit-identity-treated-as-pass KILLED 1 failed, 227 passed in 49.75s
+stale-surefire-report-accepted KILLED 2 failed, 223 passed in 49.93s
+wrong-candidate-digest-accepted KILLED 2 failed, 143 passed in 46.78s
+wrong-acceptance-digest-accepted KILLED 1 failed, 132 passed in 45.37s
+acceptance-collision-silently-overwritten KILLED 1 failed, 72 passed in 43.37s
+trust-surface-output-root-ignored KILLED 1 failed, 82 passed in 44.19s
+harness-compile-error-treated-as-violation KILLED 2 failed, 113 passed in 37.42s
+candidate-compile-failure-treated-as-violation KILLED 1 failed, 231 passed in 50.58s
+harness-exception-treated-as-contradiction KILLED 1 failed, 202 passed in 45.92s
+assertion-without-candidate-reference-violates KILLED 1 failed, 230 passed in 50.75s
+report-files-not-reverified KILLED 2 failed, 114 passed in 45.58s
+TOTAL 18 {'KILLED': 18}
