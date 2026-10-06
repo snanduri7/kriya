@@ -962,6 +962,7 @@ def close_requirements_with_acceptance_tests(
     direct/milestone pre-apply boundary and enforce's terminal gate, before
     the named-test closure. With no artifact it only supersedes an earlier
     acceptance judgment of the same candidate (never runs anything)."""
+    from kriya.workflow.acceptance_jvm import run_java_acceptance
     from kriya.workflow.acceptance_oracle import close_requirements_with_acceptance, run_acceptance
 
     modified = list(modified)
@@ -976,12 +977,23 @@ def close_requirements_with_acceptance_tests(
         built.tree_binding = tree_binding
         return built
 
+    def export_validator(root: str) -> PolymorphicValidator:
+        # B2-c: a Kriya-owned copy of the candidate; its build configuration is
+        # the authorized base's (trust surface checked first), so no toolchain
+        # declaration may differ there.
+        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+
+    def execute(artifact: Any) -> Any:
+        if artifact.language == "java":
+            return run_java_acceptance(artifact, candidate_root, candidate_paths=modified,
+                                       base_revision=_oracle_base_revision(candidate_root, workspace_path),
+                                       validator_factory=export_validator)
+        return run_acceptance(artifact, candidate_root, candidate_paths=modified, validator_factory=validator)
+
     return close_requirements_with_acceptance(
         ledger, requirement_set, acceptance,
         test_files=None if reference is None else sorted(set(test_files) | set(reference)),
-        execute=lambda artifact: run_acceptance(artifact, candidate_root, candidate_paths=modified,
-                                                validator_factory=validator),
-        source="requirement_closure.acceptance", revision=revision,
+        execute=execute, source="requirement_closure.acceptance", revision=revision,
     )
 
 

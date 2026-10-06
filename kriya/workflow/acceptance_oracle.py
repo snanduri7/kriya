@@ -225,6 +225,10 @@ class AcceptanceArtifact:
     requirement_set_digest: str
     cases: Tuple[AcceptanceCase, ...]
     imports: Tuple[str, ...]
+    # B2-c: "java" for a JUnit 5 class (kriya/workflow/acceptance_jvm.py), with
+    # its package, class name and injection path.
+    language: str = "python"
+    java: Optional[Dict[str, str]] = None
 
     @property
     def requirement_ids(self) -> List[str]:
@@ -234,7 +238,8 @@ class AcceptanceArtifact:
         return sorted(case.identity for case in self.cases if requirement_id in case.requirement_ids)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"digest": self.digest, "source_name": self.source_name, "contract": ACCEPTANCE_CONTRACT_VERSION,
+        return {"digest": self.digest, "source_name": self.source_name, "language": self.language,
+                "contract": ACCEPTANCE_CONTRACT_VERSION,
                 "runner_contract_digest": RUNNER_CONTRACT_DIGEST,
                 "requirement_set_digest": self.requirement_set_digest,
                 "cases": {rid: self.identities_for(rid) for rid in self.requirement_ids}}
@@ -350,7 +355,16 @@ def load_acceptance(path: str, requirements: Any, state_root: str) -> Acceptance
             source = handle.read()
     except OSError as error:
         raise AcceptanceError(ACCEPTANCE_ARTIFACT_INVALID, f"cannot read {path!r}: {error}") from error
-    cases, imports = parse_acceptance(source)
+    java: Optional[Dict[str, str]] = None
+    if path.endswith(".java"):
+        from kriya.workflow.acceptance_jvm import parse_java_acceptance
+
+        cases, java = parse_java_acceptance(source)
+        imports: Tuple[str, ...] = ()
+    elif path.endswith(".py"):
+        cases, imports = parse_acceptance(source)
+    else:
+        raise AcceptanceError(ACCEPTANCE_ARTIFACT_INVALID, "an acceptance file is a .py (pytest) or .java (JUnit 5) file")
     known = set(requirements.ids)
     unknown = sorted({rid for case in cases for rid in case.requirement_ids if rid not in known})
     if unknown:
@@ -366,14 +380,15 @@ def load_acceptance(path: str, requirements: Any, state_root: str) -> Acceptance
     digest = hashlib.sha256(source).hexdigest()
     store = acceptance_store(state_root)
     os.makedirs(store, exist_ok=True)
-    stored = os.path.join(store, f"{digest}.py")
+    stored = os.path.join(store, f"{digest}{'.java' if java is not None else '.py'}")
     if not os.path.isfile(stored) or _file_digest(stored) != digest:
         temporary = f"{stored}.{uuid.uuid4().hex}.tmp"
         with open(temporary, "wb") as handle:
             handle.write(source)
         os.replace(temporary, stored)
     return AcceptanceArtifact(digest=digest, stored_path=stored, source_name=os.path.basename(path),
-                              requirement_set_digest=requirements.digest, cases=cases, imports=imports)
+                              requirement_set_digest=requirements.digest, cases=cases, imports=imports,
+                              language="java" if java is not None else "python", java=java)
 
 
 def _file_digest(path: str) -> Optional[str]:
@@ -436,6 +451,12 @@ class AcceptanceRun:
     candidate_modules: List[str] = field(default_factory=list)
     integrity_problem: Optional[Tuple[str, str]] = None  # (reason code, detail)
     candidate_digest: Optional[str] = None
+    # B2-c (JVM) only: the trust-surface digest checked before the run, the
+    # candidate's main classes and per-case report detail.
+    language: str = "python"
+    trust_surface_digest: Optional[str] = None
+    candidate_classes: Optional[List[str]] = None
+    case_details: Optional[Dict[str, List[Dict[str, str]]]] = None
 
     def evidence(self) -> Dict[str, Any]:
         report = self.report
@@ -588,6 +609,10 @@ def judge_acceptance(artifact: AcceptanceArtifact, run: AcceptanceRun) -> Dict[s
     base = {"acceptance_digest": artifact.digest, "contract": ACCEPTANCE_CONTRACT_VERSION,
             "runner_contract_digest": RUNNER_CONTRACT_DIGEST, "runner": ACCEPTANCE_RUNNER,
             "acceptance_requirement_set_digest": artifact.requirement_set_digest, **run.evidence()}
+    if artifact.language == "java":
+        from kriya.workflow.acceptance_jvm import judge_java_acceptance
+
+        return judge_java_acceptance(artifact, run, base)
 
     def every(code: str, reason: str) -> Dict[str, AcceptanceJudgment]:
         return {rid: AcceptanceJudgment(code, reason, {**base, "cases": artifact.identities_for(rid)})

@@ -1058,6 +1058,8 @@ leaves it UNVERIFIED. Evidence counts only at the strength it shows: a requireme
 layout, with or without a `tests/` package); a `src/` layout, a namespace package, or importing test code is refused
 with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come from the plan's original goal.
 
+For a Maven project with JUnit 5, the acceptance file can be one Java test class instead (`--acceptance KriyaAcceptanceTest.java`): one `package`, one class, and every `@Test` method preceded by a `// kriya_requirement: REQ-1` comment. Kriya runs it in a private copy of the candidate (never in your workspace), only when the candidate left the build and test configuration (poms, `.mvn`, `src/test`, ...) exactly as it was, and never overwrites an existing file at `src/test/java/<package>/<Class>.java`. Gradle projects are not supported yet.
+
 #### Resuming an interrupted run
 `generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint of a plain `generate`/`fix` run (a milestone's checkpoint is never picked up here - see §3.4.1), or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):
 ```bash
