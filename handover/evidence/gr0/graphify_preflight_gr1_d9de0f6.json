@@ -1,0 +1,255 @@
+{
+ "requirements": {
+  "contract_digest": "addc635a909fa91be765f43b2e18143668b58d68416871614803a563c382ce6b",
+  "authoritative_ids": [
+   "REQ-1",
+   "REQ-2",
+   "REQ-3"
+  ],
+  "authoritative_texts": [
+   "For the three C# files in the issue's reproducer (Settings.cs, Reader.cs, Local.cs), `graphify extract` produces a `calls` edge from `.A()` to `.Get()` (case 1: `Get<int>(\"port\")`), from `.B()` to `.Get()` (case 2: `this.Get<int>(\"port\")`) and from `.E()` to `.Make()` (case 5: `Make<int>()`).",
+   "For the same reproducer, the non-generic calls keep their `calls` edges: `.C()` to `.GetRaw()` (case 3: `GetRaw(\"host\")`) and `.D()` to `.GetRaw()` (case 4: `this.GetRaw(\"host\")`).",
+   "In C#, a call whose method name carries an explicit type-argument list, with no receiver or through `this`, produces the same `calls` edge as the same call without the type-argument list: the type-argument list is not part of the called method's identity."
+  ],
+  "set_digest": "429613291934b2c6f924c43c0c452b0cfe1a74a826d7b80e3fb549b220ee5332",
+  "raw_goal_in_developer_request": true
+ },
+ "kriya_shape": {
+  "file_bytes": 331064,
+  "lines": 6318,
+  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+  "goal_sha256": "f96bf5a3400abdb3eddf4a6d39d14f7022cde66cf1621525f3edac759bfcb823",
+  "full_file_token_estimate": 82581
+ },
+ "attempt1": {
+  "full_file_authority": false,
+  "operations": [
+   "anchored_edit"
+  ],
+  "spans": [
+   [
+    5357,
+    5373,
+    "window"
+   ],
+   [
+    5381,
+    5397,
+    "window"
+   ],
+   [
+    5401,
+    5417,
+    "window"
+   ]
+  ],
+  "loci": [
+   5365,
+   5389,
+   5409
+  ],
+  "insertion": null,
+  "whole_file_in_final_request": false,
+  "every_exact_span_in_final_request": true,
+  "final_request_tokens": 12799,
+  "pre_fit_tokens": 12799,
+  "capacity_tokens": 16096,
+  "fits": true
+ },
+ "requests": [
+  {
+   "model": "primary",
+   "capacity_tokens": 16096,
+   "pre_fit_tokens": 12799,
+   "final_request_tokens": 12799,
+   "final_request_bytes": 31965,
+   "fits": true
+  },
+  {
+   "model": "primary",
+   "capacity_tokens": 16096,
+   "pre_fit_tokens": 6739,
+   "final_request_tokens": 6739,
+   "final_request_bytes": 16821,
+   "fits": true
+  },
+  {
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "capacity_tokens": 16096,
+   "pre_fit_tokens": 6697,
+   "final_request_tokens": 6697,
+   "final_request_bytes": 16716,
+   "fits": true
+  }
+ ],
+ "terminal": {
+  "quality_gates_passed": false,
+  "failure_category": "no_progress",
+  "developer_models": [
+   "dev-model",
+   "dev-model",
+   "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+  ]
+ },
+ "trajectory": [
+  [
+   1,
+   "model.transition",
+   "Developer request profile for dev-model"
+  ],
+  [
+   1,
+   "failure.recorded",
+   "ANCHORED EDIT FAILURE in graphify/extractors/engine.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not oc"
+  ],
+  [
+   2,
+   "failure.recorded",
+   "ANCHORED EDIT FAILURE in graphify/extractors/engine.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not oc"
+  ],
+  [
+   3,
+   "failure.recorded",
+   "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in graphify/extractors/engine.py would be retried on dev-model with the same au"
+  ],
+  [
+   3,
+   "retry.strategy_transition",
+   "No material progress on consecutive attempts - forcing a strategy transition."
+  ],
+  [
+   4,
+   "model.transition",
+   "Developer request profile for qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a (was dev-model): capability_source, model, runtime_digest changed"
+  ],
+  [
+   4,
+   "failure.recorded",
+   "ANCHORED EDIT FAILURE in graphify/extractors/engine.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not oc"
+  ],
+  [
+   5,
+   "failure.recorded",
+   "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in graphify/extractors/engine.py would be retried on qwen3.6:35b-a3b-q4_K_M-kri"
+  ],
+  [
+   5,
+   "retry.strategy_transition",
+   "No material progress on consecutive attempts - forcing a strategy transition."
+  ],
+  [
+   6,
+   "failure.recorded",
+   "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in graphify/extractors/engine.py would be retried on qwen3.6:35b-a3b-q4_K_M-kri"
+  ]
+ ],
+ "capabilities": [
+  [
+   "dev-model",
+   [
+    [
+     "a79464a2d0",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5409
+     ]
+    ]
+   ]
+  ],
+  [
+   "dev-model",
+   [
+    [
+     "99e2652863",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5390,
+      5409
+     ]
+    ]
+   ]
+  ],
+  [
+   "dev-model",
+   [
+    [
+     "99e2652863",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5390,
+      5409
+     ]
+    ]
+   ]
+  ],
+  [
+   "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   [
+    [
+     "99e2652863",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5390,
+      5409
+     ]
+    ]
+   ]
+  ],
+  [
+   "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   [
+    [
+     "99e2652863",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5390,
+      5409
+     ]
+    ]
+   ]
+  ],
+  [
+   "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   [
+    [
+     "99e2652863",
+     [
+      "anchored_edit"
+     ],
+     false,
+     [
+      5365,
+      5389,
+      5390,
+      5409
+     ]
+    ]
+   ]
+  ]
+ ]
+}
