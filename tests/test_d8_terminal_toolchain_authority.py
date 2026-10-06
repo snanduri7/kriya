@@ -173,9 +173,12 @@ def test_a_named_test_whose_requirement_needs_no_closure_builds_no_validator(tmp
         record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "")
                                                    for r in reqs.requirements},
                                     revision=1, evidence_fingerprint="cand", source="test")
-        for requirement in reqs.requirements:
-            record_requirement_closure(ledger, reqs, requirement.id, evidence_id="cand", method="named_test_run",
-                                       detail={}, source="test", revision=1)
+        for requirement in reqs.requirements:  # each by its own kind of evidence (FS-1C1)
+            named = "AppTest" in requirement.text
+            record_requirement_closure(
+                ledger, reqs, requirement.id, evidence_id="cand",
+                method="named_test_oracle" if named else "acceptance_oracle",
+                detail={"tests": ["src/test/java/demo/AppTest.java"]} if named else {}, source="test", revision=1)
     with _Spy() as spy:
         assert close_requirements_with_named_tests(
             CONTAINED, ledger, reqs, candidate, workspace, modified=["pom.xml"], revision="terminal",

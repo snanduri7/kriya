@@ -422,6 +422,124 @@ def requirement_verdict_details(ledger: ObligationLedger, requirements: Requirem
     return details
 
 
+# ------------------------------------------------------------ claims (FS-1C1)
+#
+# A requirement statement can make more than one claim. "Implement X, keeping
+# test T passing" claims new BEHAVIOR (X) and REGRESSION_PRESERVATION (T still
+# passes). A named pre-existing test is a known-good oracle: it passed before X
+# existed, so it can prove only that it still passes - never X. Each claim is
+# closed only by evidence of its own kind; a requirement closes only when every
+# claim it makes is closed for the same candidate.
+
+REGRESSION_PRESERVATION = "REGRESSION_PRESERVATION"
+BEHAVIOR = "BEHAVIOR"
+# Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
+# ever proves regression preservation. BEHAVIOR needs independent acceptance
+# evidence (FS-1C B2 executable acceptance, B3 human-bound acceptance tests);
+# neither has a producer yet, so no behaviour claim is closable today.
+NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle"})
+BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_tests"})
+REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
+
+# Words a pure regression-preservation statement is made of besides the test
+# references themselves ("tests/test_legacy.py keeps passing", "Behaviour stays
+# compatible with the legacy check test_legacy"). Closed on purpose: any other
+# word is read as a behaviour claim, so an unknown phrasing fails closed (the
+# requirement stays UNVERIFIED), never open.
+_PRESERVATION_WORDS = frozenset({
+    "a", "all", "an", "and", "are", "be", "behavior", "behaviors", "behaviour", "behaviours", "break",
+    "breaking", "breaks", "broken", "check", "checks", "compatibility", "compatible", "continue", "continues",
+    "continuing", "ensure", "ensures", "existing", "fail", "failing", "fails", "green", "has", "have", "in",
+    "intact", "is", "it", "its", "keep", "keeping", "keeps", "kept", "legacy", "make", "must", "need", "needs",
+    "no", "not", "of", "or", "pass", "passed", "passes", "passing", "regress", "regression", "regressions",
+    "remain", "remaining", "remains", "shall", "should", "stay", "staying", "stays", "still", "suite", "sure",
+    "test", "tests", "that", "the", "their", "they", "to", "unchanged", "will", "with", "without",
+})
+
+
+def requirement_claims(text: str, named_tests: Iterable[str]) -> Tuple[str, ...]:
+    """The claims a requirement statement makes, decided deterministically
+    from its own words: REGRESSION_PRESERVATION when it names existing tests
+    (``named_tests``), and BEHAVIOR when anything remains once the test
+    references and the closed preservation vocabulary are removed (or when it
+    names no test at all)."""
+    references = set()
+    for path in named_tests:
+        base = path.rsplit("/", 1)[-1]
+        references.update({path.lower(), base.lower(), base.rsplit(".", 1)[0].lower()})
+    leftover = [
+        token for token in (raw.strip("./").lower() for raw in _TEST_REFERENCE.findall(text or ""))
+        if any(ch.isalnum() for ch in token) and token not in references and token not in _PRESERVATION_WORDS
+    ]
+    named = bool(references)
+    return (((BEHAVIOR,) if leftover or not named else ())
+            + ((REGRESSION_PRESERVATION,) if named else ()))
+
+
+def requirement_claim_id(requirement_id: str, claim: str) -> str:
+    """The obligation id one claim's evidence is recorded under (never the
+    verdict's or the whole requirement's closure id)."""
+    return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}.claim.{claim.lower()}"
+
+
+def record_requirement_claim(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, claim: str, *,
+    evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
+) -> None:
+    """Deterministic evidence closing one claim of ``requirement_id`` for the
+    candidate ``evidence_id``. Only the producer kinds allowed for that claim
+    may record it: a regression oracle can never close BEHAVIOR."""
+    allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS}
+    if method not in allowed.get(claim, frozenset()):
+        raise ValueError(f"method {method!r} cannot close a {claim} claim")
+    requirement = requirements.get(requirement_id)
+    if requirement is None:
+        raise ValueError(f"unknown requirement id {requirement_id!r}")
+    ledger.record(ObligationRecord(
+        id=requirement_claim_id(requirement_id, claim), kind=ObligationKind.ORIGINAL_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description=requirement.text, source=source, revision=revision,
+        evidence={"requirement_set_digest": requirements.digest, "evidence_id": evidence_id,
+                  "claim": claim, "method": method, **detail},
+        terminal_required=False,
+    ))
+
+
+def requirement_claim(
+    ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """The evidence closing ``claim`` of ``requirement_id`` on the candidate
+    ``evidence_id``, if any."""
+    if not evidence_id:
+        return None
+    for record in reversed(ledger.history(requirement_claim_id(requirement_id, claim))):
+        evidence = record.evidence or {}
+        if record.status is ObligationStatus.SATISFIED and evidence.get("evidence_id") == evidence_id:
+            return evidence
+    return None
+
+
+def _effective_closure(
+    ledger: ObligationLedger, requirement: Requirement, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """The evidence that closes ``requirement`` for ``evidence_id``: its own
+    closure record - except a named-test closure of a statement that also
+    claims BEHAVIOR (a pre-FS-1C1 record read back on resume, or any other
+    writer), which proves only regression preservation - or else every claim
+    the statement makes closed by its own kind of evidence."""
+    closure = requirement_closure(ledger, requirement.id, evidence_id)
+    if (closure is not None and closure.get("method") in NAMED_TEST_CLOSURE_METHODS
+            and BEHAVIOR in requirement_claims(requirement.text, closure.get("tests") or ())):
+        closure = None
+    if closure is not None:
+        return closure
+    claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
+              for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
+    if all(claims.values()):
+        return {"method": "claims", "claims": claims}
+    return None
+
+
 def record_requirement_closure(
     ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, *,
     evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
@@ -496,7 +614,7 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
         if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE:
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
         evidence_id = evidence.get("evidence_id")
-        closure = requirement_closure(ledger, requirement.id, evidence_id)
+        closure = _effective_closure(ledger, requirement, evidence_id)
         if requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None:
             outcome = RequirementOutcome.VIOLATED
         elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
@@ -518,7 +636,14 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
         evidence = (requirement_counter_evidence(ledger, requirement.id, evidence_id)
-                    or requirement_closure(ledger, requirement.id, evidence_id))
+                    or _effective_closure(ledger, requirement, evidence_id))
+        if evidence is None:
+            # FS-1C1: an open requirement whose claims are partly proven shows
+            # which (e.g. regression preserved, behaviour unverified).
+            claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
+                      for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
+            if any(claims.values()):
+                evidence = {"method": "claims", "closed": False, "claims": claims}
         if evidence is not None:
             found[requirement.id] = dict(evidence)
     return found
@@ -877,13 +1002,33 @@ def close_unverified_requirements_with_named_tests(
         else:
             judgment = judge(named)
             entry["reason_code"] = judgment.reason_code
-            if judgment.closed:
+            claims = requirement_claims(requirement.text, named)
+            entry["claims"] = list(claims)
+            if not judgment.closed:
+                entry["reason"] = judgment.reason
+            elif BEHAVIOR not in claims:
                 record_requirement_closure(
                     ledger, requirements, requirement.id, evidence_id=evidence_id, method=judgment.evidence["method"],
-                    detail=dict(judgment.evidence), source=source, revision=revision,
+                    detail={**judgment.evidence, "tests": named, "claim": REGRESSION_PRESERVATION}, source=source,
+                    revision=revision,
                 )
                 entry["closed"] = True
             else:
-                entry["reason"] = judgment.reason
+                # FS-1C1: the oracle proves only that the named tests still
+                # pass; the new behaviour the same statement asks for needs
+                # its own independent evidence.
+                record_requirement_claim(
+                    ledger, requirements, requirement.id, REGRESSION_PRESERVATION, evidence_id=evidence_id,
+                    method=judgment.evidence["method"], detail={**judgment.evidence, "tests": named}, source=source,
+                    revision=revision,
+                )
+                entry["regression_preserved"] = True
+                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] is (
+                    RequirementOutcome.CLOSED_BY_EVIDENCE)
+                if not entry["closed"]:
+                    entry["reason_code"] = REQUIREMENT_BEHAVIOR_UNVERIFIED
+                    entry["reason"] = ("the named pre-existing test(s) still pass (regression preserved), but they "
+                                       "passed before the requested behaviour existed and cannot prove it; the "
+                                       "behaviour has no independent evidence")
         attempts.append(entry)
     return attempts

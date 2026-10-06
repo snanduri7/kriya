@@ -587,15 +587,17 @@ def test_cannot_confirm_from_code_is_never_satisfied_without_other_evidence():
 def test_closure_evidence_for_the_same_candidate_closes_cannot_confirm():
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.UNVERIFIED,
                                  "REQ-3": RequirementOutcome.SATISFIED})
-    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
-                               detail={"tests": ["tests/test_x.py"]}, source="test", revision=1)
+    # A behaviour statement closes only through acceptance evidence (FS-1C1);
+    # the closure mechanics below are the same for every closure method.
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="acceptance_oracle",
+                               detail={}, source="test", revision=1)
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.CLOSED_BY_EVIDENCE
     # The model's "satisfied" on REQ-1/REQ-3 closes nothing by itself (FS-1B) ...
     assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-3"]
     # ... the same deterministic closure for the same candidate does.
     for rid in ("REQ-1", "REQ-3"):
-        record_requirement_closure(ledger, reqs, rid, evidence_id="cand-1", method="named_test_run",
-                                   detail={"tests": ["tests/test_x.py"]}, source="test", revision=1)
+        record_requirement_closure(ledger, reqs, rid, evidence_id="cand-1", method="acceptance_oracle",
+                                   detail={}, source="test", revision=1)
     assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.CLOSED_BY_EVIDENCE}
     assert blocking_requirements(ledger, reqs, **PRODUCTION) == []
     # The verdict records themselves are untouched: still the verifier's words.
@@ -605,7 +607,7 @@ def test_closure_evidence_for_the_same_candidate_closes_cannot_confirm():
 
 def test_closure_evidence_never_carries_over_to_another_candidate():
     reqs, ledger = _ledger_with({"REQ-2": RequirementOutcome.UNVERIFIED})
-    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="acceptance_oracle",
                                detail={}, source="test", revision=1)
     record_requirement_verdicts(ledger, reqs, {"REQ-2": (RequirementOutcome.UNVERIFIED, "")}, revision=2,
                                 evidence_fingerprint="cand-2", source="test", only=["REQ-2"])
@@ -945,7 +947,7 @@ def test_a_resumed_pre_fs1_satisfied_record_authorizes_nothing():
     assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-2", "REQ-3"]
     details = requirement_verdict_details(ledger, reqs)
     assert (details["REQ-1"]["outcome"], details["REQ-1"]["model_outcome"]) == ("unverified", "satisfied")
-    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="acceptance_oracle",
                                detail={}, source="test", revision=1)
     record_requirement_closure(ledger, reqs, "REQ-3", evidence_id="cand-1", method="mutation_scope",
                                detail={}, source="test", revision=1, violated=True)
