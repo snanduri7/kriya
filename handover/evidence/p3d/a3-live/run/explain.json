@@ -1,0 +1,322 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "COMMITTED",
+        "lifecycle_state": "SUCCESS",
+        "model_calls": 9,
+        "seq": 125,
+        "terminal_status": "SUCCESS"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": null,
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": null,
+      "quality_gates_passed": true,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 74,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 106,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 37,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:990f6162d1d8434c3a4e4adfe27d6fd67b1f27e9c124a28e2c4cc1ed7cf28f30",
+                "wire_body": "sha256:f7b7f7a98fa4ebcfb692cc8728305f3f623f0c5debceefa460a730275c869f0b"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/math/NumberUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 39,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:5fa56880928ca7e4f778b9771627fcf0392fc22b0bd85209d35be65def56dc07",
+                "wire_body": "sha256:50c7e3f446c98223157b2ba6cf86beb3a9b2d8cd5ebce81e7e53bf6b83f0c4a2"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 49,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:c95714d6e7977f5c6bb40dd5ca44b619a146b3fd3dc1eed2038dd1703b7a8135",
+                "wire_body": "sha256:21ad409b0d074516709427a1169967cc53411babb2b77a71bb2923106dd28e36"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 53,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:130cedfae7fb1d9bc7d3276bb3ba12d47b994ba3b9b9afe8c55e77675ef2da6c",
+                "wire_body": "sha256:37f41335f9ffe8ebaa34fe98bcb2acd0f6ec7a796a169a776664b45251d6b1f2"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 63,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+              ],
+              "seq": 37,
+              "targets": [
+                {
+                  "digest": "a47c67d87b3e527afce7c39e1be83802aa1e87a8c8b3b8466a8098bbab591956",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": {
+                    "digest": "dcee87da2152631f605e2e3e7932c071105407fd033d70985094594090ed9c63",
+                    "end_line": 1696,
+                    "owner": "org.apache.commons.lang3.math.NumberUtils",
+                    "planned_members": [
+                      "clamp"
+                    ],
+                    "revision": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                    "start_line": 1695,
+                    "tier": "owner_closing_delimiter",
+                    "version": 1
+                  },
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                  "shown_tier": "skeleton",
+                  "spans": [],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 310,
+              "content": {
+                "content": "sha256:e6a6d8871919633e434c6f4ad7540146b1479f0dc5bf56a6d847e194f39e96d9"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 40,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 108,
+              "content": {
+                "content": "sha256:79698f82f9658475956d3f96dfb2f31cb30429a851f05a282d775fa97ee9e743"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 50,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 92,
+              "content": {
+                "content": "sha256:fd480f9c68c8a34d7a4f146ee801d6c8f78facf97079b03d35c960cd7c55c66b"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 54,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 425,
+              "content": {
+                "content": "sha256:642aeabbdfd0b6143be646f41d9c3d4f56776d228fafa35355aae13cccef57f3"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 64,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:934ae970fdbf1fe383ede11e5339e652a3a4fbf3a89fd2c7f63fef55f646db3c"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+              "seq": 42
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "a131e59286f27ffa9583f97dd36f4d5e37a87e84d25eddca384c2c2e134e723f",
+              "before_digest": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+              "content": {
+                "after": "sha256:a131e59286f27ffa9583f97dd36f4d5e37a87e84d25eddca384c2c2e134e723f",
+                "before": "sha256:c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                "diff": "sha256:fda462cd6291c6bd78b0affa2701e39992295abbe0bc0eabb76d74e13d6feb67"
+              },
+              "decision": "STAGED",
+              "lines_added": 22,
+              "lines_removed": 0,
+              "path": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+              "seq": 46
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 34
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "reason": "no_model_call: no Developer call in this attempt",
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 2,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T171117-866c46d9",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

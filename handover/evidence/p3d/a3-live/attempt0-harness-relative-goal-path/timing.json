@@ -1,0 +1,18 @@
+{
+ "process_wall_seconds": 0.5422700409544632,
+ "recorder_seconds": 0.0,
+ "functions": {},
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p3d/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/b3-a3-java-lang.yaml",
+  "generate",
+  "-f",
+  "goals/b3-a3-java-lang.txt",
+  "-y",
+  "--acceptance",
+  "/Users/sriramnanduri/kriya-m1-live/acceptance/b3-a3-java-lang/KriyaAcceptanceTest.java",
+  "--acceptance-approval",
+  "/Users/sriramnanduri/kriya-m1-live/acceptance/b3-a3-java-lang/approval.json"
+ ]
+}
