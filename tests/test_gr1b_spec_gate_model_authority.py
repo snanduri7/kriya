@@ -134,3 +134,5 @@ async def test_a_contradictory_indeterminate_verdict_is_advisory_too(tmp_path):
     assert not any(g.get("type") == "spec_compliance_indeterminate" for g in _gates(cfg))
     statuses = [g.get("status") for g in _spec_outcomes(cfg)]
     assert statuses == ["model_indeterminate"]
+    # No verdict was given, so nothing is closed: every requirement stays UNKNOWN for the terminal policy.
+    assert set(res["requirements"]["outcomes"].values()) == {"unknown"}
