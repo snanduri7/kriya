@@ -28,7 +28,9 @@ Execution (never in the candidate's real workspace):
 5. The operator class is injected (create-exclusive) and run alone through the ordinary Maven test gate
    (``-Dtest=<Class>``, containment/offline policy and the FS-1A fresh report binding unchanged). A missing report
    with the injected class in a compilation error is ``ACCEPTANCE_HARNESS_COMPILE_FAILED``; any other missing or
-   incomplete report is ``ACCEPTANCE_EVIDENCE_INDETERMINATE``. The injected file is re-hashed after the run.
+   incomplete report is ``ACCEPTANCE_EVIDENCE_INDETERMINATE`` (naming the plugin goal when the build was rejected
+   before the tests ran - measured: Apache RAT rejects an operator class without the repository's license header,
+   so on such repositories the operator file carries that header). The injected file is re-hashed after the run.
 6. Per-case detail is read from the report files FS-1A digested (each re-verified against that digest).
 
 Judgment (per requirement, ``judge_java_acceptance``): PASSED when every expected identity executed and passed;
@@ -78,6 +80,7 @@ _LINKAGE_TYPES = ("java.lang.NoClassDefFoundError", "java.lang.ClassNotFoundExce
                   "java.lang.AbstractMethodError", "java.lang.VerifyError", "java.lang.ClassFormatError")
 _FRAME = re.compile(r"^\s*at\s+(?:[\w.]+/)?([\w.$]+)\.[\w$<>]+\(", re.M)
 _COPY_IGNORE = (".git", ".kriya", "target", "build", ".gradle", "node_modules")
+_FAILED_GOAL = re.compile(r"Failed to execute goal (\S+)")
 _STAGING_DIR = "acceptance-runs"
 
 RUNNER_SOURCE_DIGEST = hashlib.sha256(
@@ -355,6 +358,12 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
                          "the operator acceptance class did not compile against the candidate (harness integration, "
                          "not a requirement violation)")
         reason = "no structured report" if report is None else (report.reason or f"runner {report.runner}")
+        rejected = _FAILED_GOAL.search(output)
+        if rejected:
+            # e.g. a validate-phase check (Apache RAT license headers) rejected the
+            # build before any test ran: the operator class must satisfy the
+            # repository's own source rules. Diagnostic only - still no evidence.
+            reason += f"; the build failed before the tests ran: {rejected.group(1)}"
         return every(ACCEPTANCE_EVIDENCE_INDETERMINATE, f"acceptance run evidence not complete: {reason}")
     details = run.case_details
     if details is None:

@@ -204,6 +204,26 @@ def test_a_harness_that_does_not_compile_is_not_a_violation(tmp_path, ws):
     assert judgment.code == jvm.ACCEPTANCE_HARNESS_COMPILE_FAILED
 
 
+def test_a_build_rejected_before_the_tests_ran_is_indeterminate_and_names_the_goal(tmp_path, ws):
+    """Measured on commons-cli/commons-lang: Apache RAT (validate phase) rejects an operator class
+    without the repository's license header; no test runs, so there is no evidence either way."""
+    cand = candidate(ws, tmp_path / "c", "wrong")
+    artifact = _artifact(tmp_path)
+    rejected = {"success": False, "output": "[ERROR] Failed to execute goal org.apache.rat:apache-rat-plugin:0.18:check "
+                "(rat-check) on project demo: Counter(s) UNAPPROVED exceeded", "returncode": 1}
+    with patch("kriya.capabilities.maven.MavenBuildAdapter.run_tests", return_value=rejected):
+        judgment = ao.judge_acceptance(artifact, _run(artifact, ws, cand))["REQ-1"]
+    assert judgment.code == ao.ACCEPTANCE_EVIDENCE_INDETERMINATE
+    assert "org.apache.rat:apache-rat-plugin:0.18:check" in judgment.reason
+
+
+def test_an_assertion_in_a_class_that_never_references_candidate_code_is_not_a_violation(tmp_path, ws):
+    source = ACCEPTANCE.replace("assertEquals(1, Calc.clamp(0, 1, 5))", "assertEquals(1, 2)").replace(
+        "assertEquals(5, Calc.clamp(9, 1, 5))", "assertEquals(5, 6)")
+    cand = candidate(ws, tmp_path / "c", "correct")
+    assert _judge(_artifact(tmp_path, source), ws, cand).code == ao.ACCEPTANCE_FAILED_WITHOUT_CONTRADICTION
+
+
 def test_a_candidate_whose_own_code_does_not_compile_is_an_ordinary_failure_not_evidence(tmp_path, ws):
     cand = candidate(ws, tmp_path / "c", None, {TARGET: calc_with_clamp("correct").replace("return Math", "retur Math")})
     judgment = _judge(_artifact(tmp_path), ws, cand)

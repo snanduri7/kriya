@@ -63,7 +63,14 @@ def main(out):
             targets = mutation_path_roles(reqs, tracked)["authorized"]
             pom = open(os.path.join(repo, "pom.xml")).read()
             probe = os.path.join(work, "KriyaAcceptanceProbeTest.java")
-            open(probe, "w").write(PROBE.format(package=package, cls=cls))
+            header = ""
+            if os.environ.get("PROBE_LICENSE_HEADER") == "1":
+                # The repository's own source header (the target file's leading block comment): Apache RAT rejects
+                # a file without one. A comment, not behaviour.
+                target_source = open(os.path.join(repo, targets[0])).read()
+                if target_source.startswith("/*"):
+                    header = target_source[:target_source.index("*/") + 2] + "\n"
+            open(probe, "w").write(header + PROBE.format(package=package, cls=cls))
             artifact = ao.load_acceptance(probe, reqs, os.path.join(work, "artifacts"))
             started = time.time()
             run = run_java_acceptance(artifact, cand, candidate_paths=targets, base_revision=revision,
