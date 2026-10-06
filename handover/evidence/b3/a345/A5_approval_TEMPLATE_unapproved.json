@@ -5,8 +5,9 @@
       "requirement_id": "REQ-1",
       "requirement_text_sha256": "ecc1359f6303c9d51f77b74184e44ba72a22a6bfbfde0d4a1946976c5f2bb2cb",
       "goal_sha256": "3ee13b2500a3632bc93e95cc8946586ca014a43f9dfd689ba0db3cd4541c7efc",
-      "acceptance_sha256": "26cac2dbb8f869e3816da5655a55348d74bcfe2838addb8135367b19e9b602f6",
+      "acceptance_sha256": "d6bdc9427c70d843f79f358c405f64c6ebe86c8a7d84bfc3ed2bda839557bf4e",
       "expected_cases": [
+        "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesAnotherPetTypeCaseInsensitivelyIgnoringWhitespace",
         "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.parsesCaseInsensitivelyIgnoringSurroundingWhitespace",
         "org.springframework.samples.petclinic.web.KriyaAcceptanceTest.stillThrowsParseExceptionWhenNoPetTypeMatches"
       ],

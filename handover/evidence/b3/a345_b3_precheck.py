@@ -5,7 +5,7 @@ acceptance suite against the goal (Kriya's own artifact rules), write an UNAPPRO
   reference  - DIAGNOSTIC ONLY: a harness-written implementation of the goal, to show the suite compiles and can pass.
                It is never part of any artifact, never shown to a model, and proves nothing about a future candidate.
 
-usage: PYTHONPATH=<checkout> python a345_b3_precheck.py <out.json>
+usage: PYTHONPATH=<checkout> python a345_b3_precheck.py <out.json> [TASK ...]
 """
 import json
 import os
@@ -58,7 +58,10 @@ def measure(artifact, repo, base, cand, targets):
 
 def main(out):
     results = {}
+    only = set(sys.argv[2:])  # optional task filter (e.g. A4 A5); default: all
     for task, (name, source, base_ref, target, (anchor, replacement)) in TASKS.items():
+        if only and task not in only:
+            continue
         goal = open(os.path.expanduser(f"~/kriya-m1-live/goals/{name}.txt")).read()
         reqs = derive_requirements(goal)
         work = tempfile.mkdtemp(prefix=f"b3-pre-{task}-")

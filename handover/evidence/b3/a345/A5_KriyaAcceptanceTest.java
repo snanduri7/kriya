@@ -31,6 +31,12 @@ class KriyaAcceptanceTest {
 
     // kriya_requirement: REQ-1
     @Test
+    void parsesAnotherPetTypeCaseInsensitivelyIgnoringWhitespace() throws ParseException {
+        assertEquals("Dog", formatter().parse(" dOg ", Locale.ENGLISH).getName());
+    }
+
+    // kriya_requirement: REQ-1
+    @Test
     void stillThrowsParseExceptionWhenNoPetTypeMatches() {
         assertThrows(ParseException.class, () -> formatter().parse("Fish", Locale.ENGLISH));
     }

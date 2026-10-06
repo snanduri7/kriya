@@ -38,6 +38,12 @@ class KriyaAcceptanceTest {
 
     // kriya_requirement: REQ-1
     @Test
+    void trueWhenFirstNameIsPresentAndLaterNameIsAbsent() throws ParseException {
+        assertTrue(parse("-a").hasAnyOption("a", "x"));
+    }
+
+    // kriya_requirement: REQ-1
+    @Test
     void decidesExactlyAsHasOption() throws ParseException {
         final CommandLine line = parse("-a");
         assertEquals(line.hasOption("alpha"), line.hasAnyOption("alpha"));
