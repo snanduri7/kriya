@@ -1,0 +1,74 @@
+{
+ "requirements_derived": 22,
+ "covered": [
+  "REQ-15"
+ ],
+ "strength": {
+  "REQ-15": "GENERAL"
+ },
+ "acceptance_digest": "ed8b90b12af06fdda4a5c3eb09d1bc9fdcf2fd29f7ce320bbf6d29aac7c5afe5",
+ "cases": [
+  "kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+  "kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge",
+  "kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+  "kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+  "kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge"
+ ],
+ "refusal": null,
+ "integrity_problem": null,
+ "case_results": {
+  "version": 1,
+  "gate_id": "fd8bd26549d44467bcb6a975501c61d8",
+  "runner": "pytest",
+  "completeness": "COMPLETE",
+  "reason": null,
+  "cases": 5,
+  "status_counts": {
+   "passed": 5
+  },
+  "report_files": [
+   {
+    "path": ".kriya/test-reports/fd8bd26549d44467bcb6a975501c61d8.xml",
+    "sha256": "d842de60dbeb7df823294142eb1f548547ec3e77d94ec4ab9332d5efe4ebfdb1"
+   }
+  ],
+  "cleared_reports": 0,
+  "workspace": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/gfy/ref",
+  "test_cases": [
+   {
+    "identity": "kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+    "status": "passed"
+   },
+   {
+    "identity": "kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case2_generic_call_through_this_gets_a_calls_edge",
+    "status": "passed"
+   },
+   {
+    "identity": "kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+    "status": "passed"
+   },
+   {
+    "identity": "kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+    "status": "passed"
+   },
+   {
+    "identity": "kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_control4_non_generic_call_through_this_keeps_its_calls_edge",
+    "status": "passed"
+   }
+  ]
+ },
+ "judgment": {
+  "REQ-15": "AcceptanceJudgment(code='ACCEPTANCE_PASSED', reason='', evidence={'acceptance_digest': 'ed8b90b12af06fdda4a5c3eb09d1bc9fdcf2fd29f7ce320bbf6d29aac7c5afe5', 'contract': 1, 'runner_contract_digest': '806f453647de48b218b4a1ec7e46a9e2a99817203986a0959d94f8d09b7db259', 'runner': 'pytest', 'acceptance_requirement_set_digest': '1f98a210ba0e17f6762f2263523c743e1c8ae169f108335304c8283f58c44745', 'gate_id': 'fd8bd26549d44467bcb6a975501c61d8', 'report_files': [{'path': '.kriya/test-reports/fd8bd26549d44467bcb6a975501c61d8.xml', 'sha256': 'd842de60dbeb7df823294142eb1f548547ec3e77d94ec4ab9332d5efe4ebfdb1'}], 'completeness': 'COMPLETE', 'exit_code': 0, 'candidate_modules': ['graphify'], 'candidate_digest': 'f90776477aed584ef50584ac55ebbd0fa139e401e1b306aebb5c39fa9f9083a7', 'cases': ['kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge', 'kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge', 'kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge', 'kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge', 'kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge'], 'case_results': {'kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge': ['passed'], 'kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge': ['passed'], 'kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge': ['passed'], 'kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge': ['passed'], 'kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge': ['passed']}})"
+ },
+ "output_tail": ".....                                                                    [100%]\n5 passed in 0.78s\n\n"
+}

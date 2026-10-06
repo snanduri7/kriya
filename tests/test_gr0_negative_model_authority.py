@@ -9,16 +9,20 @@ the B2-a ledger seam): an exact requirement whose B2 acceptance passed, and a
 GENERAL one HUMAN_ACCEPTED through B3, both stayed VIOLATED because the
 recorded model verdict was "missing" - requirement_outcomes applied trusted
 closure only to an UNVERIFIED/SATISFIED verdict."""
+import dataclasses
+
 import pytest
 from _b2a_fixtures import CALC_ACCEPTANCE, CALC_GOAL
 from test_b2a_acceptance_oracle import _ledger
 from test_b3_human_acceptance import GENERAL_GOAL, _acceptance, _approval, _close, _repo
 
+from kriya.workflow.obligations import ObligationStatus
 from kriya.workflow.requirements import (
     VERIFIER_REPORTED_MISSING,
     RequirementOutcome,
     blocking_requirements,
     record_requirement_closure,
+    requirement_obligation_id,
     requirement_outcomes,
     requirement_verdict_details,
 )
@@ -95,3 +99,20 @@ def test_the_model_negative_is_kept_as_advisory_provenance():
     assert details["model_outcome"] == "violated" and details["evidence_class"] == "MODEL_CLAIMED"
     assert details["reason_code"] == VERIFIER_REPORTED_MISSING
     assert details["outcome"] == "unverified"
+
+
+def test_a_pre_fix_violated_verdict_record_read_back_is_a_model_claim_too(tmp_path):
+    """A verdict record written before GR-R0 (outcome "violated", e.g. read back
+    on resume) is still only the verifier's claim: trusted closure outranks it,
+    and without closure it blocks as UNVERIFIED, never VIOLATED."""
+    reqs, ledger = _ledger(GENERAL_GOAL, verdict=MISSING)
+    record = ledger.current(requirement_obligation_id("REQ-1"))
+    ledger.record(dataclasses.replace(record, status=ObligationStatus.VIOLATED,
+                                      evidence={**record.evidence, "outcome": "violated"}))
+    assert _outcome(ledger, reqs) is RequirementOutcome.UNVERIFIED
+    assert _blocked(ledger, reqs, PERMISSIVE) == [("REQ-1", RequirementOutcome.UNVERIFIED)]
+    root, base = _repo(tmp_path)
+    acceptance = _acceptance(tmp_path)
+    _close(ledger, reqs, acceptance, root, approval=_approval(tmp_path, GENERAL_GOAL, acceptance, base, root),
+           base=base)
+    assert _outcome(ledger, reqs) is RequirementOutcome.HUMAN_ACCEPTED
