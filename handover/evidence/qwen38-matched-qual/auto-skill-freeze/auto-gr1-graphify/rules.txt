@@ -1,0 +1,13 @@
+Use spaces for indentation
+All service classes must have Service suffix
+Use snake_case for variables and functions
+Use PascalCase for class names
+Use UPPERCASE_SNAKE_CASE for constants
+Place all imports at the top of the file
+Use relative imports within the package
+External dependencies should be imported after standard library imports
+Core logic is in the main 'graphify' module
+Platform-specific artifacts are generated via 'tools/skillgen'
+Configuration files like 'platforms.toml' define build-time platform manifests
+Use setuptools with pyproject.toml for Python project configuration
+Tests are written using pytest framework

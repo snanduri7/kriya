@@ -1,0 +1,4 @@
+ea34cb4278ed29f0227a5de3ce1faa67359613699639233b041e29f9b9df62d1  auto-gr1-graphify/instructions.md
+4b167e8021312bdbbe30d7e077f7711a96668c9eedfc29ceffb774838ba7d814  auto-gr1-graphify/rules.txt
+43d0527b2e8f42fe1eb73ee647a63df48c2c659befe6ce2591876fb2f09b7164  auto-gr1-graphify/skill.yaml
+DIR auto-gr1-graphify/examples

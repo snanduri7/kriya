@@ -1,0 +1,62 @@
+{
+ "runtime_profile": "production",
+ "bindings": [
+  {
+   "binding": "primary",
+   "profile": {
+    "model": "qwen3.8:27b",
+    "endpoint": "http://localhost:11434/v1",
+    "runtime_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+    "runtime_exact": true,
+    "qualification": "QUALIFIED",
+    "failed_cases": [],
+    "capability_source": "explicit_primary",
+    "native_tool_calls": true,
+    "json_mode": true,
+    "reliable_multiline_json": false,
+    "streaming": true,
+    "edit_protocol": "small_native_tools",
+    "reasoning": false,
+    "context_window": 32768,
+    "allocation_window": 7017,
+    "output_tokens": 16384,
+    "context_policy": "adaptive",
+    "retry_inference_settings_digest": null,
+    "retry_qualification": null,
+    "digest": "66ec110d9e25ebed5d109daca5233bd86fe47e4b51b0534901f47763549f9e1d"
+   },
+   "generic_attempt_incompatibilities": [],
+   "patch_only_attempt_incompatibilities": [],
+   "compatible": true
+  },
+  {
+   "binding": "llm_chain[0]",
+   "profile": {
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "endpoint": "http://localhost:11434/v1",
+    "runtime_digest": "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3",
+    "runtime_exact": true,
+    "qualification": "QUALIFIED",
+    "failed_cases": [],
+    "capability_source": "qualification_derived",
+    "native_tool_calls": false,
+    "json_mode": true,
+    "reliable_multiline_json": true,
+    "streaming": true,
+    "edit_protocol": "text_markers",
+    "reasoning": false,
+    "context_window": 32768,
+    "allocation_window": 6781,
+    "output_tokens": 16384,
+    "context_policy": "adaptive",
+    "retry_inference_settings_digest": null,
+    "retry_qualification": null,
+    "digest": "f373011a31a07c7468054e4110c89484b7ec9a87c0bde9ab143ae9a50757a302"
+   },
+   "generic_attempt_incompatibilities": [],
+   "patch_only_attempt_incompatibilities": [],
+   "compatible": true
+  }
+ ],
+ "status": "PASS"
+}

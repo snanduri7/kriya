@@ -1,0 +1,7 @@
+Canonical source run: 20261006T204410-5388017f (Kriya a049c02, config gr1-graphify.yaml sha256 4ebd97b4...)
+Created by the canonical 'kriya analyze' with qwen3-coder:30b-kriya-e52213655394 at 2026-10-06T20:44:09
+(analyze log line 3338: "Auto-generated engineering skill created for repository 'gr1-graphify'"; files unmodified since).
+Slug = basename of the workspace root (analyzer.py:1126) -> the candidate workspace directory must be named gr1-graphify.
+analyze regenerates only when skills/auto-<slug> is absent (analyzer.py, 'if not os.path.exists(auto_skill_dir)'),
+so with these exact bytes pre-seeded under paths.skills (skills-qwen38m) the candidate analyze makes 0 auto-skill calls.
+Content checked: generic repository conventions only; no evaluator/issue/case information.
