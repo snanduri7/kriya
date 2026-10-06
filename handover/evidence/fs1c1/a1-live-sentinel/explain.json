@@ -1,0 +1,351 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [
+      {
+        "content": {
+          "output": "sha256:ae552b0b77a325843860e0b77179c76412a8e7fb23647cd545febe0b3d203785"
+        },
+        "gate": "original_requirements",
+        "seq": 126
+      }
+    ],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 10,
+        "seq": 130,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": null,
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failed_gates": [
+        {
+          "content": {
+            "output": "sha256:ae552b0b77a325843860e0b77179c76412a8e7fb23647cd545febe0b3d203785"
+          },
+          "gate": "original_requirements",
+          "seq": 126
+        }
+      ],
+      "source": "terminal_gates"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 81,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 113,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 43,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:78f95f2d9f9dc0b05c65f064ebfce3ca7c17cec4df574aab31ca3b7db7cd0d1e",
+                "wire_body": "sha256:62e0073df3d894b740e69ecc89cc4ff73db319f6474ec10101967f93a8df13d0"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "freezegun/api.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 46,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:aed2c80d0b33b8f9ff76a76253a9222b031eb92336839b4116418db25732553c",
+                "wire_body": "sha256:7e7a9dc3e9007fee6b3c2cb5028ec71a473f099b82e700c4777a17f3313c33e7"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 56,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:5cd0ff1bd5919e51aaf093c1c32f47af14db5dc2b2b376619d11c9eb4ca1030a",
+                "wire_body": "sha256:6dbfd6bb692d749a8d376a8da974809dfc4f9c68616c1d236bbe086518a46537"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 60,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:aa2451d93ccf3274a7d175baeaee8249b20352f06711a59dc7afbd27e5ef235a",
+                "wire_body": "sha256:60ea3a4ce7ce8d995ce16ce59cb138f3c6cb2745aac43246360262f834fea3db"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 70,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "freezegun/api.py"
+              ],
+              "seq": 43,
+              "targets": [
+                {
+                  "digest": "a24a9a9de6660cc07dec43969f5433aa90b7162169eae46de5c71159d04921fa",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 5,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "freezegun/api.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "f0d67017e0fd5da0641586aa35eabcb6172654fd7ec22f2dad72667db0b857d6",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_parse_time_to_freeze",
+                  "shown_revision": "f0d67017e0fd5da0641586aa35eabcb6172654fd7ec22f2dad72667db0b857d6",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 398,
+                      "start_line": 395,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 493,
+                      "start_line": 477,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 633,
+                      "start_line": 613,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 850,
+                      "start_line": 743,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 1016,
+                      "start_line": 956,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 660,
+              "content": {
+                "content": "sha256:3a08d48d0ad536f3a2e1b8b6f6a773e9ef4db8040cfb8f560ca062ffa48c388c"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 47,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 144,
+              "content": {
+                "content": "sha256:3a47bce4dadf9601b4ecb8639988d37260a4b339cbfc3914737a7a91c4a5d537"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 57,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 85,
+              "content": {
+                "content": "sha256:6017c920c09057d5c60480a5ed68e8cc90033a5d52cef0523b4d3408362adb8f"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 61,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 337,
+              "content": {
+                "content": "sha256:a679ee006656bc5e01f1f05750967fb00ff9b73f6e76ad0ceaa98250f3f7d0c0"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 71,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:021e30e45bbbd65a55c438a1a8318116d167a00b210bd64c56f935c5cbea50e6"
+              },
+              "kind": "edits",
+              "path": "freezegun/api.py",
+              "seq": 49
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "10e7878233a2cc68a5b5471264dc8618fc222dd7eeecaabd6000714e78c3f003",
+              "before_digest": "f0d67017e0fd5da0641586aa35eabcb6172654fd7ec22f2dad72667db0b857d6",
+              "content": {
+                "after": "sha256:10e7878233a2cc68a5b5471264dc8618fc222dd7eeecaabd6000714e78c3f003",
+                "before": "sha256:f0d67017e0fd5da0641586aa35eabcb6172654fd7ec22f2dad72667db0b857d6",
+                "diff": "sha256:cd47531abc462411584d31b8781f575ed66af62719833822de413d7c9bf45b32"
+              },
+              "decision": "STAGED",
+              "lines_added": 2,
+              "lines_removed": 0,
+              "path": "freezegun/api.py",
+              "seq": 53
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 40
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "reason": "no_model_call: no Developer call in this attempt",
+          "status": "NOT_APPLICABLE"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 3,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T094757-e713dddd",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

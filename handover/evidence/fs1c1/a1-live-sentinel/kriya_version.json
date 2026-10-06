@@ -1,0 +1,10 @@
+{
+  "build_provenance": "embedded",
+  "commit": "dfe22f8b4118da5ec4665290462aba9ad2eb835a",
+  "dirty": false,
+  "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-fs1c1/lib/python3.14/site-packages/kriya",
+  "product": "kriya",
+  "python": "3.14.6",
+  "tree": "786a32e9dc8b0fe0255d950ba249265250f28166",
+  "version": "0.1.0"
+}
