@@ -6867,11 +6867,13 @@ async def test_run_attempt_raises_spec_compliance_indeterminate_after_two_indete
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
     ):
-        with pytest.raises(QualityGateFailure) as exc_info:
-            await run_attempt(state, ctx)
+        await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "spec_compliance_indeterminate"
+    # One bounded re-evaluation, then - GR-R1B - the still-contradictory verdict is advisory diagnostic
+    # evidence: never a fabricated PASS (its status says what happened) and never an attempt failure.
     assert spec_compliance.check.call_count == 2
+    [gate] = [g for g in state.gate_outcomes if g["type"] == "goal_spec_compliance"]
+    assert gate["status"] == "model_indeterminate" and gate["reason_code"] == "SPEC_COMPLIANCE_MODEL_ADVISORY"
 
 
 @pytest.mark.asyncio
@@ -11181,12 +11183,14 @@ async def test_run_attempt_rejects_output_missing_a_goal_named_field(tmp_path):
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
     ):
-        with pytest.raises(QualityGateFailure) as exc_info:
-            await run_attempt(state, ctx)
+        await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "goal_spec_compliance"
-    assert "protocolVersion" in exc_info.value.failure.message
-    assert "Protocol.java" in exc_info.value.failure.likely_files
+    # GR-R1B: the model's "missing" is advisory diagnostic evidence, not an attempt failure or a retry; it stays
+    # recorded, and the terminal requirement gate (GR-R0) blocks an unrefuted model negative.
+    [gate] = [g for g in state.gate_outcomes if g["type"] == "goal_spec_compliance"]
+    assert gate["status"] == "model_reported_missing"
+    assert gate["model_missing_requirements"] == ["protocolVersion"]
+    assert any(e.kind == "spec_compliance.model_advisory" for e in state.run_events)
 
 
 @pytest.mark.asyncio
@@ -11722,11 +11726,15 @@ async def test_run_attempt_goal_spec_reevaluates_when_evidence_changes(tmp_path)
         "kriya.tools.validate.PolymorphicValidator.run_tests",
         return_value={"success": True, "output": ""},
     ):
-        with pytest.raises(QualityGateFailure) as exc_info:
-            await run_attempt(state, ctx)
+        await run_attempt(state, ctx)
 
-    assert exc_info.value.failure.type == "goal_spec_compliance"
-    assert ledger.current(obligation_id).status == ObligationStatus.VIOLATED
+    # The stale SATISFIED record does not suppress the new verdict: it is re-evaluated and recorded. GR-R1B: a
+    # model verdict is advisory, so it is recorded INDETERMINATE (never settled, never VIOLATED) with what the
+    # model said, and the attempt is not failed on it.
+    record = ledger.current(obligation_id)
+    assert record.status == ObligationStatus.INDETERMINATE
+    assert record.evidence["model_missing_requirements"] == ["a protocolVersion field"]
+    assert record.evidence["fingerprint"] != stale_fingerprint
 
 
 @pytest.mark.asyncio

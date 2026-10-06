@@ -142,7 +142,6 @@ from kriya.workflow.file_resolution import (
     _resolve_run_command,
     build_grounded_java_launch_command,
     correct_exec_main_class_property,
-    discover_response_construction_owners,
     downgrade_ungrounded_goal_explicit_commands,
     ensure_maven_covers_nonconventional_java_files,
     extract_jvm_module_flags,
@@ -264,6 +263,12 @@ from kriya.workflow.verifier_evidence import (
 from kriya.workflow.worktree import clean_untracked_files_since, repository_content_paths, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+# GR-R1B: the attempt-level Goal Spec Compliance gate's model-only outcomes -
+# advisory diagnostic evidence, never an attempt failure, retry or fallback.
+SPEC_MODEL_REPORTED_MISSING = "model_reported_missing"
+SPEC_MODEL_INDETERMINATE = "model_indeterminate"
+SPEC_COMPLIANCE_MODEL_ADVISORY = "SPEC_COMPLIANCE_MODEL_ADVISORY"
 
 
 def _apply_candidate_pom_corrections(
@@ -10406,17 +10411,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 }
             else:
-                message = (
-                    "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
-                    "internally contradictory verdict (compliant=false naming no concrete "
-                    f"missing requirement) twice in a row: {spec_result['reasoning']}"
-                )
-                failure = Failure(
-                    type="spec_compliance_indeterminate", message=message, raw_output=message,
-                    attempt=state.attempt_number,
-                )
-                state.record_gate_outcome(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+                # GR-R1B: LLM output can authorize nothing, in either
+                # direction. A model verdict contradictory twice in a row is
+                # still only the model's word: advisory diagnostic evidence,
+                # never an attempt failure, a retry or a fallback. Stronger
+                # evidence acts on its own (every deterministic gate above,
+                # and the terminal requirement gate, which leaves anything
+                # without trusted closure UNVERIFIED and blocked).
+                spec_result = {
+                    "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                    "missing_requirements": [], "likely_files": [],
+                    "status": SPEC_MODEL_INDETERMINATE, "reason_code": SPEC_COMPLIANCE_MODEL_ADVISORY,
+                }
         if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
             message = (
                 "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "
@@ -10513,60 +10519,44 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
         if ctx.requirement_set is not None:
             _close_requirements_by_migration_gate(state, ctx, goal_spec_evidence_fingerprint)
+        model_missing_requirements: List[str] = []
         if not spec_result["compliant"] and kept_requirements:
-            missing_desc = "; ".join(kept_requirements)
-            message = (
-                "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
-                f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
+            # GR-R1B: the verifier reports concrete requirements missing from
+            # a candidate every deterministic gate passed. That is the model's
+            # word alone: recorded as advisory diagnostic evidence (the
+            # requirement verdicts above keep it as MODEL_CLAIMED provenance),
+            # never an attempt failure, a retry or a fallback. The terminal
+            # requirement gate decides from trusted evidence.
+            model_missing_requirements = list(kept_requirements)
+            spec_result = {**spec_result, "status": SPEC_MODEL_REPORTED_MISSING,
+                           "reason_code": SPEC_COMPLIANCE_MODEL_ADVISORY}
+        model_advisory = spec_result.get("status") in (SPEC_MODEL_REPORTED_MISSING, SPEC_MODEL_INDETERMINATE)
+        if model_advisory:
+            logger.warning(
+                "Quality Gates: Goal spec compliance - the model reported %s; advisory only (GR-R1B: a model "
+                "verdict fails no attempt and spends no retry): %s",
+                "; ".join(model_missing_requirements) or "an indeterminate verdict", spec_result.get("reasoning"),
             )
-            # Full synchronous tree-walk + per-file read, re-run on every
-            # failed spec-compliance retry; offload so it doesn't block the
-            # event loop inside this async attempt.
-            grounded_architectural_owners = await asyncio.to_thread(
-                discover_response_construction_owners,
-                ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
-            )
-            failure = _build_quality_gate_failure(
-                "goal_spec_compliance", message, message,
-                ctx.worktree_path, state.all_files_written, state.attempt_number,
-                extra_likely_files=list(dict.fromkeys(
-                    (spec_result.get("likely_files") or [])
-                    + grounded_architectural_owners
-                )),
-            )
-            failure.diagnostics = {
-                **(failure.diagnostics or {}),
-                **({"grounded_architectural_owners": grounded_architectural_owners}
-                   if grounded_architectural_owners else {}),
-                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
-                    "arbitrated_contradictions": arbitrated_contradictions}
-                   if arbitrated_contradictions else {}),
-                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
-                    "planner_only_requirements": planner_only_requirements}
-                   if planner_only_requirements else {}),
-            }
-            if goal_spec_obligation_id and ctx.obligation_ledger is not None:
-                # Correctness Continuity Part A6: this IS new/changed evidence
-                # (settled_goal_spec was None, or content genuinely differed) -
-                # a real violation is always free to (re)invalidate.
-                ctx.obligation_ledger.record(ObligationRecord(
-                    id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
-                    status=ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT,
-                    description="goal_spec_compliance verdict for this subtask's checked files",
-                    source="attempt.run_attempt", revision=state.attempt_number,
-                    evidence={"fingerprint": goal_spec_evidence_fingerprint,
-                              "missing_requirements": kept_requirements},
-                    owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
-                ))
-            state.record_gate_outcome(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
+            state.record_event(RunEvent(
+                kind="spec_compliance.model_advisory", attempt=state.attempt_number,
+                source="attempt.goal_spec_compliance", authority=EventAuthority.ADVISORY,
+                message="The verifier's verdict on this candidate is advisory diagnostic evidence only.",
+                details={"status": spec_result["status"], "authority": "advisory_only",
+                         "missing_requirements": model_missing_requirements,
+                         "reasoning": spec_result.get("reasoning", ""),
+                         "evidence_fingerprint": goal_spec_evidence_fingerprint},
+            ))
         if goal_spec_obligation_id and ctx.obligation_ledger is not None:
             ctx.obligation_ledger.record(ObligationRecord(
                 id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
-                status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+                # A model verdict never settles this either way (GR-R1B).
+                status=ObligationStatus.INDETERMINATE if model_advisory else ObligationStatus.SATISFIED,
+                authority=ObligationAuthority.JUDGMENT,
                 description="goal_spec_compliance verdict for this subtask's checked files",
                 source="attempt.run_attempt", revision=state.attempt_number,
-                evidence={"fingerprint": goal_spec_evidence_fingerprint},
+                evidence={"fingerprint": goal_spec_evidence_fingerprint,
+                          **({"model_missing_requirements": model_missing_requirements}
+                             if model_missing_requirements else {})},
                 owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
             ))
         # Verifier-availability honesty (2026-09-20): `success: True` here
@@ -10600,12 +10590,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "planner_only_requirements": planner_only_requirements}
                if planner_only_requirements else {}),
             **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
+            **({"model_missing_requirements": model_missing_requirements} if model_missing_requirements else {}),
         })
         if _spec_status == "unknown":
             logger.info(
                 "Quality Gates: Goal spec compliance UNAVAILABLE (the check itself could "
                 f"not run - advisory only, not evaluated as verification evidence): {spec_result['reasoning']}"
             )
+        elif model_advisory:
+            pass  # logged above, with the advisory event
         elif _spec_status == "indeterminate_suppressed":
             logger.info(
                 "Quality Gates: Goal spec compliance SUPPRESSED (contradictory verdict "

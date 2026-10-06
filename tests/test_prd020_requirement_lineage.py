@@ -346,11 +346,12 @@ def _events(cfg, kind):
 
 
 @pytest.mark.asyncio
-async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names_it(tmp_path):
+async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_terminal_gate_names_it(tmp_path):
     """The plan cites only REQ-1. The Architect still sees all three; the
-    verifier finds REQ-3 missing on the first candidate, the retry is told
-    exactly REQ-3 and its original text, and the run passes only once every
-    requirement has the verifier's evidence."""
+    verifier finds REQ-3 missing on the first candidate. GR-R1B: that is the
+    model's word alone - advisory, so no retry is spent on it - and the
+    terminal gate still holds REQ-3 open by its id and the user's own text:
+    a paraphrasing plan cannot drop it."""
     def responses(n, prompt):
         return _verdict_json(prompt, missing=("REQ-3",) if n == 1 else ())
 
@@ -361,7 +362,9 @@ async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names
     with p1, p2:
         res = await engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace))
 
-    assert res["quality_gates_passed"] is True  # default policies: record
+    # An unrefuted model negative blocks under every policy (GR-R0); nothing applied.
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "requirements_unresolved"
+    assert "REQ-3 (unverified): Add a DEFAULT_NAME constant set to 'World'" in res["environment_failure"]
     # The verifier's "satisfied" is a model claim: UNVERIFIED, never satisfied (FS-1B).
     assert res["requirements"]["outcomes"] == {"REQ-1": "unverified", "REQ-2": "unverified", "REQ-3": "unverified"}
     assert "REQ-2: greet returns the text 'Hello, <name>'" in calls["planner"][0]
@@ -370,12 +373,10 @@ async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names
     assert lineage["plan"]["cited"] == ["REQ-1"] and lineage["plan"]["omitted"] == ["REQ-2", "REQ-3"]
     verdicts = _events(cfg, "requirement.verdicts")
     # GR-R0: the verifier's "missing" is a model claim, recorded UNVERIFIED (never VIOLATED by itself).
-    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["unverified", "unverified"]
+    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["unverified"]
     assert verdicts[0]["evidence_id"] != "" and verdicts[0]["requirement_set_digest"] == derive_requirements(GOAL).digest
-    # The retry is driven by the unresolved id and the user's own text.
-    retry_kwargs = engine.developer.run_generation.await_args_list[1].kwargs
-    assert "REQ-3: Add a DEFAULT_NAME constant set to 'World'" in json.dumps(retry_kwargs, default=str)
-    assert len(calls["spec"]) == 2 and all("REQ-1:" in p and "REQ-3:" in p for p in calls["spec"])
+    assert engine.developer.run_generation.await_count == 1  # no retry spent on the model's word (GR-R1B)
+    assert len(calls["spec"]) == 1 and all("REQ-1:" in p and "REQ-3:" in p for p in calls["spec"])
 
 
 @pytest.mark.asyncio
