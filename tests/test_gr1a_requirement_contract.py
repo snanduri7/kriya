@@ -393,3 +393,24 @@ def test_the_cli_binds_the_contract_before_any_model_call_and_refuses_an_invalid
     assert dispatch.await_count == 0 and llm.call_count == 0
     result, _, dispatch, llm = invoke(["--requirements", str(good), "--acceptance", str(acceptance_path)])
     assert result.exit_code == 1 and "ACCEPTANCE_UNKNOWN_REQUIREMENT" in result.output and llm.call_count == 0
+
+
+def test_r8_the_set_digest_binds_the_exact_contract_bytes_not_only_its_entries(tmp_path):
+    """Two contract files with the same entries but different bytes are two
+    operator decisions: the set digest - and so an approval's
+    requirement_set_sha256 - binds the exact contract approved."""
+    root, base, requirements, acceptance = _explicit_b3(tmp_path)
+    entries = [{"id": "REQ-1", "text": CONTRACT_EXACT, "kind": "requirement"},
+               {"id": "REQ-2", "text": CONTRACT_GENERAL, "kind": "requirement"}]
+    reformatted = tmp_path / "reformatted.json"
+    reformatted.write_text(json.dumps({"format": rc.CONTRACT_FORMAT, "requirements": entries}, indent=4))
+    other = rc.load_requirement_contract(str(reformatted), ISSUE_GOAL, state_root=str(tmp_path / "state"),
+                                         workspace=str(root)).requirement_set
+    assert other.requirements == requirements.requirements
+    assert other.digest != requirements.digest
+    document = _approve(b3.approval_template(requirements, acceptance, ["REQ-2"], base))
+    other_acceptance = ao.load_acceptance(str(tmp_path / "acceptance.py"), other, str(tmp_path / "state"))
+    with pytest.raises(ao.AcceptanceError) as refused:
+        b3.load_approval(str(_approval_path(tmp_path, document)), other, other_acceptance,
+                         state_root=str(tmp_path / "state"), workspace=str(root), base_revision=base)
+    assert "bound to another requirement set" in str(refused.value)

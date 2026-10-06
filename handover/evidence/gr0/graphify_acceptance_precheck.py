@@ -3,7 +3,9 @@ goal's requirements and runs it once through Kriya's own B2-a runner on a candid
 base, where cases 1, 2 and 5 must FAIL and controls 3 and 4 PASS - non-vacuous), then prints the judgment.
 
 usage: PYTHONPATH=<checkout>:<checkout>/tests python graphify_acceptance_precheck.py <goal.txt> <suite.py>
-       <candidate_root> <state_dir> <out.json>"""
+       <candidate_root> <state_dir> <out.json> [<requirements contract.json>]
+
+GR-R1: with a requirement contract the suite binds to the contract's closed set, as `generate --requirements`."""
 import json
 import sys
 from pathlib import Path
@@ -14,15 +16,21 @@ from kriya.workflow import acceptance_oracle as ao
 from kriya.workflow.requirements import behavior_strength, derive_requirements
 
 
-def main(goal_file, suite, root, state, out):
+def main(goal_file, suite, root, state, out, contract_file=None):
     goal = Path(goal_file).read_text(encoding="utf-8")
-    requirements = derive_requirements(goal)
+    if contract_file:
+        from kriya.workflow.requirement_contract import load_requirement_contract
+
+        requirements = load_requirement_contract(contract_file, goal, state_root=state, workspace=root).requirement_set
+    else:
+        requirements = derive_requirements(goal)
     artifact = ao.load_acceptance(suite, requirements, state)
     run = ao.run_acceptance(artifact, root, candidate_paths=[],
                             validator_factory=lambda: PolymorphicValidator(root, autonomy_cfg=AutonomyConfig()))
     judged = ao.judge_acceptance(artifact, run)
     report = {
         "requirements_derived": len(requirements.requirements),
+        "requirement_set_digest": requirements.digest, "contract_digest": requirements.contract_digest,
         "covered": list(artifact.requirement_ids),
         "strength": {rid: behavior_strength(requirements.get(rid).text, regression_covered=False)[0]
                      for rid in artifact.requirement_ids},
@@ -38,4 +46,4 @@ def main(goal_file, suite, root, state, out):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:7])

@@ -1,0 +1,19 @@
+baseline 1174 passed in 100.83s (0:01:40)
+raw-narrative-used-despite-contract KILLED 1 failed, 281 passed in 21.31s
+contract-inside-workspace-accepted KILLED 1 failed, 340 passed in 22.36s
+goal-digest-ignored KILLED 1 failed, 372 passed in 25.73s
+requirement-set-digest-ignores-contract SURVIVED 1174 passed in 100.54s (0:01:40)
+resume-fingerprint-ignores-contract KILLED 1 failed, 343 passed in 23.41s
+enforce-resume-accepts-changed-contract KILLED 1 failed, 371 passed in 23.26s
+b3-ignores-requirement-set-identity KILLED 1 failed, 376 passed in 26.53s
+b3-v1-accepted-for-contract KILLED 1 failed, 375 passed in 22.74s
+unknown-acceptance-requirement-accepted KILLED 3 failed, 305 passed in 22.57s
+duplicate-requirement-id-accepted KILLED 1 failed, 381 passed in 23.03s
+unknown-kind-accepted KILLED 1 failed, 382 passed in 22.74s
+empty-set-accepted KILLED 1 failed, 380 passed in 22.81s
+model-generated-requirement-accepted KILLED 2 failed, 326 passed in 22.41s
+model-missing-fails-the-attempt KILLED 2 failed, 354 passed in 22.87s
+model-indeterminate-fails-the-attempt KILLED 2 failed, 519 passed in 33.40s
+model-advisory-not-recorded KILLED 1 failed, 498 passed in 33.01s
+model-advisory-settles-the-obligation KILLED 1 failed, 820 passed in 78.27s (0:01:18)
+TOTAL 17 {'KILLED': 16, 'SURVIVED': 1}

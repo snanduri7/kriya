@@ -154,11 +154,12 @@ def make_config(tmp_path, window=32768, capabilities=None, max_tokens=None, fall
 def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, window=32768,
                       probe: Callable = None, goal: str = GOAL, capabilities=PRODUCTION_CAPABILITIES,
                       source: str = TARGET_SOURCE, max_tokens=None, target: str = TARGET,
-                      fallback: str = None, fallback_answers: List[str] = ()) -> EditRun:
+                      fallback: str = None, fallback_answers: List[str] = (), requirement_contract=None) -> EditRun:
     """One real direct run of the brownfield repair. The Developer gives the
     scripted answers in order, then keeps giving the last one. With
     ``fallback`` the chain has that one fallback model, which answers from
-    ``fallback_answers`` the same way."""
+    ``fallback_answers`` the same way. ``requirement_contract`` (GR-R1A) is
+    bound to the engine as the CLI binds ``--requirements``."""
     if probe is not None:
         monkeypatch.setattr(model_runtime, "probe_model_runtime", probe)
     model_runtime.clear_model_runtime_cache()
@@ -193,6 +194,7 @@ def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, wi
         return real_record(state, event)
 
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    engine.requirement_contract = requirement_contract
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record_spy), \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",

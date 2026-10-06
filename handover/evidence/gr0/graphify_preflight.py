@@ -11,7 +11,9 @@ Developer request is captured at DeveloperAgent._fit_request (tokens against
 the request's own capacity). Gates are stubbed green. Nothing is sent.
 
 usage: PYTHONPATH=<checkout>:<checkout>/tests python graphify_preflight.py <tmpdir> <goal.txt> <engine.py>
-       <canonical_attempt1_edits.json> <out.json>"""
+       <canonical_attempt1_edits.json> <out.json> [<requirements contract.json>]
+
+GR-R1: with a requirement contract the run is bound to it exactly as `generate --requirements` binds it."""
 import hashlib
 import json
 import sys
@@ -30,7 +32,7 @@ WINDOW = 32768                 # v5 num_ctx, primary and fallback
 FALLBACK = "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
 
 
-def main(tmp, goal_file, engine_file, edits_file, out_file):
+def main(tmp, goal_file, engine_file, edits_file, out_file, contract_file=None):
     goal = Path(goal_file).read_text(encoding="utf-8")
     source = Path(engine_file).read_text(encoding="utf-8")
     edits = json.loads(Path(edits_file).read_text())
@@ -53,12 +55,19 @@ def main(tmp, goal_file, engine_file, edits_file, out_file):
         })
         return fitted
 
+    contract = None
+    if contract_file:
+        from kriya.workflow.requirement_contract import load_requirement_contract
+
+        contract = load_requirement_contract(contract_file, goal, state_root=str(Path(tmp) / "contract-state"),
+                                             workspace=str(Path(tmp) / "ws"))
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(agent_module.DeveloperAgent, "_fit_request", capture_fit)
     try:
         run = run_edit_protocol(Path(tmp), monkeypatch, [answer], probe=_probe, goal=goal, source=source,
                                 target=TARGET, window=WINDOW, capabilities=PRODUCTION_CAPABILITIES,
-                                max_tokens=PRIMARY_OUTPUT_TOKENS, fallback=FALLBACK, fallback_answers=[answer])
+                                max_tokens=PRIMARY_OUTPUT_TOKENS, fallback=FALLBACK, fallback_answers=[answer],
+                                requirement_contract=contract)
     finally:
         monkeypatch.undo()
     events = run.events
@@ -68,7 +77,15 @@ def main(tmp, goal_file, engine_file, edits_file, out_file):
     spans = [(s["start_line"], s["end_line"], s["unit"]) for s in (first or {}).get("spans", [])]
     span_texts = ["\n".join(lines[a - 1:b]) for a, b, _ in spans]
     req1 = captured[0] if captured else {}
+    derived = [e.details for e in events if e.kind == "requirement.derived"]
     report = {
+        "requirements": {
+            "contract_digest": contract.digest if contract else None,
+            "authoritative_ids": [r["id"] for r in derived[0]["requirements"]] if derived else None,
+            "authoritative_texts": [r["text"] for r in derived[0]["requirements"]] if derived else None,
+            "set_digest": derived[0]["digest"] if derived else None,
+            "raw_goal_in_developer_request": bool(captured) and goal.strip().splitlines()[0] in captured[0]["fitted"],
+        },
         "kriya_shape": {"file_bytes": len(source.encode()), "lines": source.count("\n"),
                         "revision": hashlib.sha256(source.encode()).hexdigest(),
                         "goal_sha256": hashlib.sha256(goal.encode()).hexdigest(),
@@ -97,7 +114,8 @@ def main(tmp, goal_file, engine_file, edits_file, out_file):
                                         for t in c["targets"]]) for c in capabilities],
     }
     Path(out_file).write_text(json.dumps(report, indent=1, default=str))
-    print(json.dumps({"attempt1": report["attempt1"], "requests": report["requests"]}, indent=1, default=str))
+    print(json.dumps({"requirements": report["requirements"], "attempt1": report["attempt1"],
+                      "requests": report["requests"]}, indent=1, default=str))
 
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:7])

@@ -1,0 +1,20 @@
+{
+ "format": "kriya.requirements/1",
+ "requirements": [
+  {
+   "id": "REQ-1",
+   "kind": "requirement",
+   "text": "For the three C# files in the issue's reproducer (Settings.cs, Reader.cs, Local.cs), `graphify extract` produces a `calls` edge from `.A()` to `.Get()` (case 1: `Get<int>(\"port\")`), from `.B()` to `.Get()` (case 2: `this.Get<int>(\"port\")`) and from `.E()` to `.Make()` (case 5: `Make<int>()`)."
+  },
+  {
+   "id": "REQ-2",
+   "kind": "requirement",
+   "text": "For the same reproducer, the non-generic calls keep their `calls` edges: `.C()` to `.GetRaw()` (case 3: `GetRaw(\"host\")`) and `.D()` to `.GetRaw()` (case 4: `this.GetRaw(\"host\")`)."
+  },
+  {
+   "id": "REQ-3",
+   "kind": "requirement",
+   "text": "In C#, a call whose method name carries an explicit type-argument list, with no receiver or through `this`, produces the same `calls` edge as the same call without the type-argument list: the type-argument list is not part of the called method's identity."
+  }
+ ]
+}

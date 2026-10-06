@@ -1,0 +1,139 @@
+{
+  "commit": "39fb8d1",
+  "tests": [
+    "tests/test_gr1a_requirement_contract.py",
+    "tests/test_gr1b_spec_gate_model_authority.py",
+    "tests/test_gr0_negative_model_authority.py",
+    "tests/test_prd020_requirement_lineage.py",
+    "tests/test_b3_human_acceptance.py",
+    "tests/test_b2a_acceptance_oracle.py",
+    "tests/test_prd008_resume_fingerprints.py",
+    "tests/test_workflow.py"
+  ],
+  "mutants": [
+    {
+      "name": "raw-narrative-used-despite-contract",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 281 passed in 21.31s",
+      "seconds": 22.3
+    },
+    {
+      "name": "contract-inside-workspace-accepted",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 340 passed in 22.36s",
+      "seconds": 23.2
+    },
+    {
+      "name": "goal-digest-ignored",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 372 passed in 25.73s",
+      "seconds": 26.6
+    },
+    {
+      "name": "requirement-set-digest-ignores-contract",
+      "file": "kriya/workflow/requirements.py",
+      "status": "SURVIVED",
+      "tail": "1174 passed in 100.54s (0:01:40)",
+      "seconds": 101.4
+    },
+    {
+      "name": "resume-fingerprint-ignores-contract",
+      "file": "kriya/workflow/resume_fingerprints.py",
+      "status": "KILLED",
+      "tail": "1 failed, 343 passed in 23.41s",
+      "seconds": 24.4
+    },
+    {
+      "name": "enforce-resume-accepts-changed-contract",
+      "file": "kriya/workflow/workflow_controller.py",
+      "status": "KILLED",
+      "tail": "1 failed, 371 passed in 23.26s",
+      "seconds": 24.1
+    },
+    {
+      "name": "b3-ignores-requirement-set-identity",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 376 passed in 26.53s",
+      "seconds": 27.4
+    },
+    {
+      "name": "b3-v1-accepted-for-contract",
+      "file": "kriya/workflow/acceptance_approval.py",
+      "status": "KILLED",
+      "tail": "1 failed, 375 passed in 22.74s",
+      "seconds": 23.6
+    },
+    {
+      "name": "unknown-acceptance-requirement-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "3 failed, 305 passed in 22.57s",
+      "seconds": 23.5
+    },
+    {
+      "name": "duplicate-requirement-id-accepted",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 381 passed in 23.03s",
+      "seconds": 23.9
+    },
+    {
+      "name": "unknown-kind-accepted",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 382 passed in 22.74s",
+      "seconds": 23.6
+    },
+    {
+      "name": "empty-set-accepted",
+      "file": "kriya/workflow/requirement_contract.py",
+      "status": "KILLED",
+      "tail": "1 failed, 380 passed in 22.81s",
+      "seconds": 23.7
+    },
+    {
+      "name": "model-generated-requirement-accepted",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "2 failed, 326 passed in 22.41s",
+      "seconds": 23.3
+    },
+    {
+      "name": "model-missing-fails-the-attempt",
+      "file": "kriya/workflow/attempt.py",
+      "status": "KILLED",
+      "tail": "2 failed, 354 passed in 22.87s",
+      "seconds": 23.7
+    },
+    {
+      "name": "model-indeterminate-fails-the-attempt",
+      "file": "kriya/workflow/attempt.py",
+      "status": "KILLED",
+      "tail": "2 failed, 519 passed in 33.40s",
+      "seconds": 34.3
+    },
+    {
+      "name": "model-advisory-not-recorded",
+      "file": "kriya/workflow/attempt.py",
+      "status": "KILLED",
+      "tail": "1 failed, 498 passed in 33.01s",
+      "seconds": 33.9
+    },
+    {
+      "name": "model-advisory-settles-the-obligation",
+      "file": "kriya/workflow/attempt.py",
+      "status": "KILLED",
+      "tail": "1 failed, 820 passed in 78.27s (0:01:18)",
+      "seconds": 79.2
+    }
+  ],
+  "baseline": "1174 passed in 100.83s (0:01:40)",
+  "counts": {
+    "KILLED": 16,
+    "SURVIVED": 1
+  }
+}

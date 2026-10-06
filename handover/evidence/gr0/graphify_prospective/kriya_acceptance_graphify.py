@@ -2,7 +2,11 @@
 
 Written only from the frozen goal (goal.txt sha256 f96bf5a3...): its own reproducer files and its own table
 (cases 1, 2, 5 must gain a `calls` edge; controls 3, 4 keep theirs) and graphify's public `extract()` API as the
-frozen base's own tests use it. No hidden-evaluator content was read or used."""
+frozen base's own tests use it. No hidden-evaluator content was read or used.
+
+GR-R1: bound to the PROPOSED explicit requirement contract (graphify_requirements_PROPOSED_unapproved.json), not
+to the 22 requirements derived from the issue text: cases 1, 2, 5 serve REQ-1 (the reproducer) and REQ-3 (the
+type-argument rule); controls 3, 4 serve REQ-2. Only the markers changed; every assertion is as before."""
 import os
 from pathlib import Path
 
@@ -56,26 +60,29 @@ def _edge(graph, caller, caller_file, callee, callee_file):
     return (_node(result, caller, caller_file), _node(result, callee, callee_file)) in calls
 
 
-@pytest.mark.kriya_requirement("REQ-15")
+@pytest.mark.kriya_requirement("REQ-1")
+@pytest.mark.kriya_requirement("REQ-3")
 def test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge(graph):
     assert _edge(graph, ".A()", "reader", ".Get()", "settings")
 
 
-@pytest.mark.kriya_requirement("REQ-15")
+@pytest.mark.kriya_requirement("REQ-1")
+@pytest.mark.kriya_requirement("REQ-3")
 def test_case2_generic_call_through_this_gets_a_calls_edge(graph):
     assert _edge(graph, ".B()", "reader", ".Get()", "settings")
 
 
-@pytest.mark.kriya_requirement("REQ-15")
+@pytest.mark.kriya_requirement("REQ-1")
+@pytest.mark.kriya_requirement("REQ-3")
 def test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge(graph):
     assert _edge(graph, ".E()", "local", ".Make()", "local")
 
 
-@pytest.mark.kriya_requirement("REQ-15")
+@pytest.mark.kriya_requirement("REQ-2")
 def test_control3_unqualified_non_generic_call_keeps_its_calls_edge(graph):
     assert _edge(graph, ".C()", "reader", ".GetRaw()", "settings")
 
 
-@pytest.mark.kriya_requirement("REQ-15")
+@pytest.mark.kriya_requirement("REQ-2")
 def test_control4_non_generic_call_through_this_keeps_its_calls_edge(graph):
     assert _edge(graph, ".D()", "reader", ".GetRaw()", "settings")
