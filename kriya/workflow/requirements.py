@@ -19,22 +19,25 @@ user's text, verbatim:
   passed and judges the exact candidate files (fingerprinted). Planner,
   Architect, Developer and Reviewer text never writes an outcome; citing a
   requirement id in a plan or design is lineage, not evidence.
-- Outcomes: SATISFIED (the verifier found the requirement in the code),
-  VIOLATED (a concrete, literally-named requirement is absent - the gate
-  fails and the retry names the REQ id and its original text), UNVERIFIED
-  (CANNOT_CONFIRM_FROM_CODE: the requirement describes behaviour the
-  verifier cannot confirm from source text), UNKNOWN (NO_VERDICT).
-  ``blocking_requirements`` applies the policy: VIOLATED always blocks
-  success; UNKNOWN and UNVERIFIED block when
+- Verifier verdicts: satisfied, missing (a concrete, literally-named
+  requirement is absent - the gate fails and the retry names the REQ id and
+  its original text), unverifiable (CANNOT_CONFIRM_FROM_CODE), none
+  (UNKNOWN, NO_VERDICT). Both satisfied and missing are MODEL_CLAIMED and
+  recorded UNVERIFIED with the model's verdict as provenance (FS-1B, GR-R0):
+  only deterministic or human-bound evidence decides CLOSED_BY_EVIDENCE /
+  HUMAN_ACCEPTED or VIOLATED. ``blocking_requirements`` applies the policy:
+  VIOLATED always blocks success; UNKNOWN and UNVERIFIED block when
   ``autonomy.requirement_unknown_policy`` / ``requirement_unverified_policy``
-  say ``block`` (production seals both to ``block``).
+  say ``block`` (production seals both to ``block``); an UNVERIFIED the
+  verifier reported missing blocks whatever the policy.
 - UNVERIFIED is never SATISFIED. It can be closed only by another
   authoritative verifier's positive evidence for that exact requirement on
   that exact candidate (``record_requirement_closure``): a separate
   DETERMINISTIC record whose ``evidence_id`` must equal the verifier
   verdict's own, so evidence about an earlier candidate never closes a later
   one. The closed outcome is CLOSED_BY_EVIDENCE, distinct from the
-  verifier's SATISFIED. VIOLATED and UNKNOWN are never closed this way.
+  verifier's SATISFIED, whatever the verifier said (a model "missing" is
+  outranked by it). VIOLATED and UNKNOWN are never closed this way.
 - Mutation-scope requirements ("do not modify any other file", recognized
   only as a whole statement, ``is_mutation_scope_requirement``) are decided
   from Kriya's own mutation record (``close_mutation_scope_requirements``):
@@ -374,14 +377,15 @@ def record_requirement_verdicts(
         else:
             outcome, detail = entry[0], entry[1]
             reason = entry[2] if len(entry) > 2 and entry[2] else _DEFAULT_REASON[outcome.value]
-        # FS-1B: LLM output can authorize nothing. A verifier's positive
-        # verdict is a MODEL_CLAIMED assessment, never proof: it is recorded
-        # UNVERIFIED (its own verdict, reason and detail kept as provenance),
-        # and only deterministic closure evidence for this exact candidate
-        # (record_requirement_closure) can make it CLOSED_BY_EVIDENCE. A
-        # negative verdict (VIOLATED) stays a veto; FS-1 does not change it.
+        # FS-1B / GR-R0: LLM output can authorize nothing, in either
+        # direction. A verifier's verdict is a MODEL_CLAIMED assessment, never
+        # proof: SATISFIED and VIOLATED alike are recorded UNVERIFIED (the
+        # model's own verdict, reason and detail kept as provenance). Only
+        # deterministic or human-bound evidence for this exact candidate
+        # closes it or makes it VIOLATED (requirement_outcomes); a model
+        # "missing" alone still blocks success (blocking_requirements).
         model_outcome = outcome
-        if outcome is RequirementOutcome.SATISFIED:
+        if outcome in (RequirementOutcome.SATISFIED, RequirementOutcome.VIOLATED):
             outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
         ledger.record(ObligationRecord(
@@ -769,6 +773,11 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome.UNKNOWN
         if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED):
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
+        if outcome is RequirementOutcome.VIOLATED:
+            # GR-R0: a verdict record is the verifier's MODEL_CLAIMED judgment
+            # (a pre-GR-R0 record, e.g. read back on resume): never VIOLATED by
+            # itself; deterministic counter-evidence below decides that.
+            outcome = RequirementOutcome.UNVERIFIED
         evidence_id = evidence.get("evidence_id")
         closure = _effective_closure(ledger, requirement, evidence_id)
         if (requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None
@@ -1019,7 +1028,9 @@ def blocking_requirements(
 ) -> List[Tuple[Requirement, RequirementOutcome]]:
     """The requirements that forbid a successful terminal state. VIOLATED
     always blocks; PENDING and UNKNOWN (no verdict) block under
-    ``unknown_policy == "block"``; UNVERIFIED under ``unverified_policy``."""
+    ``unknown_policy == "block"``; UNVERIFIED under ``unverified_policy``, and
+    always when the verifier reported it missing (GR-R0: an unrefuted model
+    negative is not evidence either way, so it cannot become success)."""
     blocking: List[Tuple[Requirement, RequirementOutcome]] = []
     outcomes = requirement_outcomes(ledger, requirements)
     for requirement in requirements.requirements:
@@ -1027,9 +1038,17 @@ def blocking_requirements(
         if (outcome is RequirementOutcome.VIOLATED
                 or (outcome in (RequirementOutcome.PENDING, RequirementOutcome.UNKNOWN)
                     and unknown_policy == "block")
-                or (outcome is RequirementOutcome.UNVERIFIED and unverified_policy == "block")):
+                or (outcome is RequirementOutcome.UNVERIFIED
+                    and (unverified_policy == "block" or _model_reported_missing(ledger, requirement.id)))):
             blocking.append((requirement, outcome))
     return blocking
+
+
+def _model_reported_missing(ledger: ObligationLedger, requirement_id: str) -> bool:
+    """The verifier's current verdict for ``requirement_id`` is "missing"."""
+    record = ledger.current(requirement_obligation_id(requirement_id))
+    evidence = (record.evidence or {}) if record is not None else {}
+    return RequirementOutcome.VIOLATED.value in (evidence.get("model_outcome"), evidence.get("outcome"))
 
 
 def cited_requirement_ids(text: str, requirements: RequirementSet) -> List[str]:

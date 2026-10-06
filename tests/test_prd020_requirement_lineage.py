@@ -131,12 +131,13 @@ def test_a_later_violation_always_blocks():
                                 revision=1, evidence_fingerprint="a", source="test")
     record_requirement_verdicts(ledger, reqs, {"REQ-3": (RequirementOutcome.VIOLATED, "absent")},
                                 revision=2, evidence_fingerprint="b", source="test", only=["REQ-3"])
-    # A model claim was never satisfied (FS-1B), so the violation is not a
-    # SATISFIED->VIOLATED ledger regression - it blocks all the same.
+    # A model claim was never satisfied (FS-1B), so the later "missing" is not a
+    # SATISFIED->VIOLATED ledger regression. GR-R0: it is a model claim too, so
+    # it is never VIOLATED by itself - but it blocks all the same.
     assert ledger.regressions == []
-    assert ledger.current(requirement_obligation_id("REQ-3")).status is ObligationStatus.VIOLATED
+    assert ledger.current(requirement_obligation_id("REQ-3")).status is ObligationStatus.INDETERMINATE
     blocking = blocking_requirements(ledger, reqs)  # default policies: record
-    assert [(req.id, outcome) for req, outcome in blocking] == [("REQ-3", RequirementOutcome.VIOLATED)]
+    assert [(req.id, outcome) for req, outcome in blocking] == [("REQ-3", RequirementOutcome.UNVERIFIED)]
 
 
 def test_unknown_and_unverified_block_only_under_their_policy():
@@ -368,7 +369,8 @@ async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names
     lineage = {e["stage"]: e for e in _events(cfg, "requirement.lineage")}
     assert lineage["plan"]["cited"] == ["REQ-1"] and lineage["plan"]["omitted"] == ["REQ-2", "REQ-3"]
     verdicts = _events(cfg, "requirement.verdicts")
-    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["violated", "unverified"]
+    # GR-R0: the verifier's "missing" is a model claim, recorded UNVERIFIED (never VIOLATED by itself).
+    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["unverified", "unverified"]
     assert verdicts[0]["evidence_id"] != "" and verdicts[0]["requirement_set_digest"] == derive_requirements(GOAL).digest
     # The retry is driven by the unresolved id and the user's own text.
     retry_kwargs = engine.developer.run_generation.await_args_list[1].kwargs
@@ -497,7 +499,8 @@ async def test_enforce_terminal_gate_holds_a_requirement_no_subtask_mapped(tmp_p
 
     assert "REQ-2: Log every call to run()" in planner_requests[0]
     assert result.legacy_result["quality_gates_passed"] is False
-    assert "REQ-2 (violated): Log every call to run()" in result.legacy_result["global_requirement_gap"]
+    # GR-R0: reported missing by the model only - unresolved (blocks), never VIOLATED by itself.
+    assert "REQ-2 (unverified): Log every call to run()" in result.legacy_result["global_requirement_gap"]
     assert checked and checked[0]["files_written"] == ["app.py"]
 
 
@@ -569,9 +572,10 @@ def test_production_blocks_no_verdict_cannot_confirm_and_violated():
                                  "REQ-3": RequirementOutcome.VIOLATED}, )
     # REQ-4 does not exist in GOAL; every id without a verdict is NO_VERDICT.
     blocking = {req.id: outcome for req, outcome in blocking_requirements(ledger, reqs, **PRODUCTION)}
-    # REQ-1's "satisfied" is a model claim (FS-1B): UNVERIFIED, blocked like REQ-2.
+    # REQ-1's "satisfied" is a model claim (FS-1B): UNVERIFIED, blocked like REQ-2; REQ-3's "missing" is a
+    # model claim too (GR-R0): UNVERIFIED, and blocked.
     assert blocking == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.UNVERIFIED,
-                        "REQ-3": RequirementOutcome.VIOLATED}
+                        "REQ-3": RequirementOutcome.UNVERIFIED}
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED})
     blocking = {req.id: outcome for req, outcome in blocking_requirements(ledger, reqs, **PRODUCTION)}
     assert blocking == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.UNKNOWN,
@@ -626,9 +630,11 @@ def test_violated_and_no_verdict_always_block_even_with_closure_evidence():
                                 evidence_fingerprint="cand-1", source="test", only=["REQ-2"])
     blocking = {req.id: outcome for req, outcome in blocking_requirements(
         ledger, reqs, unknown_policy="block", unverified_policy="record")}
-    assert blocking["REQ-2"] is RequirementOutcome.VIOLATED
+    # GR-R0: the model's "missing" is never VIOLATED by itself; this closure (a named-test run) proves only
+    # regression preservation for a behaviour statement, so nothing stronger outranks it and it still blocks.
+    assert blocking["REQ-2"] is RequirementOutcome.UNVERIFIED
     assert blocking["REQ-3"] is RequirementOutcome.UNKNOWN
-    # VIOLATED blocks under every policy.
+    # A reported-missing requirement blocks under every policy.
     assert [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="record",
                                                    unverified_policy="record")] == ["REQ-2"]
 
