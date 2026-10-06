@@ -1,0 +1,16 @@
+import datetime
+
+import pytest
+from freezegun import freeze_time
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_freeze_time_at_epoch():
+    with freeze_time(0):
+        assert datetime.datetime.now() == datetime.datetime(1970, 1, 1)
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_freeze_time_fractional_timestamp():
+    with freeze_time(86400.5):
+        assert datetime.datetime.now() == datetime.datetime(1970, 1, 2, 0, 0, 0, 500000)

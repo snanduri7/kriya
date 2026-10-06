@@ -106,7 +106,7 @@ depth.
 | Gate | Result |
 |---|---|
 | focused B2-a | 80 tests (`tests/test_b2a_acceptance_oracle.py`), all pass |
-| mutation run 2 (`b8809cd`) | 25 run, 24 killed, 1 survived = the measured-equivalent `--noconftest` mutant (`b2a_mutation_run2_b8809cd.txt`) |
+| mutation run 2 (`b8809cd`) | 25 exercised, 24 killed, 1 equivalent/non-semantic survivor (`--noconftest`, measured), 0 meaningful survivors - not 25/25 (`b2a_mutation_run2_b8809cd.txt`) |
 | ruff / pylint | 0 findings / exit 0 |
 | full suite (`full_suite_b8809cd.txt`, absolute PYTHONPATH) | **8988 passed, 0 failed, 0 errors** |
 
@@ -147,3 +147,10 @@ Non-interference: the full suite covers M1, P1/P4/P5, P2, P3-A/B/C, I-2, FS-1A/B
   `kriya/workflow/acceptance.py` (runtime-acceptance helpers) in the working tree; restored from git before any commit
   and the module named `acceptance_oracle.py`. Evidence-only commit `cac848f` added `.py` files that failed the
   repo-wide ruff gate; fixed in `dab3a59` (same independent-check output re-measured).
+
+## 6. Recorded, not fixed (owner)
+
+- Deferred observation: a deterministic acceptance PASS together with a model-negative VIOLATED verdict is currently
+  blocked (the verdict wins). A future negative-model-authority issue, not part of B2-a or the A1 sentinel.
+- Cohort B tasks keep running without acceptance files (their purpose: no independent behaviour oracle -> UNVERIFIED,
+  no autonomous commit).
