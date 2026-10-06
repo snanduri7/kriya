@@ -374,3 +374,21 @@ def test_graphify_preflight_signal():
     assert structural_insertion_readiness("A.java", True) == "YES"
     assert structural_insertion_readiness("a.py", True) == "NO"
     assert structural_insertion_readiness("A.java", False) == "NOT_REQUIRED"
+
+
+# --- the structure re-check catches what the byte check cannot ---------------------------------------------------------------
+FIELDS = "package p;\n\npublic class Box {\n    int size() {\n        return 1;\n    }\n    int y;\n}\n"
+
+
+def test_insertion_that_comments_out_a_declaration_refused():
+    locus, _ = _locus(FIELDS, grounded=("Box.size",))
+    assert locus.tier == TIER_AFTER_GROUNDED_MEMBER and FIELDS[locus.gap_end:].startswith("int y;")
+    # A pure insertion at the gap's end: the new member parses under the owner, but `int y;` becomes a comment.
+    after = FIELDS[:locus.gap_end] + "int clamp(int v) { return v; } // " + FIELDS[locus.gap_end:]
+    assert verify_insertion(locus, FIELDS, after, [locus.carrier]).startswith(INSERTION_STRUCTURE_CHANGED)
+
+
+def test_insertion_that_does_not_parse_refused():
+    locus, _ = _locus()
+    after = _insert(SMALL, locus, "\n    public int clamp(int v) {\n        int x = ;\n        return v;\n    }\n")
+    assert verify_insertion(locus, SMALL, after, [locus.carrier]).startswith(INSERTION_STRUCTURE_CHANGED)
