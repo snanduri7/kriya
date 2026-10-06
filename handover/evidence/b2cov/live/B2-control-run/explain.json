@@ -1,0 +1,483 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 7,
+        "seq": 115,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "failure_type": "plan_scope_conflict",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 107
+    },
+    "plan_scope_conflicts": [
+      {
+        "attempt": 1,
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "required_files": [
+          "tests/test_cssselect2.py"
+        ],
+        "seq": 107,
+        "unit_id": "s2"
+      }
+    ],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "deciding_subtask": {
+        "error": "subtask repair requires approved-plan scope revision; grounded required files ['tests/test_cssselect2.py'] are outside this stage's allowed files ['tests/test_selector_count.py']",
+        "status": "needs_review",
+        "subtask_id": "s2"
+      },
+      "kind": "planning.failed",
+      "reason_codes": [
+        "PLAN_SCOPE_REVISION_REQUIRED"
+      ],
+      "seq": 113,
+      "source": "controller_terminal_event"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 64,
+        "unit_id": "s1"
+      },
+      {
+        "failure_category": "plan_scope_revision_required",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 111,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 29,
+              "call_seq": 2,
+              "content": {
+                "messages": "sha256:fef6290d17079d9f98ce882d0a0bf333cb8b9731fe5c41b7f48abd40db54ebae",
+                "wire_body": "sha256:24a37fe0681ce1b048d433d44d8baecf280f4058d36f168e65c169e132880c03"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "cssselect2/__init__.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 31,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:34206c23a9b0af8c27792560ef0ec7e9aca896002a09f0715fad2c9307a647ba",
+                "wire_body": "sha256:cb8f730943e75c14596a7d55c4aa917d36d6c49b90433ca9cc8c961e24f43eb4"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 40,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:8dd940cad0508eb3ddfa3c0d904d0040ac0115f6bf6d66ef5aa7890b79fd0096",
+                "wire_body": "sha256:c77e8936fc6657e4b270cdf5647f8ae85fc1a76badf34580e17f8eb6d6e1432a"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 44,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:3a43e3e570b1ff0cf096308aff956b9a18130fbfa1c780e3ea9596ad6e993e1b",
+                "wire_body": "sha256:9189498a8f5358fc42255a76a351a78fba848861c55344ca080af98b438a2620"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 53,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "cssselect2/__init__.py"
+              ],
+              "seq": 29,
+              "targets": [
+                {
+                  "digest": "664228eeb1842c606cc86c3f3d5e10489cdb56f10073fb97c5404cd55070d251",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 4,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "cssselect2/__init__.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "72a31505ee09e256b373cc2082ef9211dcda9cc22db13a96a3fbeb4b35b4075f",
+                  "shown_is_exact": true,
+                  "shown_member_id": "Matcher.add_selector",
+                  "shown_revision": "72a31505ee09e256b373cc2082ef9211dcda9cc22db13a96a3fbeb4b35b4075f",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 28,
+                      "start_line": 21,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 64,
+                      "start_line": 30,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 107,
+                      "start_line": 66,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 113,
+                      "start_line": 109,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 2,
+              "completion_tokens": 702,
+              "content": {
+                "content": "sha256:41ff35e8a396f3273a7fc282afdf0ff9dbda70122df8517f69463094eb4fc7d6"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 32,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 3,
+              "completion_tokens": 144,
+              "content": {
+                "content": "sha256:b246423d92a86d36d8808f1634711fe3e615742e3a6db4240d692eb515679312"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 41,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 4,
+              "completion_tokens": 110,
+              "content": {
+                "content": "sha256:e47b5c06bca15a4d460b2e9def96b5116505d0bff3afb7da15c59c4a3101044b"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 45,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 737,
+              "content": {
+                "content": "sha256:f8ee852974c171736d18474c03bf57aed0b7bdfac371c3c09ecbd4c259d875cf"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 54,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 2,
+              "content": {
+                "analysis_model_claimed": "sha256:88a394b2277263ae1e8628375c181b8a1dedf9a75b17657654b22d1ad96660c2"
+              },
+              "kind": "edits",
+              "path": "cssselect2/__init__.py",
+              "seq": 34
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "57f6374b25ae88f19332a2cbd676ef3e159dc9443459b1615552e21080769cb2",
+              "before_digest": "72a31505ee09e256b373cc2082ef9211dcda9cc22db13a96a3fbeb4b35b4075f",
+              "content": {
+                "after": "sha256:57f6374b25ae88f19332a2cbd676ef3e159dc9443459b1615552e21080769cb2",
+                "before": "sha256:72a31505ee09e256b373cc2082ef9211dcda9cc22db13a96a3fbeb4b35b4075f",
+                "diff": "sha256:26d707cb21ef4897a3d23c6593509dcabaffb78ee5806db619fc6fa3626faebf"
+              },
+              "decision": "STAGED",
+              "lines_added": 9,
+              "lines_removed": 0,
+              "path": "cssselect2/__init__.py",
+              "seq": 37
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 26
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 88,
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:c17bba73314f9406b9368baab661a83ee7ca21243e34e7df4a13398c538ef954",
+                "wire_body": "sha256:8f997bb48f6cf0fff6dea36f83ede8f338be3a1a075921408cfaf24d95c6d43c"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "tests/test_cssselect2.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 91,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_selector_count.py"
+              ],
+              "seq": 88,
+              "targets": [
+                {
+                  "digest": "e3fb6789a1182f4e14cc9921db9e4ae4faf8d0e6fdc32de241e4827824a24d3d",
+                  "full_file": true,
+                  "in_write_scope": false,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit",
+                    "full_file_replacement"
+                  ],
+                  "path": "tests/test_cssselect2.py",
+                  "requested_operation": "repair_with_full_file",
+                  "revision": "2e7bfc4372e04911c9d24e804a125452b4f32f30c167c638d9c89641c99906d6",
+                  "shown_is_exact": true,
+                  "shown_member_id": null,
+                  "shown_revision": "2e7bfc4372e04911c9d24e804a125452b4f32f30c167c638d9c89641c99906d6",
+                  "shown_tier": "full",
+                  "spans": [
+                    {
+                      "end_line": 400,
+                      "start_line": 1,
+                      "unit": "shown_full"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": true
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 7,
+              "completion_tokens": 4530,
+              "content": {
+                "content": "sha256:aadcedfb865ec4842613b1d1d388377c781c5a52ed07ac5ce48449b95565c12d"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 92,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 7,
+              "kind": "file",
+              "path": "tests/test_cssselect2.py",
+              "seq": 94
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "parse_seq": 94,
+              "path": "tests/test_cssselect2.py",
+              "proposal_kind": "file",
+              "reason_code": "plan_scope_conflict",
+              "seq": 105
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "architectural_owner",
+              "content": {
+                "attribution_reasoning": "sha256:5549aa90e6d1238343011693e1a4635f5899572b5268b5dc9b600b453316364e",
+                "message": "sha256:a1e6d098e4aa891a0990b6c1e45b18e662167482cf8eb3fc48a6d8f974c04e55",
+                "raw_output": "sha256:0f95b93480aec663c1a6a5997e174c9c90d18b8b78dd6104de412260613871dc"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "tests/test_cssselect2.py"
+              ],
+              "seq": 104,
+              "type": "plan_scope_conflict"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "failure_type": "plan_scope_conflict",
+              "no_progress_terminated": false,
+              "plan_scope_conflict": {
+                "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                "required_files": [
+                  "tests/test_cssselect2.py"
+                ]
+              },
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "seq": 107,
+              "stop_loop": true
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 85
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T130312-a8dde65c",
+  "sealed": true,
+  "verification": "VERIFIED"
+}
