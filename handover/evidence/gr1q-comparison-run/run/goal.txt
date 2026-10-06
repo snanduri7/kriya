@@ -1,0 +1,85 @@
+C#: an unqualified generic call (Get<T>(...), this.Get<T>(...)) drops its `calls` edge
+
+## Summary
+
+In C#, a call with an explicit type argument and no receiver never gets a `calls` edge, even
+when the target method is declared on the caller's own class or on its base class. The
+non-generic spelling of the same call resolves normally, so the type-argument list at the call
+site is the whole trigger.
+
+Measured on v0.9.56, the current release. v0.9.55 behaves identically.
+
+## Reproducer
+
+Three files, no corpus, no build needed. `dotnet build` on net8.0: 0 errors, 0 warnings.
+
+```csharp
+// Settings.cs
+namespace Demo
+{
+    public class Settings
+    {
+        public T Get<T>(string key) { return default(T); }   // target
+        public string GetRaw(string key) { return key; }     // control target
+    }
+}
+
+// Reader.cs
+namespace Demo
+{
+    public class Reader : Settings
+    {
+        public int A() { return Get<int>("port"); }        // 1) no edge
+        public int B() { return this.Get<int>("port"); }   // 2) no edge
+        public string C() { return GetRaw("host"); }       // 3) edge
+        public string D() { return this.GetRaw("host"); }  // 4) edge
+    }
+}
+
+// Local.cs
+namespace Demo
+{
+    public class Local
+    {
+        public T Make<T>() { return default(T); }
+        public int E() { return Make<int>(); }             // 5) no edge, same class
+    }
+}
+```
+
+```
+graphify extract src --code-only --no-cluster --out out
+```
+
+| # | Call site | v0.9.56 |
+|---|---|---|
+| 1 | `Get<int>("port")` — unqualified, generic, target on base class | no edge |
+| 2 | `this.Get<int>("port")` — same through `this` | no edge |
+| 3 | `GetRaw("host")` — control, unqualified, non-generic | edge |
+| 4 | `this.GetRaw("host")` — control, through `this` | edge |
+| 5 | `Make<int>()` — unqualified, generic, target on the same class | no edge |
+
+2 of 5. All five target member nodes exist in the graph, and `method`/`inherits` edges are
+correct — only the call-site-to-member match fails. Case 5 shows inheritance is not involved.
+
+## Expected
+
+Cases 1, 2 and 5 should produce a `calls` edge to `.Get()` / `.Make()`, exactly as the
+non-generic controls 3 and 4 do. The type-argument list is not part of the method's identity.
+
+## Where it happens (v0.9.56, graphify/extractors/engine.py)
+
+- `elif fn_node is not None and fn_node.type == "identifier":` — for `Get<int>("port")`
+  tree-sitter gives the `function` field as a `generic_name`, not an `identifier`, so this branch
+  is skipped. Control flow falls into the generic fallback further down, which takes the node
+  text verbatim and so assigns `callee_name = "Get<int>"`.
+- `callee_name = _read_text(mname, source)` — for `this.Get<int>("port")` the `name` field of the
+  `member_access_expression` is a `generic_name`, so `callee_name` becomes `"Get<int>"`.
+- In both cases the member index is keyed on the bare declared name, the lookup misses, and the
+  edge is dropped silently.
+
+What makes this worth one small change: a few lines further down, the very same call node is
+walked structurally to emit `references[generic_arg]` edges — the code descends into
+`generic_name` and reads its `type_argument_list` properly. So v0.9.56 already recognises these
+call sites as generic and already records what they instantiate; only the callee name a few
+lines above is still taken as raw text.
