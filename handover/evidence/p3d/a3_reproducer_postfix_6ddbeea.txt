@@ -1,0 +1,12 @@
+file bytes: 60790 | lines: 1696 | revision: c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6
+full-file token estimate: 15197
+developer requests: 1
+operations: [['anchored_edit']] | full_file authority: [False]
+locus: {'version': 1, 'owner': 'org.apache.commons.lang3.math.NumberUtils', 'tier': 'owner_closing_delimiter', 'start_line': 1695, 'end_line': 1696, 'planned_members': ['clamp'], 'revision': 'c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6', 'digest': 'dcee87da2152631f605e2e3e7932c071105407fd033d70985094594090ed9c63'}
+window lines: 2 | window chars: 7
+locus revision == file revision: True
+carrier in the fitted request sent: True
+whole file in the request sent: False
+insertion authorized events: 1
+quality_gates_passed: True | failure_category: None
+clamp applied: True | pure insertion: True

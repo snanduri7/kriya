@@ -1,0 +1,154 @@
+{
+  "commit": "bcb0c1d",
+  "tests": [
+    "tests/test_p3d_structural_insertion.py",
+    "tests/test_p3a_sent_request_anchor_authority.py",
+    "tests/test_context_edit_protocol_001.py"
+  ],
+  "mutants": [
+    {
+      "name": "raw-final-brace-search",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "4 failed, 43 passed in 5.28s",
+      "seconds": 6.2
+    },
+    {
+      "name": "ignore-owner-identity",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.52s",
+      "seconds": 6.4
+    },
+    {
+      "name": "ignore-revision-mismatch",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "2 failed, 52 passed in 5.82s",
+      "seconds": 6.6
+    },
+    {
+      "name": "ignore-context-digest-mismatch",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.74s",
+      "seconds": 6.6
+    },
+    {
+      "name": "allow-neighbouring-replacement",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "3 failed, 46 passed in 5.38s",
+      "seconds": 6.3
+    },
+    {
+      "name": "accept-locus-not-in-final-request",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "2 failed, 52 passed in 5.55s",
+      "seconds": 6.4
+    },
+    {
+      "name": "insertion-in-a-different-class",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "2 failed, 50 passed in 5.47s",
+      "seconds": 6.4
+    },
+    {
+      "name": "reuse-a-stale-locus",
+      "file": "kriya/workflow/edit_capability.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.67s",
+      "seconds": 6.6
+    },
+    {
+      "name": "full-file-authority-from-insertion",
+      "file": "kriya/workflow/edit_capability.py",
+      "status": "KILLED",
+      "tail": "2 failed, 53 passed in 5.74s",
+      "seconds": 6.6
+    },
+    {
+      "name": "fallback-to-full-file-context",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "5 failed, 40 passed in 4.78s",
+      "seconds": 5.6
+    },
+    {
+      "name": "ambiguous-owner-takes-first",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.75s",
+      "seconds": 6.6
+    },
+    {
+      "name": "enum-owner-accepted",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "2 failed, 51 passed in 5.89s",
+      "seconds": 6.8
+    },
+    {
+      "name": "no-new-member-required",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 6.06s",
+      "seconds": 6.9
+    },
+    {
+      "name": "grounded-member-tier-ignored",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "2 failed, 50 passed in 5.58s",
+      "seconds": 6.5
+    },
+    {
+      "name": "insertion-edit-not-verified",
+      "file": "kriya/workflow/attempt.py",
+      "status": "KILLED",
+      "tail": "5 failed, 41 passed in 5.57s",
+      "seconds": 6.5
+    },
+    {
+      "name": "any-anchor-is-insertion-only",
+      "file": "kriya/workflow/edit_capability.py",
+      "status": "KILLED",
+      "tail": "3 failed, 46 passed in 5.61s",
+      "seconds": 6.4
+    },
+    {
+      "name": "declaration-loss-accepted",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.68s",
+      "seconds": 6.6
+    },
+    {
+      "name": "no-declaration-insertion-accepted",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.67s",
+      "seconds": 6.5
+    },
+    {
+      "name": "unparsable-result-accepted",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 56 passed in 5.59s",
+      "seconds": 6.5
+    },
+    {
+      "name": "python-supported",
+      "file": "kriya/workflow/insertion_locus.py",
+      "status": "KILLED",
+      "tail": "1 failed, 55 passed in 5.73s",
+      "seconds": 6.6
+    }
+  ],
+  "baseline": "67 passed in 7.40s",
+  "counts": {
+    "KILLED": 20
+  }
+}

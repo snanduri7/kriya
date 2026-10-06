@@ -1,0 +1,5 @@
+developer requests: 1
+edit capabilities: [[(['anchored_edit'], 0, [])]]
+failures: []
+quality_gates_passed: True | failure_category: None
+clamp applied: True
