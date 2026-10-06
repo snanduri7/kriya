@@ -1,0 +1,116 @@
+{
+  "commit": "d7a376e",
+  "tests": [
+    "tests/test_b2cov_claim_strength.py",
+    "tests/test_b2a_acceptance_oracle.py",
+    "tests/test_fs1c1_requirement_claims.py",
+    "tests/test_prd020_requirement_lineage.py",
+    "tests/test_prd020_milestone_requirements.py",
+    "tests/test_fs1_false_success_reproducer.py"
+  ],
+  "mutants": [
+    {
+      "name": "finite-examples-close-universal-claim",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 68 passed in 4.30s",
+      "seconds": 5.2
+    },
+    {
+      "name": "one-passed-example-closes-entire-behavior",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 63 passed in 5.21s",
+      "seconds": 6.1
+    },
+    {
+      "name": "model-claim-upgrades-universal-evidence",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 180 passed in 12.72s",
+      "seconds": 13.6
+    },
+    {
+      "name": "c0-evidence-upgrades-universal-behavior",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "3 failed, 66 passed in 4.48s",
+      "seconds": 5.3
+    },
+    {
+      "name": "candidate-test-upgrades-universal-behavior",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 78 passed in 5.05s",
+      "seconds": 5.9
+    },
+    {
+      "name": "ambiguous-claim-treated-as-exact",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "2 failed, 62 passed in 4.24s",
+      "seconds": 5.1
+    },
+    {
+      "name": "resume-restores-old-broad-b2-claim",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 58 passed in 3.92s",
+      "seconds": 4.8
+    },
+    {
+      "name": "resume-restores-old-broad-b2-whole-closure",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 65 passed in 3.99s",
+      "seconds": 4.8
+    },
+    {
+      "name": "failed-counterexample-leaves-universal-claim-closed",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "3 failed, 64 passed in 4.31s",
+      "seconds": 5.1
+    },
+    {
+      "name": "universal-words-ignored",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "3 failed, 43 passed in 3.81s",
+      "seconds": 4.7
+    },
+    {
+      "name": "formula-over-parameter-ignored",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 61 passed in 4.40s",
+      "seconds": 5.3
+    },
+    {
+      "name": "placeholder-ignored",
+      "file": "kriya/workflow/requirements.py",
+      "status": "SURVIVED",
+      "tail": "187 passed in 17.19s",
+      "seconds": 18.0
+    },
+    {
+      "name": "uncovered-preservation-ignored",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 65 passed in 4.14s",
+      "seconds": 5.0
+    },
+    {
+      "name": "regression-coverage-assumed",
+      "file": "kriya/workflow/requirements.py",
+      "status": "SURVIVED",
+      "tail": "187 passed in 18.88s",
+      "seconds": 19.8
+    }
+  ],
+  "baseline": "187 passed in 17.85s",
+  "counts": {
+    "KILLED": 12,
+    "SURVIVED": 2
+  }
+}

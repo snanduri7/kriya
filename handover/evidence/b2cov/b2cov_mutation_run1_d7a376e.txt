@@ -1,0 +1,16 @@
+baseline 187 passed in 17.85s
+finite-examples-close-universal-claim KILLED 2 failed, 68 passed in 4.30s
+one-passed-example-closes-entire-behavior KILLED 1 failed, 63 passed in 5.21s
+model-claim-upgrades-universal-evidence KILLED 1 failed, 180 passed in 12.72s
+c0-evidence-upgrades-universal-behavior KILLED 3 failed, 66 passed in 4.48s
+candidate-test-upgrades-universal-behavior KILLED 1 failed, 78 passed in 5.05s
+ambiguous-claim-treated-as-exact KILLED 2 failed, 62 passed in 4.24s
+resume-restores-old-broad-b2-claim KILLED 1 failed, 58 passed in 3.92s
+resume-restores-old-broad-b2-whole-closure KILLED 1 failed, 65 passed in 3.99s
+failed-counterexample-leaves-universal-claim-closed KILLED 3 failed, 64 passed in 4.31s
+universal-words-ignored KILLED 3 failed, 43 passed in 3.81s
+formula-over-parameter-ignored KILLED 1 failed, 61 passed in 4.40s
+placeholder-ignored SURVIVED 187 passed in 17.19s
+uncovered-preservation-ignored KILLED 1 failed, 65 passed in 4.14s
+regression-coverage-assumed SURVIVED 187 passed in 18.88s
+TOTAL 14 {'KILLED': 12, 'SURVIVED': 2}
