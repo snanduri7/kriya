@@ -1,0 +1,84 @@
+# Untracked material left in /Users/sriramnanduri/WorkingDirectory/AI/AntiGravity/Kriya-By-Antigraviry/tmp/kriya-demo1-attribution-fix-2 (not committed, not merged) - inventory 2026-10-07
+# path | type | bytes | sha256 | classification
+1012tail | ASCII text | 192 | 37b52d6abc0a73b1701d37c89979e4616ccfc2b604865ac346268d7c9726856b | INCIDENTAL
+Archive.zip | Zip archive data, at least v2. | 5915528 | cc4c2f00143bae6909c8e060d3e4761b4edffe9b93b3e2b024569f2177651aa6 | ARCHIVE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/authority/993bdb4f01e126387220bed1de2c0b34b6cc450a7851b9c66c424af99449dfbf.json | JSON data | 1251 | 16013eead74a0144525cfa6b030baea43a20ed77d472eff6f35632054fd3a090 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/approval.txt | ASCII text, with very long lin | 1195 | 58eaf90a9652cb2e371e2be1fbee254fcd99b9aaad517e59aabbc01fd1e2de53 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/config.sha256 | ASCII text, with no line termi | 64 | 5236b0adc112cf7dcad69721d91dc8204c0f7068386a812dfbb864ae1687cf2a | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/effective-config.json | JSON data | 5791 | 60f55cfb37b39e6229b9cf9e42e1b257b6d0fec3d3eff1630e27f19d1998fb67 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/effective-config.sha256 | ASCII text, with no line termi | 64 | 02016cb5204aac1333c2cc2f9bff63d547277d253d4a3eb47573e81f0334ff19 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/exit-code.txt | very short file (no magic) | 1 | 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/revision.txt | ASCII text | 41 | 0c71fbf75b0b13939441e238396faedae3ddc042604df2bf341ba8c4f569d974 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/runtime.json | JSON data | 1459 | 5fc0fa0b40e13e9d8ad6be1433a37eb529b3d642ab10d1f9bd875ee06b3c156b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/stderr.txt | ASCII text, with very long lin | 16496 | 33bc41f9f2aab3e55d8483680cdde4644e7f63bec60c76bc59db45c954b799de | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/evidence/stdout.json | JSON data | 11682 | 1ac5fcced1221ec0eac460502ed36195ab08ae0b0cd8c10a4f4a71d6706ef82b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/COMMIT_EDITMSG | ASCII text | 17 | dd839fa17ad6782b842a50dfcb0efb7628626288419b39384a3e512ccdec2542 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/config | ASCII text | 137 | cae33efdb02cf774435c1ff9cb16bcc1014606908530c6e1dc727615fe3e8cda | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/description | ASCII text | 73 | 85ab6c163d43a17ea9cf7788308bca1466f1b0a8d1cc92e26e9bf63da4062aee | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/HEAD | ASCII text | 23 | f6f2b945f6c411b02ba3da9c7ace88dcf71b6af65ba2e0d89aa82900042b5a10 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/applypatch-msg.sample | POSIX shell script text execut | 478 | 0223497a0b8b033aa58a3a521b8629869386cf7ab0e2f101963d328aa62193f7 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/commit-msg.sample | POSIX shell script text execut | 1972 | efc1401b0e99d1ff51494d154d98b46c1e99059bcd8bf9f73cecde19fd3eb23b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/fsmonitor-watchman.sample | Perl script text executable | 4611 | 9159720099ad5595b8e66645cbfd47763c1e920f46e0b50ae75e642bbec57ef0 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/post-update.sample | POSIX shell script text execut | 189 | 81765af2daef323061dcbc5e61fc16481cb74b3bac9ad8a174b186523586f6c5 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-applypatch.sample | POSIX shell script text execut | 424 | e15c5b469ea3e0a695bea6f2c82bcf8e62821074939ddd85b77e0007ff165475 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-commit.sample | POSIX shell script text execut | 1649 | 57185b7b9f05239d7ab52db045f5b89eb31348d7b2177eab214f5eb872e1971b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-merge-commit.sample | POSIX shell script text execut | 416 | d3825a70337940ebbd0a5c072984e13245920cdf8898bd225c8d27a6dfc9cb53 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-push.sample | POSIX shell script text execut | 1374 | ecce9c7e04d3f5dd9d8ada81753dd1d549a9634b26770042b58dda00217d086a | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-rebase.sample | POSIX shell script text execut | 4898 | 4febce867790052338076f4e66cc47efb14879d18097d1d61c8261859eaaa7b3 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/pre-receive.sample | POSIX shell script text execut | 544 | a4c3d2b9c7bb3fd8d1441c31bd4ee71a595d66b44fcf49ddb310252320169989 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/prepare-commit-msg.sample | POSIX shell script text execut | 1492 | e9ddcaa4189fddd25ed97fc8c789eca7b6ca16390b2392ae3276f0c8e1aa4619 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/push-to-checkout.sample | POSIX shell script text execut | 2783 | a53d0741798b287c6dd7afa64aee473f305e65d3f49463bb9d7408ec3b12bf5f | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/sendemail-validate.sample | POSIX shell script text execut | 2308 | 44ebfc923dc5466bc009602f0ecf067b9c65459abfe8868ddc49b78e6ced7a92 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/hooks/update.sample | POSIX shell script text execut | 3650 | 8d5f2fa83e103cf08b57eaa67521df9194f45cbdbcb37da52ad586097a14d106 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/index | Git index, version 2, 1 entrie | 137 | e41072004b2b43ade7f19a947bf8fa2e7a826cf2ef02f6ab29c2391be40d7fd6 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/info/exclude | ASCII text | 240 | 6671fe83b7a07c8932ee89164d1f2793b2318058eb8b98dc5c06ee0a5a3b0ec1 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/logs/HEAD | ASCII text | 164 | eee4eb5ca4026af1126fcfce61e3cf6fade6b660097043f93891f917bbb7c18c | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/logs/refs/heads/master | ASCII text | 164 | eee4eb5ca4026af1126fcfce61e3cf6fade6b660097043f93891f917bbb7c18c | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/00/546783ac5a16bda940794c0341d076b46e3653 | zlib compressed data | 121 | ceb8daaafd768ed9e48a0e6b99f3f5104cdee9ceb8992842a3d7c301cf531898 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/21/cbee1babef33f3c2468547b9d5e196fddf6aa8 | zlib compressed data | 295 | e22667ef1c1306d4b08e5f3c66aab2cc8aee4d07987107f7b5c78a9e9a2d114f | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/33/5269374f28251c7fba9974732a95bb0e7cd843 | zlib compressed data | 122 | 2d97d25cc9a0bec56755906cb2ce5334fbe0fd910c98e6031dcd9a38a6c4b935 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/8d/40f695178f670949f910a69ebcd56a58ed7816 | zlib compressed data | 54 | 59afcd4df9f58c4ceaed7166883c3f15fefa272c8e14300bb117b7f013c09d7b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/a1/9084944f2ebfdb66e5632360069771899489e1 | zlib compressed data | 56 | 7dddb50d452dabcdd29c7b1b98f5fd8ceb3b5cd33999cee27ad2b97e5824de37 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/a6/f4c53d84721f7166bc50374ddf88e714665b3e | zlib compressed data | 132 | eab279f8077bc539d554d769d849f7ebaaccfeb3497714919c4c951029580bac | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/ab/fbfd879edf8eb126aca49b7a4e2cda879b40d9 | zlib compressed data | 277 | c075cbb92981b37c482924d327e1d371d79a7adf9eea22aec9b2235060be574b | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/cc/04c103cdf5416b37dcbcd114b399f735eadcdf | zlib compressed data | 102 | d5c9a5f1386d05476af0df8b11230cc82d8da00d1227d99131318f4d36228f13 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/objects/f5/c4f18e0b86b6aa36a9ab0e49df3fd20b08f792 | zlib compressed data | 464 | 5899ee118d74c65b09aedc8091f03f81f57bedef957f9d01068049eedbc07eb7 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/refs/heads/master | ASCII text | 41 | 80f3af19feb926c803d1c455995c7fcff7514ad667b90d71b02b07526d9bf6bf | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/commondir | ASCII text | 6 | 340ddcb67a6204f742cd1e28e5b462622dde7daaa8ee36001897196aacdc6d47 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/gitdir | ASCII text | 202 | f18e00fb7056d8fbfc29f6d7a181a4c1f08c1f55c08704bd9a737c2f355b4695 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/HEAD | ASCII text | 41 | 80f3af19feb926c803d1c455995c7fcff7514ad667b90d71b02b07526d9bf6bf | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/index | Git index, version 2, 1 entrie | 137 | 6f2c176193212c35b65eb50324419133762f38f6b78ed1dfb36bf7c1cd8a98d8 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/logs/HEAD | ASCII text | 143 | 660cdce8d5a81560abf619ce48c6baba85f5d325ce75356706584627f95dc56f | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.git/worktrees/worktree/ORIG_HEAD | ASCII text | 41 | 80f3af19feb926c803d1c455995c7fcff7514ad667b90d71b02b07526d9bf6bf | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.kriya/checkpoints/20260921T204838-84ecc95d.json | JSON data | 7914 | 4ebed5916397ccb87cce9f04b9f75611a9fd71fe568617939c36903d9902cf21 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.kriya/run.lock | JSON data | 254 | cdfa2589c5fda32df23bc1e9412c239a1b781fec95c6f27475278cd65ae3170f | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.kriya/worktree/.git | ASCII text | 213 | 5dc12dcb76ff3465fef514fc050969b5e95268d7fa34b629daba66350bd92a45 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/.kriya/worktree/README.md | ASCII text | 41 | a44cebda4c9b3a8ce440ee6a44b4f53fb484491f128a8f0927609de36a3a2650 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/kriya.yaml | ASCII text | 455 | 2bce434902c7a133a0ef56fc4658fab0ae923ad2bf1e8f64bc5bf567f70223fe | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/logs/traces.db | SQLite 3.x database, last writ | 24576 | f04576c10586c3567f173fc25cb7ec759c9bee36616e924330c402c6be5ef3bd | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/memory/knowledge_cache.db | SQLite 3.x database, last writ | 12288 | 0222dd059a7975670f7203316d3d0ac405bfcda429aee9801b6d81aba0b52b67 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-003/user-live/test_real_generate_emits_one_j0/repo/README.md | ASCII text | 41 | a44cebda4c9b3a8ce440ee6a44b4f53fb484491f128a8f0927609de36a3a2650 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-004/user-full.xml | XML 1.0 document text, ASCII t | 627366 | f7ace81f1c90919251f95dd9a9d031f8798911c3bccc6ea7fd6a255b40c674fe | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-005/user-full.xml | XML 1.0 document text, ASCII t | 629209 | 6b2acb5b89fe488732ef2d2f3a56393426cb06593ef62749f13ecf34674aa9cc | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-006/user-full.xml | XML 1.0 document text, ASCII t | 630247 | 83024fb73c52a8219c0162223682db2ca8fd9f2c7f3605a462698567466b55f4 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-007/user-full.xml | XML 1.0 document text, ASCII t | 631352 | b42c3e1a1c457e2b766514507bd2982da9a291f42d12ffaee8b0ba2bb39587cb | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-008/user-full.xml | XML 1.0 document text, ASCII t | 633559 | c8d40617f1d57bb9a750922d83974574a4191618bb3f71fb191d408b87e75686 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-009/user-full.xml | XML 1.0 document text, ASCII t | 635773 | 4e595f0e4bccd08165e5c27cec53e2863318a5a4ec01fc2a7b341ca7c4111ded | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-010/user-full.xml | XML 1.0 document text, ASCII t | 638500 | 1ced5d27aa913c338b75d138c55b9dfa2a139d651ed55a6df5c5381e1d7d2092 | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-011/user-full.xml | XML 1.0 document text, ASCII t | 640181 | d91b69ca50d9514ab141cab0d917b099b392d1773dfd6e50bf276e876a8ea66f | OLD_BACKEND_EVIDENCE
+handover/evidence/PRD-011/user-live/toolchain-parity.json.local-backup-20261004 | JSON data | 1929 | 19f50af7e64454da349eae652ddcfc4fc88aa6fecb593177e33d5e21f4e76353 | OLD_BACKEND_EVIDENCE
+node_modules/.package-lock.json | JSON data | 450 | ddfbcfb1647813a2e8a28b2f42bf9f62c2c7eff3410d2fb7d02c341c81f21d7b | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/.travis.yml | ASCII text | 58 | 9ef3eddd1e63d4e24461a62c887c6f4d3472b5bdded2ca2cec84032ba037a909 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/COPYING | Unicode text, UTF-8 text, with | 502 | ae92342a438215cd5a45359fb07e82d12b42b5ab01969b56e65a2edad914abd9 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/index.d.ts | ASCII text | 302 | 1a4c0232356bd6ff92d238357429374388794d6049426bc5bb05623e7a990ff1 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/index.js | ASCII text | 1469 | 32641b6b3c2bd800bcc8283205ee27426aed2559f1e8eb7d9377530f62292686 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/package.json | JSON data | 646 | 1eb356b6e5d3f5568ee627131293fe4ecfac6b8023222573f39aa49e108d42c4 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/perf/es6Repeat.js | ASCII text | 216 | a43364ac1fc2c82593024ea9bfae290f7d76c9a1d251355daaa5a9c1c6c458fb | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/perf/O(n).js | ASCII text | 241 | fe3ef1239d53bf5b23ff1cdfc5b83c97629b352e5de0b98450e4f5ebc0f67c8d | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/perf/perf.js | ASCII text | 1442 | 17ecaa7e27ad67c68e8b322a0dd5f76fcc48b0adf261d632f3cac5aec5aeda32 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/README.md | ASCII text | 871 | a3656c49f5e128558086af08bd30c58672db4fb85df0bfa6ad3c8deee4d6a209 | TEST_WORKTREE_POLLUTION
+node_modules/left-pad/test.js | ASCII text | 4005 | 418a39c2e7061b83cc0be4cd497b281537f1739f7a4a3da29acace7a18917f57 | TEST_WORKTREE_POLLUTION
+package-lock.json | JSON data | 528 | 9355db272b4684f8310fbb0243b0777182748997774ee8c022af7921fd279cb4 | TEST_WORKTREE_POLLUTION
+package.json | JSON data | 53 | 3782bcb8099413f5aea40bbcd72f478851979c666da07f31f143848dbd312493 | TEST_WORKTREE_POLLUTION
+process_boundary_gate.patch | unified diff output text, ASCI | 7773 | dc2c2fbc6cf0627a68c77748b4d699ccdb34265b3f2a8cac6dcfd3da9187b43d | OLD_PATCH
+tests/orig-test_workflow.py.orig | Python script text executable, | 921111 | 315a06b24f7e8b8d1b65a2fafaf38db8d07f680189b5eb5f13cdf69243ffb903 | INCIDENTAL

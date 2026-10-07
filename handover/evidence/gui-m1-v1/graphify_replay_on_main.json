@@ -1,0 +1,75 @@
+{
+ "kriya": "/Users/sriramnanduri/kriya-wt/gui-m1-integration/kriya",
+ "stability_policy": 3,
+ "run_id": "20261007T093122-df65c5d3",
+ "m1": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "candidate_files": {
+  "graphify/extractors/engine.py": "9cb72f8a7fdbbf25551fadfc1d271a9b4a93dd64e62a76bc9b6e65d3ac7cb4f2",
+  "tests/test_csharp_call_site_generic_args.py": "f4409083677f776cba94e614717db68659db19cae9a8e3487eedba2e579724b1"
+ },
+ "identical_to_frozen_applied_workspace": true,
+ "score": {
+  "acceptance_passed": 5,
+  "acceptance_exit": 0,
+  "external_score": 5,
+  "external_exit": 0,
+  "external_sites": {
+   "A": "PASS",
+   "B": "PASS",
+   "C": "PASS",
+   "D": "PASS",
+   "E": "PASS"
+  },
+  "regression76": "76 passed in 0.59s",
+  "regression_exit": 0
+ },
+ "regression_decisions": [
+  {
+   "decision_seq": 72,
+   "baseline_seq": 29,
+   "post_seq": 69,
+   "replay_seqs": [
+    70,
+    71
+   ],
+   "live_blocking": false,
+   "replayed_blocking": false,
+   "replayed_reasons": [],
+   "level2_counts": {
+    "PRE_EXISTING_FAILURE": 216,
+    "FLAKY_PREEXISTING": 1
+   },
+   "non_pre_existing": {
+    "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "FLAKY_PREEXISTING"
+   },
+   "level2_identical_to_live": true,
+   "flaky_preexisting": {
+    "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "NOT_ASSESSED"
+   }
+  },
+  {
+   "decision_seq": 138,
+   "baseline_seq": 69,
+   "post_seq": 135,
+   "replay_seqs": [
+    136,
+    137
+   ],
+   "live_blocking": false,
+   "replayed_blocking": false,
+   "replayed_reasons": [],
+   "level2_counts": {
+    "PRE_EXISTING_FAILURE": 216,
+    "RESOLVED_FAILURE": 1
+   },
+   "non_pre_existing": {
+    "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "RESOLVED_FAILURE"
+   },
+   "level2_identical_to_live": true,
+   "flaky_preexisting": {}
+  }
+ ]
+}
