@@ -1065,6 +1065,21 @@ class PolymorphicValidator:
         for root in gate_output_roots(cmd, cwd):
             binding.authorize_gate_output(gate, os.path.relpath(root, binding.root))
 
+    def _dependency_cache_dir(self, tool: str) -> str:
+        """A persistent, per-workspace dependency cache for ``tool``
+        (``maven``: the local repository; ``gradle``: the Gradle user home -
+        GRADLE-WRAPPER-CONTAINMENT-001), OUTSIDE every source tree, under the
+        Kriya state root at ``dependency-cache/<tool>/<workspace key>``,
+        keyed by the validator's original workspace (see _maven_cache_dir)."""
+        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+
+        root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+        workspace = os.path.realpath(self.original_workspace_path or self.workspace_path)
+        key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:16]
+        cache_dir = os.path.join(root, "dependency-cache", tool, key)
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+
     def _maven_cache_dir(self) -> str:
         """A persistent, per-workspace Maven local-repository cache
         (SEC-001-P6 Stage 2), OUTSIDE every source tree: under the Kriya state
@@ -1101,12 +1116,134 @@ class PolymorphicValidator:
 
     @staticmethod
     def _validation_result(success: bool, output: str, command_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Keep attested contained-toolchain evidence with the gate verdict."""
+        """Keep attested contained-toolchain evidence with the gate verdict.
+        GRADLE-WRAPPER-CONTAINMENT-001: a typed ``environment_reason_code``
+        (the verification tool could not start) and the distribution
+        provenance travel with the verdict, so the gate is classified from a
+        structured code, never from the tool's text."""
         result: Dict[str, Any] = {"success": success, "output": output}
         result.update(execution_evidence(command_result))
+        if isinstance(command_result, dict):
+            for key in ("environment_reason_code", "gradle_distribution"):
+                if command_result.get(key) is not None:
+                    result[key] = command_result[key]
         return result
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
+
+    def _run_gradle_cmd(self, gradle_cmd: str, tasks: List[str], cwd: str, timeout: int = 600,
+                        deadline: Optional[float] = None) -> Dict[str, Any]:
+        """GRADLE-WRAPPER-CONTAINMENT-001: Gradle's counterpart of
+        _run_maven_cmd. Host mode: byte-for-byte pass-through. Contained
+        mode, in the owner-decided order: (1) the Kriya-managed Gradle user
+        home for this workspace is mounted at GRADLE_CACHE_MOUNT; (2) the
+        project's declared wrapper distribution is seeded from the host
+        user's cache when its identity verifies (seed_gradle_distribution_
+        from_host, provenance kept on the result); (3) one offline run
+        (``--offline``, network DENIED); on a missing-dependency signature
+        - the wrapper's distribution, a plugin or a dependency - ONE bounded
+        registry-scoped acquisition running the same tasks (network
+        DEPENDENCY_REGISTRY_ONLY, never unrestricted, result discarded);
+        (4) one more offline run. A wrapper that still cannot start after
+        that is an environment outcome (``environment_reason_code``
+        GRADLE_DISTRIBUTION_UNAVAILABLE), never a compilation failure; a
+        dependency still missing is the GRADLE_ACQUISITION_INCOMPLETE
+        marker, as for Maven. ``--no-daemon`` in every phase: no daemon JVM
+        outlives its container or holds the cache across attempts."""
+        from kriya.tools.containment_oci import GRADLE_CACHE_MOUNT
+        from kriya.tools.dependency_execution import (
+            GRADLE_ACQUISITION_INCOMPLETE_MARKER,
+            GRADLE_DISTRIBUTION_UNAVAILABLE,
+            classify_gradle_offline_failure_text,
+            gradle_wrapper_start_failed,
+            seed_gradle_distribution_from_host,
+        )
+
+        if not self.autonomy_cfg.contained_execution_required:
+            return self._run_cmd_with_timeout([gradle_cmd] + tasks, cwd=cwd, timeout=timeout)
+
+        cache_dir = self._dependency_cache_dir("gradle")
+        provenance = seed_gradle_distribution_from_host(self.workspace_path, cache_dir)
+        logger.info("Gradle distribution seed (%s): %s", provenance.get("status"), provenance.get("url", "-"))
+        common = ["--no-daemon", "--console=plain"]
+        desc = f"{gradle_cmd} {' '.join(tasks)}"
+
+        def _bounded(seconds: int) -> int:
+            if deadline is None:
+                return seconds
+            return max(1, min(seconds, int(deadline - time.monotonic())))
+
+        def _deadline_exhausted() -> bool:
+            return deadline is not None and time.monotonic() >= deadline
+
+        def _offline_attempt() -> Dict[str, Any]:
+            result = self._run_cmd_with_timeout(
+                [gradle_cmd, "--offline", *common, *tasks], cwd=cwd, timeout=_bounded(timeout),
+                network=NetworkAuthority.DENIED, dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+            result["gradle_distribution"] = provenance
+            result["gradle_user_home"] = GRADLE_CACHE_MOUNT
+            return result
+
+        def _acquire() -> None:
+            try:
+                result = self._run_cmd_with_timeout(
+                    [gradle_cmd, *common, *tasks], cwd=cwd, timeout=_bounded(timeout),
+                    network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                    dependency_cache_path=cache_dir, dependency_cache_writable=True,
+                )
+            except ContainmentSetupError:
+                raise  # SEC-006: a containment-setup failure is never an ordinary acquisition outcome
+            except Exception as error:
+                logger.warning(f"Gradle acquisition ({desc!r}) failed to invoke: {error}")
+                return
+            log_acquisition_outcome("gradle", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+
+        def _environment(result: Dict[str, Any], code: str, why: str) -> Dict[str, Any]:
+            marked = dict(result)
+            marked["environment_reason_code"] = code
+            marked["stderr"] = f"{code}: {why}\n{result.get('stderr', '')}"
+            return marked
+
+        first = _offline_attempt()
+        if first["returncode"] == 0:
+            return first
+        first_output = first.get("stdout", "") + first.get("stderr", "")
+        if classify_gradle_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return first
+        if _deadline_exhausted():
+            return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline left no time to acquire it")
+        logger.info("%s failed offline with a missing-dependency/distribution signature - running ONE bounded "
+                    "registry-scoped acquisition, then one more offline attempt.", desc)
+        _acquire()
+        if _deadline_exhausted():
+            return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline ran out during acquisition")
+        second = _offline_attempt()
+        if second["returncode"] == 0:
+            logger.info(f"Acquisition (gradle, {desc!r}): authoritative offline retry followed and succeeded.")
+            return second
+        second_output = second.get("stdout", "") + second.get("stderr", "")
+        if gradle_wrapper_start_failed(second_output):
+            return _environment(
+                second, GRADLE_DISTRIBUTION_UNAVAILABLE,
+                f"the Gradle wrapper could not obtain its distribution ({provenance.get('url', 'undeclared')}; host seed "
+                f"{provenance.get('status')}) after one bounded registry-scoped acquisition - the verification tool "
+                "never started, nothing about the candidate was observed",
+            )
+        if classify_gradle_offline_failure_text(second_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return second
+        return self._gradle_acquisition_incomplete(
+            second, tasks, "it is still missing after one bounded, registry-scoped reacquisition attempt",
+            marker=GRADLE_ACQUISITION_INCOMPLETE_MARKER)
+
+    def _gradle_acquisition_incomplete(self, result: Dict[str, Any], tasks: List[str], why: str, *,
+                                       marker: str = "GRADLE_ACQUISITION_INCOMPLETE:") -> Dict[str, Any]:
+        marked = dict(result)
+        marked["stderr"] = (
+            f"{marker} offline execution for tasks {tasks!r} reports a missing dependency/plugin/distribution: {why} - "
+            f"this is a dependency-acquisition gap, not necessarily a defect in the generated code.\n{result.get('stderr', '')}"
+        )
+        return marked
 
     def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
                        deadline: Optional[float] = None, tooling_only: bool = False) -> Dict[str, Any]:

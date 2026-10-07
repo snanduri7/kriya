@@ -98,6 +98,7 @@ _CONTAINER_CACHE_PREFIX = "/kriya/cache"
 # without adding new ContainmentProfile/AutonomyConfig surface this pass.
 _DEFAULT_IMAGE = os.environ.get("KRIYA_OCI_IMAGE", "debian:bookworm-slim")
 _MAVEN_IMAGE = os.environ.get("KRIYA_OCI_MAVEN_IMAGE", "maven:3.9-eclipse-temurin-21")
+_GRADLE_IMAGE = os.environ.get("KRIYA_OCI_GRADLE_IMAGE", "gradle:8-jdk21")
 _PYTHON_IMAGE = os.environ.get("KRIYA_OCI_PYTHON_IMAGE", "python:3.12-slim")
 
 # A fixed PID cap (fork-bomb backstop) - Task B asks for a "process/PID
@@ -145,6 +146,11 @@ _ATTESTED_TOOLCHAINS: Dict[Tuple[str, str, Optional[str]], str] = {}
 # world-writable before dropping privileges.
 MAVEN_CACHE_MOUNT = "/kriya/cache/m2"
 PIP_CACHE_MOUNT = "/kriya/cache/pip"
+# GRADLE-WRAPPER-CONTAINMENT-001: the Kriya-managed Gradle user home
+# (wrapper distributions under wrapper/dists, dependency/plugin caches under
+# caches) - Gradle finds it through GRADLE_USER_HOME, never through the
+# forced user.home (/kriya/tmp, an empty tmpfs).
+GRADLE_CACHE_MOUNT = "/kriya/cache/gradle"
 
 
 # A non-root container user has no passwd entry in the image: its HOME is
@@ -206,6 +212,8 @@ def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str
     exe = os.path.basename(command[0]) if command else ""
     if exe in ("mvn", "mvnw", "mvn.cmd"):
         return _MAVEN_IMAGE, MAVEN_CACHE_MOUNT
+    if exe in ("gradle", "gradlew"):
+        return _GRADLE_IMAGE, GRADLE_CACHE_MOUNT
     if exe in ("java", "javac", "jar"):
         return _MAVEN_IMAGE, None
     if exe in ("python", "python3", "pytest", "pip", "pip3"):
@@ -225,10 +233,19 @@ def _toolchain_cache_mount(identity: ToolchainIdentity) -> Optional[str]:
     if identity.build_tool == "maven":
         return MAVEN_CACHE_MOUNT
     if identity.build_tool == "gradle":
-        return "/home/gradle/.gradle"
+        return GRADLE_CACHE_MOUNT
     if identity.language == "python":
         return PIP_CACHE_MOUNT
     return None
+
+
+def _gradle_home_env(profile: ContainmentProfile, cache_mount_point: Optional[str]) -> Dict[str, str]:
+    """GRADLE-WRAPPER-CONTAINMENT-001: when the profile mounts a Gradle cache
+    at GRADLE_CACHE_MOUNT, Gradle (the wrapper included) is told to use it
+    as its user home; nothing otherwise."""
+    if cache_mount_point == GRADLE_CACHE_MOUNT and profile.dependency_cache_paths:
+        return {"GRADLE_USER_HOME": GRADLE_CACHE_MOUNT}
+    return {}
 
 
 class ImageInspectStatus(str, Enum):
@@ -652,6 +669,14 @@ export https_proxy="http://$PROXY_IP:$PROXY_PORT"
 export HTTP_PROXY="$http_proxy"
 export HTTPS_PROXY="$https_proxy"
 export MAVEN_OPTS="-Dhttp.proxyHost=$PROXY_IP -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_IP -Dhttps.proxyPort=$PROXY_PORT -Dhttp.nonProxyHosts="
+# GRADLE-WRAPPER-CONTAINMENT-001: the Gradle wrapper downloads its
+# distribution from its own JVM (java.net, honours the proxy system
+# properties - JAVA_TOOL_OPTIONS reaches that JVM before any Gradle
+# code runs) and Gradle's dependency/plugin resolution reads the same
+# properties from GRADLE_OPTS. HOW to reach a host only; WHICH hosts
+# exist stays the firewall+proxy ACL's decision, exactly as for Maven.
+export GRADLE_OPTS="$MAVEN_OPTS"
+export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} $MAVEN_OPTS"
 
 # --- Step 7: execute the untrusted acquisition command - non-root, no
 # NET_ADMIN, running as the REAL host-owning identity of the bind-mounted
@@ -1181,6 +1206,7 @@ class OCIContainmentBackend:
             }
             if writer_identity is not None:
                 container_env.update(_non_root_home_env(container_env))
+            container_env.update(_gradle_home_env(profile, cache_mount_point))
             for key, value in container_env.items():
                 args += ["-e", f"{key}={value}"]
 
@@ -1451,6 +1477,8 @@ class OCIContainmentBackend:
         for key, value in build_restricted_env(profile.env_allowlist).items():
             if key in _HOST_ONLY_ENV_VARS:
                 continue
+            args += ["-e", f"{key}={value}"]
+        for key, value in _gradle_home_env(profile, cache_mount_point).items():
             args += ["-e", f"{key}={value}"]
 
         if profile.memory_mb is not None:

@@ -61,9 +61,15 @@ class GradleBuildAdapter(BuildAdapter):
             return None
         gradle_cmd = self.command(v.workspace_path)
         try:
-            res = v._run_cmd_with_timeout([gradle_cmd, "compileJava"], cwd=v.workspace_path)
+            # GRADLE-WRAPPER-CONTAINMENT-001: the validator's two-phase
+            # Gradle command (offline, bounded acquisition, offline).
+            res = v._run_gradle_cmd(gradle_cmd, ["compileJava"], cwd=v.workspace_path)
             if res["returncode"] == 0:
                 return v._validation_result(True, "Gradle compilation succeeded.", res)
+            if res.get("environment_reason_code"):
+                return v._validation_result(
+                    False, f"{res['environment_reason_code']}: Gradle could not be started to verify this candidate:\n"
+                           f"{res['stdout']}\n{res['stderr']}", res)
             return v._validation_result(False, f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}", res)
         except FileNotFoundError as e:
             # Same reasoning as the mvn case - don't silently fall through to
@@ -79,10 +85,10 @@ class GradleBuildAdapter(BuildAdapter):
         return None
 
     def run_tests(self, v: Any, test_class: Optional[str]) -> Dict[str, Any]:
-        cmd = [self.command(v.workspace_path), "test"]
+        tasks = ["test"]
         if test_class:
-            cmd.extend(["--tests", test_class])
-        res = v._run_cmd_with_timeout(cmd, cwd=v.workspace_path)
+            tasks.extend(["--tests", test_class])
+        res = v._run_gradle_cmd(self.command(v.workspace_path), tasks, cwd=v.workspace_path)
         binding = getattr(v, "test_report_binding", None)
         if binding is not None:
             binding.observe(res)  # FS-1A: build/test-results is read after this run

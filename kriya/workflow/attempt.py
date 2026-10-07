@@ -2443,6 +2443,29 @@ def _code_intelligence_for(ctx: "AttemptContext") -> Any:
 MAX_SYMBOL_LOCI_PER_FILE = 2
 
 
+def _stop_on_environment_gate_result(state: GenerationState, result: Any, gate: str) -> None:
+    """GRADLE-WRAPPER-CONTAINMENT-001: a gate result whose verification tool
+    could not start carries a typed ``environment_reason_code`` (the
+    validator sets it from a structured outcome, never from text). It is
+    raised as the existing ``verification_infrastructure_failure``
+    (retry_strategy: STOP_ENVIRONMENT - no budget reset, no fallback
+    escalation, the environment banner), never as a compile/test failure of
+    the candidate: nothing about the candidate was observed."""
+    code = result.get("environment_reason_code") if isinstance(result, dict) else None
+    if not code:
+        return
+    output = str(result.get("output") or "")
+    failure = Failure(
+        type="verification_infrastructure_failure",
+        message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {gate} gate's verification tool could not start "
+                 f"({code}); nothing about the candidate was observed, so this is not a code failure.\n{output}"),
+        raw_output=output, source="orchestrator", attempt=state.attempt_number,
+        diagnostics={"reason_code": code, "gate": gate, "gradle_distribution": result.get("gradle_distribution")},
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _edit_capability_loci(
     state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str], *,
     revision: Optional[str] = None, raw_digest: Optional[str] = None,
@@ -4095,6 +4118,7 @@ def _raise_unexecuted_test_delta(
     if not covered or test_execution.report_from_result(result) is None:
         result = (validator.run_tests(target_test=sorted(changed)) if validator.stack == "python"
                   else validator.run_tests())
+        _stop_on_environment_gate_result(state, result, "test")
         if not result.get("success"):
             failure = _build_test_quality_gate_failure(
                 "test", f"TEST FAILURE:\n{result.get('output', '')}",
@@ -9024,6 +9048,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
         _compile_started = time.monotonic()
         compile_res = validator.run_compile_check(compile_known_files)
+        _stop_on_environment_gate_result(state, compile_res, "compile")
         # R1 Deliverable 5 - observational only, timing the primary compile
         # gate call (the main full-set/targeted path's own compile check,
         # not every secondary/verification-only call site in this module -
@@ -9253,6 +9278,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
             test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
+            _stop_on_environment_gate_result(state, test_res, "targeted_test")
             if not output_confirms_nonzero_test_execution(test_res.get("output", "")):
                 # A targeted command that collected zero tests says the selector
                 # did not identify an executable test; it says nothing about the
@@ -9273,6 +9299,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 })
                 target_test = None
                 test_res = validator.run_tests()
+                _stop_on_environment_gate_result(state, test_res, "test")
                 if not test_res["success"]:
                     failure = _build_test_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",
@@ -9382,6 +9409,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if runnable_test_files or _declares_test_verification(ctx.required_verification):
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
+                _stop_on_environment_gate_result(state, test_res, "test")
                 if not test_res["success"]:
                     failure = _build_test_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",

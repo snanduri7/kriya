@@ -29,12 +29,15 @@ Two phases, always:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import re
 import shlex
+import shutil
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (
@@ -99,6 +102,185 @@ def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureK
     if _MAVEN_OFFLINE_MISSING_RE.search(combined_output):
         return OfflineFailureKind.MISSING_DEPENDENCY
     return OfflineFailureKind.ORDINARY_FAILURE
+
+
+# --- Gradle (GRADLE-WRAPPER-CONTAINMENT-001) ---------------------------------------
+#
+# Typed environment reason codes a Gradle gate result may carry
+# (``environment_reason_code``): the verification tool could not start, so
+# nothing about the candidate was observed - never a code failure.
+GRADLE_DISTRIBUTION_UNAVAILABLE = "GRADLE_DISTRIBUTION_UNAVAILABLE"
+# The offline run still misses a dependency/plugin after one bounded,
+# registry-scoped acquisition (the Maven marker's Gradle twin; a marker in
+# the output, repair-eligible like Maven's: a candidate may have declared
+# a coordinate that does not exist).
+GRADLE_ACQUISITION_INCOMPLETE_MARKER = "GRADLE_ACQUISITION_INCOMPLETE:"
+
+# The wrapper's own stage, before any Gradle code runs: it tries to obtain
+# its distribution (MEASURED, cohort T3: "Downloading https://services.
+# gradle.org/distributions/gradle-8.10.1-bin.zip" then
+# "java.net.UnknownHostException: services.gradle.org" at
+# org.gradle.wrapper.Install.forceFetch).
+_GRADLE_WRAPPER_START_RE = re.compile(
+    r"org\.gradle\.wrapper\.|Downloading https?://\S+/distributions/|Could not (?:install|download) Gradle distribution"
+    r"|Distribution .* could not be (?:downloaded|installed)",
+)
+_GRADLE_OFFLINE_MISSING_RE = re.compile(
+    r"Could not resolve all (?:files|dependencies|artifacts) for|No cached version of .* available for offline mode"
+    r"|Plugin \[id: .*\] was not found|Could not download .* (?:from|in) offline mode|available for offline mode",
+    re.IGNORECASE,
+)
+
+
+def gradle_wrapper_start_failed(combined_output: str) -> bool:
+    """The wrapper never started Gradle: its distribution could not be
+    obtained (the text is the wrapper's own, before any build script runs)."""
+    return bool(_GRADLE_WRAPPER_START_RE.search(combined_output or ""))
+
+
+def classify_gradle_offline_failure_text(combined_output: str) -> OfflineFailureKind:
+    """MISSING_DEPENDENCY when Gradle's offline run named something it has
+    not cached (a dependency, a plugin, or the wrapper's distribution);
+    ORDINARY_FAILURE for anything else (a compile error, a failing test)."""
+    text = combined_output or ""
+    if gradle_wrapper_start_failed(text) or _GRADLE_OFFLINE_MISSING_RE.search(text):
+        return OfflineFailureKind.MISSING_DEPENDENCY
+    return OfflineFailureKind.ORDINARY_FAILURE
+
+
+@dataclass(frozen=True)
+class GradleWrapperDistribution:
+    """What ``gradle/wrapper/gradle-wrapper.properties`` declares."""
+
+    url: str
+    name: str            # e.g. gradle-8.10.1-bin
+    version: str         # e.g. 8.10.1
+    url_hash: str        # Gradle's own distribution directory name for ``url``
+    sha256: Optional[str]  # distributionSha256Sum, when declared
+
+
+_WRAPPER_PROPERTIES = os.path.join("gradle", "wrapper", "gradle-wrapper.properties")
+_DIST_NAME_RE = re.compile(r"^gradle-(\d+(?:\.\d+)*(?:-[a-z0-9]+)?)-(?:bin|all)$")
+
+
+def gradle_distribution_hash(url: str) -> str:
+    """Gradle's own name for a distribution's directory under
+    ``wrapper/dists/<name>/``: the MD5 of the distribution URL as an unsigned
+    base-36 integer (org.gradle.wrapper.PathAssembler.getHash; MEASURED
+    against the host cache: gradle-8.10.1-bin.zip -> e90i968nv55tch01zkse4avv3)."""
+    value = int.from_bytes(hashlib.md5(url.encode("utf-8")).digest(), "big")  # noqa: S324 - Gradle's own scheme, not security
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while value:
+        value, rem = divmod(value, 36)
+        out = digits[rem] + out
+    return out or "0"
+
+
+def parse_gradle_wrapper_properties(workspace_path: str) -> Optional[GradleWrapperDistribution]:
+    """The wrapper distribution the project itself declares, or None when
+    the project ships no wrapper properties, declares no distribution URL,
+    or stores it anywhere but the default ``GRADLE_USER_HOME/wrapper/dists``
+    (then Kriya does not know where the wrapper will look)."""
+    path = os.path.join(workspace_path, _WRAPPER_PROPERTIES)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return None
+    values: Dict[str, str] = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith(("#", "!")) or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().replace("\\:", ":").replace("\\=", "=")
+    url = values.get("distributionUrl", "")
+    if not url:
+        return None
+    for key, default in (("distributionBase", "GRADLE_USER_HOME"), ("distributionPath", "wrapper/dists"),
+                         ("zipStoreBase", "GRADLE_USER_HOME"), ("zipStorePath", "wrapper/dists")):
+        if values.get(key, default) != default:
+            return None
+    name = url.rsplit("/", 1)[-1]
+    if not name.endswith(".zip"):
+        return None
+    name = name[:-4]
+    match = _DIST_NAME_RE.match(name)
+    if match is None:
+        return None
+    sha256 = values.get("distributionSha256Sum") or None
+    return GradleWrapperDistribution(url=url, name=name, version=match.group(1), url_hash=gradle_distribution_hash(url),
+                                     sha256=sha256.lower() if sha256 else None)
+
+
+def _sha256_of(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def seed_gradle_distribution_from_host(
+    workspace_path: str, cache_dir: str, *, host_gradle_home: Optional[str] = None,
+) -> Dict[str, Any]:
+    """GRADLE-WRAPPER-CONTAINMENT-001, owner-decided order step 2: before any
+    network, copy the project's declared wrapper distribution from the host
+    user's own Gradle cache into the Kriya-managed Gradle home when - and
+    only when - its identity is verified: the host directory is Gradle's
+    own ``wrapper/dists/<name>/<md5-base36(url)>/`` for the exact declared
+    URL, carries the wrapper's ``<name>.zip.ok`` completion marker and the
+    extracted ``gradle-<version>/lib`` matching the URL's version; when the
+    project declares ``distributionSha256Sum`` the zip must be present and
+    match it, else the seed is refused (nothing is ever accepted on a name
+    alone, no checksum is invented). Returns a provenance record (recorded
+    in gate evidence): status seeded / present / no_wrapper /
+    not_in_host_cache / unverifiable / refused, with the URL, hash, source
+    and what was verified. Copies, never links; the host cache is read only."""
+    distribution = parse_gradle_wrapper_properties(workspace_path)
+    if distribution is None:
+        return {"status": "no_wrapper"}
+    record: Dict[str, Any] = {"url": distribution.url, "name": distribution.name, "url_hash": distribution.url_hash,
+                              "declared_sha256": distribution.sha256}
+    target = os.path.join(cache_dir, "wrapper", "dists", distribution.name, distribution.url_hash)
+    marker = f"{distribution.name}.zip.ok"
+    extracted = f"gradle-{distribution.version}"
+    if os.path.isfile(os.path.join(target, marker)) and os.path.isdir(os.path.join(target, extracted, "lib")):
+        return {**record, "status": "present", "source": target}
+    home = host_gradle_home or os.environ.get("GRADLE_USER_HOME") or os.path.join(os.path.expanduser("~"), ".gradle")
+    source = os.path.join(home, "wrapper", "dists", distribution.name, distribution.url_hash)
+    if not os.path.isdir(source):
+        return {**record, "status": "not_in_host_cache", "source": source}
+    verified = ["url_hash_directory"]
+    if not os.path.isfile(os.path.join(source, marker)):
+        return {**record, "status": "unverifiable", "source": source, "reason": f"no {marker} completion marker"}
+    verified.append("completion_marker")
+    if not os.path.isdir(os.path.join(source, extracted, "lib")):
+        return {**record, "status": "unverifiable", "source": source,
+                "reason": f"no extracted {extracted}/lib for the declared version"}
+    verified.append("version_directory")
+    zip_path = os.path.join(source, f"{distribution.name}.zip")
+    if distribution.sha256:
+        if not os.path.isfile(zip_path):
+            return {**record, "status": "unverifiable", "source": source,
+                    "reason": "distributionSha256Sum is declared but the host cache keeps no zip to verify"}
+        actual = _sha256_of(zip_path)
+        if actual != distribution.sha256:
+            return {**record, "status": "refused", "source": source,
+                    "reason": f"host zip sha256 {actual} != declared {distribution.sha256}"}
+        verified.append("sha256")
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        shutil.copytree(os.path.join(source, extracted), os.path.join(target, extracted), symlinks=False)
+        with open(os.path.join(target, marker), "wb") as handle:
+            handle.write(b"")
+    except OSError as error:
+        shutil.rmtree(target, ignore_errors=True)
+        return {**record, "status": "unverifiable", "source": source, "reason": f"copy failed: {error}"}
+    return {**record, "status": "seeded", "source": source, "target": target, "verified": verified}
 
 
 def classify_pip_offline_failure_text(combined_output: str) -> OfflineFailureKind:

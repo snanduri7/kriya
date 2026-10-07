@@ -421,7 +421,11 @@ class AutonomyConfig(BaseModel):
     # instruction. A private/internal registry needs an explicit additional
     # entry here; it is never inferred from repository content.
     acquisition_registry_hosts: List[str] = Field(
-        default_factory=lambda: ["repo.maven.apache.org", "pypi.org", "files.pythonhosted.org"],
+        # GRADLE-WRAPPER-CONTAINMENT-001 (owner decision 2026-10-07): the
+        # Gradle distribution host and the Gradle Plugin Portal, for the
+        # acquisition phase only (the only phase that ever has a network).
+        default_factory=lambda: ["repo.maven.apache.org", "pypi.org", "files.pythonhosted.org",
+                                 "services.gradle.org", "plugins.gradle.org"],
         # validate_default: without this, pydantic v2 does not run
         # field_validator over a DEFAULT value at all (only over an
         # explicitly-supplied one) - the packaged default would then stay

@@ -10,8 +10,12 @@ from kriya.config.config import AutonomyConfig
 
 def test_default_hosts_are_empirically_required_only_no_wildcards():
     cfg = AutonomyConfig()
+    # GRADLE-WRAPPER-CONTAINMENT-001: services.gradle.org (wrapper distributions) and plugins.gradle.org (the Plugin
+    # Portal) were MEASURED as required by the first cohort's Gradle project (T3: UnknownHostException
+    # services.gradle.org in the denied container; settings.gradle plugins block) and approved by the owner for the
+    # acquisition phase only.
     assert cfg.acquisition_registry_hosts == [
-        "files.pythonhosted.org", "pypi.org", "repo.maven.apache.org",
+        "files.pythonhosted.org", "plugins.gradle.org", "pypi.org", "repo.maven.apache.org", "services.gradle.org",
     ]
 
 

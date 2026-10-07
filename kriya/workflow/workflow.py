@@ -60,7 +60,7 @@ from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
     classify_ownership_violations,
 )
-from kriya.workflow.attempt import AttemptContext, run_attempt
+from kriya.workflow.attempt import AttemptContext, _stop_on_environment_gate_result, run_attempt
 from kriya.workflow.attribution import (
     FutureOwnerVerificationDeferral,
     resolve_future_owner_verification_deferral,
@@ -4927,6 +4927,7 @@ class WorkflowEngine:
                 validator.java_home_override = state.java_home_override
 
                 full_test_res = validator.run_tests()
+                _stop_on_environment_gate_result(state, full_test_res, "regression_test")
                 state.terminal_full_suite_result = full_test_res
 
                 # VAL-001 brownfield validation baselining - ONLY changes
@@ -5046,6 +5047,7 @@ class WorkflowEngine:
                 ):
                     _frozen_targets = state.validation_baseline_targeted.invocation.target_test
                     _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
+                    _stop_on_environment_gate_result(state, _targeted_test_res, "targeted_test")
                     _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
                     _targeted_baseline_delta_result, _targeted_stability = classify_with_baseline_stability(
                         baseline=state.validation_baseline_targeted, post=_post_targeted_outcome,
