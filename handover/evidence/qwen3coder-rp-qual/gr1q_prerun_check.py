@@ -11,13 +11,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from kriya.workflow.acceptance_approval import load_approval, runner_contract_digest
-from kriya.workflow.requirement_contract import load_requirement_contract
-
 import kriya
 from kriya.build_info import version_report
 from kriya.workflow import acceptance_oracle as ao
+from kriya.workflow.acceptance_approval import load_approval, runner_contract_digest
 from kriya.workflow.checkpoint import compute_workspace_content_hash
+from kriya.workflow.requirement_contract import load_requirement_contract
 from kriya.workflow.requirements import goal_identity
 
 HOME = Path.home()
