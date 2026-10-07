@@ -712,8 +712,10 @@ have, besides the acceptance file and the approval below: a statement naming exi
 run); a whole-suite preservation statement such as `Every existing test must keep passing unchanged.` (the
 candidate's own full suite must run to completion, green, with complete structured evidence); a test-immutability
 constraint such as `Do not change any existing test.` (decided from what the run changed); `Do not modify any other
-file.` when the goal names the file(s) to change; a statement of a dependency migration the repository resolves.
-Anything else - a behaviour described in prose, a general rule, an API-preservation ask - is residual: model judgment
+file.` when the goal names the file(s) to change; a statement of a dependency migration the repository resolves
+(on its own: a coordinated clause beside it is residual). A command or path may sit in parentheses or backticks next
+to a suite statement; a request hidden there, or a fenced block, makes the statement residual. Anything else - a
+behaviour described in prose, a general rule, an API-preservation ask - is residual: model judgment
 never closes it (`MODEL_CLAIMED` is advisory evidence only), so give it an acceptance case or restate it. Under the
 default `record` policy nothing is refused and such requirements are reported as before.
 

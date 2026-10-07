@@ -42,6 +42,18 @@ before model execution with GOAL_INSUFFICIENT_FOR_VERIFICATION, naming the requi
   conditional repository-state closer; descriptive sentences of an issue-style goal remain mandatory requirements (the
   derivation is unchanged), so such goals are refused at admission - the admission numbers of the reruns measure it.
 
+## Final independent readiness review reconciliation (2026-10-08, reviews/FINAL_INDEPENDENT_READINESS_REVIEW.md)
+- BLOCKING: a request in quotes/parentheses/a fenced block beside a suite sentence was stripped before the vocabulary
+  check and the goal admitted with the green suite as its only closer. Stripped spans may only be commands/paths
+  (>= 3 purely alphabetic words = prose; a fence disqualifies). Tests 17/18; mutation f3.
+- MATERIAL: the suite closer lacked the FS-1C0 trust-surface rule - every full-suite closure now needs the run's
+  mutation record and is refused when the candidate changed conftest/pytest/tox/setup/pyproject/requirements/pom/gradle
+  files (test 21; mutation f5); a compound migration sentence is residual (test 19; mutation f4); T3's "Do not modify
+  or delete any existing test." and the passive/"leave untouched" shapes are recognized (test 20; mutation f6).
+- Remaining recorded limitation: a plain "keep passing" statement (without "unchanged") does not prove the tests'
+  bytes unchanged - it claims preservation of results; the "unchanged" form exists for the stronger claim. A benign
+  prose parenthetical ("(including the JSON compliance suite under tests/)") is refused, fail closed.
+
 ## Verification
 - `tests/test_requirement_closure_plain_goal_001.py` (26): recognizers on the cohort's phrasings (incl. the
   API-preservation and compound sentences that must NOT match), admission naming the residual requirement and the

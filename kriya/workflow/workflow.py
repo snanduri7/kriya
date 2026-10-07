@@ -1080,13 +1080,11 @@ def close_requirements_by_suite_preservation(
     from kriya.workflow.requirements import (
         close_suite_preservation_requirements,
         is_suite_preservation_requirement,
-        suite_statement_requires_immutability,
         test_immutability_evidence,
     )
 
     immutability = None
-    if any(is_suite_preservation_requirement(r.text) and suite_statement_requires_immutability(r.text)
-           for r in requirement_set.requirements):
+    if any(is_suite_preservation_requirement(r.text) for r in requirement_set.requirements):
         _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=list(candidate_paths))
         immutability = test_immutability_evidence(
             _reference_test_files(candidate_root, workspace_path), _candidate_test_files(candidate_root), evidence)

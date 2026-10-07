@@ -66,7 +66,6 @@ def unverified_ledger(reqs, evidence_id="candidate-1"):
 @pytest.mark.parametrize("text", [
     SUITE, "All existing tests must keep passing.", "The existing test suite stays green.",
     "Keep all existing tests green", 'Every existing test must keep passing unchanged ("pytest").',
-    "Every existing test (including the JSON compliance suite under tests/) must keep passing unchanged.",
 ])
 def test_01_whole_suite_preservation_statements_are_recognized_and_claim_preservation_only(text):
     assert is_suite_preservation_requirement(text)
@@ -145,9 +144,10 @@ def test_07_a_complete_green_full_suite_closes_the_suite_statement(tmp_path):
     root = write_project(tmp_path / "ws", "def test_a():\n    assert True\n\ndef test_b():\n    assert 1 == 1\n")
     reqs = derive_requirements("Fix it.\nAll existing tests must keep passing.")  # no "unchanged": the suite alone closes it
     ledger = unverified_ledger(reqs)
+    clean = {"available": True, "changed_test_files": [], "missing_test_files": [], "changed_trust_surface": []}
     attempts = close_suite_preservation_requirements(
         ledger, reqs, test_files=["tests/test_suite.py"], run_suite=lambda: validator_for(root).run_tests(),
-        source="t", revision=1)
+        source="t", revision=1, test_immutability=clean)
     [entry] = attempts
     assert entry["requirement"] == "REQ-2" and entry["closed"] is True and entry["test_execution"]["cases"] == 2
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.CLOSED_BY_EVIDENCE
@@ -345,3 +345,69 @@ def test_16_an_admitted_goal_whose_closers_cannot_close_still_blocks_at_the_term
     assert run.result["quality_gates_passed"] is False and run.result["failure_category"] == "requirements_unresolved"
     assert run.result["environment_failure"].startswith("REQUIREMENTS_UNRESOLVED:")
     assert (run.workspace / "tests" / "test_a.py").read_text() == TEST_MODULE  # nothing applied
+
+
+# ---------------------------------------------------------------- final readiness review reconciliation (2026-10-08)
+@pytest.mark.parametrize("text", [
+    'Every existing test must keep passing "once TTLCache.expire drops entries whose expiry time has been reached".',
+    "Every existing test must keep passing:\n```\ncache[1] = 1\nassert len(cache) == 1\n```",
+    "All existing tests must keep passing (see the README for how).",
+    "Every existing test must keep passing (`add the missing guard in expire first`).",
+    # a prose parenthetical, even a benign one, is not a command: fail closed (recorded limitation)
+    "Every existing test (including the JSON compliance suite under tests/) must keep passing unchanged.",
+])
+def test_17_a_request_hidden_in_quotes_parentheses_or_a_fence_is_never_a_suite_statement(text):
+    """Final review finding 1: stripped spans may only be commands or paths, never prose."""
+    assert not is_suite_preservation_requirement(text)
+    _, residual = deterministic_closers(derive_requirements(text), test_files=["tests/test_a.py"])
+    assert residual
+
+
+@pytest.mark.parametrize("text", ["Every existing test must keep passing (./gradlew :json-path:test).",
+                                  "Every existing test must keep passing (mvn test).", 'All tests keep passing ("pytest").',
+                                  "The test suite stays green (`python -m pytest -q`)."])
+def test_18_a_command_or_path_span_keeps_the_suite_statement(text):
+    assert is_suite_preservation_requirement(text)
+
+
+def test_19_a_compound_migration_sentence_is_residual():
+    """Final review finding 3: the migration gate closes the migration itself, nothing coordinated with it."""
+    compound = derive_requirements("Replace requests with httpx in the client and also add exponential-backoff retries to every call.")
+    closers, residual = deterministic_closers(compound, test_files=[], migration_identities=[("requests", "httpx")])
+    assert closers["REQ-1"] == [] and "compound" in residual[0]["why"]
+    pure = derive_requirements("Replace requests with httpx in the client.")
+    closers, residual = deterministic_closers(pure, test_files=[], migration_identities=[("requests", "httpx")])
+    assert closers["REQ-1"] == ["migration_gate"] and residual == []
+
+
+@pytest.mark.parametrize("text", ["Do not modify or delete any existing test.", "Do not modify, delete or rename any existing test.",
+                                  "Existing tests must not be modified.", "Leave the existing tests untouched.",
+                                  "Keep the existing tests as they are."])
+def test_20_the_cohorts_immutability_phrasings_are_recognized(text):
+    """Final review finding 5 (T3 REQ-11 was residual although it is an accepted form)."""
+    assert is_test_immutability_requirement(text)
+    assert deterministic_closers(derive_requirements(text), test_files=[])[0]["REQ-1"] == [TEST_IMMUTABILITY]
+
+
+def test_21_the_suite_closer_refuses_a_candidate_that_changed_the_test_trust_surface(tmp_path):
+    """Final review finding 2: a candidate conftest.py / pytest.ini / build declaration forges the suite's verdict,
+    so the candidate's own suite is not an independent oracle (the FS-1C0 rule); no record, no closure."""
+    from kriya.workflow.requirements import changed_test_trust_surface, test_immutability_evidence
+    assert changed_test_trust_surface(["tests/conftest.py", "pyproject.toml", "src/x.py", "pytest.ini", "pom.xml",
+                                       "tests/test_a.py", "gradle/wrapper/gradle-wrapper.properties"]) == [
+        "gradle/wrapper/gradle-wrapper.properties", "pom.xml", "pyproject.toml", "pytest.ini", "tests/conftest.py"]
+    root = write_project(tmp_path / "ws", "def test_a():\n    assert True\n")
+    reqs = derive_requirements("All existing tests must keep passing.")
+    scope = {"run_id": "r", "base_revision": "b", "candidate_revision": "b", "actual_paths": ["tests/conftest.py"], "foreign_paths": []}
+    tampered = test_immutability_evidence(["tests/test_suite.py"], ["tests/test_suite.py"], scope)
+    assert tampered["changed_trust_surface"] == ["tests/conftest.py"]
+    ledger = unverified_ledger(reqs)
+    [entry] = close_suite_preservation_requirements(ledger, reqs, test_files=["tests/test_suite.py"],
+                                                    run_suite=lambda: validator_for(root).run_tests(), source="t",
+                                                    revision=1, test_immutability=tampered)
+    assert entry["closed"] is False and "trust surface" in entry["reason"]
+    assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+    ledger = unverified_ledger(reqs)
+    [entry] = close_suite_preservation_requirements(ledger, reqs, test_files=["tests/test_suite.py"],
+                                                    run_suite=lambda: validator_for(root).run_tests(), source="t", revision=1)
+    assert entry["closed"] is False and "mutation record" in entry["reason"]  # no record at all: nothing closes

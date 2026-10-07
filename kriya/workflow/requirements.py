@@ -1104,23 +1104,54 @@ _SUITE_PRESERVATION_WORDS = (_PRESERVATION_WORDS - _GOAL_DIRECTED_WORDS) | froze
     "cases", "case", "scenario", "scenarios", "coverage", "please", "already", "present", "previously", "prior",
 })
 _STRIP_CODE_AND_PARENS = re.compile(r"`[^`]*`|\([^()]*\)|\"[^\"]*\"|'[^']*'")
+_IMMUTABILITY_VERB = (r"(?:modify|modifying|modified|change|changing|changed|edit|editing|edited|touch|touching|touched|"
+                      r"alter|altering|altered|remove|removing|removed|delete|deleting|deleted|rewrite|rewriting|"
+                      r"rewritten|rename|renaming|renamed)")
+_IMMUTABILITY_VERBS = rf"{_IMMUTABILITY_VERB}(?:\s*(?:,|/|or|and|,\s*or|,\s*and)\s*{_IMMUTABILITY_VERB})*"
+_IMMUTABILITY_OBJECT = (r"(?:any\s+of\s+the\s+|any\s+|the\s+|all\s+)?(?:existing\s+|current\s+|pre-existing\s+)?"
+                        r"(?:unit\s+|integration\s+)?tests?(?:\s+files?|\s+cases?|\s+suite)?(?:\s+(?:in|under)\s+\S+)?")
 _TEST_IMMUTABILITY_REQUIREMENT = re.compile(
-    r"(?:please\s+)?(?:do not|don't|must not|mustn't|should not|shouldn't|shall not|never|without)\s+"
-    r"(?:modify|modifying|change|changing|edit|editing|touch|touching|alter|altering|remove|removing|delete|"
-    r"deleting|rewrite|rewriting)\s+(?:any\s+of\s+the\s+|any\s+|the\s+|all\s+)?(?:existing\s+|current\s+|pre-existing\s+)?"
-    r"(?:unit\s+|integration\s+)?tests?(?:\s+files?|\s+cases?|\s+suite)?"
-    r"(?:\s+(?:in|under)\s+\S+)?\s*[.!]?",
+    r"(?:please\s+)?(?:"
+    rf"(?:do not|don't|must not|mustn't|should not|shouldn't|shall not|never|without)\s+{_IMMUTABILITY_VERBS}\s+{_IMMUTABILITY_OBJECT}"
+    rf"|{_IMMUTABILITY_OBJECT}\s+(?:must|should|shall|may)\s+not\s+be\s+{_IMMUTABILITY_VERBS}"
+    rf"|(?:leave|keep)\s+{_IMMUTABILITY_OBJECT}\s+(?:untouched|unchanged|intact|unmodified|as\s+(?:they|it)\s+(?:are|is))"
+    r")\s*[.!]?",
     re.IGNORECASE,
 )
+
+
+# A span removed before the vocabulary check may name a command or a path
+# ("(./gradlew :json-path:test)", "`python -m pytest -q`", "(mvn test)") -
+# never a request in prose: a span with three or more purely alphabetic words
+# is prose, and a fenced block is never part of a suite statement (final
+# review, 2026-10-08: a quoted or fenced request next to a suite sentence).
+_PROSE_SPAN_WORDS = 3
+# A coordinated clause beside a migration statement ("... and also add retries"): the
+# migration gate never verifies it, so the statement is residual (final review).
+_CONJUNCTION = re.compile(r"\b(?:and|also|plus|as well as|additionally|while|then)\b")
+
+
+def _spans_are_commands(text: str) -> bool:
+    if "```" in text:
+        return False
+    for match in _STRIP_CODE_AND_PARENS.finditer(text):
+        words = [token for token in match.group(0).strip("`\"'()").split() if token.isalpha()]
+        if len(words) >= _PROSE_SPAN_WORDS:
+            return False
+    return True
 
 
 def is_suite_preservation_requirement(text: str) -> bool:
     """Whether a requirement is, in its entirety, a whole-suite preservation
     statement: it names the test suite, carries a preservation cue, and
     consists of nothing but the closed suite-preservation vocabulary once
-    code spans, quotes and parentheses (a command, a path) are removed. A
-    statement naming specific tests is the named-test closer's, not this."""
-    stripped = _STRIP_CODE_AND_PARENS.sub(" ", _clean(text or ""))
+    code spans, quotes and parentheses are removed - and those spans are
+    commands or paths, never prose (``_spans_are_commands``). A statement
+    naming specific tests is the named-test closer's, not this."""
+    cleaned = _clean(text or "")
+    if not _spans_are_commands(cleaned):
+        return False
+    stripped = _STRIP_CODE_AND_PARENS.sub(" ", cleaned)
     tokens = re.findall(r"[a-z]+", stripped.lower())
     if not tokens:
         return False
@@ -1135,6 +1166,21 @@ def suite_statement_requires_immutability(text: str) -> bool:
     unchanged/intact - then the mutation record must agree before it closes."""
     tokens = set(re.findall(r"[a-z]+", _STRIP_CODE_AND_PARENS.sub(" ", _clean(text or "")).lower()))
     return bool(tokens & _IMMUTABILITY_CUES)
+
+
+# The test trust surface the FS-1C0 named-test oracle refuses to take from a
+# candidate: test configuration, fixtures and build declarations. A full-suite
+# closure is refused when the candidate changed any of them (final review:
+# a candidate conftest.py forges exit codes and reports).
+_TEST_TRUST_SURFACE = re.compile(
+    r"(?:^|/)(?:conftest\.py|pytest\.ini|\.pytest\.ini|tox\.ini|setup\.cfg|setup\.py|pyproject\.toml|"
+    r"requirements[^/]*\.txt|pom\.xml|build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|gradle\.properties|"
+    r"gradlew(?:\.bat)?)$|(?:^|/)(?:\.mvn|gradle/wrapper|tests?/.*/__init__|src/test/resources)(?:/|$)",
+)
+
+
+def changed_test_trust_surface(paths: Iterable[str]) -> List[str]:
+    return sorted(path for path in set(paths) if _TEST_TRUST_SURFACE.search(path))
 
 
 def test_immutability_evidence(
@@ -1155,6 +1201,7 @@ def test_immutability_evidence(
     return {"available": True, "reference_test_files": reference,
             "changed_test_files": sorted(path for path in reference if path in changed),
             "missing_test_files": sorted(path for path in reference if path not in present),
+            "changed_trust_surface": changed_test_trust_surface(changed),
             **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
 
 
@@ -1233,7 +1280,11 @@ def deterministic_closers(
         elif is_test_immutability_requirement(requirement.text):
             found.append(TEST_IMMUTABILITY)
         elif migrations and names_migration(requirement.text, migrations):
-            found.append(CLOSER_MIGRATION_GATE)
+            if _CONJUNCTION.search(_STRIP_CODE_AND_PARENS.sub(" ", requirement.text.lower())):
+                why = ("a compound statement: the migration gate closes only the migration itself, the rest of the "
+                       "sentence has no closer")
+            else:
+                found.append(CLOSER_MIGRATION_GATE)
         else:
             named = named_existing_tests(requirement.text, files)
             if not named and is_suite_preservation_requirement(requirement.text):
@@ -1325,10 +1376,12 @@ def close_suite_preservation_requirements(
     result, run once, lazily). Closes only when the structured evidence of
     that run is COMPLETE, the gate passed, at least one test executed and no
     executed case failed; anything else leaves it as it is, with why. A
-    statement that also says "unchanged"/"intact" closes only when the run's
-    mutation record (``test_immutability``, test_immutability_evidence) shows
-    no existing test changed or deleted - a changed one is deterministic
-    VIOLATED evidence; an unavailable record closes nothing."""
+    closure needs the run's mutation record (``test_immutability``,
+    test_immutability_evidence): a candidate that changed the test trust
+    surface (conftest, pytest/tox configuration, build declarations - the
+    FS-1C0 oracle's rule) gets no closure from its own suite; a statement
+    that also says "unchanged"/"intact" is VIOLATED when an existing test
+    changed or vanished; an unavailable record closes nothing."""
     from kriya.tools import test_execution
 
     files = list(test_files)
@@ -1364,15 +1417,21 @@ def close_suite_preservation_requirements(
             detail = {"kind": SUITE_PRESERVATION, "claim": REGRESSION_PRESERVATION, "cases": len(report.cases),
                       "status_counts": summary["status_counts"], "report_files": list(report.report_files),
                       "gate_id": report.gate_id, "runner": report.runner}
+            immutability = test_immutability if test_immutability is not None else {
+                "available": False, "reason": "no mutation record was supplied"}
+            detail["test_immutability"] = dict(immutability)
+            entry["test_immutability"] = dict(immutability)
+            if not immutability.get("available"):
+                entry["reason"] = "a full-suite closure needs the run's mutation record: " + str(immutability.get("reason"))
+                attempts.append(entry)
+                continue
+            surface = list(immutability.get("changed_trust_surface") or ())
+            if surface:
+                entry["reason"] = ("the candidate changed the test trust surface, so its own suite is not an "
+                                   "independent oracle: " + ", ".join(surface))
+                attempts.append(entry)
+                continue
             if suite_statement_requires_immutability(requirement.text):
-                immutability = test_immutability if test_immutability is not None else {
-                    "available": False, "reason": "no mutation record was supplied"}
-                detail["test_immutability"] = dict(immutability)
-                entry["test_immutability"] = dict(immutability)
-                if not immutability.get("available"):
-                    entry["reason"] = "'unchanged' needs the run's mutation record: " + str(immutability.get("reason"))
-                    attempts.append(entry)
-                    continue
                 touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
                 if touched:
                     record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
