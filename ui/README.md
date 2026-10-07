@@ -27,6 +27,9 @@ npm run dev -w @kriya-ui/test-host                                             #
 
 Matrix protection (D-9): the Electron shell talks only to `standalone/fake-kriya/fake_kriya.mjs` unless
 `KRIYA_UI_ALLOW_REAL_KRIYA=1` is set and a kriya executable is configured. Do not set it before the owner lifts D-9.
+That decision is made once (`standalone/src/main/host_mode.ts`) for both the trust strip (`HostInfo.fixtureMode`) and
+the query handler (GUI-F-A1): a configured executable that does not exist makes every KUP call a typed `HOST_ERROR`
+until the setting is fixed, exactly like an invalid configuration directory; it is never answered by the stand-in.
 
 Child environment of the real `kriya` (owner policy 2026-10-04; `standalone/src/main/child_env.ts`, exact copy in
 `tests/_kup_fixtures.py::host_child_env`): fixed `PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`, fixed

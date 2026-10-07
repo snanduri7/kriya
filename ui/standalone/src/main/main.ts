@@ -3,6 +3,9 @@
  * kriya_process.ts. Reads no Kriya state, opens no listener, loads only the local renderer bundle.
  * D-9: unless KRIYA_UI_ALLOW_REAL_KRIYA=1 is set AND a kriya executable is configured, every KUP query goes to the
  * fixture stand-in (fake-kriya/fake_kriya.mjs). Remove that gate only after the owner lifts matrix protection.
+ * GUI-F-A1: that decision is made ONCE (host_mode.ts) and consulted by both the hostInfo and the query handler, so
+ * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
+ * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
  */
 import { app, BrowserWindow, clipboard, ipcMain, session, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
@@ -10,6 +13,7 @@ import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
 import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
+import { isFixtureMode, resolveHostMode } from './host_mode';
 import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
@@ -50,28 +54,30 @@ function configDirectory() { return resolveConfigDirectory(settings.get('configD
 function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.hostInfo, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
-    const real = ALLOW_REAL && !!settings.get('kriyaExecutable');
+    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
     const dir = configDirectory();
-    return { kind: 'electron', hostVersion: HOST_VERSION, fixtureMode: !real, configDirectory: dir.ok ? dir.directory : null, configDirectorySource: dir.ok ? dir.source : 'invalid', configDirectoryProblem: dir.ok ? null : dir.message };
+    return { kind: 'electron', hostVersion: HOST_VERSION, fixtureMode: isFixtureMode(host), configDirectory: dir.ok ? dir.directory : null, configDirectorySource: dir.ok ? dir.source : 'invalid', configDirectoryProblem: dir.ok ? null : dir.message };
   });
   ipcMain.handle(IPC_CHANNELS.query, async (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     const v = validateKupRequest(raw);
     if (!v.ok) return errorEnvelope(String((raw as { operation?: unknown } | null)?.operation ?? 'unknown'), 'INVALID_REQUEST', v.message);
     const argv = buildKriyaArgv(v.value);
-    const configured = settings.get('kriyaExecutable');
-    const useReal = ALLOW_REAL && configured && existsSync(configured);
+    // GUI-F-A1: the same decision hostInfo reports; a configured executable that does not exist is refused here,
+    // never answered by the stand-in.
+    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+    if (host.mode === 'error') return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${host.message}`);
     // F-5: the child's working directory is the validated configuration directory, in BOTH modes; a missing or invalid
     // one is a typed refusal, never a fallback to Electron's own launch directory.
     const dir = configDirectory();
     if (!dir.ok) return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${dir.message}`);
     let outcome;
-    if (useReal) {
+    if (host.mode === 'real') {
       // The real child gets exactly the owner's environment policy (child_env.ts): fixed PATH, fixed
       // PYTHONDONTWRITEBYTECODE=1, the operator's HOME, an absolute operator KRIYA_STATE_DIR if set - nothing else.
       const childEnv = buildKriyaChildEnv(process.env);
       if (!childEnv.ok) return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${childEnv.message}`);
-      outcome = await runKriya({ executable: configured, argv, env: childEnv.env, cwd: dir.directory });
+      outcome = await runKriya({ executable: host.executable, argv, env: childEnv.env, cwd: dir.directory });
     } else {
       outcome = await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv(), cwd: dir.directory });
     }
