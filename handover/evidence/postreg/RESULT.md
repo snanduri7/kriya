@@ -39,8 +39,9 @@ a read-only view (1c8936a7, b0ed2c61). REG-R1 smoke before the run: NO REGRESSIO
   `test_ts_normalizer_scales_linearly_on_large_files` were FAIL (original), PASS (replay 1; observation digest
   d7038c64..., the passing observation), FAIL (replay 2). The candidate's own POST observation: FAIL AssertionError, the
   same outcome and type as the original baseline observation; only its message/body differed (they differ every run).
-  In the earlier no-model smoke/replay runs the test failed in 9/9 full-suite runs: its outcome is load-dependent
-  (INFERRED: the live run's replays ran while the model runtime was resident).
+  It failed in all 13 earlier full-suite runs made without a live model (4 REG-R1 reproduction runs, 5 context-replay
+  runs, 4 Arm A smoke runs) and in both full-suite runs of the earlier live qwen3.8 run; here it passed once. Its
+  outcome depends on host load (INFERRED - the test asserts a timing ratio; not measured).
 - TRACED (5c55630, owner's critical safety rule): `classify_baseline_observations` -> BASELINE_OUTCOME_UNSTABLE ->
   message/body UNRESOLVED -> STABILITY_UNRESOLVED (blocking, unattributed) -> REGRESSION_UNATTRIBUTED stop.
 - Classification per the experiment's stop rule: **FALSE NEGATIVE / AUTHORIZATION DEFECT**. Kriya implemented the
