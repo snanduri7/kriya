@@ -1068,8 +1068,8 @@ def close_requirements_by_test_immutability(
 
 def close_requirements_by_suite_preservation(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
-    revision: Any, toolchain_declaration_mutable: bool, java_home_override: Optional[str] = None,
-    tree_binding: Any = None,
+    revision: Any, toolchain_declaration_mutable: bool, candidate_paths: Iterable[str] = (),
+    java_home_override: Optional[str] = None, tree_binding: Any = None,
 ) -> List[Dict[str, Any]]:
     """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
     preservation requirement ("every existing test must keep passing") from
@@ -1077,7 +1077,19 @@ def close_requirements_by_suite_preservation(
     the run's toolchain authority (as the named-test closer): COMPLETE
     structured evidence, the gate passed, tests executed, no executed case
     failed. The suite runs once, only when such a requirement is open."""
-    from kriya.workflow.requirements import close_suite_preservation_requirements
+    from kriya.workflow.requirements import (
+        close_suite_preservation_requirements,
+        is_suite_preservation_requirement,
+        suite_statement_requires_immutability,
+        test_immutability_evidence,
+    )
+
+    immutability = None
+    if any(is_suite_preservation_requirement(r.text) and suite_statement_requires_immutability(r.text)
+           for r in requirement_set.requirements):
+        _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=list(candidate_paths))
+        immutability = test_immutability_evidence(
+            _reference_test_files(candidate_root, workspace_path), _candidate_test_files(candidate_root), evidence)
 
     def run_suite() -> Dict[str, Any]:
         validator = PolymorphicValidator(
@@ -1090,7 +1102,7 @@ def close_requirements_by_suite_preservation(
 
     return close_suite_preservation_requirements(
         ledger, requirement_set, test_files=_candidate_test_files(candidate_root), run_suite=run_suite,
-        source="requirement_closure.suite_preservation", revision=revision,
+        source="requirement_closure.suite_preservation", revision=revision, test_immutability=immutability,
     )
 
 
@@ -4481,7 +4493,7 @@ class WorkflowEngine:
                         suite_closures = await asyncio.to_thread(
                             close_requirements_by_suite_preservation, self.kernel.config.autonomy,
                             resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                            revision=state.attempt_number,
+                            revision=state.attempt_number, candidate_paths=state.all_files_written,
                             toolchain_declaration_mutable=toolchain_declaration_mutable(
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
                             ),

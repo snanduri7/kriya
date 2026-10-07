@@ -4222,6 +4222,29 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # LR-R1-M1: structured planning runs before any work unit; open the
         # run's attempt-evidence store now (observational, never blocks).
         attempt_evidence_scope.ensure_store(getattr(kernel, "config", None))
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: right after the run's evidence
+        # store exists and before any retrieval or model call, every mandatory
+        # requirement must have a deterministic closer under the blocking
+        # policy; else the run is refused here, spending nothing (the direct
+        # path refuses at the same point) - the refusal is still recorded.
+        from kriya.workflow.workflow import (
+            _acceptance_requirement_ids,
+            _candidate_test_files,
+            _migration_identities,
+            _requirement_policy_blocks,
+            _tracked_workspace_paths,
+        )
+        autonomy = getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
+        if _requirement_policy_blocks(autonomy):
+            admission = admission_gap(
+                requirement_set_for(goal, bound_requirement_contract(self.workflow_engine)),
+                test_files=_candidate_test_files(workspace_path),
+                acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self.workflow_engine)),
+                tracked_paths=_tracked_workspace_paths(workspace_path),
+                migration_identities=_migration_identities(goal, workspace_path),
+            )
+            if admission is not None:
+                raise admission
         available_tool_names = None
         if kernel is not None:
             try:
@@ -4356,24 +4379,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # GR-R1A: the operator's explicit, closed requirement contract when one
         # is bound; else the requirements derived from the goal.
         requirement_set = requirement_set_for(goal, bound_requirement_contract(self.workflow_engine))
-        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: refused before the first model
-        # call when a mandatory requirement has no deterministic closer.
-        from kriya.workflow.workflow import (
-            _acceptance_requirement_ids,
-            _candidate_test_files,
-            _migration_identities,
-            _requirement_policy_blocks,
-            _tracked_workspace_paths,
-        )
-        admission = admission_gap(
-            requirement_set, test_files=_candidate_test_files(workspace_path),
-            acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self.workflow_engine)),
-            tracked_paths=_tracked_workspace_paths(workspace_path),
-            migration_identities=_migration_identities(goal, workspace_path),
-        ) if _requirement_policy_blocks(getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None),
-                                                "autonomy", None)) else None
-        if admission is not None:
-            raise admission
         authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
             "Never drop, merge or reword a requirement: one no subtask serves stays open."

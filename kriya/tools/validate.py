@@ -1212,11 +1212,19 @@ class PolymorphicValidator:
         if classify_gradle_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
             return first
         if _deadline_exhausted():
+            if gradle_wrapper_start_failed(first_output):
+                return _environment(first, GRADLE_DISTRIBUTION_UNAVAILABLE,
+                                    "the Gradle wrapper could not obtain its distribution and the run's generation "
+                                    "deadline left no time to acquire it - the verification tool never started")
             return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline left no time to acquire it")
         logger.info("%s failed offline with a missing-dependency/distribution signature - running ONE bounded "
                     "registry-scoped acquisition, then one more offline attempt.", desc)
         _acquire()
         if _deadline_exhausted():
+            if gradle_wrapper_start_failed(first_output):
+                return _environment(first, GRADLE_DISTRIBUTION_UNAVAILABLE,
+                                    "the Gradle wrapper could not obtain its distribution and the run's generation "
+                                    "deadline ran out during acquisition - the verification tool never started")
             return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline ran out during acquisition")
         second = _offline_attempt()
         if second["returncode"] == 0:

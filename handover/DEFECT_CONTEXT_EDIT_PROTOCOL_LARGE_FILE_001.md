@@ -35,6 +35,12 @@ Separately, a grounded member whose body exceeds T0's room is omitted with its i
   whole-file authority stays D1's. A stale digest or revision yields no locus (the typed refusal, never a window at
   shifted lines).
 
+## Independent review reconciliation (2026-10-08, reviews/FIX_INDEPENDENT_REVIEW.md)
+- MATERIAL 3.1: the workflow's threading of the retrieval loci into the attempt context is pinned by a structural
+  tripwire (test 8: the retrieval assignment, the AttemptContext keyword, the dataclass field).
+- MINOR 3.2: the omitted-member record is replaced wholesale per package build (a path shown whole later keeps no
+  stale omission); test 7.
+
 ## Verification
 - `tests/test_context_edit_protocol_large_file_001.py` (6): real code-intel retrieval records the field's digest-bound
   line and the adopted target leads; the measured refusal (zero loci) then one exact window (operations anchored_edit

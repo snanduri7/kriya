@@ -475,7 +475,7 @@ REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
 # word is read as a behaviour claim, so an unknown phrasing fails closed (the
 # requirement stays UNVERIFIED), never open.
 _PRESERVATION_WORDS = frozenset({
-    "a", "all", "an", "and", "are", "be", "behavior", "behaviors", "behaviour", "behaviours", "break",
+    "a", "all", "an", "and", "are", "be", "behavior", "behaviors", "behaviour", "behaviours", "break", "each", "every",
     "breaking", "breaks", "broken", "check", "checks", "compatibility", "compatible", "continue", "continues",
     "continuing", "ensure", "ensures", "existing", "fail", "failing", "fails", "green", "has", "have", "in",
     "intact", "is", "it", "its", "keep", "keeping", "keeps", "kept", "legacy", "make", "must", "need", "needs",
@@ -1085,11 +1085,17 @@ ACCEPTED_GOAL_FORMS = (
 )
 
 _SUITE_NOUNS = frozenset({"test", "tests", "suite", "testsuite"})
+# Review (2026-10-08): goal-directed words ask for a state change ("Make the failing test pass") - never part of a
+# pure preservation statement, whatever the inherited named-test vocabulary allows next to a named test.
+_GOAL_DIRECTED_WORDS = frozenset({"make", "fix", "fixed", "fail", "failing", "fails", "failed"})
+# A preservation statement that also asks that the tests themselves stay as they are: closed only together with
+# the run's mutation record (no existing test changed or deleted) - a green suite alone never proves "unchanged".
+_IMMUTABILITY_CUES = frozenset({"unchanged", "intact", "untouched", "unmodified"})
 _SUITE_PRESERVATION_CUES = frozenset({"pass", "passes", "passing", "green", "unchanged", "intact", "working", "works",
                                       "succeed", "succeeds", "successful"})
 # Everything a pure whole-suite statement may be made of (besides a command or
 # path in parentheses or code spans, which are stripped first).
-_SUITE_PRESERVATION_WORDS = _PRESERVATION_WORDS | frozenset({
+_SUITE_PRESERVATION_WORDS = (_PRESERVATION_WORDS - _GOAL_DIRECTED_WORDS) | frozenset({
     "every", "each", "any", "current", "whole", "entire", "full", "complete", "unit", "integration", "automated",
     "as", "before", "after", "same", "run", "runs", "running", "command", "via", "using", "through", "also", "this",
     "these", "those", "project", "projects", "repository", "repo", "codebase", "module", "modules", "package",
@@ -1122,6 +1128,34 @@ def is_suite_preservation_requirement(text: str) -> bool:
     if not (words & _SUITE_NOUNS) or not (words & _SUITE_PRESERVATION_CUES):
         return False
     return all(token in _SUITE_PRESERVATION_WORDS for token in tokens)
+
+
+def suite_statement_requires_immutability(text: str) -> bool:
+    """Whether a suite-preservation statement also asks that the tests stay
+    unchanged/intact - then the mutation record must agree before it closes."""
+    tokens = set(re.findall(r"[a-z]+", _STRIP_CODE_AND_PARENS.sub(" ", _clean(text or "")).lower()))
+    return bool(tokens & _IMMUTABILITY_CUES)
+
+
+def test_immutability_evidence(
+    reference_test_files: Optional[Sequence[str]], present_test_files: Iterable[str],
+    scope_evidence: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """What the run's mutation record says about the tests that existed before
+    it: ``available`` (the reference set and the record exist), the existing
+    test files the candidate changed and those no longer present."""
+    if reference_test_files is None:
+        return {"available": False, "reason": "the tests that existed before the run cannot be established"}
+    if not scope_evidence or scope_evidence.get("unavailable"):
+        return {"available": False, "reason": "mutation evidence unavailable: " + str(
+            (scope_evidence or {}).get("unavailable") or "not collected")}
+    reference = sorted(set(reference_test_files))
+    present = set(present_test_files)
+    changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
+    return {"available": True, "reference_test_files": reference,
+            "changed_test_files": sorted(path for path in reference if path in changed),
+            "missing_test_files": sorted(path for path in reference if path not in present),
+            **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
 
 
 def is_test_immutability_requirement(text: str) -> bool:
@@ -1204,6 +1238,8 @@ def deterministic_closers(
             named = named_existing_tests(requirement.text, files)
             if not named and is_suite_preservation_requirement(requirement.text):
                 found.append(SUITE_PRESERVATION)
+                if suite_statement_requires_immutability(requirement.text):
+                    found.append(TEST_IMMUTABILITY)
             else:
                 claims = requirement_claims(requirement.text, named)
                 if named and REGRESSION_PRESERVATION in claims:
@@ -1245,29 +1281,22 @@ def close_test_immutability_requirements(
     none changed and nothing foreign closes it. Unavailable evidence or an
     unknown reference set leaves the verdict as it is (fail closed)."""
     attempts: List[Dict[str, Any]] = []
-    present = set(present_test_files)
+    outcomes = requirement_outcomes(ledger, requirements)
+    immutability = test_immutability_evidence(reference_test_files, present_test_files, scope_evidence)
     for requirement in requirements.requirements:
         if not is_test_immutability_requirement(requirement.text):
             continue
         record = ledger.current(requirement_obligation_id(requirement.id))
-        verdict = (record.evidence or {}) if record is not None else {}
-        evidence_id = verdict.get("evidence_id")
-        closable = verdict.get("outcome") in (RequirementOutcome.SATISFIED.value, RequirementOutcome.UNVERIFIED.value)
+        evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
+        closable = outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED  # the mapped outcome (GR-R0)
         entry: Dict[str, Any] = {"requirement": requirement.id, "kind": TEST_IMMUTABILITY, "closed": False}
         if not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
-        elif reference_test_files is None:
-            entry["reason"] = "the tests that existed before the run cannot be established"
-        elif not scope_evidence or scope_evidence.get("unavailable"):
-            entry["reason"] = "mutation evidence unavailable: " + str((scope_evidence or {}).get("unavailable") or "not collected")
+        elif not immutability["available"]:
+            entry["reason"] = immutability["reason"]
         else:
-            reference = sorted(set(reference_test_files))
-            changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
-            touched = sorted(path for path in reference if path in changed)
-            missing = sorted(path for path in reference if path not in present)
-            detail = {"kind": TEST_IMMUTABILITY, "requirement": requirement.id, "reference_test_files": reference,
-                      "changed_test_files": touched, "missing_test_files": missing,
-                      **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
+            touched, missing = immutability["changed_test_files"], immutability["missing_test_files"]
+            detail = {"kind": TEST_IMMUTABILITY, "requirement": requirement.id, **immutability}
             entry.update(detail)
             if touched or missing:
                 record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
@@ -1277,7 +1306,7 @@ def close_test_immutability_requirements(
                                    "existing test file(s) missing: " + ", ".join(missing))
                 entry["violated"] = True
             elif not closable:
-                entry["reason"] = f"the verifier's verdict is {verdict.get('outcome')}, which evidence never closes"
+                entry["reason"] = f"the requirement's outcome is {outcomes.get(requirement.id)}, which evidence never closes"
             else:
                 record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
                                            method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
@@ -1289,13 +1318,17 @@ def close_test_immutability_requirements(
 
 def close_suite_preservation_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *, test_files: Iterable[str],
-    run_suite: Any, source: str, revision: Any,
+    run_suite: Any, source: str, revision: Any, test_immutability: Optional[Mapping[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Close every UNVERIFIED whole-suite preservation requirement from the
     candidate's own full test run (``run_suite()``: the production test gate
     result, run once, lazily). Closes only when the structured evidence of
     that run is COMPLETE, the gate passed, at least one test executed and no
-    executed case failed; anything else leaves it as it is, with why."""
+    executed case failed; anything else leaves it as it is, with why. A
+    statement that also says "unchanged"/"intact" closes only when the run's
+    mutation record (``test_immutability``, test_immutability_evidence) shows
+    no existing test changed or deleted - a changed one is deterministic
+    VIOLATED evidence; an unavailable record closes nothing."""
     from kriya.tools import test_execution
 
     files = list(test_files)
@@ -1331,6 +1364,24 @@ def close_suite_preservation_requirements(
             detail = {"kind": SUITE_PRESERVATION, "claim": REGRESSION_PRESERVATION, "cases": len(report.cases),
                       "status_counts": summary["status_counts"], "report_files": list(report.report_files),
                       "gate_id": report.gate_id, "runner": report.runner}
+            if suite_statement_requires_immutability(requirement.text):
+                immutability = test_immutability if test_immutability is not None else {
+                    "available": False, "reason": "no mutation record was supplied"}
+                detail["test_immutability"] = dict(immutability)
+                entry["test_immutability"] = dict(immutability)
+                if not immutability.get("available"):
+                    entry["reason"] = "'unchanged' needs the run's mutation record: " + str(immutability.get("reason"))
+                    attempts.append(entry)
+                    continue
+                touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
+                if touched:
+                    record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                               method=FULL_REGRESSION_METHOD, detail=detail, source=source,
+                                               revision=revision, violated=True)
+                    entry["reason"] = "the suite is green but existing test file(s) changed or vanished: " + ", ".join(touched)
+                    entry["violated"] = True
+                    attempts.append(entry)
+                    continue
             record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
                                        method=FULL_REGRESSION_METHOD, detail=detail, source=source, revision=revision)
             entry["closed"] = True

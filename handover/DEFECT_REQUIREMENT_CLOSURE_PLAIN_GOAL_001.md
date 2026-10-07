@@ -54,5 +54,26 @@ before model execution with GOAL_INSUFFICIENT_FOR_VERIFICATION, naming the requi
   closure now sees the resolved identities): the invariants they protect (never SUCCESS, nothing applied) hold earlier.
 - Mutations (`mutations.txt`): 6/6 killed (admission silent, completeness ignored, recognizer opened, deletions
   ignored, model judgment counted as a closer, admission under every policy).
-- Adjacent: PRD-020, GR-R1A/R0/R1B, FS-1/1C0/1C1, B2-a/B2-COV/B3, model-evidence hardening, failure reporting,
-  AUTH-GOAL-CONTAMINATION, D8, JVM acceptance: green. ruff + pylint 0.
+- Adjacent at c6b1981: PRD-020 lineage, GR-R1A/R0/R1B, FS-1/1C0/1C1, B2-a/B2-COV/B3, model-evidence hardening,
+  failure reporting, AUTH-GOAL-CONTAMINATION, D8, JVM acceptance green - but tests/test_prd020_mutation_scope.py had
+  5 failures (found by the full suite and the independent review; the first version of this record wrongly said
+  "green"): its production-policy behaviour goals are now refused at admission; those tests exercise the scope closer
+  under the record policy. ruff + pylint 0.
+
+## Independent review reconciliation (2026-10-08, reviews/FIX_INDEPENDENT_REVIEW.md)
+- BLOCKING 5.2 (false-success path, MEASURED by the reviewer): "Make the failing test pass." was a suite statement
+  because the inherited named-test vocabulary contains "make"/"failing"; and "unchanged" closed on a green suite while
+  an existing test could have been rewritten. Fixed: goal-directed words (make, fix, fail, failing, fails, failed) are
+  excluded from the suite vocabulary; a suite statement with "unchanged"/"intact"/"untouched"/"unmodified" classifies
+  as SUITE_PRESERVATION + TEST_IMMUTABILITY and its closer records VIOLATED when an existing test changed or
+  vanished, closes nothing without the mutation record. Tests 13/14.
+- BLOCKING 5.1: the five mutation-scope tests; the controller's GoalAdmissionError branch now has its own test (15).
+- MATERIAL 5.3: test 16 proves the terminal backstop under production end to end (an admitted goal whose closers
+  cannot bind stops REQUIREMENTS_UNRESOLVED after one Developer call, nothing applied).
+- MATERIAL 5.4: the enforce path's admission moved to right after the run's evidence store opens, before retrieval
+  and planning (a refused run still leaves a sealed record).
+- MINOR 5.7: the immutability closer keys closability on the mapped outcome (GR-R0) like the other closers.
+- Known limits recorded, not changed: 5.5 (an engine without a kernel/config has no production profile, no
+  admission), 5.6 (a compound migration sentence is admitted on the migration alone, mirroring the existing gate),
+  5.8 (the suite closer runs the candidate's suite at the pre-apply boundary, a second full-suite run per candidate
+  beside the terminal regression gate - a cost item for the owner, kept for correctness tonight).

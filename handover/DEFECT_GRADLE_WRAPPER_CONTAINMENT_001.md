@@ -39,6 +39,19 @@ a correct final candidate rejected. The host wrapper cache held the exact distri
 Residual, not fixed here: T3's `gradle/versioning.gradle` runs `git describe --tags`; under the gitfile mask of a worktree
 that may fail at configuration time - to be measured by the T3 rerun and classified then.
 
+## Independent review reconciliation (2026-10-08, reviews/FIX_INDEPENDENT_REVIEW.md)
+- MATERIAL 4.1 (MEASURED by the reviewer): the wrapper regex matched the launcher frames every --stacktrace build
+  error carries, which would have sent a candidate's compile failure through a registry-scoped acquisition and typed
+  it as the environment. Anchored on org.gradle.wrapper.(Install|Download) and the download/install lines; negative
+  control test 16.
+- MATERIAL 4.2: both deadline branches now type a wrapper start failure (test 17); the deadline parameter is live.
+- MINOR 4.3: GRADLE_ACQUISITION_INCOMPLETE has the same runtime-verification consumer as Maven's marker (test 19).
+- MINOR 4.4: the seed's provenance says how strongly it verified: `shape` (Gradle's own url-hash directory,
+  completion marker, extracted version - no digest) or `declared_sha256` (test 18); "evidence binds to exact
+  identity" is met in full only when the project declares the checksum.
+- MINOR 4.5: GRADLE_OPTS and the JAVA_TOOL_OPTIONS proxy properties are exported for every acquisition command
+  (Maven ignores them and uses settings.xml; pip uses the env proxy) - kept, recorded.
+
 ## Verification
 - `tests/test_gradle_wrapper_containment_001.py` (17): wrapper properties + Gradle's own hash (MEASURED value);
   verified host seed, every unverified shape refused (no marker, no extracted version, wrong hash, declared checksum
@@ -52,4 +65,6 @@ that may fail at configuration time - to be measured by the T3 rerun and classif
   without marker, checksum unverified, GRADLE_USER_HOME dropped, acquisition offline).
 - Adjacent: Maven acquisition, capability adapters, SEC-002/005/009, registry-scoped unit, PRD-011, failure grounding,
   runtime Maven acquisition, resource authority, PRD-012 inventory, architecture guard, failure reporting: 331 passed
-  (one SEC-009 default-list expectation updated with the same justification). ruff + pylint 0.
+  (one SEC-009 default-list expectation updated with the same justification). ruff + pylint 0. Full suite at
+  c6b1981 found two tripwires to register (the FILE-INTEGRITY write-site audit for the seed's copies into the state
+  root; the LR-R1-M1 record_gate_outcome inventory, 86 -> 87) and one JVM adapter fixture needing the new seam.

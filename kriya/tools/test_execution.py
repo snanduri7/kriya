@@ -289,7 +289,8 @@ def _integrity(declared: Dict[str, int], parsed: Dict[str, int], suites: int, un
     (``unittest.subTest``, pytest subtests) adds to the count and leaves no element of its own, while a failed or
     skipped subtest adds a ``<failure>``/``<skipped>`` child to its parent's element and to the matching count.
     So with ``counts_reports`` the failure/error/skip counts must match exactly and ``tests`` may exceed the
-    elements by those uncounted passed reports (``surplus_reports``, never negative); a deficit, any other
+    elements by the reports beyond one per element (``surplus_reports``: every subtest report, passed ones
+    included, plus the parent's own call report; never negative); a deficit, any other
     mismatch or a repeated case id is JUNIT_COUNTS_INCONSISTENT / JUNIT_DUPLICATE_CASE. ``required`` names the
     counts every suite must declare (pytest declares all four; a JVM writer must declare ``tests``, the others
     are compared when declared). Nothing is reconciled from console text."""

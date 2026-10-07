@@ -828,8 +828,9 @@ def _preserve_member_exact_precision(
 def _record_omitted_members(state: GenerationState, omitted: Iterable[Dict[str, Any]]) -> None:
     """CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: the grounded members a package
     omitted, per path, with the lines and revision the entry recorded
-    (make_omitted_entry); an entry without them records nothing. Replaces
-    the path's earlier record (a package is rebuilt per attempt)."""
+    (make_omitted_entry); an entry without them records nothing. The record
+    is replaced wholesale by every package build (a path shown whole in a
+    later attempt has no omission any more)."""
     by_path: Dict[str, List[Tuple[int, int, str]]] = {}
     for entry in omitted:
         if entry.get("member_id") is None or not entry.get("revision") or entry.get("start_line") is None:
@@ -838,8 +839,7 @@ def _record_omitted_members(state: GenerationState, omitted: Iterable[Dict[str, 
         members = by_path.setdefault(entry["path"], [])
         if boundary not in members:
             members.append(boundary)
-    for path, members in by_path.items():
-        state.known_target_omitted_members[path] = members
+    state.known_target_omitted_members = by_path
 
 
 def _record_known_target_package(state: GenerationState, items: Iterable[ContextItem]) -> None:

@@ -121,9 +121,12 @@ GRADLE_ACQUISITION_INCOMPLETE_MARKER = "GRADLE_ACQUISITION_INCOMPLETE:"
 # gradle.org/distributions/gradle-8.10.1-bin.zip" then
 # "java.net.UnknownHostException: services.gradle.org" at
 # org.gradle.wrapper.Install.forceFetch).
+# Anchored on the wrapper's install/download stage only: the launcher frames
+# (GradleWrapperMain, WrapperExecutor, BootstrapMainStarter) appear in any
+# build error trace printed with --stacktrace and prove nothing (review).
 _GRADLE_WRAPPER_START_RE = re.compile(
-    r"org\.gradle\.wrapper\.|Downloading https?://\S+/distributions/|Could not (?:install|download) Gradle distribution"
-    r"|Distribution .* could not be (?:downloaded|installed)",
+    r"org\.gradle\.wrapper\.(?:Install|Download)\b|Downloading https?://\S+/distributions/"
+    r"|Could not (?:install|download) Gradle distribution|Distribution .* could not be (?:downloaded|installed)",
 )
 _GRADLE_OFFLINE_MISSING_RE = re.compile(
     r"Could not resolve all (?:files|dependencies|artifacts) for|No cached version of .* available for offline mode"
@@ -261,6 +264,7 @@ def seed_gradle_distribution_from_host(
                 "reason": f"no extracted {extracted}/lib for the declared version"}
     verified.append("version_directory")
     zip_path = os.path.join(source, f"{distribution.name}.zip")
+    strength = "shape"  # Gradle's own layout: url-hash directory, completion marker, extracted version (no digest)
     if distribution.sha256:
         if not os.path.isfile(zip_path):
             return {**record, "status": "unverifiable", "source": source,
@@ -270,6 +274,7 @@ def seed_gradle_distribution_from_host(
             return {**record, "status": "refused", "source": source,
                     "reason": f"host zip sha256 {actual} != declared {distribution.sha256}"}
         verified.append("sha256")
+        strength = "declared_sha256"
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if os.path.isdir(target):
@@ -280,7 +285,8 @@ def seed_gradle_distribution_from_host(
     except OSError as error:
         shutil.rmtree(target, ignore_errors=True)
         return {**record, "status": "unverifiable", "source": source, "reason": f"copy failed: {error}"}
-    return {**record, "status": "seeded", "source": source, "target": target, "verified": verified}
+    return {**record, "status": "seeded", "source": source, "target": target, "verified": verified,
+            "verification_strength": strength}
 
 
 def classify_pip_offline_failure_text(combined_output: str) -> OfflineFailureKind:

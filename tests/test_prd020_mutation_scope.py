@@ -267,8 +267,10 @@ def _direct_engine(tmp_path, files):
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.spec_compliance_enabled = True
-    cfg.autonomy.requirement_unknown_policy = "block"
-    cfg.autonomy.requirement_unverified_policy = "block"
+    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: under the production policy a behaviour goal is refused before any model
+    # call, so the scope closer is exercised under the record policy (VIOLATED still blocks under every policy).
+    cfg.autonomy.requirement_unknown_policy = "record"
+    cfg.autonomy.requirement_unverified_policy = "record"
     cfg.llm_chain = []
     cfg.paths.skills = str(tmp_path / "skills")
     llm = LLMClient(cfg)
@@ -307,12 +309,10 @@ async def test_direct_run_decides_the_scope_requirement_from_what_the_candidate_
     assert evidence["kind"] == MUTATION_SCOPE and evidence["authorized_paths"] == ["greeting.py"]
     if closes:
         assert outcome == "closed_by_evidence" and evidence["actual_paths"] == ["greeting.py"]
-        # REQ-1 has only the verifier's "satisfied" - a model claim, UNVERIFIED (FS-1B) - so the
-        # production policy still blocks the run, on REQ-1 alone; nothing is applied.
+        # REQ-1 has only the verifier's "satisfied" - a model claim, UNVERIFIED (FS-1B), recorded under this policy.
         assert res["requirements"]["outcomes"]["REQ-1"] == "unverified"
-        assert res["quality_gates_passed"] is False
-        assert "REQ-1 (unverified)" in res["environment_failure"] and "REQ-2" not in res["environment_failure"]
-        assert (workspace / "greeting.py").read_text() == "GREETING = 'Hi'\n"
+        assert res["quality_gates_passed"] is True
+        assert (workspace / "greeting.py").read_text() == "GREETING = 'Hello'\n"
     else:
         assert res["quality_gates_passed"] is False and outcome == "violated"
         assert evidence["out_of_scope_paths"] == ["other.py"]
@@ -334,8 +334,9 @@ async def _enforce(tmp_path, monkeypatch, goal, planned, verdict="unverifiable")
     )])
     cfg = AppConfig()
     cfg.autonomy.spec_compliance_enabled = True
-    cfg.autonomy.requirement_unknown_policy = "block"
-    cfg.autonomy.requirement_unverified_policy = "block"
+    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: see _direct_engine - the record policy; VIOLATED blocks regardless.
+    cfg.autonomy.requirement_unknown_policy = "record"
+    cfg.autonomy.requirement_unverified_policy = "record"
     we = MagicMock()
     we.engineering_triage.classify = AsyncMock(return_value=EngineeringRoute(
         kind=ChangeKind.TASK, impact=ImpactVector(), initial_risk_class=RiskClass.LOW,
@@ -380,13 +381,14 @@ async def test_enforce_terminal_gate_decides_the_scope_requirement(tmp_path, mon
     gap = result.legacy_result.get("global_requirement_gap")
     assert outcomes["REQ-2"] == outcome
     if outcome == "closed_by_evidence":
-        # REQ-1 (the verifier's "satisfied", a model claim - FS-1B) is what still blocks.
-        assert "REQ-1 (unverified)" in gap and "REQ-2" not in gap, gap
+        assert not gap, gap  # REQ-1 (the verifier's "satisfied", a model claim - FS-1B) is recorded under this policy
         evidence = result.legacy_result["requirements"]["evidence"]["REQ-2"]
         assert evidence["kind"] == MUTATION_SCOPE and evidence["actual_paths"] == ["app.py"]
         assert evidence["authorized_paths"] == ["app.py"] and evidence["base_revision"]
-    else:
+    elif outcome == "violated":
         assert f"REQ-2 ({outcome})" in gap and result.legacy_result["quality_gates_passed"] is False
+    else:
+        assert not gap  # unresolved (no referent) is UNVERIFIED: recorded under this policy, blocking under production
     [attempt] = [a for a in result.legacy_result["requirements"]["closure_attempts"]
                  if a.get("kind") == MUTATION_SCOPE]
     assert attempt["closed"] is (outcome == "closed_by_evidence")

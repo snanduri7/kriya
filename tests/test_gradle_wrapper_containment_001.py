@@ -357,3 +357,66 @@ def test_15_a_gradle_project_with_a_registry_dependency_compiles_offline_after_o
     assert all(cmd[0] == "gradle" and "--no-daemon" in cmd for cmd, _n, _a in calls)
     home = validator._dependency_cache_dir("gradle")
     assert any("commons-lang3" in root for root, _dirs, _files in os.walk(os.path.join(home, "caches")))
+
+
+# ---------------------------------------------------------------- review reconciliation (2026-10-08)
+LAUNCHER_FRAMES_FAILURE = (
+    "FAILURE: Build failed with an exception.\n* What went wrong:\nExecution failed for task ':compileJava'.\n"
+    "> Compilation failed; see the compiler error output for details.\n* Exception is:\n"
+    "org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':compileJava'.\n"
+    "\tat org.gradle.wrapper.BootstrapMainStarter.start(BootstrapMainStarter.java:37)\n"
+    "\tat org.gradle.wrapper.WrapperExecutor.execute(WrapperExecutor.java:108)\n"
+    "\tat org.gradle.wrapper.GradleWrapperMain.main(GradleWrapperMain.java:67)\n"
+)
+
+
+def test_16_an_ordinary_failure_carrying_the_launcher_frames_is_never_a_distribution_failure(tmp_path, monkeypatch):
+    """Review 4.1: the wrapper launcher frames appear in any --stacktrace build error; only the install/download
+    stage proves the distribution could not be obtained."""
+    assert not dep.gradle_wrapper_start_failed(LAUNCHER_FRAMES_FAILURE)
+    assert dep.classify_gradle_offline_failure_text(LAUNCHER_FRAMES_FAILURE) is dep.OfflineFailureKind.ORDINARY_FAILURE
+    monkeypatch.setenv("KRIYA_STATE_DIR", str(tmp_path / "state"))
+    validator = _contained_validator(tmp_path)
+    with patch.object(dep, "seed_gradle_distribution_from_host", return_value={"status": "no_wrapper"}), \
+            _runs((1, LAUNCHER_FRAMES_FAILURE)) as run:
+        result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path))
+    assert run.call_count == 1 and "environment_reason_code" not in result  # no acquisition of candidate code either
+
+
+def test_17_a_wrapper_failure_under_an_exhausted_deadline_is_still_the_environment_outcome(tmp_path, monkeypatch):
+    """Review 4.2: the deadline branches must not fold a wrapper that could not start into a compile failure."""
+    import time
+    monkeypatch.setenv("KRIYA_STATE_DIR", str(tmp_path / "state"))
+    validator = _contained_validator(tmp_path)
+    with patch.object(dep, "seed_gradle_distribution_from_host", return_value={"status": "not_in_host_cache", "url": T3_URL}), \
+            _runs((1, WRAPPER_TRACE)) as run:
+        result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path), deadline=time.monotonic() - 1)
+    assert run.call_count == 1 and result["environment_reason_code"] == dep.GRADLE_DISTRIBUTION_UNAVAILABLE
+    with patch.object(dep, "seed_gradle_distribution_from_host", return_value={"status": "no_wrapper"}), \
+            _runs((1, MISSING_DEPENDENCY)) as run:
+        result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path), deadline=time.monotonic() - 1)
+    assert run.call_count == 1 and result["stderr"].startswith("GRADLE_ACQUISITION_INCOMPLETE:") and "environment_reason_code" not in result
+
+
+def test_18_the_seed_records_how_strongly_it_verified(tmp_path):
+    """Review 4.4: without a declared checksum the seed is shape-verified (Gradle's own layout), never a digest."""
+    workspace, home, cache = tmp_path / "ws", tmp_path / "home", tmp_path / "cache"
+    workspace.mkdir()
+    write_wrapper(workspace)
+    host_cache(home)
+    record = dep.seed_gradle_distribution_from_host(str(workspace), str(cache), host_gradle_home=str(home))
+    assert record["verification_strength"] == "shape" and "sha256" not in record["verified"]
+    zip_bytes = b"dist"
+    write_wrapper(workspace, PROPERTIES + f"distributionSha256Sum={hashlib.sha256(zip_bytes).hexdigest()}\n")
+    host_cache(home, zip_bytes=zip_bytes)
+    import shutil as _sh
+    _sh.rmtree(cache)
+    record = dep.seed_gradle_distribution_from_host(str(workspace), str(cache), host_gradle_home=str(home))
+    assert record["verification_strength"] == "declared_sha256"
+
+
+def test_19_the_runtime_verification_table_knows_the_gradle_marker():
+    """Review 4.3: the Gradle acquisition-incomplete marker has the same runtime-verification consumer as Maven's."""
+    from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
+    reason = runtime_verification_infrastructure_reason({"output": "GRADLE_ACQUISITION_INCOMPLETE: offline execution for tasks ['run'] reports a missing dependency"})
+    assert reason and reason.startswith("RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE")

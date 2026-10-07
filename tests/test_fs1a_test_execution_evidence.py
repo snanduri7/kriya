@@ -253,7 +253,8 @@ def test_the_jvm_adapters_record_the_test_process_on_the_binding(tmp_path, adapt
     process = {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True}
     binding = test_execution.ReportBinding(gate_id="g", runner=adapter.build_system, workspace=str(tmp_path))
     v = SimpleNamespace(workspace_path=str(tmp_path), test_report_binding=binding,
-                        _run_maven_cmd=lambda *a, **k: process, _run_cmd_with_timeout=lambda *a, **k: process,
+                        _run_maven_cmd=lambda *a, **k: process, _run_gradle_cmd=lambda *a, **k: process,
+                        _run_cmd_with_timeout=lambda *a, **k: process,
                         _validation_result=PolymorphicValidator._validation_result)
     adapter.run_tests(v, "CalcTest")
     assert (binding.observed, binding.exit_code, binding.timed_out) == (True, 1, True)

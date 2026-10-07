@@ -151,6 +151,8 @@ def test_inventory_counts_the_design_relies_on():
     assert sum(appends.values()) == 0, appends
     records = sum((ROOT / rel).read_text(encoding="utf-8").count("state.record_gate_outcome(") for rel in appends)
     # 85 at M1.3b; FS-1A added three (the test-delta verdict and its two failures); GR-R1B removed two (the
-    # model-only goal_spec_compliance and spec_compliance_indeterminate failures, now advisory).
-    assert records == 86, records
+    # model-only goal_spec_compliance and spec_compliance_indeterminate failures, now advisory);
+    # GRADLE-WRAPPER-CONTAINMENT-001 added one (attempt._stop_on_environment_gate_result: the typed
+    # verification_infrastructure_failure for a gate whose tool could not start).
+    assert records == 87, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

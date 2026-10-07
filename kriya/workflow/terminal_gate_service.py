@@ -531,7 +531,7 @@ class TerminalGateService:
                 suite_closures = await asyncio.to_thread(
                     close_requirements_by_suite_preservation, autonomy, ledger,
                     requirement_set, request.candidate_root, request.workspace_path,
-                    revision="terminal",
+                    revision="terminal", candidate_paths=_terminal_candidate_paths(request.plan),
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
                         WriteScopeMode.DENY_ALL, (), request.plan,
                     ),

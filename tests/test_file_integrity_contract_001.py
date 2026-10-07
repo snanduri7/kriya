@@ -875,6 +875,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/static_analysis/scope.py": 1, "kriya/static_analysis/service.py": 2, "kriya/static_analysis/waivers.py": 2,
     "kriya/tools/containment_oci.py": 0, "kriya/tools/knowledge.py": 1, "kriya/tools/lsp.py": 3,
     "kriya/tools/test_execution.py": 2, "kriya/workflow/acceptance_oracle.py": 3,
+    # GRADLE-WRAPPER-CONTAINMENT-001: the host-cache seed copies a verified Gradle distribution into the
+    # Kriya-managed dependency cache under the state root (never a source tree) and writes its completion marker.
+    "kriya/tools/dependency_execution.py": 3,
     "kriya/workflow/acceptance_jvm.py": 3, "kriya/workflow/acceptance_approval.py": 2,
     "kriya/workflow/requirement_contract.py": 2,
     "kriya/tools/validate.py": 5, "kriya/workflow/checkpoint.py": 4, "kriya/workflow/context_certification.py": 3,

@@ -203,3 +203,36 @@ def test_06_an_anchor_miss_widens_the_window_at_the_same_locus():
     wider = build_edit_capability(PATH, SOURCE, full_file=False, loci=[EXCEL_LINE], budget_chars=3368, level=1)
     assert (narrow.spans[0].end_line - narrow.spans[0].start_line) < (wider.spans[0].end_line - wider.spans[0].start_line)
     assert wider.feasible and len(wider.spans[0].text) <= 3368
+
+
+# ---------------------------------------------------------------- review reconciliation (2026-10-08)
+def test_07_omitted_members_are_replaced_wholesale_by_the_next_package(workspace):
+    """Review 3.2: a path shown whole in a later attempt keeps no stale omission record."""
+    state = _state()
+    entry = {"path": PATH, "rank": 1, "reason": "body_elided", "estimated_tokens": 9, "member_id": "Big.hugeMethod",
+             "start_line": 10, "end_line": 400, "revision": "rev-1"}
+    _record_omitted_members(state, [entry])
+    assert state.known_target_omitted_members == {PATH: [(10, 400, "rev-1")]}
+    _record_omitted_members(state, [{"path": "other.java", "rank": 1, "reason": "body_elided", "estimated_tokens": 1,
+                                     "member_id": "O.m", "start_line": 1, "end_line": 2, "revision": "r"}])
+    assert PATH not in state.known_target_omitted_members
+    _record_omitted_members(state, [{"path": PATH, "rank": 1, "reason": "minimum_authority_unfit", "estimated_tokens": 9}])
+    assert state.known_target_omitted_members == {}
+
+
+def test_08_the_workflow_threads_the_retrieval_loci_into_the_attempt_context():
+    """Review 3.1: the symbol loci reach AttemptContext from the retrieval result (structural tripwire: the
+    retrieval stage assigns them and the AttemptContext construction passes them)."""
+    import ast
+    import pathlib
+    source = (pathlib.Path(__file__).resolve().parents[1] / "kriya" / "workflow" / "workflow.py").read_text()
+    tree = ast.parse(source)
+    assigned = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "retrieval_symbol_loci" for t in node.targets)
+                and isinstance(node.value, ast.Attribute) and node.value.attr == "retrieval_symbol_loci"]
+    assert assigned, "the retrieval stage no longer hands its symbol loci over"
+    passed = [kw for node in ast.walk(tree) if isinstance(node, ast.Call) for kw in node.keywords
+              if kw.arg == "retrieval_symbol_loci" and isinstance(kw.value, ast.Name) and kw.value.id == "retrieval_symbol_loci"]
+    assert passed, "AttemptContext is no longer built with the retrieval's symbol loci"
+    from kriya.workflow.attempt import AttemptContext
+    assert "retrieval_symbol_loci" in AttemptContext.__dataclass_fields__

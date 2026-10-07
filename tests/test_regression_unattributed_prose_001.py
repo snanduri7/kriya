@@ -173,6 +173,8 @@ def _decision_violations(node):
 
 
 def test_10_regression_decisions_are_assigned_only_from_gate_verdicts_and_structured_deltas():
+    """Tripwire over plain assignments to the three decision names; an augmented assignment, a new decision
+    name or a decision made under another name is outside it (the anchor count below guards the names)."""
     tree = ast.parse((ROOT / "kriya" / "workflow" / "workflow.py").read_text())
     assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)
                    and any(isinstance(t, ast.Name) and t.id in _DECISION_NAMES for t in node.targets)]

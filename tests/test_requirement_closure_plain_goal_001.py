@@ -98,7 +98,7 @@ def test_03_test_immutability_statements(text, expected):
 def test_04_admission_names_the_residual_requirement_and_the_accepted_forms():
     reqs = derive_requirements("Make lower() lower-case its argument.\n" + SUITE)
     closers, residual = deterministic_closers(reqs, test_files=["tests/test_a.py"])
-    assert closers == {"REQ-1": [], "REQ-2": [SUITE_PRESERVATION]}
+    assert closers == {"REQ-1": [], "REQ-2": [SUITE_PRESERVATION, TEST_IMMUTABILITY]}  # "unchanged": both closers
     assert [r["id"] for r in residual] == ["REQ-1"] and "model judgment never closes it" in residual[0]["why"]
     refusal = admission_gap(reqs, test_files=["tests/test_a.py"])
     assert isinstance(refusal, GoalAdmissionError) and refusal.reason_code == GOAL_INSUFFICIENT_FOR_VERIFICATION
@@ -115,7 +115,7 @@ def test_05_a_goal_made_of_closable_statements_is_admitted():
     closers, residual = deterministic_closers(reqs, test_files=["tests/test_a.py"], tracked_paths=["src/cache.py", "tests/test_a.py"])
     # REQ-1 asks for behaviour with no acceptance case: residual even though the file is named
     assert [r["id"] for r in residual] == ["REQ-1"]
-    assert closers["REQ-2"] == [CLOSER_NAMED_TESTS] and closers["REQ-3"] == [SUITE_PRESERVATION]
+    assert closers["REQ-2"] == [CLOSER_NAMED_TESTS] and closers["REQ-3"] == [SUITE_PRESERVATION, TEST_IMMUTABILITY]
     assert closers["REQ-4"] == [TEST_IMMUTABILITY] and closers["REQ-5"] == [CLOSER_MUTATION_SCOPE]
     # with an acceptance case covering REQ-1 the goal is admitted; a scope statement without a named file is not
     assert admission_gap(reqs, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"],
@@ -124,6 +124,14 @@ def test_05_a_goal_made_of_closable_statements_is_admitted():
     scope_only = derive_requirements("Keep things tidy.\n" + SCOPE)
     _, residual = deterministic_closers(scope_only, test_files=[], tracked_paths=["a.py"])
     assert {r["id"] for r in residual} == {"REQ-1", "REQ-2"} and "no referent" in residual[1]["why"]
+
+
+def test_06b_a_named_test_preservation_statement_may_start_with_every(workspace_files=("tests/test_a.py", "tests/test_b.py")):
+    # cohort-2 review F3: "every" is a quantifier of the preservation statement, not a behaviour claim
+    text = "Every existing test in tests/test_a.py and tests/test_b.py must keep passing unchanged."
+    assert requirement_claims(text, list(workspace_files)) == (REGRESSION_PRESERVATION,)
+    closers, residual = deterministic_closers(derive_requirements(text), test_files=list(workspace_files))
+    assert closers["REQ-1"] == [CLOSER_NAMED_TESTS] and residual == []
 
 
 def test_06_a_named_test_with_a_behaviour_claim_still_needs_acceptance():
@@ -135,7 +143,7 @@ def test_06_a_named_test_with_a_behaviour_claim_still_needs_acceptance():
 # ---------------------------------------------------------------- closers: the candidate's own full suite
 def test_07_a_complete_green_full_suite_closes_the_suite_statement(tmp_path):
     root = write_project(tmp_path / "ws", "def test_a():\n    assert True\n\ndef test_b():\n    assert 1 == 1\n")
-    reqs = derive_requirements("Fix it.\n" + SUITE)
+    reqs = derive_requirements("Fix it.\nAll existing tests must keep passing.")  # no "unchanged": the suite alone closes it
     ledger = unverified_ledger(reqs)
     attempts = close_suite_preservation_requirements(
         ledger, reqs, test_files=["tests/test_suite.py"], run_suite=lambda: validator_for(root).run_tests(),
@@ -246,3 +254,94 @@ def test_12_under_a_recording_policy_the_same_goal_is_not_refused(tmp_path, monk
     run = run_edit_protocol(tmp_path, monkeypatch, ["unused"], probe=_probe, goal=UNLOCALIZED_GOAL)
     assert run.result.get("failure_category") != "goal_insufficient_for_verification"
     assert not run.kinds("requirement.admission_refused")
+
+
+# ---------------------------------------------------------------- review reconciliation (2026-10-08)
+@pytest.mark.parametrize("text", ["Make the failing test pass.", "Fix the failing tests.", "Make all tests pass",
+                                  "The tests should fail until the fix lands."])
+def test_13_a_goal_directed_sentence_is_never_a_suite_preservation_statement(text):
+    """Review 5.2: the inherited named-test vocabulary allowed 'make'/'failing' next to a named test; a pure
+    preservation statement never asks for a state change, so these are residual (behaviour), never admitted."""
+    assert not is_suite_preservation_requirement(text)
+    assert BEHAVIOR in requirement_claims(text, [])
+    _, residual = deterministic_closers(derive_requirements(text), test_files=["tests/test_a.py"])
+    assert [r["id"] for r in residual] == ["REQ-1"]
+
+
+def test_14_unchanged_closes_only_with_the_mutation_record(tmp_path):
+    """Review 5.2: a green suite never proves 'unchanged'; the statement needs the run's mutation record too."""
+    from kriya.workflow.requirements import suite_statement_requires_immutability, test_immutability_evidence
+    assert suite_statement_requires_immutability(SUITE) and not suite_statement_requires_immutability("All existing tests must keep passing.")
+    closers, _ = deterministic_closers(derive_requirements(SUITE), test_files=["tests/test_a.py"])
+    assert closers["REQ-1"] == [SUITE_PRESERVATION, TEST_IMMUTABILITY]
+    root = write_project(tmp_path / "ws", "def test_a():\n    assert True\n")
+    reqs = derive_requirements(SUITE)
+    scope = {"run_id": "r", "base_revision": "b", "candidate_revision": "b", "actual_paths": ["src.py"], "foreign_paths": []}
+    clean = test_immutability_evidence(["tests/test_suite.py"], ["tests/test_suite.py"], scope)
+    rewritten = test_immutability_evidence(["tests/test_suite.py"], ["tests/test_suite.py"],
+                                           {**scope, "actual_paths": ["tests/test_suite.py"]})
+    unavailable = test_immutability_evidence(None, [], scope)
+    for evidence, expected in ((clean, RequirementOutcome.CLOSED_BY_EVIDENCE), (rewritten, RequirementOutcome.VIOLATED),
+                               (unavailable, RequirementOutcome.UNVERIFIED), (None, RequirementOutcome.UNVERIFIED)):
+        ledger = unverified_ledger(reqs)
+        [entry] = close_suite_preservation_requirements(
+            ledger, reqs, test_files=["tests/test_suite.py"], run_suite=lambda: validator_for(root).run_tests(),
+            source="t", revision=1, test_immutability=evidence)
+        assert requirement_outcomes(ledger, reqs)["REQ-1"] is expected, (evidence, entry)
+        assert entry["closed"] is (expected is RequirementOutcome.CLOSED_BY_EVIDENCE)
+    # the mapped outcome decides closability for the immutability closer too (review 5.7)
+    reqs = derive_requirements(IMMUTABLE)
+    ledger = unverified_ledger(reqs)
+    [entry] = close_test_immutability_requirements(ledger, reqs, reference_test_files=["tests/test_a.py"],
+                                                   present_test_files=["tests/test_a.py"], scope_evidence=scope,
+                                                   source="t", revision=1)
+    assert entry["closed"] is True
+
+
+@pytest.mark.asyncio
+async def test_15_the_enforce_path_refuses_before_planning_under_production(tmp_path):
+    """Review 5.1/5.4: the controller's admission branch, before retrieval and before the Planner."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from kriya.config import AppConfig
+    from kriya.workflow import workflow_controller as wc
+    from kriya.workflow.plan_schema import ChangeKind
+    from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+    (tmp_path / "app.py").write_text("x = 1\n")
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    cfg.autonomy.requirement_unknown_policy = "block"
+    cfg.autonomy.requirement_unverified_policy = "block"
+    we = MagicMock()
+    we.engineering_triage.classify = AsyncMock(return_value=EngineeringRoute(
+        kind=ChangeKind.TASK, impact=ImpactVector(), initial_risk_class=RiskClass.LOW,
+        current_risk_class=RiskClass.LOW, max_observed_risk_class=RiskClass.LOW, execution_weight=ExecutionWeight.LIGHT))
+    we.kernel = SimpleNamespace(config=cfg)
+    we.planner.run = AsyncMock(return_value="never")
+    we.acceptance = None
+    result = await wc.WorkflowController(we).execute("Add a run() entry point to `app.py`.\n", str(tmp_path), migration_mode="enforce")
+    legacy = result.legacy_result
+    assert legacy["failure_type"] == "GOAL_ADMISSION" and legacy["failure_category"] == "goal_insufficient_for_verification"
+    assert legacy["reason_codes"] == [GOAL_INSUFFICIENT_FOR_VERIFICATION] and legacy["quality_gates_passed"] is False
+    assert legacy["requirements_admission"]["residual"][0]["id"] == "REQ-1"
+    assert we.planner.run.await_count == 0 and not we.run_generation_workflow.called
+
+
+TEST_MODULE = "def test_a():\n    assert True\n"
+ADMITTED_GOAL = "tests/test_a.py must keep passing.\n\nDo not change any existing test.\n"
+
+
+def test_16_an_admitted_goal_whose_closers_cannot_close_still_blocks_at_the_terminal_under_production(tmp_path, monkeypatch):
+    """Review 5.3: the terminal backstop under production, end to end: the goal is admitted (a named test and a
+    test-immutability constraint), the Developer runs once, no closer can bind (spec compliance off: no verdict),
+    and the run stops REQUIREMENTS_UNRESOLVED with nothing applied and no retry."""
+    import _edit_protocol_harness as harness
+    monkeypatch.setattr(harness, "make_config", _blocking_config)
+    run = run_edit_protocol(tmp_path, monkeypatch, [TEST_MODULE.replace("True", "1 == 1")], probe=_probe,
+                            goal=ADMITTED_GOAL, source=TEST_MODULE, target="tests/test_a.py")
+    assert not run.kinds("requirement.admission_refused")
+    assert len(run.developer) == 1
+    assert run.result["quality_gates_passed"] is False and run.result["failure_category"] == "requirements_unresolved"
+    assert run.result["environment_failure"].startswith("REQUIREMENTS_UNRESOLVED:")
+    assert (run.workspace / "tests" / "test_a.py").read_text() == TEST_MODULE  # nothing applied

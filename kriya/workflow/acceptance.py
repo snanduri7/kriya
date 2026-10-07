@@ -296,9 +296,9 @@ def runtime_verification_infrastructure_reason(result: Dict[str, Any]) -> Option
         return "runtime command could not load its configured application entrypoint"
     # D2: a Maven artifact/plugin Kriya's own runtime command needs is a
     # verification prerequisite, never an application defect to repair.
-    if "MAVEN_ACQUISITION_INCOMPLETE:" in output:
-        return (f"{RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE}: a Maven dependency/plugin the runtime command "
-                "needs could not be acquired within one bounded, registry-scoped acquisition")
+    if "MAVEN_ACQUISITION_INCOMPLETE:" in output or "GRADLE_ACQUISITION_INCOMPLETE:" in output:
+        return (f"{RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE}: a Maven/Gradle dependency/plugin the runtime "
+                "command needs could not be acquired within one bounded, registry-scoped acquisition")
     if _MAVEN_PLUGIN_PREFIX_UNRESOLVED.search(output):
         return (f"{MAVEN_PLUGIN_UNAVAILABLE}: the runtime command names a Maven plugin prefix that could not be "
                 "resolved")
