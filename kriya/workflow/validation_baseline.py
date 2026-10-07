@@ -981,6 +981,60 @@ class BaselineDeltaResult:
 
 WHOLE_OUTPUT_AUTHORITY = "whole_output"
 PYTEST_PER_TEST_AUTHORITY = "pytest_per_test"
+
+# REGRESSION-UNATTRIBUTED-PROSE-001: why a blocking full-regression delta
+# carries no candidate-attributable test, decided from its own blocking
+# reasons (never from console text). Keyed on the first fact the delta
+# established, in this order.
+ATTRIBUTION_EVIDENCE_INCOMPLETE = "evidence_incomplete"
+ATTRIBUTION_AGGREGATE_DELTA = "aggregate_delta"
+ATTRIBUTION_PER_TEST_UNATTRIBUTABLE = "per_test_unattributable"
+_EVIDENCE_INCOMPLETE_REASON = "pytest_evidence_incomplete:"
+
+
+def regression_unattributed_diagnosis(delta: "BaselineDeltaResult") -> Tuple[str, str]:
+    """(attribution state, stop message) for a blocking full-regression
+    delta in which no per-test failure could be confirmed as caused by the
+    candidate. The message states only what the delta established:
+
+    - evidence_incomplete: per-test authority was unavailable (the pytest
+      evidence of PRE and/or POST is incomplete, ``pytest_evidence_status``)
+      and the POST suite did not pass. Whether the whole-output fingerprints
+      are equal or differ is reported as such; an aggregate change is never
+      claimed when the fingerprints are equal.
+    - aggregate_delta: the whole-invocation (level 1) comparison itself
+      blocks (a changed or new failure fingerprint) with no attributable test.
+    - per_test_unattributable: only per-test entries or an aggregate count
+      drop block, and every one of them resisted attribution after replay.
+    Every message keeps the ``REGRESSION_UNATTRIBUTED:`` prefix the stop
+    classification keys on (kriya/workflow/retry_strategy.py)."""
+    reasons = tuple(delta.blocking_reasons)
+    incomplete = [r[len(_EVIDENCE_INCOMPLETE_REASON):] for r in reasons if r.startswith(_EVIDENCE_INCOMPLETE_REASON)]
+    structural = [r for r in reasons if not r.startswith(_EVIDENCE_INCOMPLETE_REASON)]
+    level1 = delta.level1.classification.value
+    common = ("This is not a code-fixable defect signal; further Developer regeneration cannot resolve a "
+              "regression block with no attributable test.")
+    if incomplete and not structural:
+        fingerprints = ("equal" if delta.level1.pre_fingerprint == delta.level1.post_fingerprint else "different")
+        return ATTRIBUTION_EVIDENCE_INCOMPLETE, (
+            "REGRESSION_UNATTRIBUTED: the full-regression suite's per-test evidence is incomplete "
+            f"({'; '.join(incomplete)}) and the POST suite did not pass; the whole-output fingerprints of the "
+            f"PRE-mutation baseline and this candidate are {fingerprints} (level1={level1}), which proves nothing "
+            "per test, so no failure can be attributed to this candidate or excused as pre-existing - the gate "
+            f"failed closed. {common}")
+    if any(r.startswith("level1:") for r in structural):
+        return ATTRIBUTION_AGGREGATE_DELTA, (
+            "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the "
+            f"captured PRE-mutation baseline (level1={level1}), but no specific test could be confirmed as caused "
+            "by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was "
+            "independently replayed (in isolation) against both a pristine and a candidate copy and could not be "
+            "confirmed either way (an indeterminate/non-reproducible result is never treated as a known "
+            f"pre-existing failure, only as unattributable). {common}")
+    return ATTRIBUTION_PER_TEST_UNATTRIBUTABLE, (
+        "REGRESSION_UNATTRIBUTED: the full-regression suite blocks on per-test evidence that resisted attribution "
+        f"({'; '.join(structural) or 'no reason recorded'}; level1={level1}) - each entry was replayed in isolation "
+        "against both a pristine and a candidate copy and could not be confirmed either way, so none is treated as "
+        f"a known pre-existing failure, only as unattributable. {common}")
 FIELD_STABLE = "STABLE"
 FIELD_VOLATILE = "VOLATILE"
 FIELD_UNRESOLVED = "UNRESOLVED"

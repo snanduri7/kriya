@@ -351,6 +351,7 @@ from kriya.workflow.validation_baseline import (
     DeltaClassification,
     build_validation_outcome,
     capture_brownfield_baselines,
+    regression_unattributed_diagnosis,
     render_blocking_regression_evidence,
 )
 from kriya.workflow.verification_binding import bind_candidate
@@ -5255,25 +5256,28 @@ class WorkflowEngine:
                             # can fix this" (kriya/workflow/retry_strategy.py),
                             # rather than a bare "regression_test" failure
                             # that would re-enter the ordinary repair loop.
+                            # REGRESSION-UNATTRIBUTED-PROSE-001: the stop
+                            # reason states what the delta established
+                            # (incomplete evidence, an aggregate change, or
+                            # unattributable per-test entries) from its own
+                            # blocking reasons - never an aggregate change
+                            # the fingerprints do not show.
+                            _attribution, _unattributed_message = regression_unattributed_diagnosis(
+                                _baseline_delta_result)
                             failure = Failure(
                                 type="regression_unattributed",
-                                message=(
-                                    "REGRESSION_UNATTRIBUTED: the full-regression suite's "
-                                    "aggregate outcome changed relative to the captured "
-                                    f"PRE-mutation baseline (level1="
-                                    f"{_baseline_delta_result.level1.classification.value}), but no "
-                                    "specific test could be confirmed as caused by this candidate - "
-                                    "every per-test failure either matches the PRE-mutation baseline "
-                                    "exactly, or was independently replayed (in isolation) against "
-                                    "both a pristine and a candidate copy and could not be confirmed "
-                                    "either way (an indeterminate/non-reproducible result is never "
-                                    "treated as a known pre-existing failure, only as unattributable). "
-                                    "This is not a code-fixable defect signal; further Developer "
-                                    "regeneration cannot resolve an aggregate-level delta with no "
-                                    "attributable test."
-                                ),
+                                message=_unattributed_message,
                                 raw_output=full_test_res.get("output", ""),
                                 source="orchestrator", attempt=state.attempt_number,
+                                diagnostics={
+                                    # the typed code itself is set by its
+                                    # producer (retry_strategy, LR-R1-M1 D7)
+                                    # from this message's prefix
+                                    "reason_code": "REGRESSION_UNATTRIBUTED",
+                                    "attribution": _attribution,
+                                    "blocking_reasons": list(_baseline_delta_result.blocking_reasons),
+                                    "pytest_evidence_status": _baseline_delta_result.pytest_evidence_status,
+                                },
                             )
                         else:
                             failure = _build_quality_gate_failure(
