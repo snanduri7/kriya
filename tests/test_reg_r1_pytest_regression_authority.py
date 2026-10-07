@@ -9,7 +9,8 @@ run alone cannot be measured by replaying it alone.
 Invariant: a candidate may be blamed only for a difference that is stable on the untouched baseline, measured in the
 SAME verification context that produced the disputed evidence. Authority order for complete pytest reports: test id,
 outcome, exception type, message, failure body. Whole output is diagnostic when per-test evidence is complete;
-missing/incomplete evidence, baseline outcome/type instability and context mismatch fail closed.
+missing/incomplete evidence and context mismatch fail closed. (REG-R2 replaced the rule that baseline outcome/type
+instability alone fails closed: tests/test_reg_r2_flaky_baseline_envelope.py.)
 
 ``test_01``..``test_18`` are the first required matrix; ``test_c01``..``test_c12`` the context-stability controls;
 the real-pytest tests use tests/_reg_r1_fixture.py.
@@ -30,9 +31,7 @@ from _reg_r1_fixture import (
 from kriya.tools import test_execution
 from kriya.tools.test_execution import PYTEST_CASE_EVIDENCE_VERSION, parse_pytest_case_evidence
 from kriya.workflow.pytest_stability import (
-    BASELINE_OUTCOME_UNSTABLE,
     BASELINE_REPLAYS,
-    BASELINE_TYPE_UNSTABLE,
     classify_with_baseline_stability,
     record_regression_decision,
     verification_context,
@@ -40,7 +39,6 @@ from kriya.workflow.pytest_stability import (
 )
 from kriya.workflow.validation_baseline import (
     FIELD_STABLE,
-    FIELD_UNRESOLVED,
     FIELD_VOLATILE,
     OLD_CHECKPOINT_INSUFFICIENT,
     PYTEST_PER_TEST_AUTHORITY,
@@ -50,6 +48,7 @@ from kriya.workflow.validation_baseline import (
     ValidationBaseline,
     ValidationInvocation,
     ValidationOutcome,
+    baseline_behavior_envelope,
     build_validation_outcome,
     capture_brownfield_baselines,
     classify_baseline_delta,
@@ -117,6 +116,18 @@ def decide(pre, post, *, replay=None, cache=None, post_success=False, revision="
         replay=replay or replays_returning(), current_revision=lambda: revision, working_directory=working_directory)
 
 
+def fields(measurement, key):
+    """The message/body stability of a disputed test whose baseline showed one failing state."""
+    [state] = measurement.envelopes[key].states
+    return dict(state.fields)
+
+
+def record_fields(record):
+    """The same from a retained stability record: (outcome-stable, type-stable, message, body)."""
+    [state] = record["envelope"]["states"]
+    return state["fields"]
+
+
 def outcome_of(evidence, *, success=False, output="out"):
     return ValidationOutcome(execution_status="completed", success=success,
                              failure_fingerprint=None if success else compute_failure_fingerprint(output),
@@ -141,13 +152,13 @@ def test_03_message_varying_on_the_untouched_baseline_is_ignored_for_that_test()
     delta, measurement = decide({KEY: F("m1")}, {KEY: F("m2")}, replay=replay)
     assert delta.level2 == {NODE: D.PRE_EXISTING_FAILURE} and not delta.blocking
     assert delta.volatile_fields_ignored == {NODE: ("message",)}
-    assert measurement.statuses[KEY] == {"message": FIELD_VOLATILE, "body": FIELD_STABLE}
+    assert fields(measurement, KEY) == {"message": FIELD_VOLATILE, "body": FIELD_STABLE}
 
 
 def test_04_message_stable_on_the_untouched_baseline_and_changed_by_the_candidate_blocks():
     stable = raw_result({KEY: F("m1")})
     delta, measurement = decide({KEY: F("m1")}, {KEY: F("m2")}, replay=replays_returning(stable, stable))
-    assert measurement.statuses[KEY] == {"message": FIELD_STABLE, "body": FIELD_STABLE}
+    assert fields(measurement, KEY) == {"message": FIELD_STABLE, "body": FIELD_STABLE}
     assert delta.level2 == {NODE: D.CHANGED_FAILURE} and delta.blocking
     assert delta.blocking_reasons == (f"level2:{NODE}:CHANGED_FAILURE",)
 
@@ -155,24 +166,26 @@ def test_04_message_stable_on_the_untouched_baseline_and_changed_by_the_candidat
 def test_05_body_varying_on_the_untouched_baseline_is_ignored_for_that_test():
     replay = replays_returning(raw_result({KEY: F(body="run A")}), raw_result({KEY: F(body="run B")}))
     delta, measurement = decide({KEY: F(body="b1")}, {KEY: F(body="b2")}, replay=replay)
-    assert measurement.statuses[KEY] == {"message": FIELD_STABLE, "body": FIELD_VOLATILE}
+    assert fields(measurement, KEY) == {"message": FIELD_STABLE, "body": FIELD_VOLATILE}
     assert delta.level2 == {NODE: D.PRE_EXISTING_FAILURE} and delta.volatile_fields_ignored == {NODE: ("body",)}
 
 
-def test_06_exception_type_change_blocks_without_any_replay():
-    replay = replays_returning()
+def test_06_exception_type_change_blocks():
+    """REG-R2: decided against the whole baseline envelope (not the original observation alone); a type the stable
+    baseline never showed is outside it."""
+    replay = replays_returning(raw_result({KEY: F()}))
     delta, measurement = decide({KEY: F()}, {KEY: F(failure_type="KeyError")}, replay=replay)
-    assert delta.level2 == {NODE: D.CHANGED_FAILURE} and delta.blocking and measurement is None
-    assert replay.calls == []
+    assert delta.level2 == {NODE: D.CHANGED_FAILURE} and delta.blocking
+    assert replay.calls == [None, None] and not measurement.envelopes[KEY].flaky
 
 
 def test_06b_failed_to_error_outcome_change_blocks():
-    delta, _ = decide({KEY: F()}, {KEY: F(outcome="error")})
+    delta, _ = decide({KEY: F()}, {KEY: F(outcome="error")}, replay=replays_returning(raw_result({KEY: F()})))
     assert delta.level2 == {NODE: D.CHANGED_FAILURE} and delta.blocking
 
 
 def test_07_pass_to_fail_blocks():
-    delta, _ = decide({KEY: PASSED}, {KEY: F()})
+    delta, _ = decide({KEY: PASSED}, {KEY: F()}, replay=replays_returning(raw_result({KEY: PASSED})))
     assert delta.level2 == {NODE: D.NEW_FAILURE} and delta.blocking
 
 
@@ -195,7 +208,8 @@ def test_10_expected_test_missing_fails_closed(before):
 
 def test_10b_pass_to_skip_and_fail_to_skip_block():
     for before in (PASSED, F()):
-        delta, _ = decide({KEY: before}, {KEY: ("skipped", None, None, None)}, post_success=True)
+        delta, _ = decide({KEY: before}, {KEY: ("skipped", None, None, None)}, post_success=True,
+                          replay=replays_returning(raw_result({KEY: before})))
         assert list(delta.level2.values()) == [D.NEWLY_SKIPPED_OR_NOT_EXECUTED] and delta.blocking
 
 
@@ -350,37 +364,29 @@ def test_c01_c02_real_full_suite_failure_that_passes_alone_is_measured_in_the_fu
     assert calls == [None, None], "two full-suite replays, never the disputed tests alone"
     assert delta.authority == PYTEST_PER_TEST_AUTHORITY and delta.blocking is False
     assert delta.level2[SUITE_DEPENDENT] == D.PRE_EXISTING_FAILURE
-    states = {r["test"]: r for r in measurement.records}[junit_key_for_node_id(SUITE_DEPENDENT)]
-    assert (states["outcome"], states["failure_type"], states["message"]) == (FIELD_STABLE, FIELD_STABLE, FIELD_VOLATILE)
+    record = {r["test"]: r for r in measurement.records}[junit_key_for_node_id(SUITE_DEPENDENT)]
+    assert not record["flaky"] and record_fields(record)["message"] == FIELD_VOLATILE   # one state: outcome+type stable
 
 
 def test_c03_fail_fail_fail_same_type_varying_message_is_volatile_message_stable_outcome():
     replay = replays_returning(raw_result({KEY: F("m-A")}), raw_result({KEY: F("m-B")}))
     _, measurement = decide({KEY: F("m1")}, {KEY: F("m2")}, replay=replay)
     record = measurement.records[0]
-    assert (record["outcome"], record["failure_type"], record["message"], record["body"]) == (
-        FIELD_STABLE, FIELD_STABLE, FIELD_VOLATILE, FIELD_STABLE)
+    assert not record["flaky"] and record_fields(record) == {"message": FIELD_VOLATILE, "body": FIELD_STABLE}
     assert len(record["observations"]) == 1 + BASELINE_REPLAYS
 
 
-def test_c04_fail_pass_fail_baseline_is_outcome_unstable_and_fails_closed():
-    replay = replays_returning(raw_result({KEY: PASSED}), raw_result({KEY: F("m3")}))
+def test_c04_c05_superseded_by_reg_r2():
+    """c04/c05 (baseline outcome or type instability alone fails closed) were the REG-R1 rule that produced the
+    confirmed POST-REG-R1 Arm-A false negative; REG-R2 replaced them with the baseline behavior envelope. The
+    controls that keep the safe half (a state outside the envelope blocks) are in
+    tests/test_reg_r2_flaky_baseline_envelope.py; this keeps the two original baselines as REG-R2 inputs."""
+    replay = replays_returning(raw_result({KEY: PASSED}), raw_result({KEY: F("m3")}))      # FAIL / PASS / FAIL
     delta, measurement = decide({KEY: F("m1")}, {KEY: F("m2")}, replay=replay)
-    record = measurement.records[0]
-    assert record["outcome"] == BASELINE_OUTCOME_UNSTABLE and record["reason"] == BASELINE_OUTCOME_UNSTABLE
-    assert (record["message"], record["body"]) == (FIELD_UNRESOLVED, FIELD_UNRESOLVED)
-    assert delta.level2 == {NODE: D.STABILITY_UNRESOLVED} and delta.blocking
-    replay = replays_returning(raw_result({KEY: F(outcome="error")}), raw_result({KEY: F()}))
-    delta, measurement = decide({KEY: F()}, {KEY: F("m2")}, replay=replay)       # FAIL / ERROR / FAIL
-    assert measurement.records[0]["outcome"] == BASELINE_OUTCOME_UNSTABLE and delta.blocking
-
-
-def test_c05_type_instability_on_the_baseline_fails_closed():
+    assert measurement.records[0]["flaky"] and delta.level2 == {NODE: D.FLAKY_PREEXISTING} and not delta.blocking
     replay = replays_returning(raw_result({KEY: F(failure_type="RuntimeError")}), raw_result({KEY: F()}))
-    delta, measurement = decide({KEY: F()}, {KEY: F("m2")}, replay=replay)
-    record = measurement.records[0]
-    assert record["failure_type"] == BASELINE_TYPE_UNSTABLE and record["message"] == FIELD_UNRESOLVED
-    assert delta.level2 == {NODE: D.STABILITY_UNRESOLVED} and delta.blocking
+    delta, _ = decide({KEY: F()}, {KEY: F(failure_type="KeyError")}, replay=replay)    # a type it never showed
+    assert delta.level2 == {NODE: D.CHANGED_FAILURE} and delta.blocking
 
 
 def test_c06_stable_baseline_message_changed_only_by_the_candidate_blocks():
@@ -466,7 +472,7 @@ def test_c12_candidate_execution_never_contributes_to_volatility():
     stable = raw_result({KEY: F("m1")})
     for candidate in ("candidate A", "candidate B", "candidate C"):
         delta, measurement = decide({KEY: F("m1")}, {KEY: F(candidate)}, replay=replays_returning(stable))
-        assert measurement.statuses[KEY]["message"] == FIELD_STABLE and delta.level2 == {NODE: D.CHANGED_FAILURE}
+        assert fields(measurement, KEY)["message"] == FIELD_STABLE and delta.level2 == {NODE: D.CHANGED_FAILURE}
 
 
 # ---------------------------------------------------------------- unresolved edges: never blame
@@ -485,7 +491,7 @@ def test_an_unobservable_baseline_field_keeps_blocking_without_blaming_the_candi
     delta, measurement = decide({KEY: F()}, {KEY: F("m2")}, replay=make_replay(), revision=revision, cache=cache)
     assert delta.level2 == {NODE: D.STABILITY_UNRESOLVED} and delta.blocking
     assert measurement.records[0]["reason"] == expected_reason
-    assert measurement.statuses[KEY] == {"message": FIELD_UNRESOLVED, "body": FIELD_UNRESOLVED}
+    assert measurement.envelopes[KEY].unresolved == expected_reason and measurement.envelopes[KEY].states == ()
     if expected_reason != "TEST_ABSENT_FROM_REPLAY":
         assert cache == {}, "a failed measurement is never cached"
 
@@ -515,7 +521,7 @@ def test_a_baseline_that_had_drifted_when_the_replays_started_is_never_replayed(
 def test_a_stable_changed_field_is_blamed_even_when_another_differing_field_is_volatile():
     replay = replays_returning(raw_result({KEY: F("m1", "body A")}), raw_result({KEY: F("m1", "body B")}))
     delta, measurement = decide({KEY: F("m1", "b1")}, {KEY: F("changed", "changed too")}, replay=replay)
-    assert measurement.statuses[KEY] == {"message": FIELD_STABLE, "body": FIELD_VOLATILE}
+    assert fields(measurement, KEY) == {"message": FIELD_STABLE, "body": FIELD_VOLATILE}
     assert delta.level2 == {NODE: D.CHANGED_FAILURE}
 
 
@@ -572,7 +578,8 @@ def test_the_cached_measurement_round_trips_through_the_checkpoint_json():
     assert len(replay.calls) == 2 and measurement.records[0]["source"] == "cache"
     assert delta.level2 == {NODE: D.PRE_EXISTING_FAILURE}
     [entry] = restored.values()
-    assert entry["tests"][KEY]["message"] == FIELD_VOLATILE and len(entry["tests"][KEY]["observations"]) == 3
+    assert record_fields(entry["tests"][KEY])["message"] == FIELD_VOLATILE
+    assert len(entry["tests"][KEY]["observations"]) == 3 and entry["tests"][KEY]["envelope_digest"]
 
 
 # ---------------------------------------------------------------- non-pytest runners: no behaviour change
@@ -590,7 +597,8 @@ def test_non_pytest_outcomes_are_decided_exactly_as_before():
                                  failure_fingerprint=None if post_ok else compute_failure_fingerprint(post_out))
         base = ValidationBaseline(workspace_revision="rev", run_id="r", captured_at=0.0, outcome=pre,
                                   invocation=ValidationInvocation("c", "full_suite"))
-        delta = classify_baseline_delta(base, post, stability={KEY: {"message": FIELD_VOLATILE}})
+        envelope = baseline_behavior_envelope([pytest_suite_evidence(raw_result({KEY: F()})).by_key()[KEY]] * 3)
+        delta = classify_baseline_delta(base, post, stability={KEY: envelope})
         assert delta == _whole_output_delta(pre, post, classify_level1_delta(pre, post))
         assert delta.authority == WHOLE_OUTPUT_AUTHORITY and delta.pytest_evidence_status is None
 
@@ -635,7 +643,7 @@ def test_reg_r1_reproducer_untouched_baseline_against_itself_is_no_regression(tm
     assert delta.volatile_fields_ignored == {VARYING_MESSAGE: ("message", "body"), VARYING_BODY: ("body",),
                                              SUITE_DEPENDENT: ("message", "body")}
     assert replay.calls == [None, None]
-    assert {r["test"]: (r["message"], r["body"]) for r in measurement.records} == {
+    assert {r["test"]: tuple(record_fields(r).values()) for r in measurement.records} == {
         junit_key_for_node_id(VARYING_MESSAGE): (FIELD_VOLATILE, FIELD_VOLATILE),
         junit_key_for_node_id(VARYING_BODY): (FIELD_STABLE, FIELD_VOLATILE),
         junit_key_for_node_id(SUITE_DEPENDENT): (FIELD_VOLATILE, FIELD_VOLATILE)}
@@ -687,7 +695,7 @@ def test_gate_result_retains_raw_stdout_stderr_and_junit_and_the_decision_record
     assert payload["stability_context_id"] == measurement.context_id
     assert json.loads(content["comparison"])["level2"] == {NODE: "CHANGED_FAILURE"}
     stability = json.loads(content["stability"])[0]
-    assert (stability["outcome"], stability["failure_type"], stability["message"]) == (FIELD_STABLE,) * 3
+    assert not stability["flaky"] and record_fields(stability)["message"] == FIELD_STABLE
     assert json.loads(content["baseline_cases"])["failing"][0]["key"] == KEY
     assert json.loads(content["post_cases"])["session"] == [list(f) for f in post.pytest_evidence.session]
 

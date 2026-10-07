@@ -143,6 +143,8 @@ class TestOutcome:
 # sides: test identity, outcome, exception type, then message and failure
 # body - the last two only where the UNTOUCHED baseline reproduces them
 # (kriya/workflow/pytest_stability.py measures that; this module stays pure).
+# REG-R2: execution state is judged against the baseline behavior envelope
+# (every untouched-baseline observation of the context, see below).
 
 PYTEST_EVIDENCE_VERSION = 1
 PYTEST_FAILING_OUTCOMES = frozenset({"failed", "error"})
@@ -239,6 +241,90 @@ class PytestSuiteEvidence:
             runner_version=data.get("runner_version"), cases=tuple(sorted(cases, key=lambda c: c.key)),
             session=tuple((str(k), str(v)) for k, v in data.get("session") or ()),
         )
+
+
+# REG-R2: the baseline behavior envelope. A test's execution state is its
+# (outcome, exception type); the envelope is the set of states the UNTOUCHED
+# baseline actually showed in one verification context (the original
+# observation and its same-context replays, none privileged), and, per state,
+# whether the failure message/body reproduce among the observations of that
+# same state. Candidate observations are never an input.
+FIELD_NOT_ESTABLISHED = "STABILITY_NOT_ESTABLISHED"   # a state seen once: no stability evidence either way
+ENVELOPE_STATE = "state"   # stability_required token: the candidate's execution state needs the envelope
+
+
+@dataclass(frozen=True)
+class BaselineStateEvidence:
+    """One execution state of one test on the untouched baseline:
+    ``observations`` how often it was seen; ``fields`` message/body ->
+    FIELD_STABLE (seen at least twice, always the same), FIELD_VOLATILE
+    (differs between same-state observations) or FIELD_NOT_ESTABLISHED (seen
+    once); ``digests`` the distinct digests observed per field. Non-failing
+    states carry no fields."""
+
+    outcome: str
+    failure_type: Optional[str]
+    observations: int
+    fields: Tuple[Tuple[str, str], ...] = ()
+    digests: Tuple[Tuple[str, Tuple[Optional[str], ...]], ...] = ()
+
+    def field_status(self, name: str) -> Optional[str]:
+        return dict(self.fields).get(name)
+
+    def observed_digests(self, name: str) -> Tuple[Optional[str], ...]:
+        return dict(self.digests).get(name, ())
+
+
+@dataclass(frozen=True)
+class BaselineBehaviorEnvelope:
+    """``states`` every execution state the untouched baseline showed;
+    ``unresolved`` says why no envelope could be established (then it carries
+    no authority and the comparison fails closed)."""
+
+    states: Tuple[BaselineStateEvidence, ...] = ()
+    unresolved: Optional[str] = None
+
+    def state(self, case: "PytestCaseSignature") -> Optional[BaselineStateEvidence]:
+        return next((s for s in self.states if (s.outcome, s.failure_type) == (case.outcome, case.failure_type)),
+                    None)
+
+    @property
+    def flaky(self) -> bool:
+        return len(self.states) > 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"unresolved": self.unresolved,
+                "states": [{"outcome": s.outcome, "failure_type": s.failure_type, "observations": s.observations,
+                            "fields": dict(s.fields), "digests": {k: list(v) for k, v in s.digests}}
+                           for s in self.states]}
+
+    @classmethod
+    def unresolved_because(cls, reason: str) -> "BaselineBehaviorEnvelope":
+        return cls(states=(), unresolved=reason)
+
+
+def baseline_behavior_envelope(observations: Sequence[Optional["PytestCaseSignature"]]) -> BaselineBehaviorEnvelope:
+    """The envelope of one test from ALL its untouched-baseline observations
+    in one verification context. A test absent from any of them has no
+    envelope (fail closed)."""
+    if not observations or any(o is None for o in observations):
+        return BaselineBehaviorEnvelope.unresolved_because("TEST_ABSENT_FROM_REPLAY")
+    grouped: Dict[Tuple[str, str], List[PytestCaseSignature]] = {}
+    for case in observations:
+        grouped.setdefault((case.outcome, case.failure_type or ""), []).append(case)
+    states = []
+    for (_outcome, _type), same in sorted(grouped.items()):
+        fields, digests = [], []
+        if same[0].failing:
+            for name in STABILITY_FIELDS:
+                seen = tuple(sorted({c.field_digest(name) for c in same}, key=lambda d: d or ""))
+                status = (FIELD_NOT_ESTABLISHED if len(same) == 1
+                          else FIELD_STABLE if len(seen) == 1 else FIELD_VOLATILE)
+                fields.append((name, status))
+                digests.append((name, seen))
+        states.append(BaselineStateEvidence(outcome=same[0].outcome, failure_type=same[0].failure_type,
+                                            observations=len(same), fields=tuple(fields), digests=tuple(digests)))
+    return BaselineBehaviorEnvelope(states=tuple(states))
 
 
 def junit_key_for_node_id(node_id: str) -> str:
@@ -734,6 +820,11 @@ class DeltaClassification(str, Enum):
     # whether the untouched baseline reproduces that field is not (yet)
     # established - blocks, but never blames the candidate.
     STABILITY_UNRESOLVED = "STABILITY_UNRESOLVED"
+    # REG-R2: the candidate's state of an existing test is one the untouched
+    # baseline itself showed in the same verification context, and that
+    # baseline showed more than one state - not attributed, not blocking.
+    # Whether the candidate changed the flake RATE is not assessed.
+    FLAKY_PREEXISTING = "FLAKY_PREEXISTING"
 
 
 # Conservative-by-default blocking set - "fail conservatively" for anything
@@ -883,6 +974,9 @@ class BaselineDeltaResult:
     stability_required: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     volatile_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     pytest_evidence_status: Optional[str] = None
+    # REG-R2: fields ignored because their stability among the baseline's
+    # observations of that state is not established (seen once).
+    unestablished_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 WHOLE_OUTPUT_AUTHORITY = "whole_output"
@@ -897,32 +991,48 @@ class PytestPerTestDelta:
     level2: Dict[str, DeltaClassification]
     stability_required: Dict[str, Tuple[str, ...]]
     volatile_fields_ignored: Dict[str, Tuple[str, ...]]
+    unestablished_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 def classify_pytest_per_test_delta(
     pre: PytestSuiteEvidence, post: PytestSuiteEvidence,
-    *, stability: Optional[Dict[str, Dict[str, str]]] = None,
+    *, stability: Optional[Dict[str, BaselineBehaviorEnvelope]] = None,
 ) -> PytestPerTestDelta:
-    """REG-R1 per-test authority over two COMPLETE pytest reports.
+    """REG-R1/REG-R2 per-test authority over two COMPLETE pytest reports.
 
-    Authority order: test identity, outcome, exception type, then message
-    and failure body. A test of PRE missing from POST is
-    NEWLY_SKIPPED_OR_NOT_EXECUTED; PASS/SKIP -> FAIL/ERROR (or a new failing
-    test) is NEW_FAILURE; FAIL<->ERROR or another exception type is
-    CHANGED_FAILURE; FAIL -> PASS is RESOLVED_FAILURE. For a test failing the
-    same way on both sides, a differing message/body counts only where
-    ``stability`` (test key -> field -> FIELD_*, measured on the untouched
-    baseline alone) says the baseline reproduces it: a STABLE field that
-    changed is CHANGED_FAILURE; VOLATILE fields lose authority for that test
-    (it is PRE_EXISTING_FAILURE when nothing stable changed); a field not
-    yet measured, or UNRESOLVED, is STABILITY_UNRESOLVED (blocking, never
-    candidate-attributed). Unchanged passing/skipped tests are not listed.
-    Keys of ``level2`` are console node ids where known, else JUnit keys."""
+    Authority order: test identity, execution state (outcome, exception
+    type), then message and failure body. Never enveloped: a test of PRE
+    missing from POST is NEWLY_SKIPPED_OR_NOT_EXECUTED and a failing test
+    PRE never had is NEW_FAILURE. Against the original baseline observation:
+    PASS/SKIP -> FAIL/ERROR is NEW_FAILURE, FAIL<->ERROR or another exception
+    type CHANGED_FAILURE, PASS -> SKIP or FAIL -> SKIP
+    NEWLY_SKIPPED_OR_NOT_EXECUTED, FAIL -> PASS RESOLVED_FAILURE; a failure
+    in the same state whose message/body differ is STABILITY_UNRESOLVED.
+    Each blocking one of those is only provisional: it is listed in
+    ``stability_required`` and decided by the test's baseline behavior
+    envelope (``stability``: test key -> envelope, measured on the untouched
+    baseline alone, the original observation not privileged):
+
+    - no envelope (not measured, or unresolved) -> the provisional verdict
+      stands; a same-state message/body dispute is STABILITY_UNRESOLVED
+      (blocking, never candidate-attributed);
+    - candidate state outside the envelope -> the provisional verdict (blocks);
+    - candidate state inside it: a message/body that is STABLE among the
+      baseline's observations of THAT state and that the candidate changed
+      is CHANGED_FAILURE; VOLATILE and STABILITY_NOT_ESTABLISHED fields lose
+      authority; otherwise FLAKY_PREEXISTING when the baseline showed more
+      than one state, else PRE_EXISTING_FAILURE.
+
+    A known envelope also relabels a non-blocking FAIL -> PASS whose PASS the
+    baseline showed as FLAKY_PREEXISTING (never measured just for that).
+    Unchanged passing/skipped tests are not listed. Keys of ``level2`` are
+    console node ids where known, else JUnit keys."""
     stability = stability or {}
     pre_cases, post_cases = pre.by_key(), post.by_key()
     level2: Dict[str, DeltaClassification] = {}
     required: Dict[str, Tuple[str, ...]] = {}
     ignored: Dict[str, Tuple[str, ...]] = {}
+    unestablished: Dict[str, Tuple[str, ...]] = {}
     for key in sorted(set(pre_cases) | set(post_cases)):
         before, after = pre_cases.get(key), post_cases.get(key)
         shown = (after.node_id if after is not None else None) or (before.node_id if before else None) or key
@@ -933,37 +1043,67 @@ def classify_pytest_per_test_delta(
             if after.failing:
                 level2[shown] = DeltaClassification.NEW_FAILURE
             continue
-        if not before.failing:
-            if after.failing:
-                level2[shown] = DeltaClassification.NEW_FAILURE
-            elif before.outcome == "passed" and after.outcome == "skipped":
-                level2[shown] = DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED
-            continue
-        if not after.failing:
-            level2[shown] = (DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED if after.outcome == "skipped"
-                             else DeltaClassification.RESOLVED_FAILURE)
-            continue
-        if before.outcome != after.outcome or before.failure_type != after.failure_type:
-            level2[shown] = DeltaClassification.CHANGED_FAILURE
-            continue
-        differing = tuple(name for name in STABILITY_FIELDS if before.field_digest(name) != after.field_digest(name))
-        if not differing:
-            level2[shown] = DeltaClassification.PRE_EXISTING_FAILURE
-            continue
-        measured = stability.get(key)
-        if measured is None:
-            required[key] = differing
-            level2[shown] = DeltaClassification.STABILITY_UNRESOLVED
-            continue
-        statuses = {name: measured.get(name) for name in differing}
-        if any(status == FIELD_STABLE for status in statuses.values()):
-            level2[shown] = DeltaClassification.CHANGED_FAILURE
-        elif all(status == FIELD_VOLATILE for status in statuses.values()):
-            level2[shown] = DeltaClassification.PRE_EXISTING_FAILURE
-            ignored[shown] = differing
+        same_state = (before.outcome, before.failure_type) == (after.outcome, after.failure_type)
+        differing: Tuple[str, ...] = ()
+        if same_state:
+            if not after.failing:
+                continue
+            differing = tuple(name for name in STABILITY_FIELDS
+                              if before.field_digest(name) != after.field_digest(name))
+            if not differing:
+                level2[shown] = DeltaClassification.PRE_EXISTING_FAILURE
+                continue
+            provisional = DeltaClassification.STABILITY_UNRESOLVED
+        elif not after.failing:
+            if after.outcome == "skipped":
+                provisional = DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED
+            elif before.failing:
+                provisional = DeltaClassification.RESOLVED_FAILURE
+            else:
+                continue   # SKIP -> PASS
+        elif not before.failing:
+            provisional = DeltaClassification.NEW_FAILURE
         else:
-            level2[shown] = DeltaClassification.STABILITY_UNRESOLVED
-    return PytestPerTestDelta(level2=level2, stability_required=required, volatile_fields_ignored=ignored)
+            provisional = DeltaClassification.CHANGED_FAILURE
+        envelope = stability.get(key)
+        if provisional not in TERMINAL_BLOCKING_CLASSIFICATIONS:
+            known = envelope.state(after) if envelope is not None and envelope.unresolved is None else None
+            level2[shown] = DeltaClassification.FLAKY_PREEXISTING if known is not None else provisional
+            continue
+        if envelope is None:
+            required[key] = differing or (ENVELOPE_STATE,)
+            level2[shown] = provisional
+            continue
+        state = envelope.state(after) if envelope.unresolved is None else None
+        if state is None:
+            # Outside the demonstrated envelope (or none): a same-state
+            # dispute can only land here without an envelope - unresolved.
+            level2[shown] = (DeltaClassification.STABILITY_UNRESOLVED if same_state else provisional)
+            continue
+        changed, volatile, not_established = [], [], []
+        for name in STABILITY_FIELDS if after.failing else ():
+            if after.field_digest(name) in state.observed_digests(name):
+                continue   # the baseline showed exactly this in this state
+            status = state.field_status(name)
+            if status == FIELD_STABLE:
+                changed.append(name)
+            elif status == FIELD_VOLATILE:
+                volatile.append(name)
+            elif status == FIELD_NOT_ESTABLISHED:
+                not_established.append(name)
+            else:
+                changed.append(name)   # a failing state without field evidence is never excused
+        if changed:
+            level2[shown] = DeltaClassification.CHANGED_FAILURE
+            continue
+        level2[shown] = (DeltaClassification.FLAKY_PREEXISTING if envelope.flaky
+                         else DeltaClassification.PRE_EXISTING_FAILURE)
+        if volatile:
+            ignored[shown] = tuple(volatile)
+        if not_established:
+            unestablished[shown] = tuple(not_established)
+    return PytestPerTestDelta(level2=level2, stability_required=required, volatile_fields_ignored=ignored,
+                              unestablished_fields_ignored=unestablished)
 
 
 def _aggregate_count_drop(pre: ValidationOutcome, post: ValidationOutcome) -> bool:
@@ -1028,7 +1168,7 @@ def _whole_output_delta(pre: ValidationOutcome, post: ValidationOutcome, level1:
 
 def _pytest_delta(
     pre: ValidationOutcome, post: ValidationOutcome, level1: Level1Delta,
-    stability: Optional[Dict[str, Dict[str, str]]],
+    stability: Optional[Dict[str, BaselineBehaviorEnvelope]],
 ) -> BaselineDeltaResult:
     """REG-R1: a comparison where either side is a pytest run. Both sides
     complete -> per-test authority (level 1 diagnostic only). Otherwise the
@@ -1056,12 +1196,13 @@ def _pytest_delta(
         blocking=bool(reasons), blocking_reasons=tuple(reasons), level2_available=True,
         authority=PYTEST_PER_TEST_AUTHORITY, stability_required=per_test.stability_required,
         volatile_fields_ignored=per_test.volatile_fields_ignored, pytest_evidence_status="complete",
+        unestablished_fields_ignored=per_test.unestablished_fields_ignored,
     )
 
 
 def classify_baseline_delta(
     baseline: ValidationBaseline, post: ValidationOutcome, *, post_environment: Optional[str] = None,
-    stability: Optional[Dict[str, Dict[str, str]]] = None,
+    stability: Optional[Dict[str, BaselineBehaviorEnvelope]] = None,
 ) -> BaselineDeltaResult:
     """The one entry point kriya/workflow/workflow.py calls. Requires
     baseline.status == "captured" and baseline.outcome is not None - a

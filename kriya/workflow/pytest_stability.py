@@ -1,13 +1,14 @@
-"""REG-R1: baseline field stability for the pytest per-test regression authority.
+"""REG-R1/REG-R2: the baseline behavior envelope for the pytest per-test regression authority.
 
 Invariant: a candidate may be blamed only for a difference that is stable on
 the untouched baseline - and stability is measured in the SAME verification
 context that produced the disputed evidence.
 
-When a test fails the same way (identity, outcome, exception type) before and
-after the candidate but its message or failure body differs,
+When the candidate's result of an existing test differs from the original
+baseline observation in a way that would block (another execution state, or
+the same failing state with another message or failure body),
 ``kriya/workflow/validation_baseline.py`` reports it as ``stability_required``
-instead of blaming the candidate. This module then re-runs the baseline's own
+instead of deciding from that one observation. This module then re-runs the baseline's own
 verification - the exact gate call that captured the baseline (same
 workspace, working directory, runtime, environment, command and test
 selection; a full-suite baseline is replayed as the full suite, never as the
@@ -17,14 +18,16 @@ disputed test alone) - ``BASELINE_REPLAYS`` times on the untouched baseline:
   replays, and each replay's pytest session facts (versions, root, config,
   test paths, plugin set) must equal the baseline's; otherwise every disputed
   field is UNRESOLVED;
-- per disputed test, from the original observation plus the replays:
-  outcome and exception type must be identical in all of them - a baseline
-  that changes outcome (BASELINE_OUTCOME_UNSTABLE) or type
-  (BASELINE_TYPE_UNSTABLE) in the same context is never permission: the
-  message and body are UNRESOLVED and the comparison fails closed; with both
-  stable, a message/body identical in every observation is STABLE (a
-  candidate that changes it is blamed) and one that differs is VOLATILE (it
-  loses authority for that test only).
+- per disputed test, the original observation and the replays together
+  (none privileged) are its baseline behavior envelope
+  (``validation_baseline.baseline_behavior_envelope``): the set of execution
+  states (outcome, exception type) the untouched baseline showed and, per
+  state, whether message/body reproduce among the observations of that same
+  state (STABLE / VOLATILE / STABILITY_NOT_ESTABLISHED when seen once). A
+  candidate state outside the envelope blocks; inside it, only a STABLE
+  same-state field the candidate changed blocks (REG-R2; whether the
+  candidate changed a flaky test's failure rate is not assessed). A test
+  absent from any replay has no envelope (fail closed).
 
 Candidate observations are never an input. The replays are taken once per
 verification context (``verification_context_id``: policy, evidence and
@@ -48,36 +51,34 @@ from typing import Any, Callable, Dict, List, MutableMapping, Optional, Sequence
 
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.validation_baseline import (
-    FIELD_STABLE,
-    FIELD_UNRESOLVED,
-    FIELD_VOLATILE,
     PYTEST_EVIDENCE_VERSION,
-    STABILITY_FIELDS,
+    BaselineBehaviorEnvelope,
     BaselineDeltaResult,
+    DeltaClassification,
     PytestCaseSignature,
     PytestSuiteEvidence,
     ValidationBaseline,
     ValidationOutcome,
+    baseline_behavior_envelope,
     classify_baseline_delta,
     pytest_suite_evidence,
 )
 
 logger = logging.getLogger(__name__)
 
-STABILITY_POLICY_VERSION = 2   # 2: same-context replays (1 replayed the disputed tests alone)
+# 3: REG-R2 behavior envelope; 2: same-context replays (1 replayed the disputed tests alone)
+STABILITY_POLICY_VERSION = 3
 BASELINE_REPLAYS = 2
-BASELINE_OUTCOME_UNSTABLE = "BASELINE_OUTCOME_UNSTABLE"
-BASELINE_TYPE_UNSTABLE = "BASELINE_TYPE_UNSTABLE"
-_STATE_FIELDS = ("outcome", "failure_type", *STABILITY_FIELDS)
+FLAKE_RATE_REGRESSION = "NOT_ASSESSED"   # three baseline observations and one candidate run cannot support it
 
 
 @dataclass
 class StabilityMeasurement:
-    """``statuses``: test key -> {"message", "body"} -> FIELD_*, for every
+    """``envelopes``: test key -> its baseline behavior envelope, for every
     disputed test. ``records``: one evidence entry per test."""
 
     context_id: Optional[str] = None
-    statuses: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    envelopes: Dict[str, BaselineBehaviorEnvelope] = field(default_factory=dict)
     records: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -130,23 +131,13 @@ def _measure_context(
 
 def classify_baseline_observations(original: PytestCaseSignature,
                                    replayed: Sequence[Optional[PytestCaseSignature]]) -> Dict[str, Any]:
-    """One test's field stability from its original baseline observation and
-    its same-context replays."""
+    """One test's baseline behavior envelope from its original baseline
+    observation and its same-context replays, as an evidence entry."""
     observed = [original, *replayed]
-    if any(o is None for o in observed):
-        states: Dict[str, Any] = {"outcome": FIELD_UNRESOLVED, "failure_type": FIELD_UNRESOLVED}
-        reason: Optional[str] = "TEST_ABSENT_FROM_REPLAY"
-    else:
-        states = {"outcome": FIELD_STABLE if len({o.outcome for o in observed}) == 1 else BASELINE_OUTCOME_UNSTABLE,
-                  "failure_type": FIELD_STABLE if len({o.failure_type for o in observed}) == 1
-                  else BASELINE_TYPE_UNSTABLE}
-        reason = next((state for state in states.values() if state != FIELD_STABLE), None)
-    for name in STABILITY_FIELDS:
-        if reason is not None:
-            states[name] = FIELD_UNRESOLVED
-        else:
-            states[name] = FIELD_STABLE if len({o.field_digest(name) for o in observed}) == 1 else FIELD_VOLATILE
-    return {**states, "reason": reason,
+    envelope = baseline_behavior_envelope(observed)
+    data = envelope.to_dict()
+    return {"envelope": data, "envelope_digest": content_revision(json.dumps(data, sort_keys=True)),
+            "flaky": envelope.flaky, "reason": envelope.unresolved,
             "observations": [o.identity() if o is not None else None for o in observed]}
 
 
@@ -157,8 +148,8 @@ def establish_baseline_stability(
     current_revision: Callable[[], Optional[str]], working_directory: str,
 ) -> StabilityMeasurement:
     """Measure, in the baseline's own verification context and on the
-    untouched baseline only, whether each disputed test's message and body
-    reproduce (see the module docstring). ``replay(selection)`` is the
+    untouched baseline only, each disputed test's behavior envelope (see the
+    module docstring). ``replay(selection)`` is the
     baseline's own gate call; ``current_revision()`` is the pristine
     workspace's content revision now."""
     context = verification_context(baseline, working_directory=working_directory)
@@ -176,13 +167,17 @@ def establish_baseline_stability(
     replayed = [PytestSuiteEvidence.from_dict(r).by_key() for r in entry["replays"]] if entry is not None else []
     for key in sorted(required):
         if failure is not None or key not in pre_cases:
-            result: Dict[str, Any] = {name: FIELD_UNRESOLVED for name in _STATE_FIELDS}
-            result["reason"] = failure or "NOT_IN_BASELINE"
+            envelope = BaselineBehaviorEnvelope.unresolved_because(failure or "NOT_IN_BASELINE")
+            result: Dict[str, Any] = {"envelope": envelope.to_dict(), "envelope_digest": None, "flaky": False,
+                                      "reason": envelope.unresolved, "observations": []}
         else:
-            result = classify_baseline_observations(pre_cases[key], [r.get(key) for r in replayed])
+            observed = [pre_cases[key], *(r.get(key) for r in replayed)]
+            envelope = baseline_behavior_envelope(observed)
+            result = classify_baseline_observations(observed[0], observed[1:])
             entry["tests"][key] = result
-        measurement.statuses[key] = {name: result[name] for name in STABILITY_FIELDS}
-        measurement.records.append({"test": key, "context_id": context_id, "source": source, **result})
+        measurement.envelopes[key] = envelope
+        measurement.records.append({"test": key, "context_id": context_id, "source": source,
+                                    "disputed": list(required[key]), **result})
     return measurement
 
 
@@ -193,8 +188,8 @@ def classify_with_baseline_stability(
     current_revision: Callable[[], Optional[str]], working_directory: str,
 ) -> Tuple[BaselineDeltaResult, Optional[StabilityMeasurement]]:
     """``classify_baseline_delta``, then - only when per-test authority
-    disputes a message/body - the same-context baseline stability of those
-    tests, and the final classification with it."""
+    disputes a test's state or message/body - the same-context baseline
+    behavior envelope of those tests, and the final classification with it."""
     delta = classify_baseline_delta(baseline, post, post_environment=post_environment)
     if not delta.stability_required:
         return delta, None
@@ -202,7 +197,7 @@ def classify_with_baseline_stability(
         baseline=baseline, required=delta.stability_required, cache=cache, replay=replay,
         current_revision=current_revision, working_directory=working_directory)
     return (classify_baseline_delta(baseline, post, post_environment=post_environment,
-                                    stability=measurement.statuses), measurement)
+                                    stability=measurement.envelopes), measurement)
 
 
 def decision_summary(delta: BaselineDeltaResult, measurement: Optional[StabilityMeasurement]) -> Dict[str, Any]:
@@ -212,10 +207,19 @@ def decision_summary(delta: BaselineDeltaResult, measurement: Optional[Stability
         "pytest_evidence_status": delta.pytest_evidence_status,
         "diagnostic_level1": delta.level1.classification.value,
         "volatile_fields_ignored": {k: list(v) for k, v in delta.volatile_fields_ignored.items()},
+        "unestablished_fields_ignored": {k: list(v) for k, v in delta.unestablished_fields_ignored.items()},
+        "flaky_preexisting": _flaky_preexisting(delta),
         "stability_context_id": measurement.context_id if measurement is not None else None,
-        "stability": ([{k: r.get(k) for k in ("test", "source", "reason", *_STATE_FIELDS)}
+        "stability": ([{k: r.get(k) for k in ("test", "source", "disputed", "reason", "flaky", "envelope_digest",
+                                              "envelope")}
                        for r in measurement.records] if measurement is not None else []),
     }
+
+
+def _flaky_preexisting(delta: BaselineDeltaResult) -> Dict[str, str]:
+    """Every FLAKY_PREEXISTING test with its (explicitly unassessed) flake-rate verdict."""
+    return {test: FLAKE_RATE_REGRESSION for test, classification in delta.level2.items()
+            if classification is DeltaClassification.FLAKY_PREEXISTING}
 
 
 def record_regression_decision(
@@ -247,6 +251,8 @@ def record_regression_decision(
                 "level2": {k: v.value for k, v in delta.level2.items()},
                 "stability_required": {k: list(v) for k, v in delta.stability_required.items()},
                 "volatile_fields_ignored": {k: list(v) for k, v in delta.volatile_fields_ignored.items()},
+                "unestablished_fields_ignored": {k: list(v) for k, v in delta.unestablished_fields_ignored.items()},
+                "flaky_preexisting": _flaky_preexisting(delta),
                 "aggregate_drop_detected": delta.aggregate_drop_detected,
             }, sort_keys=True),
             "stability": json.dumps(measurement.records if measurement is not None else [], sort_keys=True),

@@ -54,8 +54,8 @@ def test_reg_r1_a_candidate_that_changes_no_outcome_survives_run_varying_pre_exi
     # measured in the same (full-suite) context: the suite-dependent failure passes alone, fails in every suite run
     stability = __import__("json").loads(observed.run.blob(decision["blobs"]["stability"]))
     suite_dependent = [r for r in stability if r["test"] == "tests.test_suite::test_z_fails_only_under_the_full_suite"]
-    assert [(r["outcome"], r["failure_type"], r["message"]) for r in suite_dependent] == [
-        ("STABLE", "STABLE", "VOLATILE")]
+    assert [(r["flaky"], [s["fields"]["message"] for s in r["envelope"]["states"]]) for r in suite_dependent] == [
+        (False, ["VOLATILE"])]                                   # one state (outcome and type stable), message volatile
     # the stability replays ran as the baseline's own full-suite gate (their raw evidence retained): baseline, POST
     # and exactly two same-context replays, each a full-suite run reporting every test of the suite
     full_suite_runs = [r for r in observed.of("gate.result")
@@ -78,5 +78,6 @@ def test_reg_r1_a_baseline_that_its_own_run_changed_cannot_excuse_a_difference_a
     assert decision["payload"]["blocking"] is True and decision["payload"]["authority"] == "pytest_per_test"
     assert "CHANGED_FAILURE" not in comparison["level2"].values() and "NEW_FAILURE" not in comparison["level2"].values()
     assert {r["reason"] for r in stability} == {"BASELINE_REVISION_CHANGED"}
-    assert {r["message"] for r in stability} == {"UNRESOLVED"}
+    assert {(r["envelope"]["unresolved"], len(r["envelope"]["states"])) for r in stability} == {
+        ("BASELINE_REVISION_CHANGED", 0)}
     assert observed.result["quality_gates_passed"] is False

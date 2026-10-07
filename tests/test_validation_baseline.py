@@ -768,9 +768,19 @@ def test_20_synthetic_brownfield_repo_only_new_failure_attributed(tmp_path):
     # baseline proves whether that body reproduces. Stable -> the candidate's
     # change of it is CHANGED_FAILURE; volatile -> it is PRE_EXISTING.
     assert per_test.get("tests/test_sample.py::test_pre_existing_bug") == DeltaClassification.STABILITY_UNRESOLVED
-    assert result.stability_required == {"tests.test_sample::test_pre_existing_bug": ("body",)}
-    stable = {"tests.test_sample::test_pre_existing_bug": {"message": FIELD_STABLE, "body": FIELD_STABLE}}
-    volatile = {"tests.test_sample::test_pre_existing_bug": {"message": FIELD_STABLE, "body": FIELD_VOLATILE}}
+    # REG-R2: the new failure of an existing test is also decided by the
+    # baseline behavior envelope (the original observation is not privileged).
+    assert result.stability_required == {"tests.test_sample::test_pre_existing_bug": ("body",),
+                                         "tests.test_sample::test_previously_passing": ("state",)}
+    from dataclasses import replace as _replace
+    bug = baseline.outcome.pytest_evidence.by_key()["tests.test_sample::test_pre_existing_bug"]
+    stable = {"tests.test_sample::test_pre_existing_bug": baseline_model.baseline_behavior_envelope([bug] * 3)}
+    volatile = {"tests.test_sample::test_pre_existing_bug": baseline_model.baseline_behavior_envelope(
+        [bug, _replace(bug, body_digest="another run"), bug])}
+    assert dict(stable["tests.test_sample::test_pre_existing_bug"].states[0].fields) == {
+        "message": FIELD_STABLE, "body": FIELD_STABLE}
+    assert dict(volatile["tests.test_sample::test_pre_existing_bug"].states[0].fields) == {
+        "message": FIELD_STABLE, "body": FIELD_VOLATILE}
     assert classify_baseline_delta(baseline, post_outcome, stability=stable).level2[
         "tests/test_sample.py::test_pre_existing_bug"] == DeltaClassification.CHANGED_FAILURE
     assert classify_baseline_delta(baseline, post_outcome, stability=volatile).level2[
@@ -799,7 +809,10 @@ def test_20c_untouched_pre_existing_failure_stays_pre_existing_and_only_the_new_
     post_raw = PolymorphicValidator(str(repo), original_workspace_path=str(repo),
                                     autonomy_cfg=AppConfig().autonomy).run_tests()
     result = classify_baseline_delta(baseline, build_validation_outcome(post_raw))
-    assert result.authority == PYTEST_PER_TEST_AUTHORITY and result.stability_required == {}
+    # REG-R2: the new failure of an existing test is decided by the baseline
+    # behavior envelope once measured; unmeasured, it stays NEW_FAILURE.
+    assert result.authority == PYTEST_PER_TEST_AUTHORITY
+    assert result.stability_required == {"tests.test_sample::test_previously_passing": ("state",)}
     assert result.level2 == {
         "tests/test_sample.py::test_pre_existing_bug": DeltaClassification.PRE_EXISTING_FAILURE,
         "tests/test_sample.py::test_previously_passing": DeltaClassification.NEW_FAILURE,
