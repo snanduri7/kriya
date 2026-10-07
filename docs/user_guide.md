@@ -410,6 +410,14 @@ runtime fingerprint, the inference settings, Kriya's protocol adapter or the qua
 records written before inference settings were part of the identity (policy `kriya-qualification/2`) are stale and
 must be re-qualified. A record is also stale when the **qualification policy settings** change.
 
+The served identity must stay the same for the whole run (QUALIFICATION-ARTIFACT-STABILITY-001): `kriya model
+qualify` re-observes the runtime fingerprint at the start, before and after every case and at the close, and the
+record seals those observations (`identity_stability`). If the provider changes what the tag serves while the run is
+alive (Ollama 0.40 rewrites a model on first load when it applies compatibility conversions, for example), the run
+stops with `ARTIFACT_CHANGED`, exits 1 and writes **no** record; the diagnostic (baseline digest, every observation,
+the cases that had passed) goes to stderr and to `--out`. Re-qualify once the artifact is stable. A run that saw
+another identity stays invalid even if the tag later serves the original artifact again.
+
 **Qualification policy (`model_qualification`, QUAL-CONFIG-001).** How the cases are run is configuration, not code:
 each case's output budget (`model_qualification.cases.<case>.max_tokens`), the `context_capacity` probe's answer
 budget, `headroom_tokens`, `min_fill_ratio` and `request_timeout_seconds`, the `cancellation_semantics` timing bounds,

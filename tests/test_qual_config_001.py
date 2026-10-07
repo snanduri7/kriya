@@ -133,7 +133,8 @@ def test_run_qualification_takes_the_reasoning_flag_from_the_identity_qualified(
     def budget(settings):
         llm = FakeLLM(_result(tool_calls=[_call("save_note", text=mq.NOTE_TEXT)]))
         record = asyncio.run(mq.run_qualification(cfg, MODEL, llm=llm, fingerprint=_fp(),
-                                                  only=["tool_argument_integrity"], settings=settings))
+                                                  only=["tool_argument_integrity"], settings=settings,
+                                                  identity_observer=_fp))
         return llm.calls[0]["max_tokens_override"], record
 
     assert budget(_settings(reasoning=True))[0] == 3000

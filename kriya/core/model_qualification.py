@@ -84,6 +84,15 @@ from kriya.core.provider_contract import (
     budget_window,
     consumption_bytes,
 )
+from kriya.core.qualification_identity import (
+    AFTER_CASE,
+    ARTIFACT_CHANGED,
+    BEFORE_CASE,
+    CLOSE,
+    START,
+    IdentityObserver,
+    QualificationIdentityGuard,
+)
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
@@ -231,6 +240,27 @@ class QualificationError(RuntimeError):
 
 class QualificationPathInsideWorkspaceError(QualificationError):
     pass
+
+
+class QualificationArtifactChangedError(QualificationError):
+    """QUALIFICATION-ARTIFACT-STABILITY-001: the served runtime identity
+    changed while the run was alive. The run is invalid, no record is
+    written; ``diagnostic`` holds the baseline, every identity observation
+    and the cases whose evidence had been attributed before the change."""
+
+    def __init__(self, model: str, evidence: Dict[str, Any]) -> None:
+        change = evidence.get("change") or {}
+        self.diagnostic = {"status": ARTIFACT_CHANGED, "model": model, "identity_stability": evidence}
+        where = change.get("boundary")
+        if change.get("capability"):
+            where = f"{where} {change['capability']}"
+        completed = len(change.get("cases_completed") or ())
+        super().__init__(
+            f"{ARTIFACT_CHANGED}: {model!r} cannot be qualified - the served runtime identity changed during "
+            f"qualification (baseline {change.get('baseline_digest')}, observed {change.get('observed_digest')} "
+            f"at {where}; {completed} case(s) had passed under the baseline). No qualification record was "
+            "written; re-qualify once the artifact is stable."
+        )
 
 
 @dataclass
@@ -543,6 +573,11 @@ def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntim
         )
     if record.get("schema_version") != QUALIFICATION_SCHEMA_VERSION:
         reasons.append("the qualification record schema changed")
+    stability = record.get("identity_stability")
+    if isinstance(stability, dict) and stability.get("stable") is not True:
+        # QUALIFICATION-ARTIFACT-STABILITY-001: identity evidence is present
+        # and does not vouch for the run (never written by Kriya; fails closed).
+        reasons.append("the runtime identity was not stable for the whole qualification run")
     wanted = _current_policy_digest(policy_digest)
     if record_policy_digest(record) != wanted:
         reasons.append(
@@ -1443,9 +1478,17 @@ async def run_qualification(
     progress: Optional[Callable[[CaseResult], None]] = None,
     context_window: Optional[int] = None,
     settings: Optional[InferenceSettings] = None,
+    identity_observer: Optional[IdentityObserver] = None,
 ) -> Dict[str, Any]:
     """Run the protocol cases against the configured endpoint for one exact
     runtime and return the record (the caller saves it).
+
+    QUALIFICATION-ARTIFACT-STABILITY-001: the served identity is re-observed
+    (``identity_observer``, default a fresh probe of the same binding) at the
+    start, before and after every case and at the close; the run stops with
+    ``QualificationArtifactChangedError`` the moment an observation differs
+    from ``fingerprint``, and no record is produced. A case's evidence is
+    attributed only after its post-case observation matched.
 
     ``settings`` are the inference settings qualified (default: what the
     Developer sends ``model`` with, ``role_inference_settings``); every case
@@ -1499,18 +1542,36 @@ async def run_qualification(
             requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
             fingerprint.effective_context_window),
     }
+    guard = QualificationIdentityGuard(
+        fingerprint, identity_observer or (lambda: resolve_configured_model_runtime(config, model, fresh=True)))
+    _require_stable_identity(model, guard, START)
     wanted = set(only) if only else None
     results: List[CaseResult] = []
     for case in ALL_CASES:
-        if wanted is not None and case.capability not in wanted:  # type: ignore[attr-defined]
+        capability = case.capability  # type: ignore[attr-defined]
+        if wanted is not None and capability not in wanted:
             continue
+        _require_stable_identity(model, guard, BEFORE_CASE, capability)
         result = await case(llm, model, ctx)
+        # The identity that surrounded the case must be the baseline on both
+        # sides before its evidence is attributed to the baseline.
+        _require_stable_identity(model, guard, AFTER_CASE, capability)
         results.append(result)
+        guard.case_completed(capability)
         if progress is not None:
             progress(result)
+    _require_stable_identity(model, guard, CLOSE)
     return build_record(fingerprint, results, settings=settings,
                         environment=environment_for_fingerprint(fingerprint), policy=policy,
-                        response_protocol=response_protocol_identity(config))
+                        response_protocol=response_protocol_identity(config),
+                        identity_stability=guard.evidence())
+
+
+def _require_stable_identity(model: str, guard: QualificationIdentityGuard, boundary: str,
+                             capability: Optional[str] = None) -> None:
+    """The one place a qualification run consults the identity guard."""
+    if guard.observe(boundary, capability) is not None:
+        raise QualificationArtifactChangedError(model, guard.evidence())
 
 
 def qualification_client_factory(config: Any, model: str) -> Callable[[float], Any]:
@@ -1614,12 +1675,16 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
 def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
                  settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None,
                  policy: Optional[ModelQualificationConfig] = None,
-                 response_protocol: Optional[str] = None) -> Dict[str, Any]:
+                 response_protocol: Optional[str] = None,
+                 identity_stability: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The record of one qualification run, bound to the effective
     qualification ``policy`` (defaults when None). Functional cases go to
     ``cases``; environment-dependent ones to ``environment_evidence`` under
     the digest of the environment that ran them (``environment``, default
-    the one serving the fingerprint's endpoint)."""
+    the one serving the fingerprint's endpoint). ``identity_stability``: the
+    run's sealed identity observations (QUALIFICATION-ARTIFACT-STABILITY-001;
+    ``QualificationIdentityGuard.evidence()``), None for a record built
+    without a guarded run (historical records carry none)."""
     from kriya import __version__ as kriya_version
 
     environment = environment if environment is not None else environment_for_fingerprint(fingerprint)
@@ -1657,11 +1722,15 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
         "environment_evidence": evidence,
         "measured_limits": measured_limits(results, policy),
         "summary": counts,
+        # QUALIFICATION-ARTIFACT-STABILITY-001: baseline identity, every
+        # observation (start, before/after each case, close) and stability.
+        "identity_stability": identity_stability,
     }
 
 
 __all__ = [
-    "ALL_CASES", "CAPABILITIES", "CaseResult", "FAIL", "MISSING", "NOT_EXACT", "NOT_QUALIFIED", "PASS",
+    "ALL_CASES", "ARTIFACT_CHANGED", "CAPABILITIES", "CaseResult", "FAIL", "MISSING", "NOT_EXACT", "NOT_QUALIFIED", "PASS",
+    "QualificationArtifactChangedError",
     "LEGACY_V3_POLICY_DIGEST", "POLICY_DIGEST_FIELD", "QUALIFICATION_HOME_ENV", "QUALIFICATION_POLICY_VERSION",
     "QUALIFIED", "QualificationAssessment", "policy_digest_for", "qualification_policy_digest",
     "qualification_policy_of", "record_policy_digest",

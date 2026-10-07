@@ -397,7 +397,7 @@ def test_run_qualification_keys_the_record_by_the_developer_identity_by_default(
 
     cfg = _roles_cfg()
     record = asyncio.run(mq.run_qualification(cfg, MODEL, llm=FakeLLM(), fingerprint=_fp(),
-                                              only=["plain_completion"]))
+                                              only=["plain_completion"], identity_observer=_fp))
     settings = role_inference_settings(cfg, "developer", MODEL)
     assert record["inference_settings_digest"] == settings.digest
     assert record["qualification_identity"] == qualification_identity(_fp().digest, settings)

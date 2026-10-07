@@ -719,7 +719,8 @@ def _qualify(config, fingerprint):
 
     # A case that sends nothing: the identity check runs before any case.
     return asyncio.run(mq.run_qualification(config, config.llm.model, llm=_NoCalls(), fingerprint=fingerprint,
-                                            only=["endpoint_restart_semantics"]))
+                                            only=["endpoint_restart_semantics"],
+                                            identity_observer=lambda: fingerprint))
 
 
 def _pinned_fp(**parameters):

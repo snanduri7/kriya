@@ -332,12 +332,13 @@ def test_role_models_include_every_escalation_model():
 def test_run_qualification_refuses_a_runtime_that_is_not_exact():
     with pytest.raises(mq.QualificationError, match=mq.NOT_EXACT):
         asyncio.run(mq.run_qualification(AppConfig(), MODEL, llm=FakeLLM(),
-                                         fingerprint=_fp(artifact_digest="unavailable")))
+                                         fingerprint=_fp(artifact_digest="unavailable"), identity_observer=_fp))
 
 
 def test_run_qualification_runs_selected_cases_and_binds_the_fingerprint():
     record = asyncio.run(mq.run_qualification(
         AppConfig(), MODEL, llm=FakeLLM(_result("READY")), fingerprint=_fp(), only=["plain_completion"],
+        identity_observer=_fp,
     ))
     assert [c["capability"] for c in record["cases"]] == ["plain_completion"]
     assert record["cases"][0]["status"] == mq.PASS

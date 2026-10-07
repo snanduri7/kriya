@@ -1151,6 +1151,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
     from kriya.core.inference_settings import role_inference_identities
     from kriya.core.model_qualification import (
         CAPABILITIES,
+        QualificationArtifactChangedError,
         QualificationError,
         record_policy_digest,
         role_models,
@@ -1198,6 +1199,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
                             f"; finish_reason={result.evidence.get('finish_reason')}", fg=color)
 
     records = []
+    artifact_changed: Optional[QualificationArtifactChangedError] = None
     for settings, roles in identities.values():
         if not json_output:
             window_note = f" at num_ctx {context_window}" if context_window else ""
@@ -1207,6 +1209,16 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
         try:
             record = asyncio.run(run_qualification(cfg, target, only=cases or None, progress=progress,
                                                    context_window=context_window, settings=settings))
+        except QualificationArtifactChangedError as error:
+            # QUALIFICATION-ARTIFACT-STABILITY-001: fail closed. The diagnostic
+            # (baseline, every identity observation, cases attributed before
+            # the change) goes to stderr and becomes the --out artifact below;
+            # never into the qualification store, where it could be read as
+            # authority. Identities qualified before this one keep their records.
+            click.secho(str(error), fg="red", err=True)
+            click.echo(json.dumps(error.diagnostic, indent=2, sort_keys=True), err=True)
+            artifact_changed = error
+            break
         except QualificationError as error:
             click.secho(str(error), fg="red", err=True)
             ctx.exit(1)
@@ -1227,10 +1239,16 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
                        f"{env.get('system_memory_class_gib')} GiB class, {env.get('inference_runtime')}; "
                        f"exact={env.get('exact')}) - capacity evidence counts only here")
             click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
-    output: Any = records[0] if len(records) == 1 else {"records": records}
+    if artifact_changed is not None:
+        output: Any = artifact_changed.diagnostic
+    else:
+        output = records[0] if len(records) == 1 else {"records": records}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as stream:
             json.dump(output, stream, indent=2, sort_keys=True)
+    if artifact_changed is not None:
+        ctx.exit(1)
+        return
     if json_output:
         click.echo(json.dumps(output, indent=2, sort_keys=True))
 
