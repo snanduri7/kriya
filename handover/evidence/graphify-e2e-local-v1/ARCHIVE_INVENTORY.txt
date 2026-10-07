@@ -1,0 +1,10 @@
+# ~/kriya-wt/_archive inventory (generated 2026-10-07; material preserved from removed worktrees)
+# source_worktree | archived_path | entries | files | bytes | sha256
+/Users/sriramnanduri/kriya-wt/cagc-v2-base | /Users/sriramnanduri/kriya-wt/_archive/cagc-v2-base-untracked-ignored.tar.gz | 11 | 7 | 4091 | dbeedd26e62b19f7147a5cf80a221990e07eb3b3d653e463180170b9f87343de
+/Users/sriramnanduri/kriya-wt/integration-graphify | /Users/sriramnanduri/kriya-wt/_archive/integration-graphify-untracked-ignored.tar.gz | 10 | 6 | 3893 | 1381527b102733a684bb77d0350a0092b4059700c7d00ee1c9d1d93ebaa22137
+/Users/sriramnanduri/kriya-wt/javac-adapter | /Users/sriramnanduri/kriya-wt/_archive/javac-adapter-untracked-ignored.tar.gz | 10 | 6 | 3880 | b05d7c76a7dde6ca04b186b6754515c384db6624612b5b63b87c579b397ed36b
+/Users/sriramnanduri/kriya-wt/kt-starvation | /Users/sriramnanduri/kriya-wt/_archive/kt-starvation-untracked-ignored.tar.gz | 10 | 6 | 3890 | 994572e6d058bbcb822b0c5a64bb84e77fbb7b79984e05bf8e4d69f3fb034573
+/Users/sriramnanduri/kriya-wt/p2-impl | /Users/sriramnanduri/kriya-wt/_archive/p2-impl-untracked-ignored.tar.gz | 10 | 6 | 3888 | ff75801393a95dce31d4b778361a6d95f41cfcd9d768ca74ddafcd109c00b7c9
+/Users/sriramnanduri/kriya-wt/p3-impl | /Users/sriramnanduri/kriya-wt/_archive/p3-impl-untracked-ignored.tar.gz | 10 | 6 | 3884 | d3862fc2a8ee9f56863dbe36c92fdd7919736bb088388c92d08f615a109e3b71
+/Users/sriramnanduri/kriya-wt/p3b-impl | /Users/sriramnanduri/kriya-wt/_archive/p3b-impl-untracked-ignored.tar.gz | 10 | 6 | 3886 | c1942d1906faecf47aacf951b07f3e680cb007b0add9628b50b4c6279c646b70
+/Users/sriramnanduri/kriya-wt/p3c-impl | /Users/sriramnanduri/kriya-wt/_archive/p3c-impl-untracked-ignored.tar.gz | 10 | 6 | 3880 | 96e8f6607310cd51dec76cf2c7d672bfd5dd8d19478c44396ce854decea36184
