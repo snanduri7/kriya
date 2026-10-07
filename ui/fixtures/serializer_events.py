@@ -8,7 +8,7 @@ RoleRuntimeMetrics.to_dict) - plus a model.transition carrying a real ModelReque
 temporary trace store with TraceLogger.log_run, acquired with kriya.kup.acquire and read with
 kriya.kup.inspect.history_detail, so the committed JSON is what the adapter hands a host, not a hand-written guess.
 
-Run from ui/ with the checkout's interpreter: `../.newvenv/bin/python fixtures/serializer_events.py` (or
+Run from ui/ with a Python that has Kriya installed: `$KRIYA_PYTHON fixtures/serializer_events.py` (or
 `npm run fixtures:serializer`); `--check` fails when the committed file differs from a fresh generation. Fixture only:
 temporary directories, no protected store, no model.
 """

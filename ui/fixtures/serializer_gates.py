@@ -23,7 +23,7 @@ Common to every writer: attempt (int), type (str), success (bool), output (str).
 The records below are produced by those constructors (Failure.to_gate_outcome, execution_evidence,
 runtime_evidence_outcome_fields, EgressDecision.to_dict, VerificationCoordinator._gate) and, for the literal-dict
 writers, copied key for key from the cited source lines; then logged, acquired and read back with the real KUP code.
-Run from ui/ with the checkout's interpreter: `../.newvenv/bin/python fixtures/serializer_gates.py` (or
+Run from ui/ with a Python that has Kriya installed: `$KRIYA_PYTHON fixtures/serializer_gates.py` (or
 `npm run fixtures:serializer`); `--check` fails when the committed file differs. Fixture only: temporary roots, no
 protected store, no model, no network, no bytecode written.
 """

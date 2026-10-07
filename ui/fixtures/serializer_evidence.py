@@ -17,7 +17,7 @@ Writer inventory (TRACED 2026-10-04):
     failure_report[].attribution_tier. No production writer records AttributionRecord.evidence_ids, and no
     identifier namespace exists for it to reference: the KUP schema types it as an array of strings only.
 
-Run from ui/ with the checkout's interpreter: `../.newvenv/bin/python fixtures/serializer_evidence.py` (or
+Run from ui/ with a Python that has Kriya installed: `$KRIYA_PYTHON fixtures/serializer_evidence.py` (or
 `npm run fixtures:serializer`); `--check` fails when the committed file differs. Fixture only: temporary roots, no
 protected store, no model, no network, no bytecode written.
 """
