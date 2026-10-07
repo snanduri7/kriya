@@ -1,0 +1,18 @@
+{
+ "killed": 2,
+ "total": 2,
+ "results": [
+  {
+   "mutant": "ignore context binding: selection",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 32 passed in 2.50s"
+  },
+  {
+   "mutant": "skip the post-replay revision check",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 58 passed in 6.37s"
+  }
+ ]
+}
