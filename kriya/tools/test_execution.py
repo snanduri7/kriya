@@ -253,6 +253,93 @@ def _declared_count(suite: ET.Element, name: str) -> Optional[int]:
         return None
 
 
+_COUNT_NAMES = ("tests", "failures", "errors", "skipped")
+# A passing test process whose structured evidence is not authoritative (JUNIT-COUNTS-INCONSISTENT-GATE-SUCCESS-001):
+# the gate reports this instead of PASS.
+TEST_EVIDENCE_INCONSISTENT = "TEST_EVIDENCE_INCONSISTENT"
+_UNREADABLE = "STRUCTURED_REPORT_UNREADABLE"
+
+
+def _suite_counts(root: ET.Element) -> Tuple[Dict[str, int], int, frozenset]:
+    """The counts the ``<testsuite>`` elements declare, summed: (declared,
+    suites, names some suite does not declare)."""
+    declared = dict.fromkeys(_COUNT_NAMES, 0)
+    suites = 0
+    undeclared = set()
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "testsuite":
+            continue
+        suites += 1
+        for name in _COUNT_NAMES:
+            count = _declared_count(element, name)
+            if count is None:
+                undeclared.add(name)
+            else:
+                declared[name] += count
+    return declared, suites, frozenset(undeclared)
+
+
+def _integrity(declared: Dict[str, int], parsed: Dict[str, int], suites: int, undeclared: frozenset,
+               duplicates: List[str], *, counts_reports: bool, required: Tuple[str, ...] = _COUNT_NAMES) -> Dict[str, Any]:
+    """Whether a document's declared counts and its elements agree.
+
+    JVM reporters (Surefire, Gradle; MEASURED on 220 real reports, 0 mismatches) write one ``<testcase>`` per
+    executed test and count exactly those: every count must match. pytest (MEASURED 9.1.1, _pytest/junitxml.py)
+    writes one ``<testcase>`` per test id but counts every call-phase report in ``tests``: a passed subtest
+    (``unittest.subTest``, pytest subtests) adds to the count and leaves no element of its own, while a failed or
+    skipped subtest adds a ``<failure>``/``<skipped>`` child to its parent's element and to the matching count.
+    So with ``counts_reports`` the failure/error/skip counts must match exactly and ``tests`` may exceed the
+    elements by those uncounted passed reports (``surplus_reports``, never negative); a deficit, any other
+    mismatch or a repeated case id is JUNIT_COUNTS_INCONSISTENT / JUNIT_DUPLICATE_CASE. ``required`` names the
+    counts every suite must declare (pytest declares all four; a JVM writer must declare ``tests``, the others
+    are compared when declared). Nothing is reconciled from console text."""
+    surplus = declared["tests"] - parsed["tests"]
+    if suites == 0 or undeclared & set(required):
+        reason: Optional[str] = "JUNIT_COUNTS_UNDECLARED"
+    elif duplicates:
+        reason = "JUNIT_DUPLICATE_CASE"
+    elif (any(parsed[name] != declared[name] for name in _COUNT_NAMES[1:] if name not in undeclared)
+          or surplus < 0 or (surplus and not counts_reports)):
+        reason = "JUNIT_COUNTS_INCONSISTENT"
+    else:
+        reason = None
+    return {"ok": reason is None, "reason": reason, "declared": declared, "parsed": parsed,
+            "duplicates": sorted(set(duplicates)), "surplus_reports": surplus}
+
+
+def junit_report_integrity(data: bytes) -> Dict[str, Any]:
+    """A JVM JUnit document's declared counts against its elements (exact).
+    Raises ``ET.ParseError`` on malformed XML."""
+    root = ET.fromstring(data)
+    declared, suites, undeclared = _suite_counts(root)
+    parsed = dict.fromkeys(_COUNT_NAMES, 0)
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "testcase":
+            continue
+        parsed["tests"] += 1
+        status = _status(element)
+        for name, wanted in (("failures", FAILED), ("errors", ERROR), ("skipped", SKIPPED)):
+            parsed[name] += status == wanted
+    return _integrity(declared, parsed, suites, undeclared, [], counts_reports=False, required=("tests",))
+
+
+def evidence_inconsistency(report: "TestExecutionReport") -> Optional[str]:
+    """Why a test process that exited 0 may not be reported as a verified
+    PASS (JUNIT-COUNTS-INCONSISTENT-GATE-SUCCESS-001): its structured
+    evidence is present but contradicts itself (counts, duplicates,
+    undeclared counts), cannot be read, or is complete and names a case
+    that did not pass. None when the evidence is complete and clean, and
+    when there is no structured evidence at all (no report for this
+    runner, no destination bound, no report written): that is
+    INDETERMINATE, not contradicted - the whole-output authority applies,
+    exactly as before (REG-R1)."""
+    reason = report.reason or ""
+    if report.complete:
+        failing = sorted(case.identity for case in report.cases if case.status in (FAILED, ERROR))
+        return f"{len(failing)} case(s) not passed in the structured report: {', '.join(failing[:5])}" if failing else None
+    return reason if reason.startswith(("JUNIT_", _UNREADABLE)) else None
+
+
 def parse_pytest_case_evidence(data: bytes) -> Dict[str, Any]:
     """REG-R1: every pytest ``<testcase>`` of one JUnit document, keyed
     ``classname::name`` (pytest's own address, parameters included), with
@@ -263,27 +350,17 @@ def parse_pytest_case_evidence(data: bytes) -> Dict[str, Any]:
 
     ``integrity`` says whether the document can be trusted as the complete
     per-test record: every ``<testsuite>`` declares its tests/failures/
-    errors/skipped counts, the parsed elements match them exactly and no
-    case key repeats. Raises ``ET.ParseError`` on malformed XML."""
+    errors/skipped counts, the parsed elements agree with them
+    (``_integrity``: pytest counts passed subtest reports it writes no
+    element for) and no case key repeats. Raises ``ET.ParseError`` on
+    malformed XML."""
     root = ET.fromstring(data)
     cases: Dict[str, Dict[str, Any]] = {}
     duplicates: List[str] = []
-    parsed = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
-    declared = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
-    undeclared = False
-    suites = 0
+    parsed = dict.fromkeys(_COUNT_NAMES, 0)
+    declared, suites, undeclared = _suite_counts(root)
     for element in root.iter():
-        tag = element.tag.rsplit("}", 1)[-1]
-        if tag == "testsuite":
-            suites += 1
-            for name in declared:
-                count = _declared_count(element, name)
-                if count is None:
-                    undeclared = True
-                else:
-                    declared[name] += count
-            continue
-        if tag != "testcase":
+        if element.tag.rsplit("}", 1)[-1] != "testcase":
             continue
         parsed["tests"] += 1
         key = f"{element.get('classname') or ''}::{element.get('name') or ''}"
@@ -300,16 +377,7 @@ def parse_pytest_case_evidence(data: bytes) -> Dict[str, Any]:
                       "failure_type": _failure_type(failures[0][1].get("message") or "",
                                                     failures[0][1].text or "") if failures else None,
                       "message": message if failures else None, "body": body if failures else None}
-    reason = None
-    if suites == 0 or undeclared:
-        reason = "JUNIT_COUNTS_UNDECLARED"
-    elif duplicates:
-        reason = "JUNIT_DUPLICATE_CASE"
-    elif parsed != declared:
-        reason = "JUNIT_COUNTS_INCONSISTENT"
-    return {"cases": cases,
-            "integrity": {"ok": reason is None, "reason": reason, "declared": declared, "parsed": parsed,
-                          "duplicates": sorted(set(duplicates))}}
+    return {"cases": cases, "integrity": _integrity(declared, parsed, suites, undeclared, duplicates, counts_reports=True)}
 
 
 def _jvm_report_dirs(workspace: str, build_system: str) -> List[str]:
@@ -377,6 +445,7 @@ def collect(binding: ReportBinding) -> TestExecutionReport:
     if not present:
         report.reason = report.reason or "STRUCTURED_REPORT_MISSING"
         return report
+    integrity_reason: Optional[str] = None
     try:
         for path in present:
             with open(path, "rb") as handle:
@@ -386,13 +455,20 @@ def collect(binding: ReportBinding) -> TestExecutionReport:
             if binding.runner == "pytest":  # one report per pytest invocation
                 report.raw_report = data.decode("utf-8", "replace")
                 report.case_evidence = parse_pytest_case_evidence(data)
+                integrity = report.case_evidence["integrity"]
+            else:
+                integrity = junit_report_integrity(data)
+            # JUNIT-COUNTS-INCONSISTENT-GATE-SUCCESS-001: a document whose
+            # counts contradict its elements is not a complete record.
+            integrity_reason = integrity_reason or (None if integrity["ok"] else integrity["reason"])
     except (OSError, ET.ParseError) as error:
-        report.reason = report.reason or f"STRUCTURED_REPORT_UNREADABLE:{type(error).__name__}"
+        report.reason = report.reason or f"{_UNREADABLE}:{type(error).__name__}"
         report.cases = []
         report.case_evidence = None
         return report
     finally:
         _discard_pytest_report(binding)
+    report.reason = report.reason or integrity_reason
     if report.reason is None:
         report.completeness = COMPLETE
     return report

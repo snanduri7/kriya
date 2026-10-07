@@ -250,8 +250,11 @@ def test_12_real_collection_failure_fails_closed(tmp_path):
 def test_13_malformed_or_inconsistent_junit_fails_closed(tmp_path):
     with pytest.raises(Exception):
         parse_pytest_case_evidence(b"<testsuite><testcase")
+    # JUNIT-COUNTS-INCONSISTENT-GATE-SUCCESS-001: a DEFICIT of declared tests is inconsistent (a surplus is pytest's own
+    # count of passed subtest reports, see tests/test_junit_counts_inconsistent_gate_success_001.py).
     inconsistent = parse_pytest_case_evidence(
-        b'<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase classname="a" name="t"/></testsuite>')
+        b'<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase classname="a" name="t"/>'
+        b'<testcase classname="a" name="u"/></testsuite>')
     assert (inconsistent["integrity"]["ok"], inconsistent["integrity"]["reason"]) == (False, "JUNIT_COUNTS_INCONSISTENT")
     duplicated = parse_pytest_case_evidence(
         b'<testsuite tests="2" failures="0" errors="0" skipped="0"><testcase classname="a" name="t"/>'

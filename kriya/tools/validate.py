@@ -1602,6 +1602,18 @@ class PolymorphicValidator:
             if pytest_evidence is not None:
                 # REG-R1: per-test evidence for the regression authority.
                 result["pytest_evidence"] = pytest_evidence
+            inconsistency = test_execution.evidence_inconsistency(report) if result.get("success") else None
+            if inconsistency:
+                # JUNIT-COUNTS-INCONSISTENT-GATE-SUCCESS-001: the process
+                # exited 0, but the structured evidence of this invocation
+                # does not support a verdict - no PASS is claimed; the
+                # console text never decides.
+                result["success"] = False
+                result["reason_code"] = test_execution.TEST_EVIDENCE_INCONSISTENT
+                result["output"] = (
+                    f"{test_execution.TEST_EVIDENCE_INCONSISTENT}: the test process exited 0 but its structured "
+                    f"report is not authoritative ({inconsistency}); a passing verdict is not claimed without "
+                    f"consistent evidence.\n{result.get('output', '')}")
         return result
 
     def test_runner(self) -> str:
