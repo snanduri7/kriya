@@ -387,8 +387,11 @@ def test_the_pytest_gate_passes_each_target_as_its_own_argument(tmp_path):
         failed = v.run_tests(None)
     # FS-1A: no test process ran, so its structured evidence is INDETERMINATE.
     execution = failed.pop("test_execution")
+    # REG-R1: the per-test pytest evidence of a run that never happened is incomplete too.
+    evidence = failed.pop("pytest_evidence")
     assert failed == {"success": False, "output": "pip install failed"}
     assert (execution["completeness"], execution["reason"]) == ("INDETERMINATE", "TEST_PROCESS_NOT_RUN")
+    assert (evidence["complete"], evidence["reason"], evidence["evidence"]) == (False, "TEST_PROCESS_NOT_RUN", None)
 
 
 # --- javac fallback (Capability Adapters R1, javac slice) ---------------------

@@ -23,6 +23,9 @@ from kriya.core.state_paths import trace_db_path
 from kriya.workflow import validation_baseline as baseline_model
 from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.validation_baseline import (
+    FIELD_STABLE,
+    FIELD_VOLATILE,
+    PYTEST_PER_TEST_AUTHORITY,
     DeltaClassification,
     ValidationBaseline,
     ValidationInvocation,
@@ -747,26 +750,62 @@ def test_20_synthetic_brownfield_repo_only_new_failure_attributed(tmp_path):
     post_outcome = build_validation_outcome(post_raw)
     result = classify_baseline_delta(baseline, post_outcome)
 
-    # Level 1 (mandatory, whole-invocation) ALONE already guarantees safety
-    # here: PRE's own failure text ("1 failed, 1 passed...") and POST's
-    # ("2 failed...") produce different normalized fingerprints, so the
-    # candidate is blocked regardless of per-test attribution precision.
+    # The whole-output fingerprint still differs (diagnostic only under
+    # REG-R1's per-test pytest authority, which decides here because both
+    # runs carry a complete JUnit report).
     assert result.blocking is True, "the genuinely new failure must block"
     assert result.level1.classification == DeltaClassification.CHANGED_FAILURE
+    assert result.authority == PYTEST_PER_TEST_AUTHORITY
 
-    # Level 2 (optional, per-test) correctly attributes the test that WAS
-    # already known-failing PRE...
+    # REG-R1: the complete report enumerates PRE's passing identities, so the
+    # newly failing test is attributed precisely (before REG-R1 this was the
+    # disclosed NOT_COMPARABLE limitation of the console FAILED/ERROR parser).
     per_test = result.level2
-    assert per_test.get("tests/test_sample.py::test_pre_existing_bug") == DeltaClassification.PRE_EXISTING_FAILURE
-    # ...but honestly cannot yet prove test_previously_passing is NEW rather
-    # than "an unenumerated PRE pass" purely from Level 2, since PRE's own
-    # invocation was NOT fully passing (pre.success=False - see
-    # classify_level2_delta's own pre_was_fully_passing docstring for
-    # exactly this disclosed limitation of the FAILED/ERROR-only pytest
-    # adapter). Level 1 is what actually blocks this candidate, not Level 2
-    # per-test attribution - proven separately (and precisely) below for
-    # the common, important case where PRE has zero failures at all.
-    assert per_test.get("tests/test_sample.py::test_previously_passing") == DeltaClassification.NOT_COMPARABLE
+    assert per_test.get("tests/test_sample.py::test_previously_passing") == DeltaClassification.NEW_FAILURE
+    # This candidate also rewrote the comment on the pre-existing failure's
+    # failing line, which pytest shows in that failure's body: the body
+    # differs, so it is not excused as PRE_EXISTING before the untouched
+    # baseline proves whether that body reproduces. Stable -> the candidate's
+    # change of it is CHANGED_FAILURE; volatile -> it is PRE_EXISTING.
+    assert per_test.get("tests/test_sample.py::test_pre_existing_bug") == DeltaClassification.STABILITY_UNRESOLVED
+    assert result.stability_required == {"tests.test_sample::test_pre_existing_bug": ("body",)}
+    stable = {"tests.test_sample::test_pre_existing_bug": {"message": FIELD_STABLE, "body": FIELD_STABLE}}
+    volatile = {"tests.test_sample::test_pre_existing_bug": {"message": FIELD_STABLE, "body": FIELD_VOLATILE}}
+    assert classify_baseline_delta(baseline, post_outcome, stability=stable).level2[
+        "tests/test_sample.py::test_pre_existing_bug"] == DeltaClassification.CHANGED_FAILURE
+    assert classify_baseline_delta(baseline, post_outcome, stability=volatile).level2[
+        "tests/test_sample.py::test_pre_existing_bug"] == DeltaClassification.PRE_EXISTING_FAILURE
+
+
+def test_20c_untouched_pre_existing_failure_stays_pre_existing_and_only_the_new_failure_is_attributed(tmp_path):
+    """test_20's original intent with the pre-existing failure left exactly
+    as it was: REG-R1 per-test authority attributes ONLY the new failure."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    failing = "def test_pre_existing_bug():\n    assert 1 == 2  # already broken before Kriya touches anything\n\n"
+    (repo / "tests" / "test_sample.py").write_text(failing + "def test_previously_passing():\n    assert 1 == 1\n")
+    pre_raw = PolymorphicValidator(str(repo), original_workspace_path=str(repo),
+                                   autonomy_cfg=AppConfig().autonomy).run_tests()
+    baseline = capture_validation_baseline(
+        workspace_revision="rev", run_id="r1",
+        invocation=ValidationInvocation("polymorphic_validator.run_tests", "full_suite"), raw_result=pre_raw,
+    )
+    import shutil
+    for cache_dir in ("__pycache__", ".pytest_cache", "tests/__pycache__"):
+        shutil.rmtree(repo / cache_dir, ignore_errors=True)
+    (repo / "tests" / "test_sample.py").write_text(failing + "def test_previously_passing():\n    assert 1 == 2\n")
+    post_raw = PolymorphicValidator(str(repo), original_workspace_path=str(repo),
+                                    autonomy_cfg=AppConfig().autonomy).run_tests()
+    result = classify_baseline_delta(baseline, build_validation_outcome(post_raw))
+    assert result.authority == PYTEST_PER_TEST_AUTHORITY and result.stability_required == {}
+    assert result.level2 == {
+        "tests/test_sample.py::test_pre_existing_bug": DeltaClassification.PRE_EXISTING_FAILURE,
+        "tests/test_sample.py::test_previously_passing": DeltaClassification.NEW_FAILURE,
+    }
+    assert result.blocking is True
+    assert result.blocking_reasons == ("level2:tests/test_sample.py::test_previously_passing:NEW_FAILURE",)
 
 
 def test_20b_level2_attributes_new_failure_precisely_when_pre_was_fully_passing():

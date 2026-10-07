@@ -33,6 +33,7 @@ import glob
 import hashlib
 import logging
 import os
+import re
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -90,6 +91,15 @@ class TestExecutionReport:
     report_files: List[Dict[str, str]] = field(default_factory=list)
     cleared_reports: int = 0
     version: int = TEST_EXECUTION_REPORT_VERSION
+    # REG-R1 (pytest only, never part of summary()/to_dict()): each case's
+    # failure evidence and the report's own integrity counts
+    # (parse_pytest_case_evidence), plus the raw bytes this invocation
+    # produced - the runner's stdout/stderr and the JUnit report - for the
+    # per-test regression authority and its retained evidence.
+    case_evidence: Optional[Dict[str, Any]] = None
+    raw_stdout: Optional[str] = None
+    raw_stderr: Optional[str] = None
+    raw_report: Optional[str] = None
 
     @property
     def complete(self) -> bool:
@@ -124,6 +134,19 @@ class TestExecutionReport:
                                "status": c.status} for c in self.cases]
         return data
 
+    def pytest_evidence(self) -> Optional[Dict[str, Any]]:
+        """REG-R1: what a pytest invocation reports per test, for the
+        per-test regression authority (kriya/workflow/validation_baseline.py
+        decides from it; nothing here judges). None for any other runner.
+        ``complete`` is this report's own completeness; the per-case
+        evidence and its integrity counts are None when the report could
+        not be read."""
+        if self.runner != "pytest":
+            return None
+        return {"version": PYTEST_CASE_EVIDENCE_VERSION, "complete": self.complete, "reason": self.reason,
+                "report_files": list(self.report_files), "evidence": self.case_evidence,
+                "raw": {"stdout": self.raw_stdout, "stderr": self.raw_stderr, "junit": self.raw_report}}
+
 
 @dataclass
 class ReportBinding:
@@ -141,6 +164,8 @@ class ReportBinding:
     observed: bool = False
     exit_code: Optional[int] = None
     timed_out: bool = False
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
 
     def observe(self, process_result: Optional[Dict[str, Any]]) -> None:
         """Record the runner process's own result (the adapter's command
@@ -150,6 +175,10 @@ class ReportBinding:
         self.observed = True
         self.exit_code = process_result.get("returncode", process_result.get("exit_code"))
         self.timed_out = bool(process_result.get("timed_out"))
+        # REG-R1: the raw streams, kept apart (the gate output joins them).
+        stdout, stderr = process_result.get("stdout"), process_result.get("stderr")
+        self.stdout = stdout if isinstance(stdout, str) else None
+        self.stderr = stderr if isinstance(stderr, str) else None
 
     @property
     def pytest_argument(self) -> Optional[str]:
@@ -193,6 +222,94 @@ def parse_junit_xml(data: bytes) -> List[TestCaseResult]:
         cases.append(TestCaseResult(identity=_identity(classname, name), classname=classname, name=name,
                                     status=_status(testcase)))
     return cases
+
+
+PYTEST_CASE_EVIDENCE_VERSION = 1
+_FAILURE_TAGS = ("failure", "error")
+# pytest ends every failure body (str(report.longrepr)) with the crash
+# location line "<path>:<line>: <ExceptionType>" (ReprFileLocation).
+_CRASH_LOCATION_RE = re.compile(r"^.+:\d+: ([A-Za-z_][\w.]*)$")
+_MESSAGE_TYPE_RE = re.compile(r"^([A-Za-z_][\w.]*)(?::|$)")
+
+
+def _failure_type(message: str, body: str) -> Optional[str]:
+    """The exception type pytest reports for a failure: its crash location
+    line (the last line of the body), else the ``Type:`` prefix of the
+    message, else None (never guessed)."""
+    lines = [line for line in body.splitlines() if line.strip()]
+    if lines:
+        match = _CRASH_LOCATION_RE.match(lines[-1].strip())
+        if match:
+            return match.group(1)
+    first = message.splitlines()[0] if message else ""
+    match = _MESSAGE_TYPE_RE.match(first)
+    return match.group(1) if match else None
+
+
+def _declared_count(suite: ET.Element, name: str) -> Optional[int]:
+    try:
+        return int(suite.get(name))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_pytest_case_evidence(data: bytes) -> Dict[str, Any]:
+    """REG-R1: every pytest ``<testcase>`` of one JUnit document, keyed
+    ``classname::name`` (pytest's own address, parameters included), with
+    its outcome and - for a failure or error - the exception type, the
+    reported message and the failure body (``longrepr``), verbatim. Several
+    failure/error children of one case (a failing call and a failing
+    teardown) are kept in document order.
+
+    ``integrity`` says whether the document can be trusted as the complete
+    per-test record: every ``<testsuite>`` declares its tests/failures/
+    errors/skipped counts, the parsed elements match them exactly and no
+    case key repeats. Raises ``ET.ParseError`` on malformed XML."""
+    root = ET.fromstring(data)
+    cases: Dict[str, Dict[str, Any]] = {}
+    duplicates: List[str] = []
+    parsed = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    declared = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    undeclared = False
+    suites = 0
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag == "testsuite":
+            suites += 1
+            for name in declared:
+                count = _declared_count(element, name)
+                if count is None:
+                    undeclared = True
+                else:
+                    declared[name] += count
+            continue
+        if tag != "testcase":
+            continue
+        parsed["tests"] += 1
+        key = f"{element.get('classname') or ''}::{element.get('name') or ''}"
+        children = [(child.tag.rsplit("}", 1)[-1], child) for child in element]
+        failures = [(child_tag, child) for child_tag, child in children if child_tag in _FAILURE_TAGS]
+        parsed["failures"] += sum(1 for child_tag, _ in failures if child_tag == "failure")
+        parsed["errors"] += sum(1 for child_tag, _ in failures if child_tag == "error")
+        parsed["skipped"] += sum(1 for child_tag, _ in children if child_tag == "skipped")
+        message = "\n".join(child.get("message") or "" for _, child in failures)
+        body = "\n".join(child.text or "" for _, child in failures)
+        if key in cases:
+            duplicates.append(key)
+        cases[key] = {"outcome": _status(element),
+                      "failure_type": _failure_type(failures[0][1].get("message") or "",
+                                                    failures[0][1].text or "") if failures else None,
+                      "message": message if failures else None, "body": body if failures else None}
+    reason = None
+    if suites == 0 or undeclared:
+        reason = "JUNIT_COUNTS_UNDECLARED"
+    elif duplicates:
+        reason = "JUNIT_DUPLICATE_CASE"
+    elif parsed != declared:
+        reason = "JUNIT_COUNTS_INCONSISTENT"
+    return {"cases": cases,
+            "integrity": {"ok": reason is None, "reason": reason, "declared": declared, "parsed": parsed,
+                          "duplicates": sorted(set(duplicates))}}
 
 
 def _jvm_report_dirs(workspace: str, build_system: str) -> List[str]:
@@ -239,6 +356,8 @@ def collect(binding: ReportBinding) -> TestExecutionReport:
     """Read only the reports this invocation produced; decide completeness."""
     report = TestExecutionReport(gate_id=binding.gate_id, runner=binding.runner, workspace=binding.workspace,
                                  cleared_reports=binding.cleared_reports)
+    if binding.runner == "pytest":
+        report.raw_stdout, report.raw_stderr = binding.stdout, binding.stderr
     if binding.unsupported:
         report.reason = binding.unsupported
         return report
@@ -264,9 +383,13 @@ def collect(binding: ReportBinding) -> TestExecutionReport:
                 data = handle.read()
             report.report_files.append(_digest(path, data, binding.workspace))
             report.cases.extend(parse_junit_xml(data))
+            if binding.runner == "pytest":  # one report per pytest invocation
+                report.raw_report = data.decode("utf-8", "replace")
+                report.case_evidence = parse_pytest_case_evidence(data)
     except (OSError, ET.ParseError) as error:
         report.reason = report.reason or f"STRUCTURED_REPORT_UNREADABLE:{type(error).__name__}"
         report.cases = []
+        report.case_evidence = None
         return report
     finally:
         _discard_pytest_report(binding)

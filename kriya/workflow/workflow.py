@@ -249,6 +249,12 @@ from kriya.workflow.planner_repair import (
     planner_response_model,
     record_planner_outcome,
 )
+from kriya.workflow.pytest_stability import (
+    classify_with_baseline_stability,
+    record_regression_decision,
+    replay_on_untouched_baseline,
+)
+from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
@@ -346,7 +352,6 @@ from kriya.workflow.validation_baseline import (
     DeltaClassification,
     build_validation_outcome,
     capture_brownfield_baselines,
-    classify_baseline_delta,
     render_blocking_regression_evidence,
 )
 from kriya.workflow.verification_binding import bind_candidate
@@ -2963,6 +2968,9 @@ class WorkflowEngine:
                     state.validation_baseline_full_regression.to_dict()
                     if state.validation_baseline_full_regression is not None else None
                 ),
+                # REG-R1: untouched-baseline field stability measured so far,
+                # keyed by binding digest (pytest_stability.stability_binding).
+                "validation_baseline_pytest_stability": dict(state.pytest_stability_cache),
                 **extra,
             })
 
@@ -3915,12 +3923,18 @@ class WorkflowEngine:
                      "auto_decision": auto_baseline_decision.to_dict() if auto_baseline_decision else None},
         ))
         baseline_environment = None
+        baseline_runner = None
         if full_regression_policy == "required" or autonomy_baseline_cfg.brownfield_baseline_target_test:
             try:
                 baseline_environment = baseline_environment_identity(
                     workspace_path, autonomy_baseline_cfg, goal=goal)
             except Exception as exc:
                 logger.warning(f"Baseline environment identity unavailable: {exc}")
+            # REG-R1: a pytest baseline must carry per-test evidence; one that
+            # does not (an older checkpoint) is re-established, never reused.
+            baseline_runner = PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
+            ).test_runner()
         baseline_capture = capture_brownfield_baselines(
             run_id=run_id,
             target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
@@ -3934,7 +3948,19 @@ class WorkflowEngine:
             resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
             resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
             prior_full_regression=self._prior_full_suite_evidence,
+            require_pytest_evidence=baseline_runner == "pytest",
         )
+        for _rejection in baseline_capture.reuse_rejections:
+            state.record_event(RunEvent(
+                kind="validation_baseline.reuse_rejected", attempt=0,
+                source="workflow.run_generation_workflow", authority=EventAuthority.AUXILIARY,
+                message=f"baseline not reused ({_rejection}); re-established by a fresh capture",
+                details={"reason": _rejection},
+            ))
+        _resumed_stability = (resume_state or {}).get("validation_baseline_pytest_stability")
+        if isinstance(_resumed_stability, dict):
+            # Each entry is keyed by its own binding; a stale one simply never matches.
+            state.pytest_stability_cache.update(_resumed_stability)
         if baseline_capture.full_regression_source is not None:
             state.record_event(RunEvent(
                 kind="validation_baseline.full_regression_source", attempt=0,
@@ -4936,10 +4962,17 @@ class WorkflowEngine:
                             )
                         except Exception as exc:
                             logger.warning(f"POST environment identity unavailable: {exc}")
-                    _baseline_delta_result = classify_baseline_delta(
-                        state.validation_baseline_full_regression, _post_regression_outcome,
-                        post_environment=_post_environment,
+                    # REG-R1: per-test pytest authority; a disputed message/body is
+                    # measured on the untouched baseline before anyone is blamed.
+                    _baseline_delta_result, _stability = classify_with_baseline_stability(
+                        baseline=state.validation_baseline_full_regression, post=_post_regression_outcome,
+                        post_environment=_post_environment, cache=state.pytest_stability_cache,
+                        replay=functools.partial(replay_on_untouched_baseline, workspace_path=workspace_path,
+                                                 autonomy_cfg=self.kernel.config.autonomy),
+                        current_revision=lambda: compute_workspace_content_hash(workspace_path),
                     )
+                    record_regression_decision("full_regression", state.validation_baseline_full_regression,
+                                               _post_regression_outcome, _baseline_delta_result, _stability)
                     _regression_should_block = _baseline_delta_result.blocking
                     state.record_event(RunEvent(
                         kind="validation_baseline.full_regression_delta",
@@ -4963,6 +4996,7 @@ class WorkflowEngine:
                             "pre_environment": (
                                 state.validation_baseline_full_regression.invocation.environment_fingerprint),
                             "post_environment": _post_environment,
+                            **pytest_decision_summary(_baseline_delta_result, _stability),
                         },
                     ))
                     if not _regression_should_block and not full_test_res["success"]:
@@ -5003,9 +5037,16 @@ class WorkflowEngine:
                     _frozen_targets = state.validation_baseline_targeted.invocation.target_test
                     _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
                     _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
-                    _targeted_baseline_delta_result = classify_baseline_delta(
-                        state.validation_baseline_targeted, _post_targeted_outcome,
+                    _targeted_baseline_delta_result, _targeted_stability = classify_with_baseline_stability(
+                        baseline=state.validation_baseline_targeted, post=_post_targeted_outcome,
+                        post_environment=None, cache=state.pytest_stability_cache,
+                        replay=functools.partial(replay_on_untouched_baseline, workspace_path=workspace_path,
+                                                 autonomy_cfg=self.kernel.config.autonomy),
+                        current_revision=lambda: compute_workspace_content_hash(workspace_path),
                     )
+                    record_regression_decision("targeted", state.validation_baseline_targeted,
+                                               _post_targeted_outcome, _targeted_baseline_delta_result,
+                                               _targeted_stability)
                     _targeted_regression_should_block = _targeted_baseline_delta_result.blocking
                     state.record_event(RunEvent(
                         kind="validation_baseline.targeted_delta",
@@ -5024,6 +5065,7 @@ class WorkflowEngine:
                             "aggregate_drop_detected": _targeted_baseline_delta_result.aggregate_drop_detected,
                             "blocking": _targeted_regression_should_block,
                             "blocking_reasons": list(_targeted_baseline_delta_result.blocking_reasons),
+                            **pytest_decision_summary(_targeted_baseline_delta_result, _targeted_stability),
                         },
                     ))
                     if not _targeted_regression_should_block and not _targeted_test_res["success"]:

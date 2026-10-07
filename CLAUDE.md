@@ -375,7 +375,15 @@ Invariant: a setting Kriya records, budgets against, qualifies or treats as auth
 - **Environment identity.** `baseline_environment_identity` (execution mode + PRD-011 `toolchain_fingerprint`) is recorded as the invocation's `environment_fingerprint` PRE, and recomputed POST over the candidate's toolchain declarations. Both sides are computed over the same declaration overlay, so a dependency-only edit is the same environment. `classify_baseline_delta(post_environment=)` returns NOT_COMPARABLE on mismatch: no failure is excused, so any POST failure blocks, and a green suite passes (PRD-011 migrations stay possible under sealed `required`).
 - **Per-test availability.** `BaselineDeltaResult.level2_available`/`level2_unavailable_reason` make an unparsed per-test comparison explicit. RESOLVED_FAILURE is FIXED.
 - **Maven runs.** A Maven test run is identified by its Surefire "Results:" blocks (`surefire_results_summary` - the level-1 fingerprint; `parse_surefire_structured_outcomes` - level 2), never its log (Spring Boot timestamps, the container hostname and log interleaving differ between identical runs). `BASELINE_COMPARISON_VERSION` 2.
-- **Purity.** `validation_baseline.py` stays a pure comparison library.
+- **Pytest runs (REG-R1).** A candidate may be blamed only for a difference that is stable on the untouched baseline.
+  - **Evidence.** Each pytest gate carries `pytest_evidence` (`test_execution.parse_pytest_case_evidence` over its own JUnit report): per test the outcome, exception type (pytest's crash-location line), message and body, plus integrity counts. The JUnit report is still deleted after reading.
+  - **Authority.** When PRE and POST are both COMPLETE (FS-1A completeness plus integrity), `classify_pytest_per_test_delta` decides in the order id, outcome, type, message, body; the whole-output fingerprint is diagnostic only.
+  - **Disputed fields.** A message/body difference on a test failing the same way is `stability_required`. `pytest_stability.establish_baseline_stability` replays exactly those tests twice on fresh copies of the untouched workspace (revision checked before and after, never candidate observations). Stable and changed is CHANGED_FAILURE; volatile loses authority for that test only; indeterminate is STABILITY_UNRESOLVED (blocking, never attributed).
+  - **Cache.** Measurements are keyed by `stability_binding` and checkpointed as `validation_baseline_pytest_stability`.
+  - **Fail closed.** An incomplete or missing side blocks any failing POST. A pre-REG-R1 checkpoint (no `pytest_evidence` key) of a pytest workspace is recaptured (`OLD_CHECKPOINT_INSUFFICIENT`).
+  - **Retention.** Every decision is an M1 `regression.decision`; raw stdout/stderr/JUnit ride on `gate.result`.
+  - **Scope.** Non-pytest runners are byte-identical (`_whole_output_delta`).
+- **Purity.** `validation_baseline.py` stays a pure comparison library (the replays live in `pytest_stability.py`).
 
 ### Embedding contract (`kriya/memory/embedding.py`, `kriya/memory/vector.py`) — EMBEDDING-CONTRACT-001
 Measured (Ollama 0.34.4, nomic-embed-text): `/api/embed` with `truncate: false` refuses an over-context input (HTTP 400); `/v1/embeddings` and `/api/embed` without it silently truncate to the served context (2048).

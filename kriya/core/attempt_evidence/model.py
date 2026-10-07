@@ -49,6 +49,7 @@ KINDS = frozenset({
     "developer.parse",
     "candidate.change",
     "gate.result",
+    "regression.decision",
     "obligations.snapshot",
     "diagnosis",
     "recovery.decision",

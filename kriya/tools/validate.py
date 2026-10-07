@@ -274,6 +274,19 @@ def _record_gate_result(name: str, result: Any, started: float, *, error: Option
             # the payload, the full per-identity report as content).
             payload["test_execution"] = report.summary()
             content["test_execution"] = json.dumps(report.to_dict(), sort_keys=True)
+        pytest_evidence = result.get("pytest_evidence") if isinstance(result, dict) else None
+        if isinstance(pytest_evidence, dict):
+            # REG-R1: the raw streams and the JUnit report behind a pytest
+            # verdict, each bounded like the output (content-addressed blobs).
+            integrity = (pytest_evidence.get("evidence") or {}).get("integrity") or {}
+            payload["pytest_evidence"] = {"complete": pytest_evidence.get("complete"),
+                                          "integrity_ok": integrity.get("ok"),
+                                          "integrity_reason": integrity.get("reason")}
+            for name, raw in (pytest_evidence.get("raw") or {}).items():
+                raw_text, raw_meta = attempt_evidence_scope.bounded_output(raw)
+                if raw_text is not None:
+                    content[f"pytest_{name}"] = raw_text
+                    payload[f"pytest_{name}"] = raw_meta
     except Exception as record_error:  # observational: never alters the gate
         logger.warning("Attempt evidence: gate.result not built (%s)", record_error)
         return
@@ -1564,8 +1577,18 @@ class PolymorphicValidator:
         finally:
             self.test_report_binding = None
         if isinstance(result, dict):
-            result["test_execution"] = test_execution.collect(binding).to_dict()
+            report = test_execution.collect(binding)
+            result["test_execution"] = report.to_dict()
+            pytest_evidence = report.pytest_evidence()
+            if pytest_evidence is not None:
+                # REG-R1: per-test evidence for the regression authority.
+                result["pytest_evidence"] = pytest_evidence
         return result
+
+    def test_runner(self) -> str:
+        """The runner the test gate will invoke for this workspace
+        (``pytest``, ``maven``, ``gradle``, ``javac``, ``rspec``, ``none``)."""
+        return self._test_runner()
 
     def _test_runner(self) -> str:
         """The runner the test gate will invoke for this workspace."""
