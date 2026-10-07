@@ -427,6 +427,11 @@ class GenerationState:
     # for a path, in rank order (known_target_context_items keeps one record
     # per path - the highest-ranked member). Edit authority reads them all.
     known_target_member_items: Dict[str, List["ContextItem"]] = field(default_factory=dict)
+    # CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: path -> (start_line, end_line,
+    # revision) of every grounded member the latest known-target/retry package
+    # could not show (its body exceeded T0's room). An edit locus while the
+    # revision is current; replaced per package build like the items above.
+    known_target_omitted_members: Dict[str, List[Tuple[int, int, str]]] = field(default_factory=dict)
     # DEV-INV-001 (2026-09-19): attempt_number -> investigation turns already
     # consumed THIS attempt, across every _run_developer_generation call
     # within it - a coordinated-repair attempt calls that function once per

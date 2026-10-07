@@ -2747,6 +2747,9 @@ class WorkflowEngine:
         # for why these are candidates only, validated later, never trusted
         # here.
         retrieval_member_hints: Dict[str, List[str]] = {}
+        # CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: path -> digest-bound
+        # declaration lines of the structural localization candidates.
+        retrieval_symbol_loci: Dict[str, List[Tuple[int, str]]] = {}
         # PRE-PLAN GROUNDING (2026-09-19): declared here (not only inside the
         # try block below) so both degrade safely to {} - never populated,
         # never referenced as fact - whenever Graph RAG retrieval itself is
@@ -2849,6 +2852,7 @@ class WorkflowEngine:
                 ))
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints
+                retrieval_symbol_loci = retrieval.retrieval_symbol_loci
                 verified_grounding = retrieval.verified_grounding
                 hypothesis_candidates = retrieval.hypothesis_candidates
                 if retrieval.matched:
@@ -4158,6 +4162,7 @@ class WorkflowEngine:
             },
             established_files=established_files or [],
             retrieval_member_hints=retrieval_member_hints,
+            retrieval_symbol_loci=retrieval_symbol_loci,
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
             authorized_semantic_regions=list(authorized_semantic_regions or []),

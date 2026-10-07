@@ -173,6 +173,17 @@ class GraphRetrievalResult:
     # symbol id -> member id in its file's CURRENT bytes (callable
     # candidates whose member resolved; the CI-6 decision's id check).
     current_member_ids: Dict[str, str] = field(default_factory=dict)
+    # CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: path -> [(declaration line,
+    # digest of the CURRENT bytes it was read from)] of the direct structural
+    # candidates of ANY kind (a field, a type, a method), in candidate order
+    # (the adopted targets first, adopt_decision). An edit locus for the
+    # capability decision (kriya/workflow/attempt.py _edit_capability_loci)
+    # - localization context, never write authority: a locus only ever
+    # becomes a byte-exact window of the file as it is at that moment, and
+    # only while the digest still matches.
+    retrieval_symbol_loci: Dict[str, List[Tuple[int, str]]] = field(default_factory=dict)
+    # symbol id -> (path, line, digest) behind retrieval_symbol_loci.
+    symbol_loci: Dict[str, Tuple[str, int, str]] = field(default_factory=dict)
 
     def adopt_decision(self, target_symbol_ids: Sequence[str]) -> None:
         """CI-6: the chosen targets lead the candidates, their files lead the
@@ -184,6 +195,11 @@ class GraphRetrievalResult:
         for candidate in reversed(chosen):
             self.matched_files = [candidate.path] + [p for p in self.matched_files if p != candidate.path]
             self.file_scores[candidate.path] = max(self.file_scores.get(candidate.path, 0.0), top)
+            locus = self.symbol_loci.get(candidate.symbol_id)
+            if locus is not None:
+                _path, line, digest = locus
+                loci = self.retrieval_symbol_loci.setdefault(_path, [])
+                self.retrieval_symbol_loci[_path] = [(line, digest)] + [entry for entry in loci if entry != (line, digest)]
             member_id = self.current_member_ids.get(candidate.symbol_id)
             if member_id is None:
                 continue
@@ -387,6 +403,26 @@ def member_id_for(candidate: LocalizationCandidate, namespace: str) -> str:
         candidate.lookup_key
 
 
+def _record_symbol_locus(result: GraphRetrievalResult, view: Any, structures_by_path: Dict[str, Any],
+                         candidate: LocalizationCandidate) -> None:
+    """CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: the candidate's declaration
+    line in its file's CURRENT structure, bound to that structure's digest
+    (a symbol of any kind; a field is a locus as much as a method)."""
+    if candidate.path not in structures_by_path:
+        structures_by_path[candidate.path] = view.current_structure(candidate.path)
+    structure = structures_by_path[candidate.path]
+    if structure is None:
+        return
+    symbol = next((s for s in structure.symbols if s.symbol_id == candidate.symbol_id), None)
+    if symbol is None:
+        return
+    entry = (symbol.declaration.start_line, structure.source_digest)
+    result.symbol_loci[candidate.symbol_id] = (candidate.path, *entry)
+    loci = result.retrieval_symbol_loci.setdefault(candidate.path, [])
+    if entry not in loci:
+        loci.append(entry)
+
+
 def _code_intelligence_candidates(
     result: GraphRetrievalResult, service: Any, goal: str, legacy_matches: List[Dict[str, Any]], vector_store: Any,
     query_emb: Optional[List[float]], fingerprint: Optional[str], top_k: int,
@@ -409,11 +445,14 @@ def _code_intelligence_candidates(
     result.separation = separation(candidates)
     direct: Dict[str, float] = {}
     boundaries_by_path: Dict[str, Any] = {}
+    structures_by_path: Dict[str, Any] = {}
     for rank, candidate in enumerate(candidates):
         verified, data, structure, member_id = False, None, None, ""
         if candidate.kind in CALLABLE_KINDS:
             data = view.current_bytes(candidate.path)
-            structure = view.current_structure(candidate.path)
+            if candidate.path not in structures_by_path:
+                structures_by_path[candidate.path] = view.current_structure(candidate.path)
+            structure = structures_by_path[candidate.path]
             if data is not None and structure is not None:
                 member_id = member_id_for(candidate, structure.namespace)
                 if candidate.path not in boundaries_by_path:
@@ -427,6 +466,7 @@ def _code_intelligence_candidates(
         if rank >= top_k:
             continue
         direct.setdefault(candidate.path, candidate.score)
+        _record_symbol_locus(result, view, structures_by_path, candidate)
         result.retrieved_chunks.append({"filepath": candidate.path, "score": candidate.score,
                                         "text": f"{candidate.kind} {candidate.lookup_key}: {candidate.signature}"[:300],
                                         "channels": [c for c, _ in candidate.channels]})

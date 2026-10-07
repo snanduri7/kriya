@@ -1975,6 +1975,7 @@ def build_known_target_context(
             omitted.append(make_omitted_entry(
                 path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
                 estimated_tokens=0, member_id=member_id,
+                start_line=boundary.start_line, end_line=boundary.end_line, revision=resolved.revision,
             ))
             return False
         if cache is not None:
@@ -1997,6 +1998,7 @@ def build_known_target_context(
             omitted.append(make_omitted_entry(
                 path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
                 member_id=member_id,
+                start_line=boundary.start_line, end_line=boundary.end_line, revision=resolved.revision,
             ))
             return False
         admit(make_context_item(

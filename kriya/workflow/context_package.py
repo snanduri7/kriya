@@ -168,7 +168,8 @@ def make_context_item(
 
 def make_omitted_entry(
     path: str, rank: int, reason: str, estimated_tokens: int,
-    *, member_id: Optional[str] = None,
+    *, member_id: Optional[str] = None, start_line: Optional[int] = None, end_line: Optional[int] = None,
+    revision: Optional[str] = None,
 ) -> Dict[str, Any]:
     """section 27: every omitted entry carries path/rank/reason/
     estimated_tokens - never a silent truncation with no record of what
@@ -180,6 +181,12 @@ def make_omitted_entry(
     entry = {"path": path, "rank": rank, "reason": reason, "estimated_tokens": estimated_tokens}
     if member_id is not None:
         entry["member_id"] = member_id
+        # CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: where the omitted member's
+        # bytes were in the revision it was cut from (lines only, never the
+        # text) - an edit locus for the capability decision while that
+        # revision is still the file's current content.
+        if start_line is not None and end_line is not None and revision:
+            entry.update({"start_line": start_line, "end_line": end_line, "revision": revision})
     return entry
 
 

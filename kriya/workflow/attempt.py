@@ -825,6 +825,23 @@ def _preserve_member_exact_precision(
     return new_item
 
 
+def _record_omitted_members(state: GenerationState, omitted: Iterable[Dict[str, Any]]) -> None:
+    """CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: the grounded members a package
+    omitted, per path, with the lines and revision the entry recorded
+    (make_omitted_entry); an entry without them records nothing. Replaces
+    the path's earlier record (a package is rebuilt per attempt)."""
+    by_path: Dict[str, List[Tuple[int, int, str]]] = {}
+    for entry in omitted:
+        if entry.get("member_id") is None or not entry.get("revision") or entry.get("start_line") is None:
+            continue
+        boundary = (int(entry["start_line"]), int(entry["end_line"]), str(entry["revision"]))
+        members = by_path.setdefault(entry["path"], [])
+        if boundary not in members:
+            members.append(boundary)
+    for path, members in by_path.items():
+        state.known_target_omitted_members[path] = members
+
+
 def _record_known_target_package(state: GenerationState, items: Iterable[ContextItem]) -> None:
     """Record a known-target or retry-member package per path. A package
     can render several member_exact units for one file (every member
@@ -1122,6 +1139,7 @@ def _prepare_retry_context(
         # LAST so they are never overwritten by a broader same-path
         # overview - never the reverse.
         _record_known_target_package(state, retry_member_package.relevant_files)
+        _record_omitted_members(state, retry_member_package.omitted)
         state.record_event(RunEvent(
             kind="context.retry_member_hint_package",
             attempt=state.attempt_number,
@@ -2419,10 +2437,26 @@ def _code_intelligence_for(ctx: "AttemptContext") -> Any:
         return None
 
 
-def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str]) -> List[int]:
+# CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: how many structural localization
+# candidates of one file may each open an exact window (the adopted targets
+# first); the window budget is shared equally among all loci of the file.
+MAX_SYMBOL_LOCI_PER_FILE = 2
+
+
+def _edit_capability_loci(
+    state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str], *,
+    revision: Optional[str] = None, raw_digest: Optional[str] = None,
+) -> List[int]:
     """Deterministic edit loci for ``path``: code the user's goal quotes,
-    the lines the last failure names, and where every rejected SEARCH block
-    pointed in the real source (_remember_anchor_loci)."""
+    the lines the last failure names, where every rejected SEARCH block
+    pointed in the real source (_remember_anchor_loci), and -
+    CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001 - the declaration lines of the
+    structural localization candidates for this file (ctx.retrieval_symbol_loci,
+    only those bound to ``raw_digest``, the digest of the current bytes) and
+    the first line of every grounded member the known-target package could
+    not show whole (state.known_target_omitted_members, only those of
+    ``revision``, the current shown revision). A locus of another revision
+    authorizes nothing: the file changed since it was read."""
     from kriya.workflow.edit_capability import goal_code_fragments, locate_fragments
 
     loci = locate_fragments(lines, goal_code_fragments(ctx.goal))
@@ -2430,6 +2464,12 @@ def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: s
     if failure is not None:
         loci.extend(loc.line for loc in failure.file_locations if loc.filepath == path and loc.line)
     loci.extend(state.edit_anchor_loci.get(path, ()))
+    if raw_digest:
+        current = [line for line, digest in ctx.retrieval_symbol_loci.get(path, ()) if digest == raw_digest]
+        loci.extend(current[:MAX_SYMBOL_LOCI_PER_FILE])
+    if revision:
+        loci.extend(start for start, _end, member_revision in state.known_target_omitted_members.get(path, ())
+                    if member_revision == revision)
     return loci
 
 
@@ -2578,7 +2618,8 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         capabilities[path] = build_edit_capability(
             path, content,
             full_file=full_file,
-            loci=_edit_capability_loci(state, ctx, path, content.splitlines()),
+            loci=_edit_capability_loci(state, ctx, path, content.splitlines(), revision=content_shown_revision,
+                                       raw_digest=file_raw_digest(full)),
             budget_chars=budget_chars,
             level=state.budgets.anchor_failure_counts.get(path, 0),
             shown=shown,
@@ -2988,6 +3029,12 @@ class AttemptContext:
     # md section 25). Default empty dict keeps every existing test/caller
     # that doesn't know about this field unaffected.
     retrieval_member_hints: Dict[str, List[str]] = field(default_factory=dict)
+    # CONTEXT-EDIT-PROTOCOL-LARGE-FILE-001: path -> [(declaration line, digest
+    # of the bytes it was read from)] of the structural localization
+    # candidates (graph_retrieval.GraphRetrievalResult.retrieval_symbol_loci,
+    # adopted targets first). Edit loci for _decide_edit_capabilities while
+    # the digest still matches the file; never write authority by itself.
+    retrieval_symbol_loci: Dict[str, List[Tuple[int, str]]] = field(default_factory=dict)
     # CTX-001 P1 WP9: one small AttemptContext-lifetime cache for
     # deterministic source-derived artifacts (skeleton/signatures/member-
     # exact rendering + their own token estimates), keyed by
@@ -7366,6 +7413,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # must never be silently overwritten by a broader, less precise
             # same-path overview merely because it happens to sort later.
             _record_known_target_package(state, known_target_package.relevant_files)
+            _record_omitted_members(state, known_target_package.omitted)
             # Internal evidence (WP6/observability) - never the full source,
             # just enough to answer "what tier/omission did each known
             # target actually get" from the run trace alone.
