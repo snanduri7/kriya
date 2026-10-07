@@ -1,0 +1,53 @@
+{
+  "base_revision": "67f99bd0059dd1bac9e44382907ef9f10098b39f",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 2,
+    "attempt.concluded": 2,
+    "attempt.opened": 2,
+    "authority.snapshot": 2,
+    "candidate.change": 2,
+    "developer.parse": 2,
+    "diagnosis": 2,
+    "fallback.decision": 2,
+    "gate.result": 5,
+    "mirror.decision": 5,
+    "mirror.event": 39,
+    "mirror.evidence": 3,
+    "mirror.gate_outcome": 4,
+    "model.request": 7,
+    "model.response": 7,
+    "model.result": 7,
+    "obligations.snapshot": 2,
+    "prompt.sections": 7,
+    "recovery.decision": 2,
+    "regression.decision": 1,
+    "retry.delta": 1,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 1,
+    "unit.opened": 1
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "69465d3e324739b5e71e3807fa60ba5c13517cd6",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-postreg/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "770713950381720ea1c852725ffb660a4ae582d0",
+    "version": "0.1.0"
+  },
+  "records": 110,
+  "run_id": "20261007T071630-e21ca9b2",
+  "seal": {
+    "blob_count": 105,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws-postreg-a/gr1-graphify"
+}

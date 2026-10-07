@@ -1,0 +1,129 @@
+{
+ "process_wall_seconds": 430.7231095840689,
+ "recorder_seconds": 0.7918465043185279,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 2,
+   "seconds": 6.862508598715067e-05
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 3,
+   "seconds": 1.4959019608795643e-05
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0006132080452516675
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 7,
+   "seconds": 0.036351748974993825
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 2,
+   "seconds": 0.0019972079899162054
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 2,
+   "seconds": 1.550000160932541e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 2,
+   "seconds": 8.654315024614334e-05
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 5,
+   "seconds": 0.004307334078475833
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 39,
+   "seconds": 0.03245375317055732
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 3,
+   "seconds": 0.025439541903324425
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 4,
+   "seconds": 0.048834542045369744
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 2,
+   "seconds": 3.08395829051733e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.005901416996493936
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 7,
+   "seconds": 0.0010359988082200289
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 2,
+   "seconds": 0.0015924170147627592
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 2,
+   "seconds": 0.03741283202543855
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 2,
+   "seconds": 7.870793342590332e-05
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 7,
+   "seconds": 0.020321790128946304
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 7,
+   "seconds": 0.016519207856617868
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 1,
+   "seconds": 1.2916047126054764e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 5,
+   "seconds": 0.5055569601245224
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 2,
+   "seconds": 0.00018125097267329693
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 1,
+   "seconds": 0.051729624974541366
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 2,
+   "seconds": 0.0004230838967487216
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 5,
+   "seconds": 0.0005441249813884497
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 2,
+   "seconds": 0.00034433312248438597
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 1,
+   "seconds": 5.792011506855488e-06
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-postreg/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/postreg-a.yaml",
+  "generate",
+  "-f",
+  "/Users/sriramnanduri/kriya-live-validation/graphify-canonical-853aa43/goal.txt",
+  "-y",
+  "--requirements",
+  "/Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/graphify_requirements_PROPOSED_unapproved.json",
+  "--acceptance",
+  "/Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/kriya_acceptance_graphify.py",
+  "--acceptance-approval",
+  "/Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/graphify_approval_APPROVED_owner.json"
+ ]
+}
