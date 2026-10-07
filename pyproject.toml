@@ -86,6 +86,10 @@ asyncio_mode = "strict"
 # repo's CLAUDE.md) fixes this at the root instead of chasing every future
 # spike/harness output directory with its own ignore rule.
 testpaths = ["tests"]
+# The repository root on sys.path: tests import `tests._strict_doubles` (tests/ is not a
+# package) and the console-script pytest does not add the rootdir - the certified full-suite
+# form had to export PYTHONPATH=$PWD by hand (TEST-HARNESS-001, 2026-10-07).
+pythonpath = ["."]
 markers = [
     "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
     "chaos: PRD-032 chaos scenario (tests/_chaos_harness.py::SCENARIOS id as the marker argument) - deterministic cases run by default; `pytest -m chaos --chaos-report DIR` writes the chaos report",

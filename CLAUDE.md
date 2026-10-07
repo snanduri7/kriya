@@ -26,7 +26,7 @@ pip install -e .                    # installs `kriya` and `kriya-mcp` console s
 
 # Tests
 .venv/bin/pytest                     # full suite (asyncio_mode = strict, see pyproject.toml) - entirely mocked, no live model calls
-ulimit -n 256; .venv/bin/pytest -q -n 8 --dist loadgroup   # the full suite in parallel (~8 min vs ~30 serial); add --ff to run last failures first
+scripts/run_full_suite.py            # the canonical full suite (~8 min): preflight (venv, Docker, jdtls/mvn/java, arm64-only JVMs), ulimit -n 256, PYTHONPATH, -n 8 --dist loadgroup, root-pollution post-check; extra pytest args pass through (e.g. --ff)
 .venv/bin/pytest tests/test_workflow.py            # single file
 .venv/bin/pytest tests/test_workflow.py::test_workflow_fallback_chain   # single test
 .venv/bin/pytest -m state_machine    # fast deterministic state-machine tier (retry/recovery/fallback, resume, verification/commit, budgets, lifecycle); members: tests/state_machine/ + tests/conftest.py STATE_MACHINE_TIER_FILES
@@ -43,7 +43,7 @@ ulimit -n 256; .venv/bin/pytest -q -n 8 --dist loadgroup   # the full suite in p
 
 The user is quota-conscious in this repo specifically — apply these by default, without being asked each session:
 
-- **Pytest runs.** A very small targeted run (a few new/changed test IDs, seconds) is fine at any time. For a wide-reaching change, Claude runs the full suite itself in parallel (`ulimit -n 256; .venv/bin/pytest -q -n 8 --dist loadgroup`, ~8 min), started ONCE with `run_in_background` and read when the completion notice arrives - never polled, never stacked. The user's own run is the final confirmation at a batch boundary. Anything in between (a subsystem's files) goes to the user as an exact command.
+- **Pytest runs.** A very small targeted run (a few new/changed test IDs, seconds) is fine at any time. For a wide-reaching change, Claude runs the full suite itself in parallel (`scripts/run_full_suite.py`, ~8 min; it refuses to run with a missing prerequisite), started ONCE with `run_in_background` and read when the completion notice arrives - never polled, never stacked. The user's own run is the final confirmation at a batch boundary. Anything in between (a subsystem's files) goes to the user as an exact command.
 - **Parallel suite contract (`tests/conftest.py`).** Tests that start real containers (any `skip`/`skipif` whose reason names docker) are pinned to one xdist worker (`xdist_group("docker")`): their leak checks list every kriya container on the daemon, so two at once see each other's. A test must never share a fixed path such as `/tmp` as a workspace (the workspace lock collides across workers); use `tmp_path`.
 - **Don't launch long-running or live-model work (a `kriya generate`/`fix` run, `-m live_model` tests, eval batches) and then poll it from inside the session** (repeated Bash/Read check-ins, `ScheduleWakeup` loops) — every check-in costs a turn even while "just waiting." Either hand the command to the user's terminal, or start it with `run_in_background` and wait for the actual completion notification; only peek at interim output when there's a concrete reason (e.g. confirming it didn't fail fast), not out of curiosity.
 - **Prefer fewer, well-scoped tool calls over several exploratory ones.** Batch independent reads/searches in parallel rather than trickling them out one at a time.
