@@ -1,0 +1,141 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+_ test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge _
+
+graph = (set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".A()", "reader", ".Get()", "settings")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+kriya_acceptance.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+kriya_acceptance.py:60: in _edge
+    return (_node(result, caller, caller_file), _node(result, callee, callee_file)) in calls
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+result = {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs', ...},...demo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}
+label = '.A()', file_stem = 'reader'
+
+    def _node(result, label, file_stem):
+        matches = [n["id"] for n in result["nodes"] if n["label"] == label and file_stem in n["id"].lower()]
+>       assert len(matches) == 1, (label, file_stem, matches)
+E       AssertionError: ('.A()', 'reader', [])
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+kriya_acceptance.py:54: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+  warning: skipped src/Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+____________ test_case2_generic_call_through_this_gets_a_calls_edge ____________
+
+graph = (set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case2_generic_call_through_this_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".B()", "reader", ".Get()", "settings")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+kriya_acceptance.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+kriya_acceptance.py:60: in _edge
+    return (_node(result, caller, caller_file), _node(result, callee, callee_file)) in calls
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+result = {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs', ...},...demo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}
+label = '.B()', file_stem = 'reader'
+
+    def _node(result, label, file_stem):
+        matches = [n["id"] for n in result["nodes"] if n["label"] == label and file_stem in n["id"].lower()]
+>       assert len(matches) == 1, (label, file_stem, matches)
+E       AssertionError: ('.B()', 'reader', [])
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+kriya_acceptance.py:54: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+  warning: skipped src/Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+_ test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge _
+
+graph = (set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-1")
+    @pytest.mark.kriya_requirement("REQ-3")
+    def test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge(graph):
+>       assert _edge(graph, ".E()", "local", ".Make()", "local")
+E       AssertionError: assert False
+E        +  where False = _edge((set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.E()', 'local', '.Make()', 'local')
+
+kriya_acceptance.py:78: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+  warning: skipped src/Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+_______ test_control3_unqualified_non_generic_call_keeps_its_calls_edge ________
+
+graph = (set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-2")
+    def test_control3_unqualified_non_generic_call_keeps_its_calls_edge(graph):
+>       assert _edge(graph, ".C()", "reader", ".GetRaw()", "settings")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+kriya_acceptance.py:83: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+kriya_acceptance.py:60: in _edge
+    return (_node(result, caller, caller_file), _node(result, callee, callee_file)) in calls
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+result = {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs', ...},...demo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}
+label = '.C()', file_stem = 'reader'
+
+    def _node(result, label, file_stem):
+        matches = [n["id"] for n in result["nodes"] if n["label"] == label and file_stem in n["id"].lower()]
+>       assert len(matches) == 1, (label, file_stem, matches)
+E       AssertionError: ('.C()', 'reader', [])
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+kriya_acceptance.py:54: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+  warning: skipped src/Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+_______ test_control4_non_generic_call_through_this_keeps_its_calls_edge _______
+
+graph = (set(), {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs...emo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})
+
+    @pytest.mark.kriya_requirement("REQ-2")
+    def test_control4_non_generic_call_through_this_keeps_its_calls_edge(graph):
+>       assert _edge(graph, ".D()", "reader", ".GetRaw()", "settings")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+kriya_acceptance.py:88: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+kriya_acceptance.py:60: in _edge
+    return (_node(result, caller, caller_file), _node(result, callee, callee_file)) in calls
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+result = {'nodes': [{'id': 'src_settings', 'label': 'Settings.cs', 'file_type': 'code', 'source_file': 'src/Settings.cs', ...},...demo_local', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}
+label = '.D()', file_stem = 'reader'
+
+    def _node(result, label, file_stem):
+        matches = [n["id"] for n in result["nodes"] if n["label"] == label and file_stem in n["id"].lower()]
+>       assert len(matches) == 1, (label, file_stem, matches)
+E       AssertionError: ('.D()', 'reader', [])
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+kriya_acceptance.py:54: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+  warning: skipped src/Reader.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+=========================== short test summary info ============================
+FAILED kriya_acceptance.py::test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge
+FAILED kriya_acceptance.py::test_case2_generic_call_through_this_gets_a_calls_edge
+FAILED kriya_acceptance.py::test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge
+FAILED kriya_acceptance.py::test_control3_unqualified_non_generic_call_keeps_its_calls_edge
+FAILED kriya_acceptance.py::test_control4_non_generic_call_through_this_keeps_its_calls_edge
+5 failed in 0.32s

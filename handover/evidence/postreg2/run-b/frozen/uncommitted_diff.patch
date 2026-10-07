@@ -1,0 +1,175 @@
+diff --git a/graphify/extractors/engine.py b/graphify/extractors/engine.py
+index 4d9fb1f..ae39871 100644
+--- a/graphify/extractors/engine.py
++++ b/graphify/extractors/engine.py
+@@ -5362,7 +5362,14 @@ def _extract_generic(
+                     mname = fn_node.child_by_field_name("name")
+                     recv = fn_node.child_by_field_name("expression")
+                     if mname is not None:
+-                        callee_name = _read_text(mname, source)
++                        if mname.type == "generic_name":
++                            # C#: this.Get<int>("key") — the `name` field of the
++                            # member_access_expression is a generic_name; read its
++                            # inner bare name for member lookup.
++                            gn = mname.child_by_field_name("name") or (mname.children[0] if mname.children else None)
++                            callee_name = _read_text(gn, source) if gn is not None else _read_text(mname, source)
++                        else:
++                            callee_name = _read_text(mname, source)
+                         is_member_call = True
+                         if recv is not None and recv.type == "identifier":
+                             member_receiver = _read_text(recv, source)
+@@ -5386,6 +5393,12 @@ def _extract_generic(
+                                 and fname.type == "identifier"
+                             ):
+                                 member_receiver = _read_text(fname, source)
++                elif fn_node is not None and fn_node.type == "generic_name":
++                    # C#: unqualified generic call like Get<int>("key") — the
++                    # `function` field is a generic_name whose first child is the
++                    # bare method name; use that for member lookup.
++                    gn = fn_node.child_by_field_name("name") or (fn_node.children[0] if fn_node.children else None)
++                    callee_name = _read_text(gn, source) if gn is not None else _read_text(fn_node, source)
+                 elif fn_node is not None and fn_node.type == "identifier":
+                     callee_name = _read_text(fn_node, source)
+                 else:
+diff --git a/tests/test_csharp_call_site_generic_args.py b/tests/test_csharp_call_site_generic_args.py
+index 0d070e5..f3a90b4 100644
+--- a/tests/test_csharp_call_site_generic_args.py
++++ b/tests/test_csharp_call_site_generic_args.py
+@@ -12,6 +12,11 @@ PR #2913 closed the FIELD-position gap (the parallel ``field_declaration``
+ handler); this test covers the call-site gap that PR #2913 deliberately left
+ for a follow-up. Each case asserts the edge exists (no count) -- absence is
+ the bug; counts are an implementation detail.
++
++This module also covers the related ``calls``-edge gap: an unqualified or
++``this``-qualified generic call (``Get<T>(...)``, ``this.Get<T>(...)``) must
++produce a ``calls`` edge to the target method, identical to its non-generic
++counterpart. The type-argument list is not part of the method's identity.
+ """
+ from __future__ import annotations
+ 
+@@ -64,6 +69,26 @@ def _all_refs(tmp_path, files: dict[str, str]) -> list[tuple[str, str, str | Non
+     ]
+ 
+ 
++def _calls(tmp_path, files: dict[str, str]) -> set[tuple[str, str]]:
++    """Extract, returning {(source_label, target_label)} for `calls` edges."""
++    for name, body in files.items():
++        p = tmp_path / name
++        p.parent.mkdir(parents=True, exist_ok=True)
++        p.write_text(body)
++    old = os.getcwd()
++    try:
++        os.chdir(tmp_path)
++        r = extract([Path(n) for n in files], cache_root=tmp_path / ".cache")
++    finally:
++        os.chdir(old)
++    labels = {n["id"]: n.get("label", "") for n in r["nodes"]}
++    return {
++        (labels.get(e["source"], ""), labels.get(e["target"], ""))
++        for e in r["edges"]
++        if e["relation"] == "calls"
++    }
++
++
+ _TYPES = (
+     "public interface IThing { }\n"
+     "public interface IService { }\n"
+@@ -226,3 +251,98 @@ def test_call_site_generic_args_appear_in_issue_repro(tmp_path):
+     assert (".Di()", "Box") in {(s, t) for s, t, _c in all_di_refs}, (
+         "the Box<...> argument itself must still link from the Di method"
+     )
++
++
++# ---------------------------------------------------------------------------
++# `calls`-edge coverage: unqualified and this-qualified generic calls must
++# resolve to the target method exactly as their non-generic counterparts do.
++# ---------------------------------------------------------------------------
++
++_SETTINGS = (
++    "namespace Demo\n"
++    "{\n"
++    "    public class Settings\n"
++    "    {\n"
++    "        public T Get<T>(string key) { return default(T); }\n"
++    "        public string GetRaw(string key) { return key; }\n"
++    "    }\n"
++    "}\n"
++)
++
++_READER = (
++    "namespace Demo\n"
++    "{\n"
++    "    public class Reader : Settings\n"
++    "    {\n"
++    "        public int A() { return Get<int>(\"port\"); }\n"
++    "        public int B() { return this.Get<int>(\"port\"); }\n"
++    "        public string C() { return GetRaw(\"host\"); }\n"
++    "        public string D() { return this.GetRaw(\"host\"); }\n"
++    "    }\n"
++    "}\n"
++)
++
++_LOCAL = (
++    "namespace Demo\n"
++    "{\n"
++    "    public class Local\n"
++    "    {\n"
++    "        public T Make<T>() { return default(T); }\n"
++    "        public int E() { return Make<int>(); }\n"
++    "    }\n"
++    "}\n"
++)
++
++
++def test_unqualified_generic_call_on_base_class_emits_calls_edge(tmp_path):
++    """Case 1: `Get<int>(\"port\")` unqualified, target on the base class."""
++    edges = _calls(tmp_path, {
++        "Settings.cs": _SETTINGS,
++        "Reader.cs": _READER,
++    })
++    assert (".A()", ".Get()") in edges, (
++        "unqualified generic call `Get<int>(...)` on a base-class method must emit a calls edge"
++    )
++
++
++def test_this_qualified_generic_call_on_base_class_emits_calls_edge(tmp_path):
++    """Case 2: `this.Get<int>(\"port\")`, target on the base class."""
++    edges = _calls(tmp_path, {
++        "Settings.cs": _SETTINGS,
++        "Reader.cs": _READER,
++    })
++    assert (".B()", ".Get()") in edges, (
++        "`this.Get<int>(...)` on a base-class method must emit a calls edge"
++    )
++
++
++def test_unqualified_non_generic_call_on_base_class_still_emits_calls_edge(tmp_path):
++    """Case 3 (control): `GetRaw(\"host\")` unqualified, non-generic."""
++    edges = _calls(tmp_path, {
++        "Settings.cs": _SETTINGS,
++        "Reader.cs": _READER,
++    })
++    assert (".C()", ".GetRaw()") in edges, (
++        "unqualified non-generic call `GetRaw(...)` must still emit a calls edge"
++    )
++
++
++def test_this_qualified_non_generic_call_on_base_class_still_emits_calls_edge(tmp_path):
++    """Case 4 (control): `this.GetRaw(\"host\")`, non-generic."""
++    edges = _calls(tmp_path, {
++        "Settings.cs": _SETTINGS,
++        "Reader.cs": _READER,
++    })
++    assert (".D()", ".GetRaw()") in edges, (
++        "`this.GetRaw(...)` must still emit a calls edge"
++    )
++
++
++def test_unqualified_generic_call_same_class_emits_calls_edge(tmp_path):
++    """Case 5: `Make<int>()` unqualified, target on the same class."""
++    edges = _calls(tmp_path, {
++        "Local.cs": _LOCAL,
++    })
++    assert (".E()", ".Make()") in edges, (
++        "unqualified generic call `Make<int>()` on the same class must emit a calls edge"
++    )

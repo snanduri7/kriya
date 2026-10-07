@@ -1,0 +1,3 @@
+/Users/sriramnanduri/kriya-m1-live/ws-postreg2-a/gr1-graphify                                                    67f99bd (detached HEAD)
+/Users/sriramnanduri/kriya-m1-live/ws-postreg2-a/gr1-graphify/.kriya/worktree                                    67f99bd (detached HEAD)
+/Users/sriramnanduri/kriya-m1-live/ws-postreg2-a/gr1-graphify/.kriya/worktrees/candidate-kriya-worktree-c2a3db38 67f99bd (detached HEAD)

@@ -1,0 +1,11 @@
+2026-10-07 09:14:59,029 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b-kriya-e52213655394, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+2026-10-07 09:14:59,178 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+2026-10-07 09:14:59,400 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Source: qualification_derived, native_tool_calls=False, json_mode=True, reliable_multiline_json=True, preferred_edit_protocol=text_markers]
+  developer        qwen3-coder:30b-kriya-e52213655394       QUALIFIED
+  developer        qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a QUALIFIED
+  planner          qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a QUALIFIED
+  architect        qwen3-coder:30b-kriya-e52213655394       QUALIFIED
+  reviewer         qwen3-coder:30b-kriya-e52213655394       QUALIFIED
+  run_verifier     qwen3-coder:30b-kriya-e52213655394       QUALIFIED
+  skill_gap        qwen3-coder:30b-kriya-e52213655394       QUALIFIED
+  spec_compliance  qwen3-coder:30b-kriya-e52213655394       QUALIFIED

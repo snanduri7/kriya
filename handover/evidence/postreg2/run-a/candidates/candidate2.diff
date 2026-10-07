@@ -1,0 +1,37 @@
+diff --git a/graphify/extractors/engine.py b/graphify/extractors/engine.py
+index 4d9fb1f..097ebf5 100644
+--- a/graphify/extractors/engine.py
++++ b/graphify/extractors/engine.py
+@@ -5362,7 +5362,12 @@ def _extract_generic(
+                     mname = fn_node.child_by_field_name("name")
+                     recv = fn_node.child_by_field_name("expression")
+                     if mname is not None:
+-                        callee_name = _read_text(mname, source)
++                        # Handle generic names by stripping type arguments for callee name
++                        if mname.type == "generic_name":
++                            # Extract the bare method name without type arguments
++                            callee_name = _read_text(mname.child_by_field_name("name"), source)
++                        else:
++                            callee_name = _read_text(mname, source)
+                         is_member_call = True
+                         if recv is not None and recv.type == "identifier":
+                             member_receiver = _read_text(recv, source)
+@@ -5386,8 +5391,16 @@ def _extract_generic(
+                                 and fname.type == "identifier"
+                             ):
+                                 member_receiver = _read_text(fname, source)
+-                elif fn_node is not None and fn_node.type == "identifier":
+-                    callee_name = _read_text(fn_node, source)
++                elif fn_node is not None and fn_node.type in ("identifier", "generic_name"):
++                    # For generic_name (e.g., Get<int>), extract the bare method name
++                    if fn_node.type == "generic_name":
++                        name_node = fn_node.child_by_field_name("name")
++                        if name_node is not None:
++                            callee_name = _read_text(name_node, source)
++                        else:
++                            callee_name = _read_text(fn_node, source)
++                    else:
++                        callee_name = _read_text(fn_node, source)
+                 else:
+                     # Fallback: original name-field / first-named-child scan.
+                     name_node = node.child_by_field_name("name")

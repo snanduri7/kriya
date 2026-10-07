@@ -1,0 +1,154 @@
+{
+  "_run_record": {
+    "classification": "derived",
+    "revision": 7,
+    "run_id": "20261007T091832-d5607f08"
+  },
+  "_workspace": {
+    "version": "1",
+    "workspace_id": "5f90f8d7d9185c949f0773a41f354a1ef029ea87a0f2458cf9f2cf0369981c7e"
+  },
+  "approval_basis": "authoritative_validation",
+  "approval_status": "approved",
+  "lifecycle_state": "failed",
+  "plan": {
+    "acceptance_criteria": [
+      {
+        "description": "REQ-1: Calls Get<int>(), this.Get<int>(), and Make<int>() produce calls edges to their respective targets.",
+        "id": "ac1",
+        "method": "judgment",
+        "tool_name": null
+      },
+      {
+        "description": "REQ-2: Non-generic calls GetRaw() and this.GetRaw() continue to produce calls edges.",
+        "id": "ac2",
+        "method": "judgment",
+        "tool_name": null
+      }
+    ],
+    "extension_points": [],
+    "global_invariants": [
+      {
+        "id": "gi1",
+        "statement": "C# generic call resolution must extract the bare method name from generic_name nodes (stripping type arguments) to match against the member index, ensuring calls like Get<T>() resolve to Get."
+      },
+      {
+        "id": "gi2",
+        "statement": "Existing non-generic C# call behavior must be preserved exactly as before."
+      }
+    ],
+    "integration_relationships": [],
+    "kind": "task",
+    "plan_id": "20261007T091832-d5607f08",
+    "refactor_baseline": null,
+    "subtasks": [
+      {
+        "acceptance_criteria_ids": [
+          "ac2"
+        ],
+        "depends_on": [],
+        "description": "Fix _extract_generic in engine.py to strip type arguments from generic_name nodes when resolving the callee name for C# calls.",
+        "execution_method": "model",
+        "execution_role": "implementation",
+        "id": "s1",
+        "ownership_justification": {},
+        "planned_files": [
+          {
+            "action": "modify",
+            "environment_requirements": [
+              "python"
+            ],
+            "path": "graphify/extractors/engine.py",
+            "preserved_references": [
+              "graphify/extractors/base.py"
+            ],
+            "reason": "",
+            "requires_capabilities": []
+          }
+        ],
+        "provides": [
+          "fixed_csharp_generic_resolution"
+        ],
+        "relevant_global_invariant_ids": [
+          "gi1",
+          "gi2"
+        ],
+        "requirement_ids": [],
+        "requires": [],
+        "tool_arguments": {},
+        "tool_name": null,
+        "verification": [
+          {
+            "description": "Run the existing C# member calls test suite to ensure no regressions.",
+            "requires_runtime_execution": false,
+            "tool_name": "test",
+            "type": "tool",
+            "verifier_kind": "test"
+          }
+        ]
+      },
+      {
+        "acceptance_criteria_ids": [
+          "ac1"
+        ],
+        "depends_on": [
+          "s1"
+        ],
+        "description": "Add a specific test case for unqualified and this-qualified generic calls in C# to verify the fix.",
+        "execution_method": "model",
+        "execution_role": "implementation",
+        "id": "s2",
+        "ownership_justification": {},
+        "planned_files": [
+          {
+            "action": "modify",
+            "environment_requirements": [
+              "python",
+              "pytest"
+            ],
+            "path": "tests/test_csharp_call_site_generic_args.py",
+            "preserved_references": [
+              "graphify/extract.py"
+            ],
+            "reason": "",
+            "requires_capabilities": []
+          }
+        ],
+        "provides": [
+          "verified_generic_call_fix"
+        ],
+        "relevant_global_invariant_ids": [
+          "gi1",
+          "gi2"
+        ],
+        "requirement_ids": [],
+        "requires": [
+          "fixed_csharp_generic_resolution"
+        ],
+        "tool_arguments": {},
+        "tool_name": null,
+        "verification": [
+          {
+            "description": "Run the new test case to verify calls edges are created for generic calls.",
+            "requires_runtime_execution": false,
+            "tool_name": "test",
+            "type": "tool",
+            "verifier_kind": "test"
+          }
+        ]
+      }
+    ]
+  },
+  "plan_hash": "9a4296f321c089325751d88b975e3695804adbe6e378180a9a985bc63f308c96",
+  "plan_id": "20261007T091832-d5607f08",
+  "repair_attempts": 0,
+  "schema_version": 1,
+  "stage_order": [
+    "s1",
+    "s2"
+  ],
+  "stage_states": {
+    "s1": "failed",
+    "s2": "pending"
+  }
+}

@@ -1,0 +1,38 @@
+KRIYA REVISION                   MATCH
+GRAPHIFY HEAD                    MATCH
+WORKSPACE CLEAN                  MATCH
+UNTRACKED .kriya ABSENT          MATCH
+MAINTAINER FIX OBJECT ABSENT     MATCH
+GOAL FILE SHA                    MATCH
+GOAL BINDING                     MATCH
+REQUIREMENT CONTRACT SHA         MATCH
+ACCEPTANCE SHA                   MATCH
+B3 APPROVAL SHA                  MATCH
+B3 FORMAT /2                     MATCH
+REQUIREMENT SET SHA              MATCH
+ACCEPTANCE DIGEST                MATCH
+RUNNER CONTRACT                  MATCH
+BASE REVISION                    MATCH
+B3 APPROVAL LOADS                MATCH
+SEC-009 CURRENT                  MATCH
+WORKSPACE STILL CLEAN            MATCH
+CONFIG = QUALIFIED MATCHED PROFILE MATCH
+AUTO-SKILL FILES                 MATCH
+AUTO-SKILL DIGEST                MATCH
+QUALIFICATION VIEW READ ONLY     MATCH
+QUALIFICATION HOME = VIEW        MATCH
+ROLE MODELS AS MATCHED           MATCH
+EVERY ROLE IDENTITY QUALIFIED    MATCH
+ROLE IDENTITIES = PREPARED       MATCH
+REG-R1 SMOKE NO REGRESSION       MATCH
+WORKSPACE STILL CLEAN (after status) MATCH
+ALL PASS
+model status: all roles QUALIFIED
+invocation: kriya --config /Users/sriramnanduri/kriya-m1-live/config/postreg2-a.yaml generate -f /Users/sriramnanduri/kriya-live-validation/graphify-canonical-853aa43/goal.txt -y --requirements /Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/graphify_requirements_PROPOSED_unapproved.json --acceptance /Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/kriya_acceptance_graphify.py --acceptance-approval /Users/sriramnanduri/kriya-wt/p3d/handover/evidence/gr0/graphify_prospective/graphify_approval_APPROVED_owner.json
+== postreg2-a start 09:15:01 base 67f99bd kriya 56ae8d3d6
+analyze exit=1 seconds=211
+generate exit=1 wall_seconds=512.2
+run_id=20261007T091832-d5607f08
+verify exit=0
+explain exit=0
+== postreg2-a end 09:27:07. Next: freeze-postreg2.sh a (never evaluate before freezing)

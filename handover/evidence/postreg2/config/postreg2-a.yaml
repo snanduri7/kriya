@@ -1,0 +1,119 @@
+# provider-contract-v5-production: v4 (sha256 of v4 unchanged) + a static Planner role binding (agent_llms.planner.llm).
+# PROVIDER-CONTRACT-001A successor production configuration (operator-owned,
+# outside every workspace). Identical to provider-contract-v3-production.yaml
+# (sha256 667831f0...f3f75e0d8, which stays frozen as the PROVIDER-CONTRACT-001
+# identity) except that every model binding uses the native Ollama adapter
+# (/api/chat with truncate:false): a prompt larger than the served window is
+# refused by the provider, typed, instead of being answered from a silently
+# truncated prompt as /v1 does (measured). Pinned model tags and all settings
+# are unchanged; both are QUALIFIED under kriya-qualification/8 on this adapter.
+runtime_profile: production
+autonomy:
+  mode: human-in-the-loop
+  web_lookup_enabled: false
+  web_lookup_auto_approve: false
+  run_verification_enabled: true
+  self_correction_loop_enabled: false
+search:
+  base_url: ''
+skills:
+  load_global: false
+  load_cwd: false
+paths:
+  skills: /Users/sriramnanduri/kriya-m1-live/skills-postreg2-a
+  state: /Users/sriramnanduri/kriya-m1-live/state-postreg2-a
+  memory: /Users/sriramnanduri/kriya-m1-live/memory/postreg2-a
+llm:
+  provider: openai
+  model: qwen3-coder:30b-kriya-e52213655394
+  inference_runtime: ollama_native
+  api_key: local-key
+  base_url: http://localhost:11434/v1
+  temperature: 0.7
+  reviewer_temperature: 0.7
+  max_tokens: 16384
+  planner_max_tokens: 8192
+  # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+  transport:
+    connect_timeout_seconds: 10.0
+    read_timeout_seconds: 900.0
+    write_timeout_seconds: 60.0
+    pool_timeout_seconds: 10.0
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: small_native_tools
+  extra_body:
+    options:
+      num_ctx: 32768
+      top_p: 0.8
+      top_k: 20
+# Developer fallback: the pinned qwen3.6 identity, qualified under policy /4.
+llm_chain:
+- model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+  inference_runtime: ollama_native
+  base_url: http://localhost:11434/v1
+  api_key: local-key
+  context_window: 32768
+  temperature: 0.7
+  extra_body:
+    options:
+      num_ctx: 32768
+      top_p: 0.8
+      top_k: 20
+    reasoning_effort: none
+# Per-role output budgets: exactly the values these roles resolved to before
+# the per-role mechanism existed (planner = llm.planner_max_tokens; every
+# other agent role = llm.max_tokens). Preserved, not tuned.
+agent_llms:
+  planner:
+    # Static Planner role specialization (2026-10-03): the already-qualified
+    # llm_chain[0] binding, verbatim. Selected from the measured cross-task
+    # Planner matrix (commons-lang, Spring Boot, Python, Spring XML): correct
+    # targets 4/4 and no over-scoped unit, vs qwen3-coder 4/4 and 1 over-scoped
+    # unit (Spring XML 9/9 earlier). The Developer stays qwen3-coder (llm).
+    llm:
+      provider: openai
+      model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+      inference_runtime: ollama_native
+      api_key: local-key
+      base_url: http://localhost:11434/v1
+      context_window: 32768
+      temperature: 0.7
+      max_tokens: 16384
+      planner_max_tokens: 8192
+      extra_body:
+        options:
+          num_ctx: 32768
+          top_p: 0.8
+          top_k: 20
+        reasoning_effort: none
+    max_output_tokens: 8192
+  architect:
+    max_output_tokens: 16384
+  reviewer:
+    max_output_tokens: 16384
+  run_verifier:
+    max_output_tokens: 16384
+  skill_gap:
+    max_output_tokens: 16384
+  spec_compliance:
+    max_output_tokens: 16384
+embedding:
+  model: nomic-embed-text:latest
+  base_url: http://localhost:11434/v1
+# PRD-031A static-analysis gate, enabled and required (Semgrep 1.178.0 from the
+# digest-pinned image under production OCI containment; rule pack outside every workspace).
+static_analysis:
+  enabled: true
+  provider: semgrep
+  requirement: required
+  providers:
+    semgrep:
+      version: "1.178.0"
+      image: semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+      rule_packs:
+        - /Users/sriramnanduri/.kriya/operator/prd036/semgrep-rules/java-security.yml
