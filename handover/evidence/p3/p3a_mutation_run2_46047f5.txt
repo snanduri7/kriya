@@ -1,0 +1,11 @@
+baseline 74 passed in 7.83s
+pre-fit-prompt-recorded-as-sent KILLED 1 failed, 29 passed in 5.06s
+any-anchor-in-the-file-accepted KILLED 5 failed, 15 passed in 4.79s
+revision-of-sent-text-ignored KILLED 1 failed, 29 passed in 5.14s
+stale-member-unit-accepted KILLED 1 failed, 28 passed in 5.24s
+member-unit-need-not-be-sent KILLED 1 failed, 27 passed in 5.81s
+whole-file-need-not-be-sent KILLED 5 failed, 13 passed in 5.11s
+not-in-file-anchor-accepted-from-sent-text KILLED 1 failed, 28 passed in 5.84s
+with-section-copy-not-recorded KILLED 1 failed, 27 passed in 5.86s
+sent-requests-never-kept KILLED 1 failed, 28 passed in 5.31s
+TOTAL 9 {'KILLED': 9}

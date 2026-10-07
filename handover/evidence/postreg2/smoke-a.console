@@ -1,0 +1,40 @@
+   }
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "disputed": [
+    "body"
+   ],
+   "reason": null,
+   "flaky": false,
+   "envelope_digest": "77a532a767a1e6a70ecbc08cb70ecc6c1aa33ca82c0de1a6f266bce688f4e619",
+   "envelope": {
+    "unresolved": null,
+    "states": [
+     {
+      "outcome": "failed",
+      "failure_type": "FileNotFoundError",
+      "observations": 3,
+      "fields": {
+       "message": "STABLE",
+       "body": "VOLATILE"
+      },
+      "digests": {
+       "message": [
+        "1eb05dfda8ea60dd896578e92e1481b4091b58257cbdb1b915710b437f08822b"
+       ],
+       "body": [
+        "8bc5cf96ea73dc3f132f0de92c26f4b1a92ce1d4ba7535fa772490368a285626",
+        "cf4e1426c466ed4b7c05365c40f06abd9c2cfc61a1212ecc17b9b3eca33276d7",
+        "fe8e050c3e1dd5ec782bf000d7ed28e2491682352a903f9ef119ab417fc37aa7"
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "verdict": "NO REGRESSION"
+}
+exit=0
+arm workspace untouched

@@ -1,0 +1,498 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "COMMITTED",
+        "lifecycle_state": "SUCCESS",
+        "model_calls": 10,
+        "seq": 139,
+        "terminal_status": "SUCCESS"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": null,
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": null,
+      "quality_gates_passed": true,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 65,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 124,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 30,
+              "call_seq": 2,
+              "content": {
+                "messages": "sha256:f245adfa29b7d5168aa6a40349a560f808e74c20a4f8eade441bea346c05f594",
+                "wire_body": "sha256:c8825d1f77b332ec781df09f4d354033d3177347b4b8a584381e20a2d1f73b1f"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/CharSetUtils.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 32,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:05cffaa53ca9ccb87c4840f0f919e0aab3207a96ade173e02d41d90c9180f106",
+                "wire_body": "sha256:f05adc4ff1f9664c6b95a28e04bec6a78bc2f352bdd91086b06ef3dd7324da56"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 41,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:f11c866fbae7d89b4c012caf7f36a45be2d2dadbfced811390e7d72183856bf0",
+                "wire_body": "sha256:e0d054bacd21e56519c6dc69dd695752942f0f1cb3027aed69aa7043dadba954"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 45,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:b69cd9449f1165a99792c95a6f9c91441c8a3de2d9ac575fdbc08c1afb480ea8",
+                "wire_body": "sha256:deeb6b5c1ac4d21d16978049cf61f7b71298e9d2d2d350a6d813eb7ae8ab37e8"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 54,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/CharSetUtils.java"
+              ],
+              "seq": 30,
+              "targets": [
+                {
+                  "digest": "89df40075c1301cc8e5ae14138e5cddf2795ba0625285f964ae0d6710b93f2f0",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/CharSetUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "59f16d1e872c4d0bed97c8ca87b144adfe4e57fae71bebc6f7a17d634f34939f",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharSetUtils.containsAny",
+                  "shown_revision": "59f16d1e872c4d0bed97c8ca87b144adfe4e57fae71bebc6f7a17d634f34939f",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 69,
+                      "start_line": 58,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 2,
+              "completion_tokens": 438,
+              "content": {
+                "content": "sha256:7a37a0361a0d279d8242928db5750832b41e7c915f843449d3a5159cf973e2c4"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 33,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 3,
+              "completion_tokens": 116,
+              "content": {
+                "content": "sha256:c3aa027acc2241cf87acdf05abadbf4789c47a8881a36742aba65419ccbf885c"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 42,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 4,
+              "completion_tokens": 92,
+              "content": {
+                "content": "sha256:4e88c8ffa190b667bbb9336a6372ba28d796ba06ab7de13f2bbd3523a08b8807"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 46,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 521,
+              "content": {
+                "content": "sha256:374eea815fcf5c5f806a4885644dc29011203325ade9fe539de3fb94908c536e"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 55,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 2,
+              "content": {
+                "analysis_model_claimed": "sha256:05bf4d2c306d0cdd96e8e98e743f6f208c2e59c41b14c5b34cc6c868e64129af"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/CharSetUtils.java",
+              "seq": 35
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "68029881a066b4248d014dde2e7e31141b50a1855eddd94111ada982836a264b",
+              "before_digest": "59f16d1e872c4d0bed97c8ca87b144adfe4e57fae71bebc6f7a17d634f34939f",
+              "content": {
+                "after": "sha256:68029881a066b4248d014dde2e7e31141b50a1855eddd94111ada982836a264b",
+                "before": "sha256:59f16d1e872c4d0bed97c8ca87b144adfe4e57fae71bebc6f7a17d634f34939f",
+                "diff": "sha256:4c9cb56ad9ced4ba19c7410ae66c68d8631ee5817d9e01531f672660cfbd4c20"
+              },
+              "decision": "STAGED",
+              "lines_added": 13,
+              "lines_removed": 0,
+              "path": "src/main/java/org/apache/commons/lang3/CharSetUtils.java",
+              "seq": 38
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (2 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 27
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 87,
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:f8e34f6a05cc875bc53ed0d2a888f5f6d460af3b430d12f4f4b88caef47e5450",
+                "wire_body": "sha256:00d1d59cbbc1ec395f2ec2dd2391f586e3824f63039917cbf46988a9f897554c"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 89,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:b792650d9773249dbcafd3dc803265f494c400809ec165fe258b4e27d630577d",
+                "wire_body": "sha256:f85c1e3100657e8a116429a9fe2d1a0d3609aaaca2cadb629a0f9c1566bab95d"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 100,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:b64ad43893be5e971c3ac671375307a9a91d3c78fbad9d8a38a1c7453174bbc3",
+                "wire_body": "sha256:1702cb4d3cfcf92a3a8c546187b59c1e22a591ecc204e9ccffa4eb1ee8476b61"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 104,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:6d2bb5fe08f48042b42c0c5c88b50780acdd3777f5d9fdc388ed6fea60e3b4c0",
+                "wire_body": "sha256:aa37ac589dec6bebbbca50fc196b1ee0d01b2d28de3748ff82c4511837acb3ed"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 113,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java"
+              ],
+              "seq": 87,
+              "targets": [
+                {
+                  "digest": "4ce60588bed703c4ea10e52324fba1b166dd91f821ee33a8dba5f9e3e133b607",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 2,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "00d013a1e715106a1c1fbe40554b1ee766ab2fc2c09f5bba6da11d8513ee2094",
+                  "shown_is_exact": true,
+                  "shown_member_id": "CharSetUtilsTest.testConstructor",
+                  "shown_revision": "00d013a1e715106a1c1fbe40554b1ee766ab2fc2c09f5bba6da11d8513ee2094",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 43,
+                      "start_line": 36,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 58,
+                      "start_line": 46,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 6,
+              "completion_tokens": 659,
+              "content": {
+                "content": "sha256:cd2cd8bb63daa73e2914ce5c99c62af477924b6d415fb7314c807fdb257c424f"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 90,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 170,
+              "content": {
+                "content": "sha256:b830dff9ff8a342a6c70fd4021daeb071d9115650b6e33b58475015772a38e87"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 101,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 94,
+              "content": {
+                "content": "sha256:95cdb587fb4da579cd8d740d12a08d05e0d357e4a6b3eec01ae6eb669387b6a1"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 105,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 9,
+              "completion_tokens": 425,
+              "content": {
+                "content": "sha256:7f98feb34c6c09f477ecdab6af9044c380b5f27957cdb34fde739c9795b4a532"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 114,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 6,
+              "content": {
+                "analysis_model_claimed": "sha256:9dbeb90f449dd01f8961aeb7419c8d84f4af1c24341d2a99b37deb6e41b758fa"
+              },
+              "kind": "edits",
+              "path": "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java",
+              "seq": 92
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "bdb354dc8b0bbfda3c9eaa85e4b7521b8ca9c3cc505fc0f5a8e60d29da6372a3",
+              "before_digest": "00d013a1e715106a1c1fbe40554b1ee766ab2fc2c09f5bba6da11d8513ee2094",
+              "content": {
+                "after": "sha256:bdb354dc8b0bbfda3c9eaa85e4b7521b8ca9c3cc505fc0f5a8e60d29da6372a3",
+                "before": "sha256:00d013a1e715106a1c1fbe40554b1ee766ab2fc2c09f5bba6da11d8513ee2094",
+                "diff": "sha256:d8f1facca04f1e5d0e169c7ca194939484d28a7d5225f6743ea4bd00b7ca6876"
+              },
+              "decision": "STAGED",
+              "lines_added": 25,
+              "lines_removed": 0,
+              "path": "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java",
+              "seq": 95
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "reason": "every recorded check passed (3 gate result(s))",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 84
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "planning": 1,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T193554-02bd0660",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

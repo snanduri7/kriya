@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
@@ -1137,11 +1138,20 @@ _PROSE_CONTAMINATION_PATTERNS = (
 )
 
 
-def find_explanatory_prose_contamination(path: str, content: str) -> Optional[str]:
-    """Return an obvious un-commented model explanation embedded in source."""
+def find_explanatory_prose_contamination(path: str, content: str, baseline: Optional[str] = None) -> Optional[str]:
+    """Return an obvious un-commented model explanation the candidate put in
+    source. P3-C: only lines the candidate added count - a line occurring in
+    ``content`` more often than in ``baseline`` (the file before this write;
+    None for a new file, all of whose lines are the candidate's). An
+    unchanged baseline line is never the candidate's contamination: judging
+    it made a file whose base already held such a line unmodifiable."""
     if os.path.splitext(path)[1].lower() not in _PRODUCTION_SOURCE_EXTENSIONS:
         return None
+    unchanged = Counter((baseline or "").splitlines())
     for line_number, line in enumerate((content or "").splitlines(), start=1):
+        if unchanged[line] > 0:
+            unchanged[line] -= 1
+            continue
         stripped = line.lstrip()
         if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
             continue

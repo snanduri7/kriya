@@ -1,0 +1,2506 @@
+{
+  "adapter_version": "kriya-openai-compat/3",
+  "cases": [
+    {
+      "capability": "plain_completion",
+      "elapsed_seconds": 3.854,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32455,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "unverified",
+            "served_context_window": null
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 64,
+          "min_output_tokens": 64,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 64,
+          "prompt_tokens": 57,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 30,
+          "requested_max_tokens": 64,
+          "required_tokens": 377,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 64,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "requested_per_request"
+        },
+        "completion_tokens": 2,
+        "content": "READY",
+        "content_chars": 5,
+        "elapsed_seconds": 3.845,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 64,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 64,
+          "source": "model_qualification.cases.plain_completion.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "first_request",
+          "prefix_shared_chars": 0
+        },
+        "prompt_tokens": 30,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "unverified",
+              "served_context_window": null
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 3845
+            },
+            "dispatched_bytes": 61,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 30,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 3100,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 489
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "finish_reason_stop",
+      "elapsed_seconds": 0.734,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32456,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 56,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 30,
+          "requested_max_tokens": 256,
+          "required_tokens": 568,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 3,
+        "content_chars": 6,
+        "elapsed_seconds": 0.731,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 256,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.finish_reason_stop.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "user",
+          "prefix_shared_chars": 26
+        },
+        "prompt_tokens": 30,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 731
+            },
+            "dispatched_bytes": 59,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 30,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 464
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "structured_json",
+      "elapsed_seconds": 1.636,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32432,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 80,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 49,
+          "requested_max_tokens": 256,
+          "required_tokens": 592,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 19,
+        "content_chars": 34,
+        "elapsed_seconds": 1.633,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 256,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parsed": {
+          "count": 3,
+          "status": "ok"
+        },
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.structured_json.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 4
+        },
+        "prompt_tokens": 49,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": true,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 1633
+            },
+            "dispatched_bytes": 118,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 49,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 691
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "multiline_json",
+      "elapsed_seconds": 2.979,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32375,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 137,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 83,
+          "requested_max_tokens": 512,
+          "required_tokens": 905,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 42,
+        "content": "def greet(name):\n    message = f\"Hello, {name}!\"\n    return message",
+        "content_chars": 116,
+        "elapsed_seconds": 2.977,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 512,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.multiline_json.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "user",
+          "prefix_shared_chars": 47
+        },
+        "prompt_tokens": 83,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": true,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2977
+            },
+            "dispatched_bytes": 253,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 83,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 6,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 937
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "native_tool_calls",
+      "elapsed_seconds": 3.481,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32374,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 138,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 288,
+          "requested_max_tokens": 256,
+          "required_tokens": 650,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 26,
+        "content_chars": 0,
+        "elapsed_seconds": 3.478,
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 256,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.native_tool_calls.max_tokens"
+        },
+        "prefix_reuse": {},
+        "prompt_tokens": 288,
+        "protocol": {
+          "json_mode": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 3478
+            },
+            "dispatched_bytes": 285,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 288,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 2330
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 1,
+        "tool_call_sources": [
+          "native"
+        ],
+        "tool_calls": [
+          {
+            "arguments": {
+              "city": "Paris"
+            },
+            "id": "call_hfev8qcl",
+            "name": "get_weather",
+            "source": "native"
+          }
+        ]
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "multiple_tool_calls",
+      "elapsed_seconds": 4.974,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32352,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 160,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 299,
+          "requested_max_tokens": 512,
+          "required_tokens": 928,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "served_observed"
+        },
+        "cities": [
+          "paris",
+          "tokyo"
+        ],
+        "completion_tokens": 53,
+        "content_chars": 0,
+        "elapsed_seconds": 4.971,
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 512,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.multiple_tool_calls.max_tokens"
+        },
+        "prefix_reuse": {},
+        "prompt_tokens": 299,
+        "protocol": {
+          "json_mode": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 4971
+            },
+            "dispatched_bytes": 338,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 299,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 2530
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 2,
+        "tool_call_sources": [
+          "native"
+        ]
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "tool_argument_integrity",
+      "elapsed_seconds": 5.032,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32322,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 190,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 320,
+          "requested_max_tokens": 512,
+          "required_tokens": 958,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 53,
+        "content_chars": 0,
+        "elapsed_seconds": 5.029,
+        "expected": "Line one \"quoted\" \\ backslash\nLine two: tab\tand unicode caf\u00e9 \u2013 \u6771\u4eac \u2713 {braces} [brackets]",
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 512,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.tool_argument_integrity.max_tokens"
+        },
+        "prefix_reuse": {},
+        "prompt_tokens": 320,
+        "protocol": {
+          "json_mode": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 5029
+            },
+            "dispatched_bytes": 405,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 320,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "load_ms": 7,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 2545
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "received": [
+          "Line one \"quoted\" \\ backslash\nLine two: tab\tand unicode caf\u00e9 \u2013 \u6771\u4eac \u2713 {braces} [brackets]"
+        ],
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 1,
+        "tool_call_sources": [
+          "native"
+        ]
+      },
+      "measured": {
+        "verified_tool_argument_chars": 87
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "streaming_assembly",
+      "elapsed_seconds": 2.924,
+      "evidence": {
+        "assembled_matches_result": true,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32441,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 71,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 40,
+          "requested_max_tokens": 256,
+          "required_tokens": 583,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 51,
+        "content_chars": 50,
+        "delta_count": 31,
+        "elapsed_seconds": 2.922,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 256,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 256,
+          "source": "model_qualification.cases.streaming_assembly.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 4
+        },
+        "prompt_tokens": 40,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2922
+            },
+            "dispatched_bytes": 97,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 40,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": true,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 667
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "output_truncation",
+      "elapsed_seconds": 1.599,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32452,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 16,
+          "min_output_tokens": 16,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 16,
+          "prompt_tokens": 60,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 38,
+          "requested_max_tokens": 16,
+          "required_tokens": 332,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 16,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 16,
+        "content_chars": 15,
+        "elapsed_seconds": 1.597,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 16,
+        "model": "qwen3.8:27b",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 38,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 1596
+            },
+            "dispatched_bytes": 70,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 38,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 6,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 668
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "reasoning_behavior",
+      "elapsed_seconds": 0.94,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32426,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 2048,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 2048,
+          "prompt_tokens": 86,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 56,
+          "requested_max_tokens": 2048,
+          "required_tokens": 1366,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 2048,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 3,
+        "content": "85",
+        "content_chars": 2,
+        "elapsed_seconds": 0.937,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 2048,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 2048,
+          "source": "model_qualification.cases.reasoning_behavior.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 56,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 937
+            },
+            "dispatched_bytes": 133,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 56,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 675
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": [],
+        "visible_content_has_think_tags": false
+      },
+      "measured": {
+        "reasoning_observed": false
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "full_file_raw_content",
+      "elapsed_seconds": 6.313,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32120,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 392,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 249,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1672,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 91,
+        "content_chars": 261,
+        "defines_slugify": true,
+        "elapsed_seconds": 6.309,
+        "fence_preserved": true,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 1024,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "parses": true,
+        "payload_exact": true,
+        "policy": {
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.full_file_raw_content.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 249,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 6309
+            },
+            "dispatched_bytes": 876,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 249,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "protocol_reason_code": null,
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 2070
+        },
+        "raw_had_fence": false,
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "response_protocol": "structured",
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "anchored_edit_protocol",
+      "elapsed_seconds": 8.328,
+      "evidence": {
+        "analysis": true,
+        "applied": true,
+        "applied_parses_and_changed": true,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32067,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 445,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 269,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1725,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 106,
+        "content_chars": 359,
+        "convention_kept": true,
+        "edit_count": 1,
+        "elapsed_seconds": 8.324,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 1024,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.anchored_edit_protocol.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 35
+        },
+        "prompt_tokens": 269,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 8323
+            },
+            "dispatched_bytes": 1010,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 269,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "protocol_reason_code": null,
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 2318
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "response_protocol": "structured",
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "malformed_output_recovery",
+      "elapsed_seconds": 2.514,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32414,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_state": {
+            "budget_context_window": 32768,
+            "requested_context_window": 32768,
+            "served_context_provenance": "server_observed",
+            "served_context_window": 32768
+          },
+          "context_window": 32768,
+          "counting_method": "default_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 98,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reasoning_reserve_source": null,
+          "reported_prompt_tokens": 58,
+          "requested_max_tokens": 512,
+          "required_tokens": 866,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "served_observed"
+        },
+        "completion_tokens": 29,
+        "content_chars": 86,
+        "elapsed_seconds": 2.511,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "max_tokens": 512,
+        "model": "qwen3.8:27b",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "policy": {
+          "max_tokens": 512,
+          "source": "model_qualification.cases.malformed_output_recovery.max_tokens"
+        },
+        "prefix_reuse": {
+          "prefix_break": "system",
+          "prefix_shared_chars": 10
+        },
+        "prompt_tokens": 58,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "json_schema": false,
+          "provider_contract": {
+            "adapter": "ollama_native",
+            "context": {
+              "budget_context_window": 32768,
+              "requested_context_window": 32768,
+              "served_context_provenance": "server_observed",
+              "served_context_window": 32768
+            },
+            "deadline": {
+              "configured_transport_timeout_ms": 900000,
+              "deadline_bound": false,
+              "deadline_source": null,
+              "effective_request_timeout_ms": 900000,
+              "elapsed_request_ms": 2510
+            },
+            "dispatched_bytes": 165,
+            "inference_deadline_bound": false,
+            "prompt_consumption": "consistent",
+            "prompt_tokens_reported": 58,
+            "proxy_policy": "direct",
+            "sdk_max_retries": 0,
+            "served_context_observation": {
+              "reason": null,
+              "status": "observed",
+              "window": 32768
+            },
+            "served_context_window_after_call": 32768,
+            "settings": {
+              "context_window": {
+                "effective": 32768,
+                "provenance": "request"
+              },
+              "min_p": {
+                "effective": 0,
+                "provenance": "server_model_config"
+              },
+              "presence_penalty": {
+                "effective": null,
+                "provenance": "unverified",
+                "server_config_observed": 0
+              },
+              "reasoning": {
+                "effective": "none",
+                "provenance": "request"
+              },
+              "repeat_penalty": {
+                "effective": 1.05,
+                "provenance": "request"
+              },
+              "temperature": {
+                "effective": 0.7,
+                "provenance": "request"
+              },
+              "top_k": {
+                "effective": 20,
+                "provenance": "request"
+              },
+              "top_p": {
+                "effective": 0.8,
+                "provenance": "request"
+              }
+            },
+            "timeout_seconds": {
+              "connect": 10.0,
+              "read": 900.0
+            }
+          },
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "load_ms": 5,
+          "model": "qwen3.8:27b",
+          "prompt_eval_ms": 677
+        },
+        "reasoning_chars": 0,
+        "reasoning_present": false,
+        "reasoning_source": null,
+        "recovered": [
+          "a.py",
+          "b.py",
+          "c.py"
+        ],
+        "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "timeout_semantics",
+      "elapsed_seconds": 0.009,
+      "evidence": {
+        "backend_error": "ConnectTimeout: ",
+        "status": "TIMEOUT"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "cancellation_semantics",
+      "elapsed_seconds": 1.862,
+      "evidence": {
+        "cancelled_raised": true,
+        "endpoint_healthy_after": "OK",
+        "policy": {
+          "first_delta_timeout_seconds": 120.0,
+          "health_check_max_tokens": 64,
+          "max_settle_seconds": 10.0,
+          "max_tokens": 1024,
+          "source": "model_qualification.cases.cancellation_semantics.max_tokens"
+        },
+        "recorded_status": "CANCELLED",
+        "settle_seconds": 0.0
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "endpoint_error_semantics",
+      "elapsed_seconds": 0.036,
+      "evidence": {
+        "backend_error": "NativeRuntimeError: HTTP 404: model 'kriya-qualification-no-such-model:0' not found",
+        "status": "BACKEND_ERROR"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "endpoint_restart_semantics",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "not exercised live: restarting the operator's model server is out of scope for an automatic qualification; connection-refused classification is covered by fixture tests"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "tokenizer_measurement",
+      "elapsed_seconds": 8.604,
+      "evidence": {
+        "ascii_bytes_per_token": {
+          "indented": 5.16,
+          "java": 4.3361,
+          "json": 1.9375,
+          "python": 3.4,
+          "stacktrace": 3.3095,
+          "xml": 2.7419
+        },
+        "consumption_bytes_per_token": {
+          "indented": 1.53,
+          "java": 3.7983,
+          "json": 1.2847,
+          "python": 3.1391,
+          "stacktrace": 3.1984,
+          "xml": 2.6387
+        },
+        "non_ascii_bytes_per_token": 3.8538,
+        "policy": {
+          "bytes_per_token_margin": 0.9,
+          "source": "model_qualification.measurement.bytes_per_token_margin"
+        },
+        "reported_prompt_tokens": {
+          "indented": 100,
+          "java": 119,
+          "json": 144,
+          "python": 115,
+          "stacktrace": 126,
+          "unicode": 72,
+          "xml": 155
+        }
+      },
+      "measured": {
+        "bytes_per_token_ceiling": 8.0,
+        "bytes_per_token_floor": 1.7438,
+        "non_ascii_bytes_per_token_floor": 3.4684
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "over_context_refusal",
+      "elapsed_seconds": 16.602,
+      "evidence": {
+        "context_window": 32768,
+        "provider_context_window": 32768,
+        "provider_prompt_tokens": 40973,
+        "reason_code": "PROVIDER_PROMPT_TRUNCATED",
+        "refused": true,
+        "target_prompt_tokens": 40960
+      },
+      "measured": {},
+      "status": "PASS"
+    }
+  ],
+  "developer_response_protocol": "kriya_sentinel_v1",
+  "environment": {
+    "accelerator_backend": "metal",
+    "accelerator_count": 1,
+    "accelerator_memory_class_gib": 64,
+    "accelerator_model": "Apple M1 Max",
+    "architecture": "arm64",
+    "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+    "exact": true,
+    "inference_runtime": "ollama/0.34.4",
+    "os": "darwin",
+    "runtime_parallelism": "unavailable",
+    "schema_version": 1,
+    "system_memory_class_gib": 64,
+    "unified_memory": true
+  },
+  "environment_evidence": {
+    "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d": {
+      "cases": [
+        {
+          "capability": "context_capacity",
+          "elapsed_seconds": 391.012,
+          "evidence": {
+            "context_window": 32768,
+            "fill_ratio": 0.9896,
+            "finish_reason": "stop",
+            "first_marker_recalled": true,
+            "last_marker_recalled": true,
+            "policy": {
+              "headroom_source": "model_qualification.cases.context_capacity.headroom_tokens",
+              "headroom_tokens": 384,
+              "max_tokens": 64,
+              "min_fill_ratio": 0.9,
+              "request_timeout_seconds": 600.0,
+              "source": "model_qualification.cases.context_capacity.max_tokens"
+            },
+            "reported_prompt_tokens": 32426,
+            "served_context_window": 32768,
+            "target_prompt_tokens": 32384,
+            "temperature": 0.0
+          },
+          "measured": {},
+          "status": "PASS"
+        }
+      ],
+      "environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "qualified_at": "2026-10-06T17:19:51.051498+00:00"
+    }
+  },
+  "fingerprint": {
+    "adapter_version": "kriya-ollama-native/2",
+    "alias": "qwen3.8:27b",
+    "artifact_digest": "sha256:22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643",
+    "chat_template": "renderer:qwen3.8",
+    "configured_context_window": 32768,
+    "digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+    "effective_context_window": 32768,
+    "endpoint": "http://localhost:11434/v1",
+    "exact": true,
+    "family": "qwen35",
+    "kriya_protocol": "capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0",
+    "missing_components": [],
+    "model_context_length": 262144,
+    "model_format": "gguf",
+    "parameter_size": "27.3B",
+    "probe_errors": [],
+    "provider": "ollama",
+    "provider_version": "0.34.4",
+    "quantization": "Q4_K_M",
+    "runtime_parameters_digest": "sha256:89df261f9db28d75efcf982e18c020bdf79f1e5e5c8c09c8af306eb608a0bdf3",
+    "schema_version": 1,
+    "served_capabilities": [
+      "completion",
+      "thinking",
+      "tools",
+      "vision"
+    ],
+    "server_parameters": [
+      "draft_num_predict 4",
+      "min_p 0",
+      "presence_penalty 0",
+      "repeat_penalty 1",
+      "temperature 1",
+      "top_k 20",
+      "top_p 0.95"
+    ],
+    "tokenizer_digest": "sha256:c4f14798e03b8d2fadcb06bc42f1d0fce3cc2c9bcc743b6bdec16bb03b59f4fd",
+    "tokenizer_identity": "gpt2/qwen35",
+    "tool_call_parser": "parser:qwen3.5",
+    "weights_digest": "sha256:f5f1dd8920d417aac2718b0bda3403da274301efdd6760b4f0f4b864ff2ad57d"
+  },
+  "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+  "inference_settings": {
+    "digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+    "extra_body": {
+      "options": {
+        "num_ctx": 32768,
+        "repeat_penalty": 1.05,
+        "top_k": 20,
+        "top_p": 0.8
+      },
+      "think": false,
+      "truncate": false
+    },
+    "output_ceiling": 16384,
+    "reasoning": false,
+    "server_config": {},
+    "temperature": 0.7,
+    "version": 3
+  },
+  "inference_settings_digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+  "kriya_version": "0.1.0",
+  "measured_limits": {
+    "bytes_per_token_ceiling": 8.0,
+    "bytes_per_token_floor": 1.7438,
+    "non_ascii_bytes_per_token_floor": 3.4684,
+    "reasoning_observed": false,
+    "verified_tool_argument_chars": 87
+  },
+  "policy_version": "kriya-qualification/8",
+  "qualification_identity": "2bb6395591682bc88c03fb6df78baee1b96795209d9f30dc1e86b12dd0ac2169",
+  "qualification_policy": {
+    "cases": {
+      "anchored_edit_protocol": {
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "cancellation_semantics": {
+        "first_delta_timeout_seconds": 120.0,
+        "health_check_max_tokens": 64,
+        "max_settle_seconds": 10.0,
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "context_capacity": {
+        "headroom_tokens": 384,
+        "max_tokens": 64,
+        "min_fill_ratio": 0.9,
+        "reasoning_headroom_tokens": null,
+        "reasoning_max_tokens": null,
+        "request_timeout_seconds": 600.0
+      },
+      "finish_reason_stop": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "full_file_raw_content": {
+        "max_tokens": 1024,
+        "reasoning_max_tokens": null
+      },
+      "malformed_output_recovery": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "multiline_json": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "multiple_tool_calls": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      },
+      "native_tool_calls": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "plain_completion": {
+        "max_tokens": 64,
+        "reasoning_max_tokens": null
+      },
+      "reasoning_behavior": {
+        "max_tokens": 2048,
+        "reasoning_max_tokens": null
+      },
+      "streaming_assembly": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "structured_json": {
+        "max_tokens": 256,
+        "reasoning_max_tokens": null
+      },
+      "tool_argument_integrity": {
+        "max_tokens": 512,
+        "reasoning_max_tokens": null
+      }
+    },
+    "measurement": {
+      "bytes_per_token_margin": 0.9,
+      "reasoning_tokens_headroom": 1.5
+    }
+  },
+  "qualification_policy_digest": "sha256:d34ab460fd768fb238717081c95f571dacc214c0d64d9c78dd3a4b2f0e549fff",
+  "qualified_at": "2026-10-06T17:19:51.051498+00:00",
+  "roles": [
+    "developer"
+  ],
+  "schema_version": 2,
+  "summary": {
+    "FAIL": 0,
+    "PASS": 19,
+    "UNAVAILABLE": 1
+  }
+}

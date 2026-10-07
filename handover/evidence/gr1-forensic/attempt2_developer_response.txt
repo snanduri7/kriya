@@ -1,0 +1,94 @@
+The issue is in the C# call site processing logic in `graphify/extractors/engine.py`. When a call has a generic name (like `Get<int>`), the current code uses `_read_text(mname, source)` which returns the full text including type arguments. This causes lookup failures because method indices are keyed by bare names.
+
+The fix needs to extract just the method name from `generic_name` nodes when they appear in member access expressions or as standalone function calls. The code already handles generic names properly for `references[generic_arg]` edges, so we just need to adjust how we compute `callee_name`.
+
+Looking at the existing code structure, I need to modify two places:
+1. When processing member access expressions with generic names
+2. When processing direct identifiers that are generic names
+
+The solution is to detect when a node is a `generic_name` and extract its identifier part (before the `<`) instead of using the full text.
+
+<<<KRIYA:EDIT path="graphify/extractors/engine.py">>>
+<<<KRIYA:SEARCH>>>
+                fn_node = node.child_by_field_name("function")
+                if fn_node is not None and fn_node.type == "member_access_expression":
+                    mname = fn_node.child_by_field_name("name")
+                    recv = fn_node.child_by_field_name("expression")
+                    if mname is not None:
+                        callee_name = _read_text(mname, source)
+                        is_member_call = True
+                        if recv is not None and recv.type == "identifier":
+                            member_receiver = _read_text(recv, source)
+                        elif recv is not None and recv.type in ("this", "this_expression"):
+                            member_receiver = "this"
+<<<KRIYA:REPLACE>>>
+                fn_node = node.child_by_field_name("function")
+                if fn_node is not None and fn_node.type == "member_access_expression":
+                    mname = fn_node.child_by_field_name("name")
+                    recv = fn_node.child_by_field_name("expression")
+                    if mname is not None:
+                        # Handle generic names by extracting the bare method name
+                        if mname.type == "generic_name":
+                            # Extract identifier part from generic_name (e.g., "Get" from "Get<int>")
+                            callee_name = _read_text(mname.child_by_field_name("name"), source)
+                        else:
+                            callee_name = _read_text(mname, source)
+                        is_member_call = True
+                        if recv is not None and recv.type == "identifier":
+                            member_receiver = _read_text(recv, source)
+                        elif recv is not None and recv.type in ("this", "this_expression"):
+                            member_receiver = "this"
+<<<KRIYA:END_EDIT>>>
+<<<KRIYA:EDIT path="graphify/extractors/engine.py">>>
+<<<KRIYA:SEARCH>>>
+                elif fn_node is not None and fn_node.type == "identifier":
+                    callee_name = _read_text(fn_node, source)
+                else:
+                    # Fallback: original name-field / first-named-child scan.
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        callee_name = _read_text(name_node, source)
+                    else:
+                        for child in node.children:
+                            if child.is_named:
+                                raw = _read_text(child, source)
+                                if "." in raw:
+                                    callee_name = raw.split(".")[-1]
+                                    is_member_call = True
+                                    parts = raw.split(".")
+                                    if len(parts) == 2 and parts[0]:
+                                        member_receiver = parts[0]
+                                else:
+                                    callee_name = raw
+                                break
+<<<KRIYA:REPLACE>>>
+                elif fn_node is not None and fn_node.type == "identifier":
+                    # Handle generic names by extracting the bare method name
+                    if fn_node.parent is not None and fn_node.parent.type == "generic_name":
+                        # This identifier is part of a generic_name, extract the bare name
+                        callee_name = _read_text(fn_node.parent.child_by_field_name("name"), source)
+                    else:
+                        callee_name = _read_text(fn_node, source)
+                else:
+                    # Fallback: original name-field / first-named-child scan.
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        # Handle generic names by extracting the bare method name
+                        if name_node.type == "generic_name":
+                            callee_name = _read_text(name_node.child_by_field_name("name"), source)
+                        else:
+                            callee_name = _read_text(name_node, source)
+                    else:
+                        for child in node.children:
+                            if child.is_named:
+                                raw = _read_text(child, source)
+                                if "." in raw:
+                                    callee_name = raw.split(".")[-1]
+                                    is_member_call = True
+                                    parts = raw.split(".")
+                                    if len(parts) == 2 and parts[0]:
+                                        member_receiver = parts[0]
+                                else:
+                                    callee_name = raw
+                                break
+<<<KRIYA:END_EDIT>>>

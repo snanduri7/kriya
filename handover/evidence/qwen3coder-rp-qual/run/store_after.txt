@@ -1,0 +1,4 @@
+total 168
+drwxr-xr-x@  3 sriramnanduri  staff     96  6 Oct 23:13 .
+drwxr-xr-x@ 60 sriramnanduri  staff   1920  6 Oct 23:10 ..
+-rw-r--r--@  1 sriramnanduri  staff  83485  6 Oct 23:13 6180997db8fb39ec123bcc0ecfe1db7056d3d0eca7ee6aa269298fb6dc651ec0.json

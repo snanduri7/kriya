@@ -1,0 +1,150 @@
+{
+ "kriya": "/Users/sriramnanduri/kriya-m1-live/venv-postreg2/lib/python3.14/site-packages/kriya",
+ "stability_policy": 3,
+ "run_id": "20261007T071630-e21ca9b2",
+ "m1": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "faithful_to_sealed": {
+  "baseline_cases": true,
+  "post_cases": true,
+  "timing_observations": true
+ },
+ "replays_served": [
+  94,
+  95
+ ],
+ "timing_test_observations": {
+  "baseline": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "1724cc2302e414fbd666bd42b47eb0e4a87e855b89746da430dddfbfe59e5f16"
+  },
+  "replay1": {
+   "outcome": "passed",
+   "failure_type": null,
+   "message": null
+  },
+  "replay2": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "382c5d1e6c2e82514121f49c136e6b72785e80b69dcf9769f083bfcf8f6ae1fd"
+  },
+  "candidate": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "36148bbdb050dcca4094da31903178af27c68e3687aa1ce40d94f65e123aca68"
+  }
+ },
+ "live_sealed_verdict": {
+  "blocking": true,
+  "blocking_reasons": [
+   "level2:tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files:STABILITY_UNRESOLVED"
+  ]
+ },
+ "replayed_verdict": {
+  "authority": "pytest_per_test",
+  "blocking": false,
+  "blocking_reasons": [],
+  "diagnostic_level1": "CHANGED_FAILURE",
+  "level2_counts": {
+   "PRE_EXISTING_FAILURE": 216,
+   "FLAKY_PREEXISTING": 1
+  },
+  "timing_test": "FLAKY_PREEXISTING",
+  "non_pre_existing": {
+   "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "FLAKY_PREEXISTING"
+  }
+ },
+ "stability_records": [
+  {
+   "test": "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "context_id": "e0311bef217edb8c6182a2e28c09685f6b76b1fcb10ffc8ae2ae57d334b2530b",
+   "source": "replay",
+   "disputed": [
+    "message",
+    "body"
+   ],
+   "envelope": {
+    "unresolved": null,
+    "states": [
+     {
+      "outcome": "failed",
+      "failure_type": "AssertionError",
+      "observations": 2,
+      "fields": {
+       "message": "VOLATILE",
+       "body": "VOLATILE"
+      },
+      "digests": {
+       "message": [
+        "1724cc2302e414fbd666bd42b47eb0e4a87e855b89746da430dddfbfe59e5f16",
+        "382c5d1e6c2e82514121f49c136e6b72785e80b69dcf9769f083bfcf8f6ae1fd"
+       ],
+       "body": [
+        "5e9be0afb78345e23fd41c3652c642845075e60ab52a68dc0cda63c74c67a9ca",
+        "ee805874cc7e5d344a3903ad5778cb607387f3740159cd0669a5e31c33a3d6ac"
+       ]
+      }
+     },
+     {
+      "outcome": "passed",
+      "failure_type": null,
+      "observations": 1,
+      "fields": {},
+      "digests": {}
+     }
+    ]
+   },
+   "envelope_digest": "f68903babc9f869a6db6b5ee784467d1e57430ca776999fe7f6951315b9c2b7f",
+   "flaky": true,
+   "reason": null,
+   "observations": [
+    "e9f79f0b5a905775b62c92b2cf8ddee0aa94f43bb775d721e28847ce72e1adfc",
+    "d7038c6409ce646e2df6ad97c3390b8321a79960d8412497d2c057119b7893fc",
+    "92b78b0d3e717c4f10f7de5ca2f0b4e5e63ccdb712e7174089e81351d9a899dd"
+   ]
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "context_id": "e0311bef217edb8c6182a2e28c09685f6b76b1fcb10ffc8ae2ae57d334b2530b",
+   "source": "replay",
+   "disputed": [
+    "body"
+   ],
+   "envelope": {
+    "unresolved": null,
+    "states": [
+     {
+      "outcome": "failed",
+      "failure_type": "FileNotFoundError",
+      "observations": 3,
+      "fields": {
+       "message": "STABLE",
+       "body": "VOLATILE"
+      },
+      "digests": {
+       "message": [
+        "1eb05dfda8ea60dd896578e92e1481b4091b58257cbdb1b915710b437f08822b"
+       ],
+       "body": [
+        "6aad4e87971a7dfa3db0aaa582b1421a30bc108b38655bf4d7c28a29317991e3",
+        "8513357aa73fcb9fa4c6f2858797c274fa3034fe3c1d53b306b63b3dd811e6ed",
+        "8f23295becf10e8d9ab1833f83fda90dc0ae02c3ce33c4409db81b3d16e93f89"
+       ]
+      }
+     }
+    ]
+   },
+   "envelope_digest": "041a6a7187c48060324cfa09bbd0b21dbeae398a3c64077dc56cac25664d1133",
+   "flaky": false,
+   "reason": null,
+   "observations": [
+    "e49922a4bf3726c8bd1f24b19100c15d13f1073c381579a25bd35212368c32d8",
+    "8f3c281c162b583d5824cf4ee8a610fe1490c08554f8b1022173730f204b0f1d",
+    "3b6fd0725d46beb9fa7f7a93be61e534f60f4c069b690f71508a11ba6a2a6fa6"
+   ]
+  }
+ ]
+}

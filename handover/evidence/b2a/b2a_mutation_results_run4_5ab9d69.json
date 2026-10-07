@@ -1,0 +1,189 @@
+{
+  "commit": "5ab9d69",
+  "tests": [
+    "tests/test_b2a_acceptance_oracle.py",
+    "tests/test_fs1c1_requirement_claims.py",
+    "tests/test_prd020_requirement_lineage.py",
+    "tests/test_fs1_false_success_reproducer.py",
+    "tests/test_prd020_milestone_requirements.py"
+  ],
+  "mutants": [
+    {
+      "name": "candidate-config-used-during-acceptance",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 47 passed in 4.31s",
+      "seconds": 5.2
+    },
+    {
+      "name": "candidate-conftest-trusted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "SURVIVED",
+      "tail": "154 passed in 18.68s",
+      "seconds": 19.5
+    },
+    {
+      "name": "acceptance-file-writable-by-candidate",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "4 failed, 38 passed in 4.31s",
+      "seconds": 5.2
+    },
+    {
+      "name": "staged-artifact-change-ignored",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 47 passed in 3.98s",
+      "seconds": 4.8
+    },
+    {
+      "name": "model-claim-closes-behavior",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 152 passed in 16.66s",
+      "seconds": 17.5
+    },
+    {
+      "name": "candidate-tests-close-behavior",
+      "status": "NOT_APPLIED",
+      "count": 0
+    },
+    {
+      "name": "failed-acceptance-treated-as-pass",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "3 failed, 45 passed in 4.23s",
+      "seconds": 5.1
+    },
+    {
+      "name": "failed-acceptance-left-closed",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 51 passed in 4.38s",
+      "seconds": 5.2
+    },
+    {
+      "name": "missing-execution-treated-as-pass",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 72 passed in 9.37s",
+      "seconds": 10.2
+    },
+    {
+      "name": "stale-or-incomplete-report-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 60 passed in 4.30s",
+      "seconds": 5.2
+    },
+    {
+      "name": "missing-observations-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 80 passed in 7.55s",
+      "seconds": 8.5
+    },
+    {
+      "name": "wrong-candidate-digest-accepted",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 80 passed in 9.23s",
+      "seconds": 10.1
+    },
+    {
+      "name": "candidate-changed-during-run-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 49 passed in 3.95s",
+      "seconds": 4.8
+    },
+    {
+      "name": "wrong-acceptance-digest-accepted",
+      "status": "NOT_APPLIED",
+      "count": 0
+    },
+    {
+      "name": "other-requirement-set-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 81 passed in 9.25s",
+      "seconds": 10.2
+    },
+    {
+      "name": "unknown-requirement-accepted",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 36 passed in 3.82s",
+      "seconds": 4.7
+    },
+    {
+      "name": "unsupported-layout-falls-back-to-normal-tests",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 48 passed in 4.03s",
+      "seconds": 4.9
+    },
+    {
+      "name": "plugin-autoload-left-on",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "8 failed, 19 passed in 3.91s",
+      "seconds": 4.7
+    },
+    {
+      "name": "foreign-plugin-ignored",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 74 passed in 9.17s",
+      "seconds": 10.0
+    },
+    {
+      "name": "bytecode-written-into-candidate",
+      "file": "kriya/tools/validate.py",
+      "status": "KILLED",
+      "tail": "2 failed, 46 passed in 3.98s",
+      "seconds": 4.9
+    },
+    {
+      "name": "assertion-violates-without-candidate-code",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 77 passed in 9.18s",
+      "seconds": 10.0
+    },
+    {
+      "name": "environment-error-in-candidate-violates",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 81 passed in 9.24s",
+      "seconds": 10.1
+    },
+    {
+      "name": "claims-typed-on-candidate-files-only",
+      "file": "kriya/workflow/workflow.py",
+      "status": "KILLED",
+      "tail": "1 failed, 152 passed in 16.30s",
+      "seconds": 17.1
+    },
+    {
+      "name": "required-claims-ignored",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 50 passed in 4.41s",
+      "seconds": 5.3
+    },
+    {
+      "name": "raising-run-leaves-earlier-pass",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "1 failed, 119 passed in 9.64s",
+      "seconds": 10.5
+    }
+  ],
+  "baseline": "154 passed in 18.15s",
+  "counts": {
+    "KILLED": 22,
+    "SURVIVED": 1,
+    "NOT_APPLIED": 2
+  }
+}

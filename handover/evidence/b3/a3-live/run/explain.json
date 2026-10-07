@@ -1,0 +1,176 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 2,
+        "seq": 48,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:7461666e84b044d8d28e582a7d23cfaf437f0387dd0c269f74ce25daea0df77d"
+      },
+      "failure_type": "context_edit_protocol_unsatisfiable",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 41
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "context_edit_protocol_unsatisfiable",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "context_edit_protocol_unsatisfiable",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 45,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+              ],
+              "seq": 32,
+              "targets": [
+                {
+                  "digest": "b6ab67dd6e35c6964f2d0ea993dccd658452d0972b406bde910b0b6d85210535",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 0,
+                  "operations": [],
+                  "path": "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "c015dad6fabd88847b1bb829760feb67af8836223e7c6d45ea6b910de72916a6",
+                  "shown_tier": "skeleton",
+                  "spans": [],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:7461666e84b044d8d28e582a7d23cfaf437f0387dd0c269f74ce25daea0df77d",
+                "raw_output": "sha256:7461666e84b044d8d28e582a7d23cfaf437f0387dd0c269f74ce25daea0df77d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+              ],
+              "reason_code": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE",
+              "seq": 39,
+              "type": "context_edit_protocol_unsatisfiable"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:7461666e84b044d8d28e582a7d23cfaf437f0387dd0c269f74ce25daea0df77d"
+              },
+              "failure_type": "context_edit_protocol_unsatisfiable",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: no mutation operation is feasible under the authoritative context of this Developer invocation - src/main/java/org/apache/commons/lang3/math/NumberUtils.java: no authoritative full source, and no exact source for any located edit region. Nothing was sent to the model.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 41,
+              "stop_loop": true
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 29
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T161443-c1afd254",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

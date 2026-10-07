@@ -1,0 +1,6 @@
+'+5:30' -> datetime.timedelta(seconds=19800) (accepted)
+'-2:00' -> datetime.timedelta(days=-1, seconds=79200) (accepted)
+'+05:99' -> datetime.timedelta(seconds=23940) (accepted)
+'+99:00' -> datetime.timedelta(days=4, seconds=10800) (accepted)
+'+24:00' -> datetime.timedelta(days=1) (accepted)
+'+05:30\n' -> datetime.timedelta(seconds=19800) (accepted)

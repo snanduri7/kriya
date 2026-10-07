@@ -1,0 +1,1 @@
+74d745f (pre-B2-c): Java acceptance artifact refused: ACCEPTANCE_ARTIFACT_INVALID - not a readable Python file: invalid syntax (kriya_acceptance.py, line 1)

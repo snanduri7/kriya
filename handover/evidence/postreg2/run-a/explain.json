@@ -1,0 +1,2400 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 10,
+        "seq": 290,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:1ccf4b39b33829f40dd93c96b734e6e4ee74545a9ada3eaa6b445ed45b8fc325"
+      },
+      "failure_type": "context_edit_protocol_unsatisfiable",
+      "progress_classification": "NO_PROGRESS",
+      "retry": false,
+      "seq": 278
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "context_edit_protocol_unsatisfiable",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "context_edit_protocol_unsatisfiable",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 286,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 34,
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:4b145e1a74efb4dbd512105b21161e03dd122b4e436a465123712bc9a8c03dda",
+                "wire_body": "sha256:b7fa0c76eab003da58fc9816651fe59db19a907f65f9babd494674b73b61aca8"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 37,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 34,
+              "targets": [
+                {
+                  "digest": "a79464a2d0d517e9e3df62af8d94a5f0ecb1cc5ecc0b05ff3342d01146276233",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5365,
+                    5389,
+                    5409
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5373,
+                      "start_line": 5357,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5397,
+                      "start_line": 5381,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5417,
+                      "start_line": 5401,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 3,
+              "completion_tokens": 955,
+              "content": {
+                "content": "sha256:07cf01bdab6fd04f224b150873b2deb4a73fb58ec7824c2216ced7537b338067"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 38,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 3,
+              "content": {
+                "analysis_model_claimed": "sha256:8b39188c285d63fff640249f2b65ad11c44cd351089dff89addc8f5072154ef6"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 40
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 52
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:6a9fa37371382a3e9fb1357099a6d85e62c59866aeb7e86ffd5ec12c738b9cd7",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 51,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 53,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 4,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 68,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 31
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 63,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:b5f12d83f2458f2bceec76843e70b788b1d7b11e44ecb8cb505dc14bf468a0f0",
+                "wire_body": "sha256:efe7226bc8dc6ade2329b82a20270ab8be129aca26c2ef21dfa787b5a688027f"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 67,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 63,
+              "targets": [
+                {
+                  "digest": "7dda476671d6b4c6d83f9b0c4fc68a132b8c42bbc5964d3ebd6b4d1dfd218b0a",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5375,
+                    5380,
+                    5381,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5409,
+                    5500,
+                    5530,
+                    5550
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5393,
+                      "start_line": 5356,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5413,
+                      "start_line": 5405,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5499,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5529,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5549,
+                      "unit": "block"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 1069,
+              "content": {
+                "content": "sha256:059f485420cdc0391360201f0dbdbf6f0273ba0473ba40b71f44dda60c8460b2"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 69,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:8897abe94bdcddd8406c99d7b5d7c59852b3fdaa9554de4360df1bde4f7c6c72"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 71
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:cf88bbe2d9132e6b289a9a519db3e1bbf354fd0ff1e2e1814a7dbb6f1f13b76e"
+              },
+              "decision": "STAGED",
+              "lines_added": 6,
+              "lines_removed": 1,
+              "path": "graphify/extractors/engine.py",
+              "seq": 75
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:40d3c8c30f715e289823004dedb09fa40cc2af2252900a5e8965ce3a9fe50767",
+                "raw_output": "sha256:31337effcc87db0bf968744bb2f12dcbac54f5241dde5ea4ad5b30d85003d120"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 86,
+              "type": "test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:31337effcc87db0bf968744bb2f12dcbac54f5241dde5ea4ad5b30d85003d120",
+                "pytest_junit": "sha256:8175704215cdabc8b5860712603c8686874e8eaccf644488b1b330e0ed634bc4",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:ee7a6231a320911a595c74d548078b925624977b8d942197ed25c14bd1ad6720",
+                "test_execution": "sha256:6b7eb71c5596cdc58bfef28665540db4aa422844c231fe81e655dad50751e463"
+              },
+              "gate": "tests",
+              "seq": 78,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 87,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 5,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 99,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 61
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 96,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:b24b22fc682f9fe1d33621c08f7bba2a94397b31650eeab4198286c0f15daf62",
+                "wire_body": "sha256:881e593f03af18d0d1afb8dc69b051e31489215bb76e2a7d07aec466f0d18814"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 98,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 96,
+              "targets": [
+                {
+                  "digest": "353e36362e36a6b888f6b22f553c79237907db1def32858fb1cccf28d31d0a23",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5375,
+                    5380,
+                    5381,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5394,
+                    5414,
+                    5500,
+                    5530,
+                    5550
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5416,
+                      "start_line": 5412,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5499,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 5532,
+                      "start_line": 5528,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5549,
+                      "unit": "block"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 422,
+              "content": {
+                "content": "sha256:c6852c46c2a77b662f4af3420ec4082d0bb16bf69938d63b0cf84240019e7b1c"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 100,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:caee52e8730b773022765744931478026db299d188197335e99410ca49e6e6cb"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 102
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+              "reason_code": "diagnosis_mismatch",
+              "seq": 113
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:eba0e70d4539700a753cc4b620b6c13926f1d6d4b44fb63c618c3f44138e7520",
+                "raw_output": "sha256:7e712aa89834d5e6ee4bd385c5adafbecd20a530da5d9afc5410cbaaa63c44da"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 112,
+              "type": "diagnosis_mismatch"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "diagnosis_mismatch",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 114,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 6,
+              "changed": [
+                "failure_signature",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 127,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 94
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 124,
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:4a0b63375e7a7d64ed07c58ad1d4f8335f1d5d2579c579ecfb8fc52347754326",
+                "wire_body": "sha256:6cf4ab259f4e699b85ed3fefab4f4ef1688d4fd73f1b41b0722dc144c56e4fb3"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 126,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 124,
+              "targets": [
+                {
+                  "digest": "353e36362e36a6b888f6b22f553c79237907db1def32858fb1cccf28d31d0a23",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5375,
+                    5380,
+                    5381,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5394,
+                    5414,
+                    5500,
+                    5530,
+                    5550
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5416,
+                      "start_line": 5412,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5499,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 5532,
+                      "start_line": 5528,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5549,
+                      "unit": "block"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 6,
+              "completion_tokens": 1502,
+              "content": {
+                "content": "sha256:8ddf705e9e6665126ff478e0b1a4cfb5a0a5fc3f8ee420f0ec2d2d11e6f9f130"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 128,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 6,
+              "content": {
+                "analysis_model_claimed": "sha256:9f29eee7de564b8995094d0fe21e310d895f5c77f42fe312c5eb4aadf317a959"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 130
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 142
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:6a9fa37371382a3e9fb1357099a6d85e62c59866aeb7e86ffd5ec12c738b9cd7",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 141,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 143,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 7,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 158,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 122
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 155,
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:10ffa86bf50f0d704684b5f8e379cbcfd7a70cfc0180edca72b03b2bd52e3bab",
+                "wire_body": "sha256:5b8f2882e353bf271c3a9d84c28107cbf8b05fd0d49f07f20ae6f008be4a4496"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 157,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 155,
+              "targets": [
+                {
+                  "digest": "42e9600c146c5b16fad712af170e88cca2c7bcdc2f47eb8d40b5e4ec8bf4b722",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    5358,
+                    5359,
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5374,
+                    5375,
+                    5378,
+                    5379,
+                    5380,
+                    5381,
+                    5382,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5391,
+                    5393,
+                    5394,
+                    5395,
+                    5414,
+                    5500,
+                    5505,
+                    5530,
+                    5535,
+                    5550,
+                    5555
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5386,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5391,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5395,
+                      "start_line": 5393,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5414,
+                      "start_line": 5414,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5500,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5505,
+                      "start_line": 5505,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5530,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5535,
+                      "start_line": 5535,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5550,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5555,
+                      "start_line": 5555,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 7,
+              "completion_tokens": 369,
+              "content": {
+                "content": "sha256:d600a63489f6991ecd077f4cd2e021dc4932c212144e5e255311d2cb419c04f7"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 159,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 7,
+              "content": {
+                "analysis_model_claimed": "sha256:e3de7f4a03520aa3f2626465efa2fcfd0092b72e6e59bd43c773ba5d463d4759"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 161
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:78f3f0b194765cabc7f0b11060422a881e8a2de4992a30b09dc73e6153e3cdf0"
+              },
+              "decision": "STAGED",
+              "lines_added": 16,
+              "lines_removed": 3,
+              "path": "graphify/extractors/engine.py",
+              "seq": 165
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:50be7f14ab80359f569fc079f3c7f1114e2060f06b5d32da3bcc1b18ad8ad5ba",
+                "raw_output": "sha256:9868f3c0b23c94dab798d883cb6c4ce8d57fa646deaedd0e011d3884616a86ed"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 176,
+              "type": "test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:9868f3c0b23c94dab798d883cb6c4ce8d57fa646deaedd0e011d3884616a86ed",
+                "pytest_junit": "sha256:74af7644761f3227cfa9b397e0ca85108bfebb442dca6287203969853e4302cb",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:d79e5e20da0d194ff8ace7cf93dc519fd961c50bd04640d65751c1f9be862eed",
+                "test_execution": "sha256:bd6d83a29bd44b6891371bfc0f5c9f53c1e5e8d2189cd7723a0a2984a4db6aea"
+              },
+              "gate": "tests",
+              "seq": 168,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 177,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 8,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 190,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 147
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 152
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 5,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 187,
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:d5165788b2391f14b45be0364773e51be4e0a9be7d1a56cd28959a99db0d6705",
+                "wire_body": "sha256:148704a77ca58a2d1a72a654cc274032cfc4ae221e59aee03ac77721ba9a15c8"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 189,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 187,
+              "targets": [
+                {
+                  "digest": "8a96477ac74b695d042fa3ace93316d81e3efd9f4b491b6137a5d999fa7bd6b5",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5358,
+                    5359,
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5374,
+                    5375,
+                    5378,
+                    5379,
+                    5380,
+                    5381,
+                    5382,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5391,
+                    5393,
+                    5394,
+                    5395,
+                    5422,
+                    5500,
+                    5505,
+                    5530,
+                    5535,
+                    5550,
+                    5555
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5386,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5391,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5395,
+                      "start_line": 5393,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5422,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5500,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5505,
+                      "start_line": 5505,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5530,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5535,
+                      "start_line": 5535,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5550,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5555,
+                      "start_line": 5555,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 8,
+              "completion_tokens": 1216,
+              "content": {
+                "content": "sha256:8ca1720a14b2fe20d76e21a6ab2f6b0185e824999d903c76a2c1b33106691033"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 191,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 8,
+              "content": {
+                "analysis_model_claimed": "sha256:7913d7fee2b3e4529a730f71735596e669174406b7594add88a5db08f70915fe"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 193
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 204
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:6a9fa37371382a3e9fb1357099a6d85e62c59866aeb7e86ffd5ec12c738b9cd7",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 203,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 205,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 9,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 219,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 184
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 6,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 216,
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:14ef5e13b07f0c5174247291cb6588a38d9bacbd7db72af6d25a3b763e76981d",
+                "wire_body": "sha256:a69222aa97ec8d9c7f4c120db386274f098795063f7e1218001b3ea93a91bebf"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 218,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 216,
+              "targets": [
+                {
+                  "digest": "4fbb934de8eb8015a80ffb0ebd0c085c0eb7c888b6977990a643d77e16123b71",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    5358,
+                    5359,
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5374,
+                    5375,
+                    5378,
+                    5379,
+                    5380,
+                    5381,
+                    5382,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5391,
+                    5393,
+                    5394,
+                    5395,
+                    5396,
+                    5401,
+                    5403,
+                    5422,
+                    5500,
+                    5505,
+                    5513,
+                    5530,
+                    5535,
+                    5543,
+                    5550,
+                    5555,
+                    5563
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5386,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5391,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5393,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5401,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5403,
+                      "start_line": 5403,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5422,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5500,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5505,
+                      "start_line": 5505,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5513,
+                      "start_line": 5513,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5530,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5535,
+                      "start_line": 5535,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5543,
+                      "start_line": 5543,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5550,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5555,
+                      "start_line": 5555,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5563,
+                      "start_line": 5563,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 9,
+              "completion_tokens": 649,
+              "content": {
+                "content": "sha256:2bd770d7521c293dcedbbb267b745511594a60be10fce048b6adb300eed6dcfc"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 220,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 9,
+              "content": {
+                "analysis_model_claimed": "sha256:bfa05716c82d7ba6bf32df34a3eee83a50811038df2d6a27965ff46dcc695e9e"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 222
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 233
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:6a9fa37371382a3e9fb1357099a6d85e62c59866aeb7e86ffd5ec12c738b9cd7",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 232,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 234,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the current attempt",
+              "seq": 248
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 214
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 7,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 246,
+              "targets": [
+                {
+                  "digest": "4fbb934de8eb8015a80ffb0ebd0c085c0eb7c888b6977990a643d77e16123b71",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 2,
+                  "loci": [
+                    5358,
+                    5359,
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5374,
+                    5375,
+                    5378,
+                    5379,
+                    5380,
+                    5381,
+                    5382,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5391,
+                    5393,
+                    5394,
+                    5395,
+                    5396,
+                    5401,
+                    5403,
+                    5422,
+                    5500,
+                    5505,
+                    5513,
+                    5530,
+                    5535,
+                    5543,
+                    5550,
+                    5555,
+                    5563
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5386,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5391,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5393,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5401,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5403,
+                      "start_line": 5403,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5422,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5500,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5505,
+                      "start_line": 5505,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5513,
+                      "start_line": 5513,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5530,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5535,
+                      "start_line": 5535,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5543,
+                      "start_line": 5543,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5550,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5555,
+                      "start_line": 5555,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5563,
+                      "start_line": 5563,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:2679d1aa88e25e7d591ab3cdc2a48eb441d628de1dbb99e9ede3c1932d2f27ea",
+                "raw_output": "sha256:790a27f632719399bcd3e97a4afaccc7a32c195135e8e63f942f1a31a93b559a"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 255,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 257,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 270
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 244
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 8,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 268,
+              "targets": [
+                {
+                  "digest": "352b9f56537e87f9c7365d147adbb01024f4764d55bf03f8d288822e0f893975",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 2,
+                  "loci": [
+                    5358,
+                    5359,
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5368,
+                    5369,
+                    5370,
+                    5371,
+                    5372,
+                    5373,
+                    5374,
+                    5375,
+                    5378,
+                    5379,
+                    5380,
+                    5381,
+                    5382,
+                    5383,
+                    5384,
+                    5385,
+                    5386,
+                    5388,
+                    5389,
+                    5390,
+                    5391,
+                    5393,
+                    5394,
+                    5395,
+                    5396,
+                    5401,
+                    5403,
+                    5422,
+                    5500,
+                    5505,
+                    5513,
+                    5530,
+                    5535,
+                    5543,
+                    5550,
+                    5555,
+                    5563
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4",
+                  "shown_tier": "skeleton",
+                  "spans": [
+                    {
+                      "end_line": 5375,
+                      "start_line": 5358,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5386,
+                      "start_line": 5378,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5391,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5393,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5401,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5403,
+                      "start_line": 5403,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5422,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5500,
+                      "start_line": 5500,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5505,
+                      "start_line": 5505,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5513,
+                      "start_line": 5513,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5530,
+                      "start_line": 5530,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5535,
+                      "start_line": 5535,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5543,
+                      "start_line": 5543,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5550,
+                      "start_line": 5550,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5555,
+                      "start_line": 5555,
+                      "unit": "window"
+                    }
+                  ],
+                  "uncovered_loci": [
+                    5563
+                  ],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:1ccf4b39b33829f40dd93c96b734e6e4ee74545a9ada3eaa6b445ed45b8fc325",
+                "raw_output": "sha256:1ccf4b39b33829f40dd93c96b734e6e4ee74545a9ada3eaa6b445ed45b8fc325"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE",
+              "seq": 276,
+              "type": "context_edit_protocol_unsatisfiable"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:1ccf4b39b33829f40dd93c96b734e6e4ee74545a9ada3eaa6b445ed45b8fc325"
+              },
+              "failure_type": "context_edit_protocol_unsatisfiable",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: no mutation operation is feasible under the authoritative context of this Developer invocation - graphify/extractors/engine.py: no authoritative full source, and no exact source for located line(s) [5563] within the window budget. Nothing was sent to the model.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 278,
+              "stop_loop": true
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 261
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 265
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 9,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 1,
+    "review": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261007T091832-d5607f08",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -131,6 +131,269 @@ class TestOutcome:
     failure_fingerprint: Optional[str] = None
 
 
+# --- REG-R1: pytest per-test evidence ----------------------------------------
+#
+# A pytest run's whole combined output is not a stable identity of its
+# failures: an already-failing test may print a value that differs on every
+# execution of the SAME code (a measured duration, a random identifier, a
+# container hostname). REG-R1 (live: run 20261006T231821-fb31caad, where
+# two runs of the untouched baseline differed and the whole-output
+# fingerprint blocked a candidate that changed no test's outcome) makes the
+# per-invocation JUnit report the authority whenever it is complete on both
+# sides: test identity, outcome, exception type, then message and failure
+# body - the last two only where the UNTOUCHED baseline reproduces them
+# (kriya/workflow/pytest_stability.py measures that; this module stays pure).
+# REG-R2: execution state is judged against the baseline behavior envelope
+# (every untouched-baseline observation of the context, see below).
+
+PYTEST_EVIDENCE_VERSION = 1
+PYTEST_FAILING_OUTCOMES = frozenset({"failed", "error"})
+# The signature fields whose authority depends on baseline stability; test
+# identity, outcome and exception type are always authoritative.
+STABILITY_FIELDS = ("message", "body")
+_PYTEST_VERSION_RE = re.compile(r"\bpytest-(\d[\w.]*)")
+# The session facts pytest prints before collecting that define where and how
+# the suite ran (interpreter/runner versions, root, config, test paths,
+# plugin set). Only these keyed lines: other header lines can carry values
+# that change every run (a random seed) and are never part of a context.
+_PYTEST_SESSION_FACT_RE = re.compile(r"^(platform|rootdir|configfile|testpaths|plugins):? (.+)$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class PytestCaseSignature:
+    """One test of one pytest invocation. ``key`` is the JUnit address
+    (``classname::name``); ``node_id`` the console node id when the run's
+    short summary names this failing test (needed to replay it). Message and
+    body are digests of the text after ``normalize_failure_text`` (the same
+    volatile-token rules every other failure comparison here uses)."""
+
+    key: str
+    outcome: str
+    failure_type: Optional[str] = None
+    message_digest: Optional[str] = None
+    body_digest: Optional[str] = None
+    node_id: Optional[str] = None
+
+    @property
+    def failing(self) -> bool:
+        return self.outcome in PYTEST_FAILING_OUTCOMES
+
+    def field_digest(self, name: str) -> Optional[str]:
+        return {"message": self.message_digest, "body": self.body_digest}[name]
+
+    def identity(self) -> str:
+        """The baseline test-result identity a stability measurement is
+        bound to."""
+        return content_revision(json.dumps(
+            [self.key, self.outcome, self.failure_type, self.message_digest, self.body_digest]))
+
+
+@dataclass(frozen=True)
+class PytestSuiteEvidence:
+    """What one pytest invocation's own JUnit report says, per test.
+    ``complete`` only when the run completed (FS-1A), the report was read
+    and its integrity counts hold (``test_execution.
+    parse_pytest_case_evidence``); otherwise ``reason`` says why and the
+    evidence carries no authority."""
+
+    version: int
+    complete: bool
+    reason: Optional[str]
+    collected: int
+    report_digest: Optional[str]
+    runner_version: Optional[str]
+    cases: Tuple[PytestCaseSignature, ...]
+    # The pytest session's own context facts (``_PYTEST_SESSION_FACT_RE``),
+    # sorted; part of the verification context a stability measurement binds.
+    session: Tuple[Tuple[str, str], ...] = ()
+
+    def by_key(self) -> Dict[str, PytestCaseSignature]:
+        return {case.key: case for case in self.cases}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "version": self.version, "runner": "pytest", "runner_version": self.runner_version,
+            "complete": self.complete, "reason": self.reason, "collected": self.collected,
+            "report_digest": self.report_digest, "session": [list(fact) for fact in self.session],
+            "passed": [c.key for c in self.cases if c.outcome == "passed"],
+            "skipped": [c.key for c in self.cases if c.outcome == "skipped"],
+            "failing": [{"key": c.key, "outcome": c.outcome, "failure_type": c.failure_type,
+                         "message_digest": c.message_digest, "body_digest": c.body_digest, "node_id": c.node_id}
+                        for c in self.cases if c.failing],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PytestSuiteEvidence":
+        """Another evidence version is never reinterpreted: it loads as
+        incomplete (no authority)."""
+        cases = [PytestCaseSignature(key=key, outcome="passed") for key in data.get("passed") or ()]
+        cases += [PytestCaseSignature(key=key, outcome="skipped") for key in data.get("skipped") or ()]
+        cases += [PytestCaseSignature(key=c["key"], outcome=c["outcome"], failure_type=c.get("failure_type"),
+                                      message_digest=c.get("message_digest"), body_digest=c.get("body_digest"),
+                                      node_id=c.get("node_id"))
+                  for c in data.get("failing") or ()]
+        supported = data.get("version") == PYTEST_EVIDENCE_VERSION
+        return cls(
+            version=PYTEST_EVIDENCE_VERSION if supported else int(data.get("version") or 0),
+            complete=bool(data.get("complete")) and supported,
+            reason=data.get("reason") if supported else "PYTEST_EVIDENCE_VERSION_UNSUPPORTED",
+            collected=int(data.get("collected") or 0), report_digest=data.get("report_digest"),
+            runner_version=data.get("runner_version"), cases=tuple(sorted(cases, key=lambda c: c.key)),
+            session=tuple((str(k), str(v)) for k, v in data.get("session") or ()),
+        )
+
+
+# REG-R2: the baseline behavior envelope. A test's execution state is its
+# (outcome, exception type); the envelope is the set of states the UNTOUCHED
+# baseline actually showed in one verification context (the original
+# observation and its same-context replays, none privileged), and, per state,
+# whether the failure message/body reproduce among the observations of that
+# same state. Candidate observations are never an input.
+FIELD_NOT_ESTABLISHED = "STABILITY_NOT_ESTABLISHED"   # a state seen once: no stability evidence either way
+ENVELOPE_STATE = "state"   # stability_required token: the candidate's execution state needs the envelope
+
+
+@dataclass(frozen=True)
+class BaselineStateEvidence:
+    """One execution state of one test on the untouched baseline:
+    ``observations`` how often it was seen; ``fields`` message/body ->
+    FIELD_STABLE (seen at least twice, always the same), FIELD_VOLATILE
+    (differs between same-state observations) or FIELD_NOT_ESTABLISHED (seen
+    once); ``digests`` the distinct digests observed per field. Non-failing
+    states carry no fields."""
+
+    outcome: str
+    failure_type: Optional[str]
+    observations: int
+    fields: Tuple[Tuple[str, str], ...] = ()
+    digests: Tuple[Tuple[str, Tuple[Optional[str], ...]], ...] = ()
+
+    def field_status(self, name: str) -> Optional[str]:
+        return dict(self.fields).get(name)
+
+    def observed_digests(self, name: str) -> Tuple[Optional[str], ...]:
+        return dict(self.digests).get(name, ())
+
+
+@dataclass(frozen=True)
+class BaselineBehaviorEnvelope:
+    """``states`` every execution state the untouched baseline showed;
+    ``unresolved`` says why no envelope could be established (then it carries
+    no authority and the comparison fails closed)."""
+
+    states: Tuple[BaselineStateEvidence, ...] = ()
+    unresolved: Optional[str] = None
+
+    def state(self, case: "PytestCaseSignature") -> Optional[BaselineStateEvidence]:
+        return next((s for s in self.states if (s.outcome, s.failure_type) == (case.outcome, case.failure_type)),
+                    None)
+
+    @property
+    def flaky(self) -> bool:
+        return len(self.states) > 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"unresolved": self.unresolved,
+                "states": [{"outcome": s.outcome, "failure_type": s.failure_type, "observations": s.observations,
+                            "fields": dict(s.fields), "digests": {k: list(v) for k, v in s.digests}}
+                           for s in self.states]}
+
+    @classmethod
+    def unresolved_because(cls, reason: str) -> "BaselineBehaviorEnvelope":
+        return cls(states=(), unresolved=reason)
+
+
+def baseline_behavior_envelope(observations: Sequence[Optional["PytestCaseSignature"]]) -> BaselineBehaviorEnvelope:
+    """The envelope of one test from ALL its untouched-baseline observations
+    in one verification context. A test absent from any of them has no
+    envelope (fail closed)."""
+    if not observations or any(o is None for o in observations):
+        return BaselineBehaviorEnvelope.unresolved_because("TEST_ABSENT_FROM_REPLAY")
+    grouped: Dict[Tuple[str, str], List[PytestCaseSignature]] = {}
+    for case in observations:
+        grouped.setdefault((case.outcome, case.failure_type or ""), []).append(case)
+    states = []
+    for (_outcome, _type), same in sorted(grouped.items()):
+        fields, digests = [], []
+        if same[0].failing:
+            for name in STABILITY_FIELDS:
+                seen = tuple(sorted({c.field_digest(name) for c in same}, key=lambda d: d or ""))
+                status = (FIELD_NOT_ESTABLISHED if len(same) == 1
+                          else FIELD_STABLE if len(seen) == 1 else FIELD_VOLATILE)
+                fields.append((name, status))
+                digests.append((name, seen))
+        states.append(BaselineStateEvidence(outcome=same[0].outcome, failure_type=same[0].failure_type,
+                                            observations=len(same), fields=tuple(fields), digests=tuple(digests)))
+    return BaselineBehaviorEnvelope(states=tuple(states))
+
+
+def junit_key_for_node_id(node_id: str) -> str:
+    """pytest's own JUnit address for a console node id
+    (``_pytest.junitxml.mangle_test_address``): the file path becomes a
+    dotted module, every ``::`` part but the last is the classname, the
+    parameters stay on the name."""
+    path, bracket, params = node_id.partition("[")
+    names = path.split("::")
+    names[0] = re.sub(r"\.py$", "", names[0].replace("/", "."))
+    names[-1] += bracket + params
+    return f"{'.'.join(names[:-1])}::{names[-1]}"
+
+
+def _failing_node_ids(output: str) -> Dict[str, str]:
+    """JUnit key -> console node id for every FAILED/ERROR line of the
+    run's short summary; a key two lines map to is left out (ambiguous)."""
+    found: Dict[str, List[str]] = {}
+    for _kind, node_id, _reason in _PYTEST_SUMMARY_LINE_RE.findall(output or ""):
+        found.setdefault(junit_key_for_node_id(node_id), []).append(node_id)
+    return {key: ids[0] for key, ids in found.items() if len(set(ids)) == 1}
+
+
+def _evidence_digest(text: Optional[str]) -> str:
+    return content_revision(normalize_failure_text(text or ""))
+
+
+def pytest_suite_evidence(raw_result: Dict[str, Any]) -> Optional[PytestSuiteEvidence]:
+    """The per-test evidence a test-gate result carries (``run_tests``
+    attaches ``pytest_evidence`` for a pytest run), or None for any other
+    runner or a result without it."""
+    evidence = raw_result.get("pytest_evidence")
+    if not isinstance(evidence, dict):
+        return None
+    parsed = evidence.get("evidence") if isinstance(evidence.get("evidence"), dict) else {}
+    integrity = parsed.get("integrity") if isinstance(parsed.get("integrity"), dict) else {}
+    raw_cases = parsed.get("cases")
+    from kriya.tools.test_execution import PYTEST_CASE_EVIDENCE_VERSION
+
+    if evidence.get("version") != PYTEST_CASE_EVIDENCE_VERSION:
+        reason: Optional[str] = "PYTEST_EVIDENCE_VERSION_UNSUPPORTED"
+    elif evidence.get("complete") is not True:
+        reason = str(evidence.get("reason") or "PYTEST_REPORT_INCOMPLETE")
+    elif not isinstance(raw_cases, dict) or integrity.get("ok") is not True:
+        reason = str(integrity.get("reason") or "PYTEST_REPORT_UNREADABLE")
+    else:
+        reason = None
+    output = str(raw_result.get("output") or "")
+    node_ids = _failing_node_ids(output)
+    cases = []
+    for key, case in (raw_cases.items() if isinstance(raw_cases, dict) else ()):
+        failing = case.get("outcome") in PYTEST_FAILING_OUTCOMES
+        cases.append(PytestCaseSignature(
+            key=key, outcome=str(case.get("outcome")),
+            failure_type=case.get("failure_type") if failing else None,
+            message_digest=_evidence_digest(case.get("message")) if failing else None,
+            body_digest=_evidence_digest(case.get("body")) if failing else None,
+            node_id=node_ids.get(key) if failing else None,
+        ))
+    report_files = evidence.get("report_files") or []
+    version = _PYTEST_VERSION_RE.search(output)
+    return PytestSuiteEvidence(
+        version=PYTEST_EVIDENCE_VERSION, complete=reason is None, reason=reason, collected=len(cases),
+        report_digest=report_files[0].get("sha256") if report_files and isinstance(report_files[0], dict) else None,
+        runner_version=version.group(1) if version else None, cases=tuple(sorted(cases, key=lambda c: c.key)),
+        session=tuple(sorted({(name, value.strip()) for name, value in _PYTEST_SESSION_FACT_RE.findall(output)})),
+    )
+
+
 @dataclass(frozen=True)
 class ValidationOutcome:
     """Wraps PolymorphicValidator's own existing {"success": bool, "output":
@@ -152,6 +415,8 @@ class ValidationOutcome:
     # counts as a cross-check signal, honestly distinct from per-test
     # identity coverage.
     aggregate_counts: Optional[Dict[str, int]] = None
+    # REG-R1: a pytest run's own per-test evidence (None for other runners).
+    pytest_evidence: Optional[PytestSuiteEvidence] = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +457,10 @@ class ValidationBaseline:
                     ]
                     if self.outcome.test_outcomes is not None else None
                 ),
+                # REG-R1: always present in this format (None = not a pytest
+                # run); an older checkpoint lacks the key altogether.
+                "pytest_evidence": (
+                    self.outcome.pytest_evidence.to_dict() if self.outcome.pytest_evidence is not None else None),
             }
         return {
             "workspace_revision": self.workspace_revision,
@@ -233,6 +502,8 @@ class ValidationBaseline:
                 evidence_ref=raw_outcome.get("evidence_ref"),
                 test_outcomes=test_outcomes,
                 aggregate_counts=raw_outcome.get("aggregate_counts"),
+                pytest_evidence=(PytestSuiteEvidence.from_dict(raw_outcome["pytest_evidence"])
+                                 if isinstance(raw_outcome.get("pytest_evidence"), dict) else None),
             )
         raw_invocation = data["invocation"]
         return cls(
@@ -467,6 +738,7 @@ def build_validation_outcome(
         evidence_ref=evidence_ref,
         test_outcomes=test_outcomes,
         aggregate_counts=aggregate_counts or None,
+        pytest_evidence=pytest_suite_evidence(raw_result),
     )
 
 
@@ -544,6 +816,15 @@ class DeltaClassification(str, Enum):
     NEWLY_SKIPPED_OR_NOT_EXECUTED = "NEWLY_SKIPPED_OR_NOT_EXECUTED"
     INFRASTRUCTURE_ENVIRONMENT_FAILURE = "INFRASTRUCTURE_ENVIRONMENT_FAILURE"
     NOT_COMPARABLE = "NOT_COMPARABLE"
+    # REG-R1: an already-failing test whose message or body differs while
+    # whether the untouched baseline reproduces that field is not (yet)
+    # established - blocks, but never blames the candidate.
+    STABILITY_UNRESOLVED = "STABILITY_UNRESOLVED"
+    # REG-R2: the candidate's state of an existing test is one the untouched
+    # baseline itself showed in the same verification context, and that
+    # baseline showed more than one state - not attributed, not blocking.
+    # Whether the candidate changed the flake RATE is not assessed.
+    FLAKY_PREEXISTING = "FLAKY_PREEXISTING"
 
 
 # Conservative-by-default blocking set - "fail conservatively" for anything
@@ -557,6 +838,7 @@ TERMINAL_BLOCKING_CLASSIFICATIONS = frozenset({
     DeltaClassification.CHANGED_FAILURE,
     DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED,
     DeltaClassification.INFRASTRUCTURE_ENVIRONMENT_FAILURE,
+    DeltaClassification.STABILITY_UNRESOLVED,
 })
 
 
@@ -670,7 +952,16 @@ class BaselineDeltaResult:
     possible at all; when it was not, `level2_unavailable_reason` says why
     (no structured parser recognized the output) - an empty `level2` is
     never silently read as "no per-test failures". RESOLVED_FAILURE is the
-    FIXED classification."""
+    FIXED classification.
+
+    REG-R1: `authority` names what decided. Under PYTEST_PER_TEST_AUTHORITY
+    `level1` is diagnostic only (it never blocks); `stability_required` maps
+    each test key whose message/body differ, and whose baseline stability is
+    not yet established, to those fields (the caller measures them on the
+    untouched baseline and classifies again); `volatile_fields_ignored` maps
+    a test to the fields that lost authority because the baseline itself
+    varies in them. `pytest_evidence_status` says why per-test authority was
+    unavailable for a pytest comparison (it then fails closed)."""
 
     level1: Level1Delta
     level2: Dict[str, DeltaClassification]
@@ -679,39 +970,166 @@ class BaselineDeltaResult:
     blocking_reasons: Tuple[str, ...]
     level2_available: bool = False
     level2_unavailable_reason: Optional[str] = None
+    authority: str = "whole_output"
+    stability_required: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
+    volatile_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
+    pytest_evidence_status: Optional[str] = None
+    # REG-R2: fields ignored because their stability among the baseline's
+    # observations of that state is not established (seen once).
+    unestablished_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
-def classify_baseline_delta(
-    baseline: ValidationBaseline, post: ValidationOutcome, *, post_environment: Optional[str] = None,
-) -> BaselineDeltaResult:
-    """The one entry point kriya/workflow/workflow.py calls. Requires
-    baseline.status == "captured" and baseline.outcome is not None - a
-    caller must check baseline-indeterminate BEFORE calling this (see
-    FAILURE_BEHAVIOR: indeterminate is a distinct terminal outcome, never
-    routed through delta comparison at all).
+WHOLE_OUTPUT_AUTHORITY = "whole_output"
+PYTEST_PER_TEST_AUTHORITY = "pytest_per_test"
+FIELD_STABLE = "STABLE"
+FIELD_VOLATILE = "VOLATILE"
+FIELD_UNRESOLVED = "UNRESOLVED"
 
-    PRD-024: ``post_environment`` is the POST run's environment identity
-    (``baseline_environment_identity``). When the baseline recorded one and
-    they differ (e.g. an authorized PRD-011 toolchain migration), the runs
-    are NOT_COMPARABLE: a PRE baseline from another toolchain proves nothing
-    about which POST failures are pre-existing, so none is excused - every
-    POST failure blocks, exactly as with no baseline, and a fully passing
-    POST suite does not."""
-    if baseline.status != "captured" or baseline.outcome is None:
-        raise ValueError("classify_baseline_delta requires a captured baseline with a real outcome")
-    pre = baseline.outcome
-    pre_environment = baseline.invocation.environment_fingerprint
-    if pre_environment is not None and post_environment is not None and pre_environment != post_environment:
-        return BaselineDeltaResult(
-            level1=Level1Delta(DeltaClassification.NOT_COMPARABLE, pre.failure_fingerprint,
-                               post.failure_fingerprint),
-            level2={}, aggregate_drop_detected=False, blocking=not post.success,
-            blocking_reasons=() if post.success else ("environment_not_comparable",),
-            level2_available=False,
-            level2_unavailable_reason="PRE and POST ran in different recorded environments",
-        )
-    level1 = classify_level1_delta(pre, post)
 
+@dataclass(frozen=True)
+class PytestPerTestDelta:
+    level2: Dict[str, DeltaClassification]
+    stability_required: Dict[str, Tuple[str, ...]]
+    volatile_fields_ignored: Dict[str, Tuple[str, ...]]
+    unestablished_fields_ignored: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
+
+
+def classify_pytest_per_test_delta(
+    pre: PytestSuiteEvidence, post: PytestSuiteEvidence,
+    *, stability: Optional[Dict[str, BaselineBehaviorEnvelope]] = None,
+) -> PytestPerTestDelta:
+    """REG-R1/REG-R2 per-test authority over two COMPLETE pytest reports.
+
+    Authority order: test identity, execution state (outcome, exception
+    type), then message and failure body. Never enveloped: a test of PRE
+    missing from POST is NEWLY_SKIPPED_OR_NOT_EXECUTED and a failing test
+    PRE never had is NEW_FAILURE. Against the original baseline observation:
+    PASS/SKIP -> FAIL/ERROR is NEW_FAILURE, FAIL<->ERROR or another exception
+    type CHANGED_FAILURE, PASS -> SKIP or FAIL -> SKIP
+    NEWLY_SKIPPED_OR_NOT_EXECUTED, FAIL -> PASS RESOLVED_FAILURE; a failure
+    in the same state whose message/body differ is STABILITY_UNRESOLVED.
+    Each blocking one of those is only provisional: it is listed in
+    ``stability_required`` and decided by the test's baseline behavior
+    envelope (``stability``: test key -> envelope, measured on the untouched
+    baseline alone, the original observation not privileged):
+
+    - no envelope (not measured, or unresolved) -> the provisional verdict
+      stands; a same-state message/body dispute is STABILITY_UNRESOLVED
+      (blocking, never candidate-attributed);
+    - candidate state outside the envelope -> the provisional verdict (blocks);
+    - candidate state inside it: a message/body that is STABLE among the
+      baseline's observations of THAT state and that the candidate changed
+      is CHANGED_FAILURE; VOLATILE and STABILITY_NOT_ESTABLISHED fields lose
+      authority; otherwise FLAKY_PREEXISTING when the baseline showed more
+      than one state, else PRE_EXISTING_FAILURE.
+
+    A known envelope also relabels a non-blocking FAIL -> PASS whose PASS the
+    baseline showed as FLAKY_PREEXISTING (never measured just for that).
+    Unchanged passing/skipped tests are not listed. Keys of ``level2`` are
+    console node ids where known, else JUnit keys."""
+    stability = stability or {}
+    pre_cases, post_cases = pre.by_key(), post.by_key()
+    level2: Dict[str, DeltaClassification] = {}
+    required: Dict[str, Tuple[str, ...]] = {}
+    ignored: Dict[str, Tuple[str, ...]] = {}
+    unestablished: Dict[str, Tuple[str, ...]] = {}
+    for key in sorted(set(pre_cases) | set(post_cases)):
+        before, after = pre_cases.get(key), post_cases.get(key)
+        shown = (after.node_id if after is not None else None) or (before.node_id if before else None) or key
+        if after is None:
+            level2[shown] = DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED
+            continue
+        if before is None:
+            if after.failing:
+                level2[shown] = DeltaClassification.NEW_FAILURE
+            continue
+        same_state = (before.outcome, before.failure_type) == (after.outcome, after.failure_type)
+        differing: Tuple[str, ...] = ()
+        if same_state:
+            if not after.failing:
+                continue
+            differing = tuple(name for name in STABILITY_FIELDS
+                              if before.field_digest(name) != after.field_digest(name))
+            if not differing:
+                level2[shown] = DeltaClassification.PRE_EXISTING_FAILURE
+                continue
+            provisional = DeltaClassification.STABILITY_UNRESOLVED
+        elif not after.failing:
+            if after.outcome == "skipped":
+                provisional = DeltaClassification.NEWLY_SKIPPED_OR_NOT_EXECUTED
+            elif before.failing:
+                provisional = DeltaClassification.RESOLVED_FAILURE
+            else:
+                continue   # SKIP -> PASS
+        elif not before.failing:
+            provisional = DeltaClassification.NEW_FAILURE
+        else:
+            provisional = DeltaClassification.CHANGED_FAILURE
+        envelope = stability.get(key)
+        if provisional not in TERMINAL_BLOCKING_CLASSIFICATIONS:
+            known = envelope.state(after) if envelope is not None and envelope.unresolved is None else None
+            level2[shown] = DeltaClassification.FLAKY_PREEXISTING if known is not None else provisional
+            continue
+        if envelope is None:
+            required[key] = differing or (ENVELOPE_STATE,)
+            level2[shown] = provisional
+            continue
+        state = envelope.state(after) if envelope.unresolved is None else None
+        if state is None:
+            # Outside the demonstrated envelope (or none): a same-state
+            # dispute can only land here without an envelope - unresolved.
+            level2[shown] = (DeltaClassification.STABILITY_UNRESOLVED if same_state else provisional)
+            continue
+        changed, volatile, not_established = [], [], []
+        for name in STABILITY_FIELDS if after.failing else ():
+            if after.field_digest(name) in state.observed_digests(name):
+                continue   # the baseline showed exactly this in this state
+            status = state.field_status(name)
+            if status == FIELD_STABLE:
+                changed.append(name)
+            elif status == FIELD_VOLATILE:
+                volatile.append(name)
+            elif status == FIELD_NOT_ESTABLISHED:
+                not_established.append(name)
+            else:
+                changed.append(name)   # a failing state without field evidence is never excused
+        if changed:
+            level2[shown] = DeltaClassification.CHANGED_FAILURE
+            continue
+        level2[shown] = (DeltaClassification.FLAKY_PREEXISTING if envelope.flaky
+                         else DeltaClassification.PRE_EXISTING_FAILURE)
+        if volatile:
+            ignored[shown] = tuple(volatile)
+        if not_established:
+            unestablished[shown] = tuple(not_established)
+    return PytestPerTestDelta(level2=level2, stability_required=required, volatile_fields_ignored=ignored,
+                              unestablished_fields_ignored=unestablished)
+
+
+def _aggregate_count_drop(pre: ValidationOutcome, post: ValidationOutcome) -> bool:
+    if not (pre.aggregate_counts and post.aggregate_counts):
+        return False
+    pre_total = sum(pre.aggregate_counts.values())
+    post_total = sum(post.aggregate_counts.values())
+    pre_failing = pre.aggregate_counts.get("failed", 0) + pre.aggregate_counts.get("error", 0)
+    post_failing = post.aggregate_counts.get("failed", 0) + post.aggregate_counts.get("error", 0)
+    # A drop in TOTAL collected/reported tests that isn't explained by
+    # an equal-or-greater rise in failing tests is a silent
+    # disappearance signal - conservative, aggregate-level detection
+    # for exactly the case classify_level2_delta's own per-id view
+    # can't see (a test that stops being collected/reported at all).
+    # total_drop and failure_rise are both "positive means worse" -
+    # flag only when more tests vanished than can be accounted for by
+    # tests that simply moved from passing into the failing count.
+    total_drop = pre_total - post_total
+    failure_rise = post_failing - pre_failing
+    return total_drop > 0 and total_drop > max(0, failure_rise)
+
+
+def _whole_output_delta(pre: ValidationOutcome, post: ValidationOutcome, level1: Level1Delta) -> BaselineDeltaResult:
+    """The whole-invocation (level 1) authority with the console per-test
+    view (level 2) - every runner but a pytest run with complete per-test
+    evidence on both sides."""
     level2: Dict[str, DeltaClassification] = {}
     # `is not None` (never bare truthiness) - an empty-but-successfully-
     # parsed tuple (pytest ran, confirmed zero failures) must still enable
@@ -720,25 +1138,7 @@ def classify_baseline_delta(
         level2 = classify_level2_delta(
             pre.test_outcomes, post.test_outcomes, pre_was_fully_passing=pre.success,
         )
-
-    aggregate_drop = False
-    if pre.aggregate_counts and post.aggregate_counts:
-        pre_total = sum(pre.aggregate_counts.values())
-        post_total = sum(post.aggregate_counts.values())
-        pre_failing = pre.aggregate_counts.get("failed", 0) + pre.aggregate_counts.get("error", 0)
-        post_failing = post.aggregate_counts.get("failed", 0) + post.aggregate_counts.get("error", 0)
-        # A drop in TOTAL collected/reported tests that isn't explained by
-        # an equal-or-greater rise in failing tests is a silent
-        # disappearance signal - conservative, aggregate-level detection
-        # for exactly the case classify_level2_delta's own per-id view
-        # can't see (a test that stops being collected/reported at all).
-        # total_drop and failure_rise are both "positive means worse" -
-        # flag only when more tests vanished than can be accounted for by
-        # tests that simply moved from passing into the failing count.
-        total_drop = pre_total - post_total
-        failure_rise = post_failing - pre_failing
-        if total_drop > 0 and total_drop > max(0, failure_rise):
-            aggregate_drop = True
+    aggregate_drop = _aggregate_count_drop(pre, post)
 
     reasons: List[str] = []
     blocking = False
@@ -764,6 +1164,81 @@ def classify_baseline_delta(
             + " output; only the whole-invocation (level 1) comparison applies"
         ),
     )
+
+
+def _pytest_delta(
+    pre: ValidationOutcome, post: ValidationOutcome, level1: Level1Delta,
+    stability: Optional[Dict[str, BaselineBehaviorEnvelope]],
+) -> BaselineDeltaResult:
+    """REG-R1: a comparison where either side is a pytest run. Both sides
+    complete -> per-test authority (level 1 diagnostic only). Otherwise the
+    whole-output comparison, failing closed: a failing POST suite blocks
+    whatever level 1 says, since an aggregate match proves nothing about
+    individual tests."""
+    unavailable = [f"{side}:{evidence.reason if evidence is not None else 'PYTEST_EVIDENCE_MISSING'}"
+                   for side, evidence in (("PRE", pre.pytest_evidence), ("POST", post.pytest_evidence))
+                   if evidence is None or not evidence.complete]
+    if unavailable:
+        status = "; ".join(unavailable)
+        legacy = _whole_output_delta(pre, post, level1)
+        if post.success:
+            return replace(legacy, pytest_evidence_status=status)
+        return replace(legacy, blocking=True, pytest_evidence_status=status,
+                       blocking_reasons=legacy.blocking_reasons + (f"pytest_evidence_incomplete:{status}",))
+    per_test = classify_pytest_per_test_delta(pre.pytest_evidence, post.pytest_evidence, stability=stability)
+    aggregate_drop = _aggregate_count_drop(pre, post)
+    reasons = [f"level2:{test_id}:{classification.value}" for test_id, classification in per_test.level2.items()
+               if classification in TERMINAL_BLOCKING_CLASSIFICATIONS]
+    if aggregate_drop:
+        reasons.append("aggregate_count_drop")
+    return BaselineDeltaResult(
+        level1=level1, level2=per_test.level2, aggregate_drop_detected=aggregate_drop,
+        blocking=bool(reasons), blocking_reasons=tuple(reasons), level2_available=True,
+        authority=PYTEST_PER_TEST_AUTHORITY, stability_required=per_test.stability_required,
+        volatile_fields_ignored=per_test.volatile_fields_ignored, pytest_evidence_status="complete",
+        unestablished_fields_ignored=per_test.unestablished_fields_ignored,
+    )
+
+
+def classify_baseline_delta(
+    baseline: ValidationBaseline, post: ValidationOutcome, *, post_environment: Optional[str] = None,
+    stability: Optional[Dict[str, BaselineBehaviorEnvelope]] = None,
+) -> BaselineDeltaResult:
+    """The one entry point kriya/workflow/workflow.py calls. Requires
+    baseline.status == "captured" and baseline.outcome is not None - a
+    caller must check baseline-indeterminate BEFORE calling this (see
+    FAILURE_BEHAVIOR: indeterminate is a distinct terminal outcome, never
+    routed through delta comparison at all).
+
+    PRD-024: ``post_environment`` is the POST run's environment identity
+    (``baseline_environment_identity``). When the baseline recorded one and
+    they differ (e.g. an authorized PRD-011 toolchain migration), the runs
+    are NOT_COMPARABLE: a PRE baseline from another toolchain proves nothing
+    about which POST failures are pre-existing, so none is excused - every
+    POST failure blocks, exactly as with no baseline, and a fully passing
+    POST suite does not.
+
+    REG-R1: when either side is a pytest run (it carries pytest evidence),
+    ``_pytest_delta`` decides; ``stability`` is the untouched-baseline field
+    stability measured for this baseline (kriya/workflow/pytest_stability.py).
+    Every other runner is decided exactly as before."""
+    if baseline.status != "captured" or baseline.outcome is None:
+        raise ValueError("classify_baseline_delta requires a captured baseline with a real outcome")
+    pre = baseline.outcome
+    pre_environment = baseline.invocation.environment_fingerprint
+    if pre_environment is not None and post_environment is not None and pre_environment != post_environment:
+        return BaselineDeltaResult(
+            level1=Level1Delta(DeltaClassification.NOT_COMPARABLE, pre.failure_fingerprint,
+                               post.failure_fingerprint),
+            level2={}, aggregate_drop_detected=False, blocking=not post.success,
+            blocking_reasons=() if post.success else ("environment_not_comparable",),
+            level2_available=False,
+            level2_unavailable_reason="PRE and POST ran in different recorded environments",
+        )
+    level1 = classify_level1_delta(pre, post)
+    if pre.pytest_evidence is not None or post.pytest_evidence is not None:
+        return _pytest_delta(pre, post, level1, stability)
+    return _whole_output_delta(pre, post, level1)
 
 
 # --- Blocking-only evidence rendering (VAL-001 G1-DEVINV2, 2026-09-20) ------
@@ -903,6 +1378,10 @@ class BrownfieldBaselineCaptureResult:
     # now), "resume" (this run's own checkpoint) or "prior_full_suite" (an
     # earlier full-suite result describing exactly this starting state).
     full_regression_source: Optional[str] = None
+    # REG-R1: why a checkpointed/prior baseline was NOT reused although it
+    # matched (OLD_CHECKPOINT_INSUFFICIENT: a pytest baseline recorded
+    # before per-test evidence existed); the baseline was captured afresh.
+    reuse_rejections: Tuple[str, ...] = ()
 
 
 def _normalized_targets(target_test: Optional[Union[str, Sequence[str]]]) -> Optional[Tuple[str, ...]]:
@@ -966,19 +1445,37 @@ def _capture_single_baseline(
     )
 
 
+OLD_CHECKPOINT_INSUFFICIENT = "OLD_CHECKPOINT_INSUFFICIENT"
+
+
+def _predates_pytest_evidence(payload: Dict[str, Any]) -> bool:
+    """A serialized baseline written before REG-R1: its outcome has no
+    ``pytest_evidence`` key at all (this format always writes it, None for
+    a run that carried no per-test evidence - the comparator fails such a
+    baseline closed). Never reinterpreted, never migrated."""
+    outcome = payload.get("outcome")
+    return isinstance(outcome, dict) and "pytest_evidence" not in outcome
+
+
 def _reuse_or_capture(
     *, run_id: str, target_test: Optional[Tuple[str, ...]],
     resume_baseline: Optional[Dict[str, Any]],
     run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
     compute_revision: Callable[[], Optional[str]], environment_identity: Optional[str] = None,
-    prior_baseline: Optional[Dict[str, Any]] = None,
+    prior_baseline: Optional[Dict[str, Any]] = None, require_pytest_evidence: bool = False,
+    rejections: Optional[List[str]] = None,
 ) -> Tuple[ValidationBaseline, str]:
     """The baseline and where it came from: this run's own checkpoint
     ("resume"), then an earlier full-suite result (``prior_baseline``,
     "prior_full_suite"), each reused only when its workspace revision and
     its invocation (command, selection, environment - which includes the
     validator's execution policy) match exactly; otherwise a fresh capture
-    ("captured")."""
+    ("captured").
+
+    REG-R1: with ``require_pytest_evidence`` (the workspace's test runner is
+    pytest) a payload written before per-test evidence existed is not
+    reused - it is re-established by a fresh capture, and
+    ``OLD_CHECKPOINT_INSUFFICIENT:<source>`` is appended to ``rejections``."""
     invocation = ValidationInvocation(
         command_identity="polymorphic_validator.run_tests",
         selection_identity=_selection_identity_for_targets(target_test),
@@ -988,6 +1485,10 @@ def _reuse_or_capture(
     current_revision: List[Optional[str]] = []
     for source, payload in (("resume", resume_baseline), ("prior_full_suite", prior_baseline)):
         if payload is None:
+            continue
+        if require_pytest_evidence and _predates_pytest_evidence(payload):
+            if rejections is not None:
+                rejections.append(f"{OLD_CHECKPOINT_INSUFFICIENT}:{source}")
             continue
         try:
             candidate = ValidationBaseline.from_dict(payload)
@@ -1019,6 +1520,7 @@ def capture_brownfield_baselines(
     resume_baseline_full_regression: Optional[Dict[str, Any]] = None,
     environment_identity: Optional[str] = None,
     prior_full_regression: Optional[Dict[str, Any]] = None,
+    require_pytest_evidence: bool = False,
 ) -> BrownfieldBaselineCaptureResult:
     """`run_validator(target_test) -> {"success": bool, "output": str}` and
     `compute_revision() -> Optional[str]` are the caller's own thin wrappers
@@ -1057,6 +1559,7 @@ def capture_brownfield_baselines(
     content, command, selection and environment - instead of running the
     suite again."""
     normalized_target_test = _normalized_targets(target_test)
+    rejections: List[str] = []
     targeted = None
     if normalized_target_test is not None:
         targeted, _ = _reuse_or_capture(
@@ -1064,6 +1567,7 @@ def capture_brownfield_baselines(
             resume_baseline=resume_baseline_targeted,
             run_validator=run_validator, compute_revision=compute_revision,
             environment_identity=environment_identity,
+            require_pytest_evidence=require_pytest_evidence, rejections=rejections,
         )
 
     full_regression = None
@@ -1076,6 +1580,7 @@ def capture_brownfield_baselines(
             run_validator=run_validator, compute_revision=compute_revision,
             environment_identity=environment_identity,
             prior_baseline=prior_full_regression,
+            require_pytest_evidence=require_pytest_evidence, rejections=rejections,
         )
         if full_regression.status == "baseline_indeterminate":
             hard_stop_reason = (
@@ -1085,5 +1590,5 @@ def capture_brownfield_baselines(
 
     return BrownfieldBaselineCaptureResult(
         targeted=targeted, full_regression=full_regression, hard_stop_reason=hard_stop_reason,
-        full_regression_source=full_regression_source,
+        full_regression_source=full_regression_source, reuse_rejections=tuple(rejections),
     )

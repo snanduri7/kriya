@@ -187,7 +187,10 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
     assert len(ids) == len(set(ids))
     assert PRODUCTION_DOCTOR_CHECK_IDS == (
         "profile.production", "plugins.core_tools", "workspace.identity_lock",
-        "persistence.checkpoints", "persistence.traces", "persistence.logs", "capacity.workspace",
+        "persistence.checkpoints", "persistence.traces", "persistence.logs",
+        # LR-R1-M1 (deliberate characterization change): the attempt recorder row (never required).
+        "evidence.attempt_recorder",
+        "capacity.workspace",
         "capacity.temp", "git.worktree", "isolation.candidate_worktree", "toolchain.required",
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
         # PROVIDER-CONTRACT-001 (deliberate characterization change): the provider contract row.

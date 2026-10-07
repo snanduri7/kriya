@@ -113,6 +113,12 @@ class ChatResponse:
     finish_reason: Optional[str] = None
     provider_metadata: Dict[str, Any] = field(default_factory=dict)
     tool_calls: List[RawToolCall] = field(default_factory=list)
+    # LR-R1-M1 (evidence only, read by no decision): the transport content
+    # exactly as the provider returned it, before any trimming (D3), and a
+    # separately returned reasoning field's text (recorded as a digest unless
+    # the operator chose full_with_reasoning).
+    raw_content: Optional[str] = None
+    reasoning_text: Optional[str] = None
 
     def to_raw(self) -> Dict[str, Any]:
         """The raw-field dict LLMClient's normalizer reads (the historical
@@ -130,6 +136,16 @@ class InferenceRuntimePort(abc.ABC):
 
     name: str
     capabilities: RuntimeCapabilities
+
+    # -- the exact request body ------------------------------------------
+    def wire_payload(self, request: ChatRequest, *, stream: bool) -> Optional[Dict[str, Any]]:
+        """The exact body this adapter sends for ``request`` (LR-R1-M1 §5.3).
+        An adapter that posts a body builds it here, once, and sends exactly
+        this object, so evidence of the body and the body sent can never
+        differ. Transport configuration (endpoint, credentials, timeout) is
+        never part of it. None: this adapter declares no wire body."""
+        del request, stream
+        return None
 
     # -- per-request context window --------------------------------------
     @abc.abstractmethod
@@ -281,12 +297,25 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
     ``finish_reason`` degrades it to None - never a fabricated "stop"
     (VAL-001 G1-R3)."""
 
+    def wire_payload(self, request: ChatRequest, *, stream: bool) -> Dict[str, Any]:
+        """The keyword arguments of ``chat.completions.create`` (minus the
+        per-request timeout, which is transport configuration)."""
+        body: Dict[str, Any] = dict(model=request.model, messages=request.messages,
+                                    temperature=request.temperature, max_tokens=request.max_tokens)
+        if request.tools is not None:
+            body.update(tools=request.tools, tool_choice="auto", extra_body=request.extra_body)
+            return body
+        if stream:
+            body["stream"] = True
+            if self.capabilities.stream_usage:
+                body["stream_options"] = {"include_usage": True}
+        body.update(extra_body=request.extra_body, response_format=request.response_format)
+        return body
+
     async def complete(self, client: Any, request: ChatRequest) -> ChatResponse:
-        common = dict(model=request.model, messages=request.messages, temperature=request.temperature,
-                      max_tokens=request.max_tokens, **_timeout_kwarg(request))
         if request.stream_callback is None:
             response = await client.chat.completions.create(
-                **common, extra_body=request.extra_body, response_format=request.response_format,
+                **self.wire_payload(request, stream=False), **_timeout_kwarg(request),
             )
             out = ChatResponse(content="", provider_metadata=_provider_metadata(response))
             self._read_usage(out, getattr(response, "usage", None))
@@ -296,17 +325,18 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             reasoning = _str_or_none(getattr(message, "reasoning", None)) or _str_or_none(
                 getattr(message, "reasoning_content", None))
             out.reasoning_chars = len(reasoning) if reasoning else 0
-            out.content = (message.content or "").strip()
+            out.reasoning_text = reasoning
+            out.raw_content = message.content or ""
+            out.content = out.raw_content.strip()
             return out
         # PROVIDER-CONTRACT-001: exactly one request. A failure is the
         # caller's typed failure, never a silent resend in another shape.
-        stream_options = {"stream_options": {"include_usage": True}} if self.capabilities.stream_usage else {}
         stream = await client.chat.completions.create(
-            **common, stream=True, **stream_options,
-            extra_body=request.extra_body, response_format=request.response_format,
+            **self.wire_payload(request, stream=True), **_timeout_kwarg(request),
         )
         out = ChatResponse(content="")
         chunks: List[str] = []
+        reasoning_chunks: List[str] = []
         async for chunk in stream:
             if not out.provider_metadata:
                 out.provider_metadata = _provider_metadata(chunk)
@@ -322,17 +352,18 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
                 reasoning_delta = _str_or_none(getattr(delta, "reasoning", None))
                 if reasoning_delta:
                     out.reasoning_chars += len(reasoning_delta)
+                    reasoning_chunks.append(reasoning_delta)
                 if delta.content:
                     chunks.append(delta.content)
                     request.stream_callback(delta.content)
-        out.content = "".join(chunks).strip()
+        out.raw_content = "".join(chunks)
+        out.reasoning_text = "".join(reasoning_chunks) or None
+        out.content = out.raw_content.strip()
         return out
 
     async def complete_with_tools(self, client: Any, request: ChatRequest) -> ChatResponse:
         response = await client.chat.completions.create(
-            model=request.model, messages=request.messages, tools=request.tools, tool_choice="auto",
-            temperature=request.temperature, max_tokens=request.max_tokens, extra_body=request.extra_body,
-            **_timeout_kwarg(request),
+            **self.wire_payload(request, stream=False), **_timeout_kwarg(request),
         )
         message = response.choices[0].message
         reasoning = _str_or_none(getattr(message, "reasoning", None))
@@ -342,6 +373,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             provider_metadata=_provider_metadata(response),
             tool_calls=[RawToolCall(tc.id, tc.function.name, tc.function.arguments)
                         for tc in (message.tool_calls or [])],
+            raw_content=message.content or "", reasoning_text=reasoning,
         )
         self._read_usage(out, getattr(response, "usage", None))
         return out

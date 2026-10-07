@@ -1,0 +1,24 @@
+{
+ "requirement": "PATCH_ONLY_PROVEN",
+ "targets": [
+  "src/main/java/org/apache/commons/lang3/StringUtils.java"
+ ],
+ "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+ "candidates": [
+  {
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "status": "COMPATIBLE",
+   "reasons": [],
+   "patch_only_files": [
+    "src/main/java/org/apache/commons/lang3/StringUtils.java"
+   ],
+   "runtime_digest": "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3",
+   "qualification": "QUALIFIED",
+   "capability_source": "qualification_derived",
+   "file_allocation_tokens": 16096
+  }
+ ],
+ "sizes": {
+  "src/main/java/org/apache/commons/lang3/StringUtils.java": 402131
+ }
+}

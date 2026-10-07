@@ -86,11 +86,7 @@ def prune_run_state(
         )
         return report
 
-    protected: Set[str] = set(protect_run_ids) | set(list_checkpoint_run_references(workspace_path))
-    protected.update(milestone_ledger_run_references(workspace_path))
-    control_state_run = load_control_state_run_reference(workspace_path)
-    if control_state_run is not None:
-        protected.add(control_state_run)
+    protected: Set[str] = set(protect_run_ids) | workspace_run_references(workspace_path)
     terminal = []
     for record in scan.records:
         if not record.terminal or record.commit_state_unknown:
@@ -138,6 +134,17 @@ def prune_run_state(
     return report
 
 
+def workspace_run_references(workspace_path: str) -> Set[str]:
+    """Run ids the workspace still references: resume checkpoints, the
+    persisted ControlState (enforce resume) and milestone commit ledgers."""
+    references = set(list_checkpoint_run_references(workspace_path))
+    references.update(milestone_ledger_run_references(workspace_path))
+    control_state_run = load_control_state_run_reference(workspace_path)
+    if control_state_run is not None:
+        references.add(control_state_run)
+    return references
+
+
 def _unlink(path: str) -> None:
     try:
         os.unlink(path)
@@ -163,5 +170,5 @@ def prune_after_run(workspace_path: str, run_id: str) -> None:
 
 __all__ = [
     "DEFAULT_KEEP_TERMINAL_RUNS", "DEFAULT_KEEP_UNREFERENCED_EVIDENCE",
-    "PruneReport", "prune_after_run", "prune_run_state",
+    "PruneReport", "prune_after_run", "prune_run_state", "workspace_run_references",
 ]

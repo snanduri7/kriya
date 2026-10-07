@@ -1,0 +1,85 @@
+{
+ "workspace": "r2c-java-lang-a",
+ "commit": "4ee346e59eecccdaefbdd74ac53698da4a1f348a",
+ "stack": "java",
+ "commands": [
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-lang-a"
+  },
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-lang-a"
+  },
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-java-lang-a"
+  }
+ ],
+ "success": true,
+ "runner": "maven-surefire",
+ "summary": "Tests run: 22042, Failures: 0, Errors: 0, Skipped: 19",
+ "passed": 22023,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 19,
+ "duration_seconds": 327.7,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "java",
+   "runtime": "jdk",
+   "runtime_version": "8",
+   "build_tool": "maven",
+   "build_tool_version": "3.9",
+   "containment_image": "maven:3.9-eclipse-temurin-8",
+   "requirement_source": "pom.xml",
+   "image_digest": "sha256:5f397b4bd0bcea6f283d6f8e535780d40818ca81806eb1fee1716f45f6f24a70",
+   "observed_runtime_version": "8",
+   "observed_build_tool_version": "3.9.16",
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "8",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-8"
+    },
+    "target": {
+     "runtime_version": "8",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-8"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": "in org.apache.commons.lang3.CharsetsTest\n[INFO] Running org.apache.commons.lang3.IntegerRangeTest\n[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in org.apache.commons.lang3.IntegerRangeTest\n[INFO] Running org.apache.commons.lang3.BooleanUtilsTest\n[INFO] Tests run: 90, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in org.apache.commons.lang3.BooleanUtilsTest\n[INFO] Running org.apache.commons.lang3.ArrayUtilsTest\n[INFO] Tests run: 361, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in org.apache.commons.lang3.ArrayUtilsTest\n[INFO] Running org.apache.commons.lang3.DoubleRangeTest\n[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in org.apache.commons.lang3.DoubleRangeTest\n[INFO] Running org.apache.commons.lang3.ArrayUtilsSetTest\n[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.apache.commons.lang3.ArrayUtilsSetTest\n[INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 22042, Failures: 0, Errors: 0, Skipped: 19\n[INFO] \n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  02:31 min\n[INFO] Finished at: 2026-10-05T13:39:00Z\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\n",
+ "restored_clean": true
+}

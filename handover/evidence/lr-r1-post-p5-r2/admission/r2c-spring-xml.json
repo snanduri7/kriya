@@ -1,0 +1,66 @@
+{
+ "workspace": "r2c-spring-xml",
+ "commit": "09351b3ee0bd5aec2d480c0280e84700978f56d3",
+ "stack": "java",
+ "commands": [
+  {
+   "argv": [
+    "mvn",
+    "-B",
+    "-o",
+    "-Dmaven.repo.local=/kriya/cache/m2",
+    "test"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-spring-xml"
+  }
+ ],
+ "success": true,
+ "runner": "maven-surefire",
+ "summary": "Tests run: 75, Failures: 0, Errors: 0, Skipped: 0",
+ "passed": 75,
+ "failed": 0,
+ "errors": 0,
+ "skipped": 0,
+ "duration_seconds": 15.0,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "java",
+   "runtime": "jdk",
+   "runtime_version": "17",
+   "build_tool": "maven",
+   "build_tool_version": "3.9",
+   "containment_image": "maven:3.9-eclipse-temurin-17",
+   "requirement_source": "pom.xml",
+   "image_digest": "sha256:f0be3f7442b426f4bc8238fcb0fc5545be96d3266511aed07f767fd51b78a09e",
+   "observed_runtime_version": "17",
+   "observed_build_tool_version": "3.9.16",
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "17",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-17"
+    },
+    "target": {
+     "runtime_version": "17",
+     "runtime_constraint": null,
+     "requirement_source": "pom.xml",
+     "containment_image": "maven:3.9-eclipse-temurin-17"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "GREEN",
+ "output_tail": "_0 on p1_0.id=v1_0.pet_id where p1_0.id=?\n[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.959 s -- in org.springframework.samples.petclinic.service.ClinicServiceSpringDataJpaTests\n[INFO] Running org.springframework.samples.petclinic.service.ClinicServiceJdbcTests\n[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.198 s -- in org.springframework.samples.petclinic.service.ClinicServiceJdbcTests\nINFO  LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'petclinic'\nINFO  LocalContainerEntityManagerFactoryBean - Closing JPA EntityManagerFactory for persistence unit 'petclinic'\nWARN  cache - HHH90001002: Attempt to stop an already-stopped JCacheRegionFactory.\nWARN  cache - HHH90001002: Attempt to stop an already-stopped JCacheRegionFactory.\n[INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 75, Failures: 0, Errors: 0, Skipped: 0\n[INFO] \n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  12.724 s\n[INFO] Finished at: 2026-10-05T13:45:23Z\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nPicked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp\nOpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended\n",
+ "restored_clean": true
+}

@@ -1,0 +1,265 @@
+{
+ "workspace": "v5-t2-moreit-count-unique",
+ "goal": "Add a function `count_unique(iterable, key=None)` to more_itertools/more.py that returns the number of distinct items in the iterable (distinct by `key(item)` when a key function is given), add it to the module's `__all__`, and add tests for it in tests/test_more.py.",
+ "run_id": "20261005T174757-165198e5",
+ "generate_exit": 1,
+ "wall_seconds": 452.4914610385895,
+ "process_wall_seconds": 452.27142216596985,
+ "recorder_seconds": 0.37734091584570706,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0002,
+  "capture_mode": 0.0,
+  "close_run": 0.0006,
+  "emit": 0.0021,
+  "ensure_store": 0.002,
+  "enter_attempt_iteration": 0.0001,
+  "exit_attempt_iteration": 0.0004,
+  "mirror_decision": 0.0058,
+  "mirror_event": 0.0743,
+  "mirror_evidence": 0.0053,
+  "mirror_gate_outcome": 0.0475,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.0205,
+  "record_call_result": 0.0019,
+  "record_developer_parse": 0.0045,
+  "record_diagnosis": 0.0046,
+  "record_fallback_decision": 0.0003,
+  "record_wire_request": 0.0391,
+  "record_wire_response": 0.0406,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0084,
+  "_record_authority_snapshot": 0.0005,
+  "_record_candidate_change": 0.1163,
+  "_record_developer_sections": 0.0004,
+  "_recorded_section_fit": 0.0007,
+  "_record_recovery_decision": 0.0012,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 5,
+  "capture_mode": 5,
+  "close_run": 1,
+  "emit": 14,
+  "ensure_store": 3,
+  "enter_attempt_iteration": 5,
+  "exit_attempt_iteration": 5,
+  "mirror_decision": 8,
+  "mirror_event": 88,
+  "mirror_evidence": 6,
+  "mirror_gate_outcome": 9,
+  "note_retry_evidence": 5,
+  "prune_after_run": 1,
+  "record_call_result": 14,
+  "record_developer_parse": 5,
+  "record_diagnosis": 4,
+  "record_fallback_decision": 5,
+  "record_wire_request": 14,
+  "record_wire_response": 14,
+  "store_pointer": 2,
+  "_record_gate_result": 7,
+  "_record_authority_snapshot": 5,
+  "_record_candidate_change": 3,
+  "_record_developer_sections": 5,
+  "_recorded_section_fit": 7,
+  "_record_recovery_decision": 4,
+  "_unit_evidence": 2
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 3,
+  "seconds": 0.1163166260230355
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.0006040410371497273
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.020484416047111154
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 228,
+ "records_by_kind": {
+  "mirror.event": 88,
+  "model.request": 14,
+  "model.response": 14,
+  "model.result": 14,
+  "prompt.sections": 12,
+  "mirror.gate_outcome": 9,
+  "mirror.decision": 8,
+  "gate.result": 7,
+  "mirror.evidence": 6,
+  "attempt.opened": 5,
+  "fallback.decision": 5,
+  "authority.snapshot": 5,
+  "developer.parse": 5,
+  "obligations.snapshot": 5,
+  "attempt.closed": 5,
+  "attempt.concluded": 5,
+  "candidate.change": 4,
+  "diagnosis": 4,
+  "recovery.decision": 4,
+  "retry.delta": 3,
+  "unit.opened": 2,
+  "unit.closed": 2,
+  "run.opened": 1,
+  "run.closed": 1
+ },
+ "store_kib": 1468,
+ "capture": "full",
+ "model_calls": 14,
+ "model_seconds": 327.48,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 3
+  },
+  {
+   "role": "localization",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "developer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 5
+  },
+  {
+   "role": "run_verifier",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "spec_compliance",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "reviewer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  }
+ ],
+ "attempts": 5,
+ "calls_outside_attempts": {
+  "localization": 2,
+  "planning": 3,
+  "review": 1
+ },
+ "completeness": {
+  "Q1:RECORDED": 5,
+  "Q2:RECORDED": 5,
+  "Q3:RECORDED": 5,
+  "Q4:NOT_APPLICABLE": 1,
+  "Q4:RECORDED": 4,
+  "Q5:RECORDED": 5,
+  "Q6:NOT_APPLICABLE": 1,
+  "Q6:RECORDED": 4,
+  "Q7:NOT_APPLICABLE": 2,
+  "Q7:RECORDED": 3,
+  "Q8:RECORDED": 5
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q6",
+   "status": "NOT_APPLICABLE",
+   "reason": "no failure was recorded for this attempt; nothing was retried"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  },
+  {
+   "unit": "s2",
+   "attempt": 4,
+   "question": "Q4",
+   "status": "NOT_APPLICABLE",
+   "reason": "model_proposed_no_change"
+  },
+  {
+   "unit": "s2",
+   "attempt": 4,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 14,
+    "seq": 228,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:226430a66b193f3b78859bc8e050043735d4e3e2a24755d83df97537c104d2fe"
+   },
+   "failure_type": "attribution_rejected",
+   "progress_classification": "NO_PROGRESS",
+   "retry": false,
+   "seq": 216,
+   "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "unauthorized_generation_target",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "outcome": "RETURNED",
+    "quality_gates_passed": true,
+    "seq": 78,
+    "unit_id": "s1"
+   },
+   {
+    "failure_category": "unauthorized_generation_target",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 224,
+    "unit_id": "s2"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.083,
+ "non_model_seconds": 125.02,
+ "recorder_pct_non_model": 0.302
+}

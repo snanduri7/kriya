@@ -1,0 +1,7 @@
+certified_code (worktree HEAD at replay) = 12cc872 (implementation 6d242e7 + certification evidence)
+kriya imported by the replay = /Users/sriramnanduri/kriya-wt/p3d/kriya (verified from the replay's own cwd/env:
+  PYTHONPATH=/Users/sriramnanduri/kriya-wt/p3d, module kriya.workflow.pytest_stability exists only there)
+CORRECTION: the first identity line printed the main checkout's kriya because that check ran from the session cwd,
+  not the replay's neutral workspace; the replay itself never imported it.
+runtime = matched config qwen38-matched-developer.yaml (contained OCI python:3.12-slim), Graphify base 67f99bd,
+  candidate engine.py e47eacba60c19860270cb8c46fe95f2443a897eb5ffe0fddd921ed1cf0426034; no model calls

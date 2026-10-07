@@ -1,0 +1,2 @@
+Change `_parse_tz_offset` in freezegun/api.py so that it also accepts a string offset of the form "+HH:MM" or "-HH:MM" (for example "+05:30" is an offset of 5 hours 30 minutes and "-02:00" is minus 2 hours), raising ValueError for any other string, while timedelta and number offsets keep working exactly as before, following the existing tests and keeping tests/test_operations.py passing.
+- Do not modify any other file.

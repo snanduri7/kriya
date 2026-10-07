@@ -1,0 +1,15 @@
+[graphify extract] scanning /Users/sriramnanduri/kriya-live-validation/val001-g1-graphify-c3406/g1_evidence/acceptance/reproducer
+[graphify extract] found 3 code, 0 docs, 0 papers, 0 images
+[graphify extract] AST extraction on 3 code files...
+[graphify extract] wrote /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/tmplsbseqxs/out/graphify-out/graph.json — 9 nodes, 8 edges (no clustering)
+
+
+=== per-call-site result ===
+  [FAIL] A() -> Get<int>("port") [unqualified generic, base class]
+  [FAIL] B() -> this.Get<int>("port") [this., generic, base class]
+  [FAIL] C() -> GetRaw("host") [control, non-generic]
+  [FAIL] D() -> this.GetRaw("host") [control, non-generic]
+  [FAIL] E() -> Make<int>() [unqualified generic, same class]
+
+0/5 expected calls edges present.
+ACCEPTANCE: FAIL

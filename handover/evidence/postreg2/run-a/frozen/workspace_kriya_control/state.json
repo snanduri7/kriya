@@ -1,0 +1,112 @@
+{
+  "_run_record": {
+    "classification": "derived",
+    "revision": 7,
+    "run_id": "20261007T091832-d5607f08"
+  },
+  "_workspace": {
+    "version": "1",
+    "workspace_id": "5f90f8d7d9185c949f0773a41f354a1ef029ea87a0f2458cf9f2cf0369981c7e"
+  },
+  "acceptance_approval_digest": "5f9cc2a9df55579afc5928d94b236bb423c4108c7ddd37faf276c10841e7e5be",
+  "base_commit": "67f99bd0059dd1bac9e44382907ef9f10098b39f",
+  "created_at": "2026-10-07T03:48:32.998083+00:00",
+  "current_artifact_registry_hash": null,
+  "current_contract_hash": null,
+  "current_milestone_id": null,
+  "current_plan_hash": "9a4296f321c089325751d88b975e3695804adbe6e378180a9a985bc63f308c96",
+  "engineering_route": {
+    "current_risk_class": "LOW",
+    "deterministic_signals": {
+      "creation_language": false,
+      "dependency_graph_available": true,
+      "dependency_terms": false,
+      "enhancement_language": false,
+      "known_files_count": 0,
+      "migration_language": false,
+      "multi_part_structure": false,
+      "repo_appears_empty": false,
+      "repro_shape": false,
+      "scope_language": "none",
+      "security_terms": false
+    },
+    "escalated": false,
+    "escalation_stage": "none",
+    "execution_weight": "light",
+    "final_execution_weight": "light",
+    "impact": {
+      "build_system_change": false,
+      "configuration_change": false,
+      "dependency_change": false,
+      "downstream_references": 0,
+      "files_touched": 0,
+      "persistence_change": false,
+      "public_contract_change": false,
+      "security_boundary_change": false,
+      "shared_entrypoint_change": false,
+      "symbols_impacted": 0
+    },
+    "impact_final": {
+      "build_system_change": false,
+      "configuration_change": false,
+      "dependency_change": false,
+      "downstream_references": 0,
+      "files_touched": 0,
+      "persistence_change": false,
+      "public_contract_change": false,
+      "security_boundary_change": false,
+      "shared_entrypoint_change": false,
+      "symbols_impacted": 0
+    },
+    "impact_initial": {
+      "build_system_change": false,
+      "configuration_change": false,
+      "dependency_change": false,
+      "downstream_references": 0,
+      "files_touched": 0,
+      "persistence_change": false,
+      "public_contract_change": false,
+      "security_boundary_change": false,
+      "shared_entrypoint_change": false,
+      "symbols_impacted": 0
+    },
+    "initial_execution_weight": "light",
+    "initial_risk_class": "LOW",
+    "kind": "task",
+    "max_observed_risk_class": "LOW",
+    "reason_codes": [
+      "no_signals_fired_defaulted_to_task"
+    ],
+    "router_confidence": null,
+    "router_used": false
+  },
+  "last_verified_checkpoint": null,
+  "milestone_group_id": null,
+  "milestone_states": {},
+  "patch_hash": null,
+  "process_profile": {
+    "auto_merge_allowed": true,
+    "context_depth": "narrow",
+    "contract_analysis_required": false,
+    "execution_weight": "light",
+    "full_test_suite_required": false,
+    "heavy_extended_checks_not_yet_available": false,
+    "human_review_required": false,
+    "impact_revalidation_required": false,
+    "planning_required": false,
+    "structured_subtasks_required": false,
+    "verification_tier": "light"
+  },
+  "requirement_contract_digest": "addc635a909fa91be765f43b2e18143668b58d68416871614803a563c382ce6b",
+  "run_id": "20261007T091832-d5607f08",
+  "schema_version": 1,
+  "subtask_completion_scope": "candidate",
+  "subtask_states": {
+    "s1": "failed",
+    "s2": "pending"
+  },
+  "subtask_written_files": {},
+  "tree_hash": "975f0667afa68908d7ab758551cb8cec6a9456f2",
+  "updated_at": "2026-10-07T03:57:04.250425+00:00",
+  "workspace_content_hash": "bba7689c625508feb81b3e8c024c8ec52ea0f844db0462dd789d5bb803c7600b"
+}

@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 # `name as name` marks an explicit re-export: the helper moved to its own module
 # during modularization, and callers (tests, review_context.py, spikes) still
@@ -34,6 +34,7 @@ from kriya.control.run_coordinator import (
     owning_run_work_unit,
 )
 from kriya.control.run_record import RunLifecycle
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.kernel import Kernel
 from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
@@ -53,6 +54,8 @@ from kriya.static_analysis.service import (
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
+from kriya.workflow.acceptance_approval import bound_approval
+from kriya.workflow.acceptance_oracle import bound_acceptance
 from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
     classify_ownership_violations,
@@ -92,6 +95,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.compile_regression import attribute_compile_regression
 from kriya.workflow.context_budget import (
     CandidatePrompts,
     RetrievalLimits,
@@ -245,11 +249,16 @@ from kriya.workflow.planner_repair import (
     planner_response_model,
     record_planner_outcome,
 )
+from kriya.workflow.pytest_stability import (
+    classify_with_baseline_stability,
+    record_regression_decision,
+)
+from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
+from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     blocking_requirements,
     cited_requirement_ids,
-    derive_requirements,
     requirement_evidence,
     requirement_lineage,
     requirement_outcomes,
@@ -342,7 +351,6 @@ from kriya.workflow.validation_baseline import (
     DeltaClassification,
     build_validation_outcome,
     capture_brownfield_baselines,
-    classify_baseline_delta,
     render_blocking_regression_evidence,
 )
 from kriya.workflow.verification_binding import bind_candidate
@@ -597,7 +605,7 @@ def _settle_no_change_proposal(
             diagnostics={"reason_code": VERIFIED_NO_CHANGE_REFUSED, "verified_no_change": refusal},
             attempt=attempt,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         state.record_event(RunEvent(
             kind="unit.verified_no_change_refused", attempt=attempt, source="workflow",
             authority=EventAuthority.AUTHORITATIVE,
@@ -908,6 +916,94 @@ def _settle_future_owner_verification_obligations(
     return settled
 
 
+def _candidate_test_files(candidate_root: str) -> List[str]:
+    """The runnable test files of the candidate tree (a requirement's own
+    words may name them)."""
+    from kriya.workflow.file_resolution import is_runnable_test_file
+
+    test_files: List[str] = []
+    for root, dirs, files in os.walk(candidate_root):
+        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
+                                                "__pycache__", "target", "build", "dist"}]
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), candidate_root)
+            if is_runnable_test_file(rel):
+                test_files.append(rel)
+    return test_files
+
+
+def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[List[str]]:
+    """The test files that existed before this run: the real workspace's
+    (untouched until apply) and the run base's. A statement naming one of
+    them claims regression preservation even when the candidate deleted it.
+    None when that cannot be established (an in-place candidate with no
+    readable base): the caller then assumes the statement claims both."""
+    from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.named_test_oracle import BaseTree
+
+    in_place = os.path.realpath(candidate_root) == os.path.realpath(workspace_path)
+    files = [] if in_place else _candidate_test_files(workspace_path)
+    base_revision = _oracle_base_revision(candidate_root, workspace_path)
+    if base_revision:
+        try:
+            files += [path for path in BaseTree(candidate_root, base_revision).paths if is_runnable_test_file(path)]
+        except Exception as exc:  # unreadable base (git error, I/O): unknown, both claims required
+            logger.info(f"Acceptance: base test files unavailable: {type(exc).__name__}: {exc}")
+            return None
+    elif in_place:
+        return None
+    return sorted(set(files))
+
+
+def close_requirements_with_acceptance_tests(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    acceptance: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
+    tree_binding: Any = None, approval: Any = None,
+) -> List[Dict[str, Any]]:
+    """FS-1C2 B2-a: judges the BEHAVIOR claims the operator's acceptance file
+    (bound before generation; ``acceptance`` None = none was given) covers,
+    by running it once, under Kriya's own runner, on the candidate at
+    ``candidate_root`` - see kriya/workflow/acceptance_oracle.py. Shared by the
+    direct/milestone pre-apply boundary and enforce's terminal gate, before
+    the named-test closure. With no artifact it only supersedes an earlier
+    acceptance judgment of the same candidate (never runs anything)."""
+    from kriya.workflow.acceptance_jvm import run_java_acceptance
+    from kriya.workflow.acceptance_oracle import close_requirements_with_acceptance, run_acceptance
+
+    modified = list(modified)
+    test_files = _candidate_test_files(candidate_root)
+    reference = _reference_test_files(candidate_root, workspace_path)
+
+    def validator() -> PolymorphicValidator:
+        built = PolymorphicValidator(
+            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+            toolchain_declaration_mutable=toolchain_declaration_mutable,
+        )
+        built.tree_binding = tree_binding
+        return built
+
+    def export_validator(root: str) -> PolymorphicValidator:
+        # B2-c: a Kriya-owned copy of the candidate; its build configuration is
+        # the authorized base's (trust surface checked first), so no toolchain
+        # declaration may differ there.
+        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+
+    base_revision = _oracle_base_revision(candidate_root, workspace_path) if acceptance is not None else None
+
+    def execute(artifact: Any) -> Any:
+        if artifact.language == "java":
+            return run_java_acceptance(artifact, candidate_root, candidate_paths=modified,
+                                       base_revision=base_revision, validator_factory=export_validator)
+        return run_acceptance(artifact, candidate_root, candidate_paths=modified, validator_factory=validator)
+
+    return close_requirements_with_acceptance(
+        ledger, requirement_set, acceptance,
+        test_files=None if reference is None else sorted(set(test_files) | set(reference)),
+        execute=execute, source="requirement_closure.acceptance", revision=revision,
+        approval=approval, base_revision=base_revision,
+    )
+
+
 def close_requirements_with_named_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
@@ -926,7 +1022,7 @@ def close_requirements_with_named_tests(
     its own gates were): this step verifies the already-authorized
     candidate; it never re-decides a toolchain change. Without that
     authority a changed declaration still fails closed here."""
-    from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.named_test_oracle import judge_named_tests
     from kriya.workflow.requirements import (
         RequirementOutcome,
         close_unverified_requirements_with_named_tests,
@@ -934,31 +1030,86 @@ def close_requirements_with_named_tests(
         requirement_outcomes,
     )
 
-    test_files: List[str] = []
-    for root, dirs, files in os.walk(candidate_root):
-        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
-                                                "__pycache__", "target", "build", "dist"}]
-        for name in files:
-            rel = os.path.relpath(os.path.join(root, name), candidate_root)
-            if is_runnable_test_file(rel):
-                test_files.append(rel)
+    test_files = _candidate_test_files(candidate_root)
     outcomes = requirement_outcomes(ledger, requirement_set)
     if not any(outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED
                and named_existing_tests(requirement.text, test_files)
                for requirement in requirement_set.requirements):
         return []  # D8: nothing to close, so no validator and no toolchain resolution
-    validator = PolymorphicValidator(
-        candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
-        toolchain_declaration_mutable=toolchain_declaration_mutable,
-    )
-    validator.java_home_override = java_home_override
-    validator.tree_binding = tree_binding
+    def candidate_validator() -> PolymorphicValidator:
+        validator = PolymorphicValidator(
+            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+            toolchain_declaration_mutable=toolchain_declaration_mutable,
+        )
+        validator.java_home_override = java_home_override
+        validator.tree_binding = tree_binding
+        return validator
+
+    def base_validator(root: str) -> PolymorphicValidator:
+        # The base revision declares its own toolchain; nothing is changed there.
+        validator = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+        validator.java_home_override = java_home_override
+        return validator
+
+    modified = list(modified)
+    base_revision = _oracle_base_revision(candidate_root, workspace_path)
     return close_unverified_requirements_with_named_tests(
         ledger, requirement_set, test_files=test_files, modified=modified,
-        run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
-        confirms_execution=output_confirms_nonzero_test_execution,
+        judge=lambda named: judge_named_tests(
+            named, candidate_root=candidate_root, base_revision=base_revision, modified=modified,
+            candidate_validator=candidate_validator, base_validator=base_validator),
         source="requirement_closure.named_test_run", revision=revision,
     )
+
+
+def _seed_grounded_loci(
+    state: GenerationState, worktree_path: str, grounded_locations: Sequence[Mapping[str, Any]],
+) -> None:
+    """P2: the edit loci of a grounded failure carried into a plan-scope
+    re-invocation (a fresh GenerationState) - each only when the file's raw
+    revision in this sandbox equals the one the locator was observed on. A
+    locus only decides which exact lines are shown (CONTEXT-EDIT-PROTOCOL
+    windows); write authority stays the validated plan's."""
+    seeded: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    for location in grounded_locations:
+        path = str(location.get("filepath") or "")
+        line = location.get("line")
+        normalized = os.path.normpath(path) if path else ""
+        full = os.path.join(worktree_path, normalized)
+        current = None
+        if (normalized and not os.path.isabs(normalized) and not normalized.startswith("..")
+                and isinstance(line, int) and line > 0 and os.path.isfile(full)):
+            try:
+                current = read_file_revision(full)
+            except OSError:
+                current = None
+        entry = {"filepath": path, "line": line}
+        if current is None or current != location.get("revision"):
+            dropped.append(entry)
+            continue
+        state.edit_anchor_loci[normalized] = sorted(set(state.edit_anchor_loci.get(normalized, [])) | {line})
+        seeded.append(entry)
+    state.record_event(RunEvent(
+        kind="recovery.grounded_loci", attempt=state.attempt_number, source="workflow.run_generation_workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        message=f"plan-scope recovery: {len(seeded)} grounded locus/loci carried, {len(dropped)} stale dropped",
+        details={"seeded": seeded, "dropped": dropped},
+    ))
+
+
+def _oracle_base_revision(candidate_root: str, workspace_path: str) -> Optional[str]:
+    """FS-1C0: the revision a named test must be authored at - the owning
+    run's base (so an earlier unit's committed change is still the run's
+    own), else the candidate's HEAD; None when neither can be read."""
+    from kriya.workflow.worktree import git_read_lines
+
+    try:
+        base = _run_committed_paths(workspace_path)[1]
+        return base or git_read_lines(candidate_root, "rev-parse", "HEAD")[0]
+    except Exception as exc:  # no readable base: the oracle refuses (UNVERIFIED)
+        logger.info(f"Named-test oracle base revision unavailable: {exc}")
+        return None
 
 
 def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[str], List[str]]:
@@ -1124,7 +1275,7 @@ def _run_static_analysis_gate(
             "reason_codes": list(result.reason_codes), "evidence_digest": result.evidence_digest,
         },
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1157,7 +1308,7 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
         diagnostics={"reason_code": reason, "workspace_state": outcome.workspace_state,
                      "commit_transaction_id": outcome.transaction_id},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1182,7 +1333,7 @@ def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
         source="contract_registry_gate", authority="deterministic",
         attempt=state.attempt_number, diagnostics={"reason_code": reason},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1192,6 +1343,15 @@ class WorkflowEngine:
     def __init__(self, kernel: Kernel, llm_client: LLMClient) -> None:
         self.kernel = kernel
         self.llm = llm_client
+        # FS-1C2 B2-a: the operator's acceptance file for this run, bound
+        # before generation (`kriya generate --acceptance`); None = none.
+        self.acceptance: Any = None
+        # FS-1C2 B3: the operator's approval of that suite for GENERAL
+        # requirements (`--acceptance-approval`), bound at the same time.
+        self.acceptance_approval: Any = None
+        # GR-R1A: the operator's explicit requirement contract, bound by the CLI
+        # before any model call (kriya/workflow/requirement_contract.py).
+        self.requirement_contract: Any = None
         # PRD-024: the last applied candidate's terminal full-suite result
         # (full_suite_evidence_for_reuse), offered to the next run as its
         # baseline; reused only if it describes that run's exact start.
@@ -1504,6 +1664,7 @@ class WorkflowEngine:
         planned_source_files: Optional[Sequence[str]] = None,
         reference_context: str = "",
         recovery_contract_block: str = "",
+        grounded_locations: Optional[Sequence[Mapping[str, Any]]] = None,
         established_files: Optional[List[str]] = None,
         predetermined_plan: Optional[str] = None,
         predetermined_design: Optional[str] = None,
@@ -1822,6 +1983,13 @@ class WorkflowEngine:
             ))
         except Exception as exc:  # never blocks the run; the gap is logged loudly
             logger.warning(f"Could not record the run's egress authority: {exc}")
+        # LR-R1-M1: where this run's attempt evidence lives (or why it does
+        # not). The only change the recorder makes to a trace row.
+        state.record_event(RunEvent(
+            kind="evidence.attempt_store", attempt=0, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUXILIARY, message="attempt evidence store",
+            details=attempt_evidence_scope.store_pointer(),
+        ))
         # PRD-013/014: the exact runtime of the primary model and its
         # qualification state, persisted with the run. Every call also adds
         # its own fingerprint id to the RunRecord (LLMClient).
@@ -1862,7 +2030,10 @@ class WorkflowEngine:
         # not the user's statements - there is nothing to fix as a
         # requirement.
         requirement_goal = getattr(work_unit, "requirement_goal", None) if requirements_from_goal else None
-        requirement_set = derive_requirements(requirement_goal) if requirement_goal else None
+        # GR-R1A: the operator's explicit, closed requirement contract when one
+        # is bound (never merged with requirements derived from the goal).
+        requirement_set = (requirement_set_for(requirement_goal, bound_requirement_contract(self))
+                           if requirement_goal else None)
         if requirement_set is not None:
             state.record_event(RunEvent(
                 kind="requirement.derived", attempt=0, source="workflow.run_generation_workflow",
@@ -1936,6 +2107,9 @@ class WorkflowEngine:
                 runtime_verification_required=runtime_verification_required,
                 strict_spec_compliance=strict_spec_compliance,
                 strict_dependency_index=strict_dependency_index,
+                acceptance_digest=getattr(bound_acceptance(self), "digest", None),
+                approval_digest=getattr(bound_approval(self), "digest", None),
+                requirement_contract_digest=getattr(bound_requirement_contract(self), "digest", None),
             )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -2793,6 +2967,9 @@ class WorkflowEngine:
                     state.validation_baseline_full_regression.to_dict()
                     if state.validation_baseline_full_regression is not None else None
                 ),
+                # REG-R1: untouched-baseline field stability measured so far,
+                # keyed by binding digest (pytest_stability.stability_binding).
+                "validation_baseline_pytest_stability": dict(state.pytest_stability_cache),
                 **extra,
             })
 
@@ -3607,7 +3784,7 @@ class WorkflowEngine:
             # discarding all prior Plan/Design work.
             logger.debug(f"Failed to build active-skill manifest: {ex}")
             active_skill_manifest = []
-        state.evidence_records.append(EvidenceRecord(
+        state.record_evidence(EvidenceRecord(
             kind="active_skills", source="skill_engine", attempt=0,
             payload={"skills": active_skill_manifest},
         ))
@@ -3745,26 +3922,48 @@ class WorkflowEngine:
                      "auto_decision": auto_baseline_decision.to_dict() if auto_baseline_decision else None},
         ))
         baseline_environment = None
+        baseline_runner = None
         if full_regression_policy == "required" or autonomy_baseline_cfg.brownfield_baseline_target_test:
             try:
                 baseline_environment = baseline_environment_identity(
                     workspace_path, autonomy_baseline_cfg, goal=goal)
             except Exception as exc:
                 logger.warning(f"Baseline environment identity unavailable: {exc}")
+            # REG-R1: a pytest baseline must carry per-test evidence; one that
+            # does not (an older checkpoint) is re-established, never reused.
+            baseline_runner = PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
+            ).test_runner()
+        # The baseline's verification call. REG-R1: the same call replays the
+        # untouched baseline for stability, so it runs in the same context.
+        def baseline_suite_run(target_test):
+            return PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
+            ).run_tests(target_test=target_test)
+
         baseline_capture = capture_brownfield_baselines(
             run_id=run_id,
             target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
             full_regression_policy=full_regression_policy,
             environment_identity=baseline_environment,
-            run_validator=lambda target_test: PolymorphicValidator(
-                workspace_path, original_workspace_path=workspace_path,
-                autonomy_cfg=autonomy_baseline_cfg,
-            ).run_tests(target_test=target_test),
+            run_validator=baseline_suite_run,
             compute_revision=lambda: compute_workspace_content_hash(workspace_path),
             resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
             resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
             prior_full_regression=self._prior_full_suite_evidence,
+            require_pytest_evidence=baseline_runner == "pytest",
         )
+        for _rejection in baseline_capture.reuse_rejections:
+            state.record_event(RunEvent(
+                kind="validation_baseline.reuse_rejected", attempt=0,
+                source="workflow.run_generation_workflow", authority=EventAuthority.AUXILIARY,
+                message=f"baseline not reused ({_rejection}); re-established by a fresh capture",
+                details={"reason": _rejection},
+            ))
+        _resumed_stability = (resume_state or {}).get("validation_baseline_pytest_stability")
+        if isinstance(_resumed_stability, dict):
+            # Each entry is keyed by its own binding; a stale one simply never matches.
+            state.pytest_stability_cache.update(_resumed_stability)
         if baseline_capture.full_regression_source is not None:
             state.record_event(RunEvent(
                 kind="validation_baseline.full_regression_source", attempt=0,
@@ -3858,6 +4057,11 @@ class WorkflowEngine:
                 f"Failed to create an isolated generation sandbox: {e}. "
                 "Refusing to generate directly in the application workspace."
             ) from e
+
+        # P2: a plan-scope re-invocation keeps the grounded loci of the
+        # failure that widened its scope (revision-bound; a stale one is dropped).
+        if grounded_locations:
+            _seed_grounded_loci(state, worktree_path, grounded_locations)
 
         # Resolved ONCE, here, against workspace_path BEFORE any Developer
         # write happens (worktree_path above is an isolated copy - writes
@@ -3992,11 +4196,12 @@ class WorkflowEngine:
             requirement_set=requirement_set,
         )
 
+        from kriya.workflow.model_transition import fallback_routing_for_state
         from kriya.workflow.retry_policy import decide_for_state
         while decide_for_state(
             state, max_retries=max_retries,
             targeted_max_retries=TARGETED_MAX_RETRIES,
-            has_fallback_model=bool(chain),
+            has_fallback_model=fallback_routing_for_state(state, self.kernel.config, chain, worktree_path).available,
         ).should_continue:
             # Reset once per loop iteration, unconditionally - NOT just inside the "4.5"
             # section below. Independent review (2026-08-15) found the narrower reset
@@ -4012,6 +4217,9 @@ class WorkflowEngine:
             # run_attempt() is even called, guarantees no exception path can skip it.
             state.pre_approval_review = None
             state.verified_candidate_binding = None
+            # LR-R1-M1: the whole iteration is the attempt's evidence identity
+            # (observational; reset in this try's finally).
+            attempt_evidence_token = attempt_evidence_scope.enter_attempt_iteration(lambda: state.attempt_number)
             try:
                 # Best-of-N only ever applies to the very first attempt of a run
                 # (state.attempt_number == 0 going in - resumed checkpoints also
@@ -4060,7 +4268,7 @@ class WorkflowEngine:
                         raw_output=message,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
 
                 # PRD-022: near-duplicates the candidate actually created,
@@ -4093,6 +4301,21 @@ class WorkflowEngine:
                     except Exception as exc:
                         scope_closures = []
                         logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
+                    # FS-1C2 B2-a: the operator's acceptance file judges the
+                    # behaviour claims it covers on this candidate.
+                    try:
+                        acceptance_closures = await asyncio.to_thread(
+                            close_requirements_with_acceptance_tests, self.kernel.config.autonomy,
+                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                            acceptance=bound_acceptance(self), approval=bound_approval(self),
+                            modified=state.all_files_written, revision=state.attempt_number,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan,
+                            ),
+                        )
+                    except Exception as exc:
+                        acceptance_closures = []
+                        logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
                     # An UNVERIFIED (cannot confirm from code) requirement whose
                     # own text names existing tests is closed only by running
                     # exactly those tests on this candidate.
@@ -4109,7 +4332,7 @@ class WorkflowEngine:
                     except Exception as exc:
                         closures = []
                         logger.warning(f"Requirement closure by named tests unavailable: {exc}")
-                    closures = scope_closures + closures
+                    closures = scope_closures + acceptance_closures + closures
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,
@@ -4139,7 +4362,7 @@ class WorkflowEngine:
                                 "blocking": {req.id: outcome.value for req, outcome in blocking},
                             },
                         )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
 
                 # PRD-031A: the static-analysis gate, on the exact batch the
@@ -4742,10 +4965,18 @@ class WorkflowEngine:
                             )
                         except Exception as exc:
                             logger.warning(f"POST environment identity unavailable: {exc}")
-                    _baseline_delta_result = classify_baseline_delta(
-                        state.validation_baseline_full_regression, _post_regression_outcome,
-                        post_environment=_post_environment,
+                    # REG-R1: per-test pytest authority; a disputed message/body is
+                    # measured on the untouched baseline, in the baseline's own
+                    # verification context, before anyone is blamed.
+                    _baseline_delta_result, _stability = classify_with_baseline_stability(
+                        baseline=state.validation_baseline_full_regression, post=_post_regression_outcome,
+                        post_environment=_post_environment, cache=state.pytest_stability_cache,
+                        replay=baseline_suite_run,
+                        current_revision=lambda: compute_workspace_content_hash(workspace_path),
+                        working_directory=os.path.realpath(workspace_path),
                     )
+                    record_regression_decision("full_regression", state.validation_baseline_full_regression,
+                                               _post_regression_outcome, _baseline_delta_result, _stability)
                     _regression_should_block = _baseline_delta_result.blocking
                     state.record_event(RunEvent(
                         kind="validation_baseline.full_regression_delta",
@@ -4769,6 +5000,7 @@ class WorkflowEngine:
                             "pre_environment": (
                                 state.validation_baseline_full_regression.invocation.environment_fingerprint),
                             "post_environment": _post_environment,
+                            **pytest_decision_summary(_baseline_delta_result, _stability),
                         },
                     ))
                     if not _regression_should_block and not full_test_res["success"]:
@@ -4809,9 +5041,16 @@ class WorkflowEngine:
                     _frozen_targets = state.validation_baseline_targeted.invocation.target_test
                     _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
                     _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
-                    _targeted_baseline_delta_result = classify_baseline_delta(
-                        state.validation_baseline_targeted, _post_targeted_outcome,
+                    _targeted_baseline_delta_result, _targeted_stability = classify_with_baseline_stability(
+                        baseline=state.validation_baseline_targeted, post=_post_targeted_outcome,
+                        post_environment=None, cache=state.pytest_stability_cache,
+                        replay=baseline_suite_run,
+                        current_revision=lambda: compute_workspace_content_hash(workspace_path),
+                        working_directory=os.path.realpath(workspace_path),
                     )
+                    record_regression_decision("targeted", state.validation_baseline_targeted,
+                                               _post_targeted_outcome, _targeted_baseline_delta_result,
+                                               _targeted_stability)
                     _targeted_regression_should_block = _targeted_baseline_delta_result.blocking
                     state.record_event(RunEvent(
                         kind="validation_baseline.targeted_delta",
@@ -4830,6 +5069,7 @@ class WorkflowEngine:
                             "aggregate_drop_detected": _targeted_baseline_delta_result.aggregate_drop_detected,
                             "blocking": _targeted_regression_should_block,
                             "blocking_reasons": list(_targeted_baseline_delta_result.blocking_reasons),
+                            **pytest_decision_summary(_targeted_baseline_delta_result, _targeted_stability),
                         },
                     ))
                     if not _targeted_regression_should_block and not _targeted_test_res["success"]:
@@ -4894,6 +5134,9 @@ class WorkflowEngine:
                 # ever narrows what's shown for the FULL-suite signal, never
                 # touches the targeted one.
                 _full_regression_unattributed = False
+                # P2: files the compiler's errors name, when a test-compilation
+                # failure is attributed to the candidate (compile_regression.py).
+                _regression_known_files: List[str] = list(state.all_files_written)
                 if _regression_should_block and _baseline_delta_result is not None:
                     from kriya.workflow.regression_attribution import confirm_ambiguous_regressions
                     _resolved_level2, _replay_evidence = confirm_ambiguous_regressions(
@@ -4933,7 +5176,27 @@ class WorkflowEngine:
                                 f"{_targeted_test_res.get('output', '')}"
                             )
                     elif not _targeted_regression_should_block:
-                        _full_regression_unattributed = True
+                        # P2: no per-test evidence at all (a test-compilation
+                        # failure runs no test) is not "every failure is
+                        # pre-existing": under a green, comparable PRE the
+                        # compiler's own diagnostics attribute it.
+                        _compile_regression = attribute_compile_regression(
+                            _baseline_delta_result, full_test_res.get("output", ""), worktree_path,
+                        )
+                        if _compile_regression is None:
+                            _full_regression_unattributed = True
+                        else:
+                            _regression_known_files = sorted(
+                                set(state.all_files_written) | set(_compile_regression.files))
+                            state.record_event(RunEvent(
+                                kind="validation_baseline.compile_regression_attributed",
+                                attempt=state.attempt_number,
+                                source="workflow.run_generation_workflow",
+                                authority=EventAuthority.AUTHORITATIVE,
+                                message=("Full-regression compilation failure attributed to the candidate "
+                                         "from compiler diagnostics: " + ", ".join(_compile_regression.files)),
+                                details=_compile_regression.as_dict(),
+                            ))
 
                 if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
@@ -5016,9 +5279,9 @@ class WorkflowEngine:
                             failure = _build_quality_gate_failure(
                                 "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
                                 _regression_failure_output, worktree_path,
-                                state.all_files_written, state.attempt_number,
+                                _regression_known_files, state.attempt_number,
                             )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                     _record_future_owner_verification_deferred(
                         obligation_ledger, deferral,
@@ -5033,7 +5296,7 @@ class WorkflowEngine:
                         deferral.evidence_path, deferral.verification_subtask_id,
                         deferral.required_capability, deferral.future_owner_id, current_subtask_id,
                     )
-                    state.gate_outcomes.append({
+                    state.record_gate_outcome({
                         "attempt": state.attempt_number,
                         "type": "regression_test",
                         "success": True,
@@ -5113,7 +5376,7 @@ class WorkflowEngine:
                     ):
                         merged = state.ownership_redirect_recovery.setdefault(key, [])
                         merged.extend(v for v in values if v not in merged)
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only) - same
                 # authorization the per-attempt pre-write gate in
@@ -5159,7 +5422,7 @@ class WorkflowEngine:
                         },
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # CORR-018-P1 (A3-bound slice, 2026-09-09) - same terminal
                 # re-check discipline as the brownfield-API gate immediately
@@ -5199,9 +5462,9 @@ class WorkflowEngine:
                         },
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "regression_test",
                     "success": True,
@@ -5436,6 +5699,9 @@ class WorkflowEngine:
             except Exception as e:
                 if await handle_attempt_failure(state, attempt_ctx, e):
                     break
+            finally:
+                attempt_evidence_scope.exit_attempt_iteration(
+                    attempt_evidence_token, succeeded=state.overall_attempt_succeeded)
 
         # Intermediate trace checkpoint (2026-08-15, found while forensically
         # investigating a real live run): the ONLY trace_logger.log_run() call

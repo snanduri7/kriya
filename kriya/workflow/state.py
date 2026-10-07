@@ -11,8 +11,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.architectural_choice import CandidateArchitecturalChange
 from kriya.workflow.context_package import ContextItem
+from kriya.workflow.diagnosis_codes import StopReasonEvidence
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.process_profile import ProcessProfile
@@ -446,8 +448,17 @@ class GenerationState:
     # capability is not progress.
     edit_capabilities: Dict[str, Any] = field(default_factory=dict)
     edit_capabilities_attempt: int = 0
+    # P3-A: per target, the user prompts the invocation that decided its
+    # current capability actually dispatched (as fitted); read only together
+    # with that capability (_current_edit_capability), so never across attempts.
+    edit_capability_sent: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
     edit_anchor_loci: Dict[str, List[int]] = field(default_factory=dict)
     edit_failure_capability: Dict[str, Tuple[str, str, Any]] = field(default_factory=dict)
+    # GR-R0 (RETRY-NO-INFORMATION-GAIN): every (path, capability digest, (model,
+    # requested operation)) already refused as ANCHOR_CONTEXT_NOT_ESCALATED. The
+    # same key refused again means no strategy change altered the request, so
+    # no further attempt can either.
+    edit_refused_capabilities: Set[Tuple[str, str, Any]] = field(default_factory=set)
     edit_capability_models: Dict[str, Tuple[str, Optional[str]]] = field(default_factory=dict)
     # PRD-017: the request profile (kriya/workflow/model_transition.py) of the
     # last Developer call, so a model change between attempts is recorded
@@ -498,6 +509,9 @@ class GenerationState:
     # (e.g. "ContextItem" as a forward-ref string).
     validation_baseline_targeted: Optional[Any] = None
     validation_baseline_full_regression: Optional[Any] = None
+    # REG-R1: untouched-baseline field stability (binding digest -> measurement),
+    # kriya/workflow/pytest_stability.py; checkpointed with the baselines.
+    pytest_stability_cache: Dict[str, Any] = field(default_factory=dict)
     # Revisions that passed the real compile gate. A later candidate invalidates
     # only changed files and their manifest dependents; unrelated validated files
     # remain stable across targeted/dependency-scoped retries.
@@ -631,6 +645,11 @@ class GenerationState:
     sampling_resamples: int = 0
     retry_evidence_seen: Dict[str, int] = field(default_factory=dict)
     no_progress_reason: Optional[str] = None
+    # LR-R1-P4: the inputs digest of this invocation's last verification-only
+    # attempt (retry_strategy.verification_inputs_digest) and its attempt
+    # number - what a later retry would have to change to be worth running.
+    verification_only_inputs: Optional[str] = None
+    verification_only_inputs_attempt: Optional[int] = None
     # PRD-028 (kriya/workflow/authority_escalation.py): every member-authority
     # expansion decision this run, GRANTED or INDETERMINATE.
     authority_expansions: List[Any] = field(default_factory=list)
@@ -653,6 +672,10 @@ class GenerationState:
     # of code regeneration can ever fix a JVM crashing during its own startup
     # or a missing build/run tool binary.
     environment_failure: Optional[str] = None
+    # LR-R1-M1 D7: evidence-only typed code of a text-only stop
+    # (kriya/workflow/diagnosis_codes.py). Read only by the evidence recorder;
+    # never a decision input (structural test).
+    stop_reason_evidence: Optional[StopReasonEvidence] = None
     # Toolchain preflight (_check_java_toolchain_mismatch) runs at most once per
     # generation run, the first time a PolymorphicValidator confirms the stack
     # is 'java' - toolchain_checked gates that, toolchain_warning persists into
@@ -738,6 +761,24 @@ class GenerationState:
         self.run_events.append(event)
         if event.failure_type:
             self.failure_ledger.record(event)
+        attempt_evidence_scope.mirror_event(event)
+
+    def record_evidence(self, record: EvidenceRecord) -> None:
+        self.evidence_records.append(record)
+        attempt_evidence_scope.mirror_evidence(record)
+
+    def record_gate_outcome(self, outcome: Dict[str, Any]) -> None:
+        """The one way a gate outcome is added (LR-R1-M1 §5.2): appended exactly
+        as before, then mirrored once into the attempt evidence store. A
+        direct ``gate_outcomes`` mutation outside this module is a tripwire
+        failure (tests/test_lr_r1_m1_mirroring.py)."""
+        self.gate_outcomes.append(outcome)
+        attempt_evidence_scope.mirror_gate_outcome(len(self.gate_outcomes) - 1, outcome)
+
+    def restore_gate_outcomes(self, outcomes: List[Dict[str, Any]], *, source: str) -> None:
+        """Replace the outcomes with a checkpoint's (resume), recorded once."""
+        self.gate_outcomes = list(outcomes)
+        attempt_evidence_scope.mirror_gate_outcomes_restored(self.gate_outcomes, source)
 
     def record_developer_attempt_outcome(self, client: Any, *, passed: bool) -> None:
         """PRD-018: charge this attempt's deterministic gate outcome to the
@@ -933,7 +974,10 @@ class GenerationState:
             metrics["process_profile"] = self.process_profile.to_dict()
         return metrics
 
-    def record_failure(self, failure: Any, *, operation: Optional[str] = None) -> RunEvent:
+    def record_failure(self, failure: Any, *, operation: Optional[str] = None, diagnosis: bool = True) -> RunEvent:
+        """The failure's run event and evidence; ``diagnosis=False`` leaves the
+        LR-R1-M1 ``diagnosis`` record to a caller that writes it once the
+        failure's attribution is known (retry_strategy, P2)."""
         try:
             authority = EventAuthority(failure.authority)
         except (ValueError, TypeError):
@@ -949,7 +993,7 @@ class GenerationState:
             details={"likely_files": list(failure.likely_files)},
         )
         self.record_event(event)
-        self.evidence_records.append(EvidenceRecord(
+        self.record_evidence(EvidenceRecord(
             kind="failure",
             source=failure.source,
             attempt=failure.attempt or self.attempt_number,
@@ -968,4 +1012,6 @@ class GenerationState:
                 "attempted_edits": list(failure.attempted_edits),
             },
         ))
+        if diagnosis:
+            attempt_evidence_scope.record_diagnosis(failure, operation)
         return event

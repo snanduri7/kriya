@@ -1,0 +1,109 @@
+{
+ "kriya": {
+  "product": "kriya",
+  "version": "0.1.0",
+  "commit": "56ae8d3d6afa9edb2a39be995dbb3c4c8239eb02",
+  "tree": "04ffa959fa307b6106a0163b9b143f0539f4d33c",
+  "dirty": false,
+  "build_provenance": "embedded",
+  "python": "3.14.6",
+  "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-postreg2/lib/python3.14/site-packages/kriya"
+ },
+ "base_revision": "bba7689c625508feb81b3e8c024c8ec52ea0f844db0462dd789d5bb803c7600b",
+ "wall_seconds": 267.0,
+ "baseline_complete": true,
+ "post_complete": true,
+ "authority": "pytest_per_test",
+ "blocking": false,
+ "blocking_reasons": [],
+ "diagnostic_level1": "CHANGED_FAILURE",
+ "level2_counts": {
+  "PRE_EXISTING_FAILURE": 217
+ },
+ "volatile_fields_ignored": {
+  "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": [
+   "message",
+   "body"
+  ],
+  "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo": [
+   "body"
+  ]
+ },
+ "replay_selections": [
+  null,
+  null
+ ],
+ "unestablished_fields_ignored": {},
+ "stability": [
+  {
+   "test": "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "disputed": [
+    "message",
+    "body"
+   ],
+   "reason": null,
+   "flaky": false,
+   "envelope_digest": "e3148e6fd508b8daa4d877fe5837804687ab09833a23604cc74cb6ccf7d21f8e",
+   "envelope": {
+    "unresolved": null,
+    "states": [
+     {
+      "outcome": "failed",
+      "failure_type": "AssertionError",
+      "observations": 3,
+      "fields": {
+       "message": "VOLATILE",
+       "body": "VOLATILE"
+      },
+      "digests": {
+       "message": [
+        "3219be5987dac40d2eedbd6e271727d4d5159f6110a3d020aa7bedc1b1e1555a",
+        "6bbc72d2876d03dd0edd91574236c88d6ab59a919fbb162e96be96bbce4c4c83",
+        "95e5d777df00fd85c5449a0a11a08bb5c40a3c0610cee91ec6e1888864e747c3"
+       ],
+       "body": [
+        "41ca6f4f680623ebf471db2a3e38e7716377d463e6566b02bd18c43599c914d5",
+        "7947f85c512f897d33db53b122ab5a03f15a41faae5990b191661ec0ab95ea4a",
+        "a0631ada0ff0b7a94d0453b49a72bfbb02288910ad9e821d44d1576e2c62beb4"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "disputed": [
+    "body"
+   ],
+   "reason": null,
+   "flaky": false,
+   "envelope_digest": "b5724d419713119b63e1cceec998615cb6d0a7588741362f71cebf2ce6c3be68",
+   "envelope": {
+    "unresolved": null,
+    "states": [
+     {
+      "outcome": "failed",
+      "failure_type": "FileNotFoundError",
+      "observations": 3,
+      "fields": {
+       "message": "STABLE",
+       "body": "VOLATILE"
+      },
+      "digests": {
+       "message": [
+        "1eb05dfda8ea60dd896578e92e1481b4091b58257cbdb1b915710b437f08822b"
+       ],
+       "body": [
+        "2f5a3d7a5901e8b6b9b23387741bc605c5fa1a02ea8bf40ced3f4de9e1719963",
+        "993b0e0eab03cd812f4ae10375619fabfbd07711892011655d11a8ff4b0a1b9f",
+        "e4246c3cc40be52f27b6abbbe7c3034489a8cb93eafd4440eb20125ce0c4ab24"
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "verdict": "NO REGRESSION"
+}

@@ -1,0 +1,558 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 7,
+        "seq": 106,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+      },
+      "failure_type": "regression_unattributed",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 100,
+      "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "regression_unattributed",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "regression_unattributed",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 103,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 33,
+              "call_seq": 3,
+              "content": {
+                "messages": "sha256:669e56653a941b75e6d6950fb54a33934e526a4453640b90f4fbe3aba0055b7f",
+                "wire_body": "sha256:2676799a4892ad92f98090af513be119d8edd64f0815fb29be28592d9c8714f6"
+              },
+              "dispatched": true,
+              "model": "qwen3.8:27b",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 35,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 33,
+              "targets": [
+                {
+                  "digest": "5354964db01ad7dbf67f506f0bd213e534c34430aa7dc010fc317f8756231427",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5365,
+                    5389,
+                    5409
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5373,
+                      "start_line": 5357,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5397,
+                      "start_line": 5381,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5417,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6275,
+                      "start_line": 6268,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 3,
+              "completion_tokens": 668,
+              "content": {
+                "content": "sha256:da1ba30bab849b049db5b197395a3ce7da0e2086e3c449a8ed9d14819449bb4e"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 36,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 3,
+              "content": {
+                "analysis_model_claimed": "sha256:dffad82601b7b39564b6d0ad8d5b28a1421ba58b4620a68a09c06017d9efcfd7"
+              },
+              "kind": "invalid",
+              "path": "graphify/extractors/engine.py",
+              "reason_code": "INVALID_EDIT_PROTOCOL",
+              "seq": 38
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "parse_reason_code": "INVALID_EDIT_PROTOCOL",
+              "parse_seq": 38,
+              "path": "graphify/extractors/engine.py",
+              "proposal_kind": "invalid",
+              "reason_code": "INVALID_EDIT_PROTOCOL",
+              "seq": 49
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:ec866d23ffa4d8408ea80c3f4c3a90ce106b636e9662f7b97dda4356e6edea63",
+                "raw_output": "sha256:183bb9772310102bee4b72e7c26f01e791a72b234db486be3e73e101dae68b7e"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "INVALID_EDIT_PROTOCOL",
+              "seq": 48,
+              "type": "operation_contract"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "operation_contract",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 50,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 4,
+              "changed": [
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 64,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3.8:27b",
+              "requested_rejection": [],
+              "selected": "qwen3.8:27b",
+              "seq": 30
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 59,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:5ffda1af0154e3cb092563eb1d6bb0346e529bee7b63cb0ef0ee49f0249d6dbe",
+                "wire_body": "sha256:c3e725a0338da5b73cece81cf081e07660ec7ad56594457c7ab1c481149598d9"
+              },
+              "dispatched": true,
+              "model": "qwen3.8:27b",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 63,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:82b011d9cfafc3d9b33bcbdbc04b63e110c7f6eea57259d4ded247b63a4dc1f3",
+                "wire_body": "sha256:fe44c0360206149db53451e2f5e9db6b3e59e15bda06109d2c40f448c271702b"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 74,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:1b6e7211adbd39239e4cb6dcb7a823a7d1480e9a34e97ffdf3bb4a49b4b1c73f",
+                "wire_body": "sha256:2e21f59b700202c449975c9d8d417338bc68704038ce3503c1269d1f0b45cd3f"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 78,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:56e06acbebcdac6320ce2616319a5706472426c33a70212fd463925e0ed66740",
+                "wire_body": "sha256:ee61030200ce06e85aeb90846fd86812e1a1246b1b2418098798a0a04685c772"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 88,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 59,
+              "targets": [
+                {
+                  "digest": "5354964db01ad7dbf67f506f0bd213e534c34430aa7dc010fc317f8756231427",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5365,
+                    5389,
+                    5409
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5373,
+                      "start_line": 5357,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5397,
+                      "start_line": 5381,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5417,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6275,
+                      "start_line": 6268,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 375,
+              "content": {
+                "content": "sha256:c74b7885f6484c6c304d8b451acec5875818c941dded728a0a389b022696c396"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 65,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 152,
+              "content": {
+                "content": "sha256:92d8255c1e197ddda5acbf737d94622a86a3948c32c36d87aa2489e5d2681234"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 75,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 105,
+              "content": {
+                "content": "sha256:a6635e8da883a9ceef9149993b6c0e93904d303d94511b6f53115710a23f15c0"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 79,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 848,
+              "content": {
+                "content": "sha256:462143bcd57101195340344a42fbeb8408c5d73232b77133a30a6b55682cc4e1"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 89,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:5a79bca29040c9aea755c1ee2f76894a27bb6bd7f156bf77f927351373ad6548"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 67
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "e47eacba60c19860270cb8c46fe95f2443a897eb5ffe0fddd921ed1cf0426034",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:e47eacba60c19860270cb8c46fe95f2443a897eb5ffe0fddd921ed1cf0426034",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:c22536472207707f237646cd43fb8de409c5762fc1d5b3888dc8c98223611c5c"
+              },
+              "decision": "STAGED",
+              "lines_added": 8,
+              "lines_removed": 1,
+              "path": "graphify/extractors/engine.py",
+              "seq": 71
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "full_set",
+              "content": {
+                "attribution_reasoning": "sha256:529720fc811eddecd52305a338ee0e080328dabb2446d488085d0b07c0841871",
+                "message": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901",
+                "raw_output": "sha256:ba2ceb5ab40c63b44a5a609da3f5d0fa6843ecb705b85fb64dd1944abe5711e6"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [],
+              "seq": 99,
+              "type": "regression_unattributed"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:ba2ceb5ab40c63b44a5a609da3f5d0fa6843ecb705b85fb64dd1944abe5711e6",
+                "test_execution": "sha256:f01af8d16dd343684f91f61bd92ddb83046f604fd47c10eb7e21703ca2edf805"
+              },
+              "gate": "tests",
+              "seq": 92,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+              },
+              "failure_type": "regression_unattributed",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=CHANGED_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer regeneration cannot resolve an aggregate-level delta with no attributable test.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 100,
+              "stop_loop": true,
+              "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3.8:27b",
+              "requested_rejection": [],
+              "selected": "qwen3.8:27b",
+              "seq": 57
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T231821-fb31caad",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

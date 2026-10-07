@@ -177,8 +177,19 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
             pass
 
 
+# Configuration that only decides what Kriya RECORDS, never what it does
+# (LR-R1-M1 invariant I-2): excluded from every execution-identity
+# fingerprint, so a capture-mode change is never config drift. SEC-009
+# approval digests still cover it (kriya/config/authority_approval.py).
+OBSERVATIONAL_CONFIG_SECTIONS = ("evidence",)
+
+
+def without_observational_config(config_dict: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in config_dict.items() if key not in OBSERVATIONAL_CONFIG_SECTIONS}
+
+
 def compute_config_fingerprint(config_dict: Dict[str, Any]) -> str:
-    blob = json.dumps(config_dict, sort_keys=True, default=str)
+    blob = json.dumps(without_observational_config(config_dict), sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 

@@ -1,0 +1,2524 @@
+[
+ {
+  "run": "R1-T1 httpx",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "httpx/_models.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "regression_unattributed",
+   "reason_code": null,
+   "likely_files": [],
+   "message": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=CHANGED_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer "
+  },
+  "candidate": [
+   {
+    "path": "httpx/_models.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "more_itertools/more.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "more_itertools/more.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": null,
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "tests/test_more.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "targeted_test",
+   "reason_code": null,
+   "likely_files": [
+    "tests/test_more.py"
+   ],
+   "message": "TARGETED TEST FAILURE:\n============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /kriya/workspace\nconfigfile: pyproject.toml\ncollected 598 items\n\ntests/test_more.py ..................................................... [  8%]\n........................................................................ [ 20%]\n........................................................................ [ 32%]\n...............................F........................................ [ 44%]\n........................................."
+  },
+  "candidate": [
+   {
+    "path": "tests/test_more.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s2",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "tests/test_more.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "tests/test_more.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in tests/test_more.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "tests/test_more.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s2",
+  "attempt": 3,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "tests/test_more.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "targeted_test",
+   "reason_code": null,
+   "likely_files": [
+    "tests/test_more.py"
+   ],
+   "message": "TARGETED TEST FAILURE:\n============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /kriya/workspace\nconfigfile: pyproject.toml\ncollected 598 items\n\ntests/test_more.py ..................................................... [  8%]\n........................................................................ [ 20%]\n........................................................................ [ 32%]\n...............................F........................................ [ 44%]\n........................................."
+  },
+  "candidate": [
+   {
+    "path": "tests/test_more.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.mandatory#2"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s2",
+  "attempt": 4,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "no_change",
+    "path": "tests/test_more.py",
+    "reason_code": null,
+    "edit_count": 0,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "attribution_rejected",
+   "reason_code": null,
+   "likely_files": [
+    "more_itertools/more.py"
+   ],
+   "message": "TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED for every targeted file (tests/test_more.py). Its own analysis instead names: more_itertools/more.py."
+  },
+  "candidate": [],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.mandatory#2"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/CharUtils.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/main/java/org/apache/commons/lang3/CharUtils.java: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s1",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/CharUtils.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/main/java/org/apache/commons/lang3/CharUtils.java: ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is real source, but not source this attempt was authorized to rely on (it was not in the exact current source shown). Its location is now shown as exact source."
+  },
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s1",
+  "attempt": 3,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory#3"
+   ],
+   "reason": null
+  },
+  "recovery": null,
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "goal_spec_compliance",
+   "reason_code": null,
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the generated code doesn't satisfy: isAsciiWhitespace method in CharUtils.java; @Test annotation on testIsAsciiWhitespace_char method\n\nThe goal requires adding the method `isAsciiWhitespace` to `CharUtils.java` and its tests to `CharUtilsTest.java`, but the provided code only shows changes to `CharUtilsTest.java` without any corresponding addition of the method in `CharUtils.java`. Additionally, the test method is missing the `@Test` annotation which is required for test methods."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/test/java/org/apache/commons/lang3/CharUtilsTest.java: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 3,
+  "developer_calls": [],
+  "parse": [],
+  "diagnosis": {
+   "type": "no_progress_retry",
+   "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in src/test/java/org/apache/commons/lang3/CharUtilsTest.java would be retried on qwen3-coder:30b-kriya-e52213655394 with the same authoritative context, the same feasible operations (anchored_edit) and the same requested operation (repair_with_patch); nothing new can be shown within the budget."
+  },
+  "candidate": [],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the current attempt"
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 4,
+  "developer_calls": [],
+  "parse": [],
+  "diagnosis": {
+   "type": "no_progress_retry",
+   "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in src/test/java/org/apache/commons/lang3/CharUtilsTest.java would be retried on qwen3-coder:30b-kriya-e52213655394 with the same authoritative context, the same feasible operations (anchored_edit) and the same requested operation (repair_with_patch); nothing new can be shown within the budget."
+  },
+  "candidate": [],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the previous attempt"
+  },
+  "recovery": {
+   "action": "fallback_targeted",
+   "progress_classification": "REPEATED_ACTION",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 5,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "goal_spec_compliance",
+   "reason_code": null,
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the generated code doesn't satisfy: isAsciiWhitespace method in CharUtils.java; @Test annotation on testIsAsciiWhitespace method\n\nThe goal requires adding the method 'isAsciiWhitespace' to CharUtils.java and its tests to CharUtilsTest.java. The provided code shows tests for 'isAsciiWhitespace' in CharUtilsTest.java but does not show the actual implementation of the 'isAsciiWhitespace' method in CharUtils.java, which is a required part of the implementation. Additionally, the test method is missing the @Test annotation."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the previous attempt"
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "fallback_targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 6,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/test/java/org/apache/commons/lang3/CharUtilsTest.java: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "model",
+    "model_profile",
+    "retry_evidence",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 7,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/test/java/org/apache/commons/lang3/CharUtilsTest.java: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "REPEATED_ACTION",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 8,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "structural_corruption",
+   "reason_code": null,
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "STRUCTURAL CORRUPTION in src/test/java/org/apache/commons/lang3/CharUtilsTest.java: 1 extra closing '}' brace(s) - more closing braces than opening ones. This usually means an edit's replace text accidentally folded in extra, unrelated content (e.g. a redundant full-file dump appended after the intended change). Re-check your SEARCH/REPLACE blocks - the replace text for each pair should contain ONLY the corrected version of that pair's search text, nothing else."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "REFUSED",
+    "reason_code": "structural_corruption"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "retry_evidence",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "fallback_targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 9,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "targeted_test",
+   "reason_code": null,
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "TARGETED TEST FAILURE:\n[INFO] Scanning for projects...\n[INFO] \n[INFO] ------------------< org.apache.commons:commons-lang3 >------------------\n[INFO] Building Apache Commons Lang 3.21.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- enforcer:3.6.3:enforce (enforce-maven-version) @ commons-lang3 ---\n[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed\n[INFO] \n[INFO] --- enforcer:3.6.3:enforce (enforce-java-version) @ commons-lang3 ---\n[INFO] Rule 0: org.apache.maven.enforcer.rules.ver"
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "model",
+    "model_profile",
+    "retry_evidence",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "fallback_targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 10,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "goal_spec_compliance",
+   "reason_code": null,
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/CharUtils.java",
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the generated code doesn't satisfy: isAsciiWhitespace method in CharUtils.java; @Test annotation on testIsAsciiWhitespace method\n\nThe goal requires adding the method 'isAsciiWhitespace' to CharUtils.java and its tests to CharUtilsTest.java. The provided code shows tests for 'isAsciiWhitespace' in CharUtilsTest.java but does not show the actual implementation of the 'isAsciiWhitespace' method in CharUtils.java, which is required by the goal. Additionally, the test method is missing the @Test annotation."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "model",
+    "model_profile",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 11,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "targeted_test",
+   "reason_code": null,
+   "likely_files": [
+    "src/test/java/org/apache/commons/lang3/CharUtilsTest.java"
+   ],
+   "message": "TARGETED TEST FAILURE:\n[INFO] Scanning for projects...\n[INFO] \n[INFO] ------------------< org.apache.commons:commons-lang3 >------------------\n[INFO] Building Apache Commons Lang 3.21.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- enforcer:3.6.3:enforce (enforce-maven-version) @ commons-lang3 ---\n[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed\n[INFO] \n[INFO] --- enforcer:3.6.3:enforce (enforce-java-version) @ commons-lang3 ---\n[INFO] Rule 0: org.apache.maven.enforcer.rules.ver"
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "stop_exhausted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T4 lang-countTrue",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [],
+  "parse": [],
+  "diagnosis": {
+   "type": "context_edit_protocol_unsatisfiable",
+   "reason_code": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/BooleanUtils.java"
+   ],
+   "message": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: no mutation operation is feasible under the authoritative context of this Developer invocation - src/main/java/org/apache/commons/lang3/BooleanUtils.java: no authoritative full source, and no exact source for any located edit region. Nothing was sent to the model."
+  },
+  "candidate": [],
+  "retry_delta": null,
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T5 petclinic",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/main/java/org/springframework/samples/petclinic/owner/Owner.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": null,
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R1-T5 petclinic",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "regression_unattributed",
+   "reason_code": null,
+   "likely_files": [],
+   "message": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=CHANGED_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer "
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "inflect/__init__.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "inflect/__init__.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in inflect/__init__.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "inflect/__init__.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s1",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "inflect/__init__.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "inflect/__init__.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in inflect/__init__.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "inflect/__init__.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s1",
+  "attempt": 3,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "inflect/__init__.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "inflect/__init__.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory#3"
+   ],
+   "reason": null
+  },
+  "recovery": null,
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "file",
+    "path": "tests/test_count_noun.py",
+    "reason_code": null,
+    "edit_count": 0,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "goal_spec_compliance",
+   "reason_code": null,
+   "likely_files": [
+    "inflect/__init__.py"
+   ],
+   "message": "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the generated code doesn't satisfy: count_noun method must use the engine's existing plural method to inflect the noun based on the provided count\n\nThe goal requires that the `count_noun` method must use the engine's existing `plural` method to inflect the noun, but this requirement is not verifiable from the provided code since the implementation details of `count_noun` are not shown. Additionally, the goal specifies that the output format must be strictly 'count space inflected_noun', which is satisfied, but there is no expli"
+  },
+  "candidate": [
+   {
+    "path": "tests/test_count_noun.py",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in cssselect2/tree.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "prose_contamination",
+   "reason_code": null,
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "SOURCE PROSE CONTAMINATION in cssselect2/tree.py: obvious explanatory text was emitted as executable source; return code only or use the language's comment syntax for genuine documentation."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "prose_contamination"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 3,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in cssselect2/tree.py: ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is real source, but not source this attempt was authorized to rely on (it was not in the exact current source shown). Its location is now shown as exact source."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.mandatory#3"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 4,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "ANCHORED EDIT FAILURE in cssselect2/tree.py: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "retry_evidence",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "fallback_targeted",
+   "progress_classification": "REPEATED_ACTION",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 5,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "prose_contamination",
+   "reason_code": null,
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "SOURCE PROSE CONTAMINATION in cssselect2/tree.py: obvious explanatory text was emitted as executable source; return code only or use the language's comment syntax for genuine documentation."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "prose_contamination"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "model",
+    "model_profile",
+    "retry_evidence",
+    "sections.mandatory#3"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "full_set",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "fallback_targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 6,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "prose_contamination",
+   "reason_code": null,
+   "likely_files": [
+    "cssselect2/tree.py"
+   ],
+   "message": "SOURCE PROSE CONTAMINATION in cssselect2/tree.py: obvious explanatory text was emitted as executable source; return code only or use the language's comment syntax for genuine documentation."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "prose_contamination"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "full_set",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "repair_with_full_file",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 7,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   },
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   },
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "cssselect2/tree.py",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   },
+   {
+    "kind": "file",
+    "path": "tests/test_cssselect2.py",
+    "reason_code": null,
+    "edit_count": 0,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "operation_contract",
+   "reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED",
+   "likely_files": [
+    "tests/test_cssselect2.py"
+   ],
+   "message": "OPERATION CONTRACT FAILURE in tests/test_cssselect2.py: a full-file replacement was returned, but this file's context this attempt was not authoritative, complete, exact current source (skeleton/signatures/member-only/stale revision/candidate-derived) - whole-file replacement requires authoritative pristine current source regardless of which operation was originally requested. Return an anchored SEARCH/REPLACE edit instead."
+  },
+  "candidate": [
+   {
+    "path": "cssselect2/tree.py",
+    "decision": "REFUSED",
+    "reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"
+   },
+   {
+    "path": "tests/test_cssselect2.py",
+    "decision": "REFUSED",
+    "reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "sections.mandatory"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "NO_AUTHORIZED_REPAIR_TARGET"
+  },
+  "mode": "full_set",
+  "operation": "repair_with_full_file",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T3 lang-a",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/CharSetUtils.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/CharSetUtils.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": null,
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T3 lang-a",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/test/java/org/apache/commons/lang3/CharSetUtilsTest.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": null,
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_NOT_IN_FILE",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/main/java/org/apache/commons/lang3/ArrayFill.java: ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #1: the search block does not occur in the current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+  },
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_NOT_IN_FILE"
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 2,
+  "developer_calls": [],
+  "parse": [],
+  "diagnosis": {
+   "type": "no_progress_retry",
+   "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+   ],
+   "message": "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in src/main/java/org/apache/commons/lang3/ArrayFill.java would be retried on qwen3-coder:30b-kriya-e52213655394 with the same authoritative context, the same feasible operations (anchored_edit) and the same requested operation (repair_with_patch); nothing new can be shown within the budget."
+  },
+  "candidate": [],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the current attempt"
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "REPEATED_ACTION",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 3,
+  "developer_calls": [],
+  "parse": [],
+  "diagnosis": {
+   "type": "no_progress_retry",
+   "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+   ],
+   "message": "ANCHOR_CONTEXT_NOT_ESCALATED: the last anchored_edit failure in src/main/java/org/apache/commons/lang3/ArrayFill.java would be retried on qwen3-coder:30b-kriya-e52213655394 with the same authoritative context, the same feasible operations (anchored_edit) and the same requested operation (repair_with_patch); nothing new can be shown within the budget."
+  },
+  "candidate": [],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the previous attempt"
+  },
+  "recovery": {
+   "action": "fallback_targeted",
+   "progress_classification": "REPEATED_ACTION",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 4,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+   "likely_files": [
+    "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/main/java/org/apache/commons/lang3/ArrayFill.java: ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is real source, but not source this attempt was authorized to rely on (it was not in the exact current source shown). Its location is now shown as exact source."
+  },
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "UNKNOWN",
+   "changed": [],
+   "reason": "no recorded Developer request in the previous attempt"
+  },
+  "recovery": {
+   "action": "full_set",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "fallback_targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 5,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "regression_unattributed",
+   "reason_code": null,
+   "likely_files": [],
+   "message": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=NEW_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer rege"
+  },
+  "candidate": [
+   {
+    "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "stop_environment",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "mode": "full_set",
+  "operation": "repair_with_full_file",
+  "fallback": [
+   {
+    "phase": "escalation",
+    "fallback": null,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": null
+   },
+   {
+    "phase": "call",
+    "fallback": true,
+    "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T5 spring-xml",
+  "unit": "s1",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": null,
+  "recovery": null,
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T5 spring-xml",
+  "unit": "s2",
+  "attempt": 1,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+   "likely_files": [
+    "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java: ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is real source, but not source this attempt was authorized to rely on (it was not in the exact current source shown). Its location is now shown as exact source."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+   }
+  ],
+  "retry_delta": null,
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "full_set",
+  "operation": "create_full_file",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T5 spring-xml",
+  "unit": "s2",
+  "attempt": 2,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": {
+   "type": "anchored_edit",
+   "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+   "likely_files": [
+    "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java"
+   ],
+   "message": "ANCHORED EDIT FAILURE in src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java: ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT: Anchor matching failed for edit #1: the search block is real source, but not source this attempt was authorized to rely on (it was not in the exact current source shown). Its location is now shown as exact source."
+  },
+  "candidate": [
+   {
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "decision": "REFUSED",
+    "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "failure_signature",
+    "mode",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory#2",
+    "sections.mandatory#3",
+    "sections.planned_source"
+   ],
+   "reason": null
+  },
+  "recovery": {
+   "action": "targeted",
+   "progress_classification": "NO_PROGRESS",
+   "no_progress_reason": null,
+   "stop_reason_code": null
+  },
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ },
+ {
+  "run": "R2-T5 spring-xml",
+  "unit": "s2",
+  "attempt": 3,
+  "developer_calls": [
+   {
+    "role": "developer",
+    "model": "qwen3-coder:30b-kriya-e52213655394",
+    "dispatched": true
+   }
+  ],
+  "parse": [
+   {
+    "kind": "edits",
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "reason_code": null,
+    "edit_count": 1,
+    "detail": ""
+   }
+  ],
+  "diagnosis": null,
+  "candidate": [
+   {
+    "path": "src/test/java/org/springframework/samples/petclinic/model/OwnerTests.java",
+    "decision": "STAGED",
+    "reason_code": null
+   }
+  ],
+  "retry_delta": {
+   "information_gain": "PRESENT",
+   "changed": [
+    "authority",
+    "retry_evidence",
+    "sections.graph_context",
+    "sections.mandatory#3"
+   ],
+   "reason": null
+  },
+  "recovery": null,
+  "mode": "targeted",
+  "operation": "repair_with_patch",
+  "fallback": [
+   {
+    "phase": "call",
+    "fallback": false,
+    "selected": "qwen3-coder:30b-kriya-e52213655394",
+    "requested_rejection": []
+   }
+  ]
+ }
+]

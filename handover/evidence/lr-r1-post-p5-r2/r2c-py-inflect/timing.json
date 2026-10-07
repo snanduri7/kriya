@@ -1,0 +1,122 @@
+{
+ "process_wall_seconds": 251.37932062498294,
+ "recorder_seconds": 0.27466470858780667,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 4,
+   "seconds": 0.0001489589922130108
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 4,
+   "seconds": 4.082976374775171e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0006833750521764159
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 12,
+   "seconds": 0.0019587079877965152
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 3,
+   "seconds": 0.0020416248589754105
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 4,
+   "seconds": 3.749894676730037e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 4,
+   "seconds": 0.0004506671684794128
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 4,
+   "seconds": 0.002973375143483281
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 74,
+   "seconds": 0.059980376390740275
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 5,
+   "seconds": 0.00382695795269683
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 9,
+   "seconds": 0.03408612380735576
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 4,
+   "seconds": 6.583926733583212e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.05576795793604106
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 13,
+   "seconds": 0.0018470013746991754
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 4,
+   "seconds": 0.0023769992403686047
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 3,
+   "seconds": 0.01189916708972305
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 4,
+   "seconds": 0.0002055839286185801
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 13,
+   "seconds": 0.03561399911995977
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 13,
+   "seconds": 0.033406583359465
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 2,
+   "seconds": 1.1750904377549887e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 6,
+   "seconds": 0.00936454109614715
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 3,
+   "seconds": 0.0003195420140400529
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 2,
+   "seconds": 0.014817625051364303
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 4,
+   "seconds": 0.000421375036239624
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 9,
+   "seconds": 0.0008211652166210115
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 3,
+   "seconds": 0.0015828339965082705
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 2,
+   "seconds": 1.025001984089613e-05
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p5/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/r2c-py-inflect.yaml",
+  "generate",
+  "Add a method `count_noun(self, count, noun)` to the `inflect.engine` class in inflect/__init__.py that returns the count followed by a space and the noun inflected for that count with the engine's own `plural` method (for example `count_noun(1, \"cat\")` returns \"1 cat\" and `count_noun(3, \"cat\")` returns \"3 cats\"), and add tests for it in a new file tests/test_count_noun.py.",
+  "-y"
+ ]
+}

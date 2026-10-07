@@ -1,0 +1,118 @@
+{
+ "process_wall_seconds": 555.2507713749656,
+ "recorder_seconds": 0.13826830015750602,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 4,
+   "seconds": 0.00017154199304059148
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 4,
+   "seconds": 2.0820298232138157e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.000462958007119596
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 13,
+   "seconds": 0.0012538769515231252
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 2,
+   "seconds": 0.002274291997309774
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 4,
+   "seconds": 3.487500362098217e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 4,
+   "seconds": 0.00014812510926276445
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 6,
+   "seconds": 0.005561708938330412
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 50,
+   "seconds": 0.04265812813537195
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 5,
+   "seconds": 0.003556251060217619
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 4,
+   "seconds": 0.021407750027719885
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 4,
+   "seconds": 6.332993507385254e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.008630292024463415
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 4,
+   "seconds": 0.0008677919395267963
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 1,
+   "seconds": 0.0008667499641887844
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 4,
+   "seconds": 0.023222331947181374
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 5,
+   "seconds": 0.00021170900436118245
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 4,
+   "seconds": 0.010462126054335386
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 4,
+   "seconds": 0.012600417016074061
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 1,
+   "seconds": 4.375004209578037e-06
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 1,
+   "seconds": 0.0025569580029696226
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 3,
+   "seconds": 0.0002983339363709092
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 1,
+   "seconds": 9.38749872148037e-05
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 2,
+   "seconds": 0.00023908400908112526
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 4,
+   "seconds": 0.000669625005684793
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 1,
+   "seconds": 6.709014996886253e-06
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/run2-lang-countwords.yaml",
+  "generate",
+  "Add a public static method StringUtils.countWords(CharSequence cs) that returns the number of whitespace-separated words (Character.isWhitespace), returning 0 for null or empty/blank input, and add unit tests for it.",
+  "-y"
+ ]
+}

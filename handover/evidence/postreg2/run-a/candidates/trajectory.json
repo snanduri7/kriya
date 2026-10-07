@@ -1,0 +1,58 @@
+{
+ "run_id": "20261007T091832-d5607f08",
+ "m1": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "attempts": 9,
+ "stageable_candidates": 2,
+ "candidates": [
+  {
+   "candidate": 1,
+   "attempt_seq": 56,
+   "unit": "s1",
+   "carried_from_committed_units": [],
+   "files": {
+    "graphify/extractors/engine.py": "499598c7c2131836add2c80a664dd79bf94b7064fe7de1f0571ca8653b1b337a"
+   },
+   "acceptance_passed": 0,
+   "acceptance_exit": 1,
+   "external_score": 0,
+   "external_exit": 1,
+   "external_sites": {
+    "A": "FAIL",
+    "B": "FAIL",
+    "C": "FAIL",
+    "D": "FAIL",
+    "E": "FAIL"
+   },
+   "regression76": "76 passed in 0.57s",
+   "regression_exit": 0,
+   "best_external_so_far": 0
+  },
+  {
+   "candidate": 2,
+   "attempt_seq": 146,
+   "unit": "s1",
+   "carried_from_committed_units": [],
+   "files": {
+    "graphify/extractors/engine.py": "a68e6e1555a7ab6a2cc7a236776aa7be6d0d124f7435077922ee17a25090c2f4"
+   },
+   "acceptance_passed": 0,
+   "acceptance_exit": 1,
+   "external_score": 0,
+   "external_exit": 1,
+   "external_sites": {
+    "A": "FAIL",
+    "B": "FAIL",
+    "C": "FAIL",
+    "D": "FAIL",
+    "E": "FAIL"
+   },
+   "regression76": "76 passed in 0.60s",
+   "regression_exit": 0,
+   "best_external_so_far": 0
+  }
+ ],
+ "best_external": 0
+}

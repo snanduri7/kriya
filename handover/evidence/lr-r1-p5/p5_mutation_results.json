@@ -1,0 +1,110 @@
+{
+ "head": "f2bb41bc07179e12b5b267e21ce54d6ed15f0726",
+ "baseline": "331 passed in 17.36s",
+ "tests": [
+  "tests/test_lr_r1_p5_integration_obligation_reproducer.py",
+  "tests/test_lr_r1_p5_integration_evidence.py",
+  "tests/test_workflow_controller_enforce.py",
+  "tests/test_lr_r1_m1_t6_fixes.py"
+ ],
+ "mutants": [
+  {
+   "label": "consumer-writes-only",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "2 failed, 117 passed in 9.88s",
+   "seconds": 10.7
+  },
+  {
+   "label": "all-subtask-writes-blindly-unioned",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 155 passed in 4.12s",
+   "seconds": 5.0
+  },
+  {
+   "label": "provider-identity-ignored / unrelated-sibling-accepted",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 264 passed in 9.25s",
+   "seconds": 10.1
+  },
+  {
+   "label": "wrong-provider-accepted (any subtask's planned files count)",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 276 passed in 9.01s",
+   "seconds": 9.9
+  },
+  {
+   "label": "provider-local-pass-implies-global-pass",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "2 failed, 127 passed in 3.69s",
+   "seconds": 4.5
+  },
+  {
+   "label": "final-workspace-state-ignored",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 256 passed in 8.64s",
+   "seconds": 9.5
+  },
+  {
+   "label": "no-change-consumer-treated-as-missing",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 127 passed in 3.83s",
+   "seconds": 4.7
+  },
+  {
+   "label": "verification-only-consumer-treated-as-missing",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "2 failed, 125 passed in 3.56s",
+   "seconds": 4.4
+  },
+  {
+   "label": "verification-only-without-verification-passes",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 128 passed in 4.24s",
+   "seconds": 5.1
+  },
+  {
+   "label": "missing-artifact-converted-to-success",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "2 failed, 124 passed in 3.66s",
+   "seconds": 4.5
+  },
+  {
+   "label": "production-call-passes-no-provenance",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "2 failed, 145 passed in 4.23s",
+   "seconds": 5.1
+  },
+  {
+   "label": "resume-provenance-unrecorded",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 147 passed in 4.18s",
+   "seconds": 5.0
+  },
+  {
+   "label": "decision-not-mirrored-to-m1",
+   "file": "kriya/workflow/workflow_controller.py",
+   "status": "KILLED",
+   "summary": "1 failed, 154 passed in 4.23s",
+   "seconds": 5.1
+  },
+  {
+   "label": "q9-drops-integration-decisions",
+   "file": "kriya/core/attempt_evidence/explain.py",
+   "status": "KILLED",
+   "summary": "1 failed, 154 passed in 4.23s",
+   "seconds": 5.1
+  }
+ ]
+}

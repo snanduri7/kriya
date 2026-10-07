@@ -1,0 +1,122 @@
+{
+ "process_wall_seconds": 381.8956826250069,
+ "recorder_seconds": 0.180604298831895,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 2,
+   "seconds": 9.175005834549665e-05
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 2,
+   "seconds": 1.4159595593810081e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.00046579196350649
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 8,
+   "seconds": 0.0017500019748695195
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 3,
+   "seconds": 0.0019216249929741025
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 2,
+   "seconds": 4.6291970647871494e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 2,
+   "seconds": 0.00030645797960460186
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 7,
+   "seconds": 0.0050234998925589025
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 53,
+   "seconds": 0.043465419206768274
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 3,
+   "seconds": 0.004043333989102393
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 7,
+   "seconds": 0.00782858394086361
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 2,
+   "seconds": 3.2919924706220627e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.029676167003344744
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 13,
+   "seconds": 0.0016043759533204138
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 2,
+   "seconds": 0.0020663750474341214
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 1,
+   "seconds": 0.0009755829814821482
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 2,
+   "seconds": 9.69990505836904e-05
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 13,
+   "seconds": 0.0327313729794696
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 13,
+   "seconds": 0.032196086074691266
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 2,
+   "seconds": 1.2582982890307903e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 6,
+   "seconds": 0.009647083934396505
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 2,
+   "seconds": 0.00016200001118704677
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 2,
+   "seconds": 0.005304374033585191
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 2,
+   "seconds": 0.00017770897829905152
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 6,
+   "seconds": 0.0005520009435713291
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 1,
+   "seconds": 0.00044420798076316714
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 2,
+   "seconds": 9.916955605149269e-06
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p5/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/v5-t5-petclinic-pet-count.yaml",
+  "generate",
+  "Add a method `public int getPetCount()` to org.springframework.samples.petclinic.owner.Owner that returns the number of pets the owner has, and add a unit test for it in OwnerTests.",
+  "-y"
+ ]
+}

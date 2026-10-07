@@ -1,0 +1,353 @@
+{
+  "architect": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3-coder:30b-kriya-e52213655394",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "developer": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:8bbe07eb132f2c8d399cae36b394a081c19ca64294401c21684c2546459c03f3",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "repeat_penalty": 1.05,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.8:27b",
+      "reasons": [],
+      "status": "QUALIFIED"
+    },
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "planner": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "reviewer": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3-coder:30b-kriya-e52213655394",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "run_verifier": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3-coder:30b-kriya-e52213655394",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "skill_gap": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3-coder:30b-kriya-e52213655394",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ],
+  "spec_compliance": [
+    {
+      "exact": true,
+      "execution_environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.4",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "failed": [],
+      "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+      "identity": "normal",
+      "inference_settings": {
+        "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+        "extra_body": {
+          "options": {
+            "num_ctx": 32768,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "think": false,
+          "truncate": false
+        },
+        "output_ceiling": 16384,
+        "reasoning": false,
+        "server_config": {},
+        "temperature": 0.7,
+        "version": 3
+      },
+      "missing": [],
+      "model": "qwen3-coder:30b-kriya-e52213655394",
+      "reasons": [],
+      "status": "QUALIFIED"
+    }
+  ]
+}

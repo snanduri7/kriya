@@ -1,4 +1,6 @@
 import asyncio
+import functools
+import inspect
 import ipaddress
 import json
 import logging
@@ -13,6 +15,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from kriya.config import AppConfig
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_runtime import ChatRequest, InferenceRuntimePort, RuntimeErrorKind, runtime_for_binding
 from kriya.core.inference_settings import request_settings
 from kriya.core.model_runtime import context_window_overrides, request_extra_body
@@ -169,6 +172,39 @@ def _common_prefix_length(a: str, b: str) -> int:
         else:
             high = middle - 1
     return low
+
+
+def _evidence_call(prompt_kind: str):
+    """LR-R1-M1: one logical model call is one attempt-evidence call scope
+    (attributed to the role the caller set, role_metrics.model_role). A call
+    that ends before any wire request - an egress, budget, schema or
+    deadline refusal - still records the refused prompt. Observational: the
+    call's own result or exception passes through unchanged."""
+    def decorate(method):
+        signature = inspect.signature(method)
+
+        @functools.wraps(method)
+        async def wrapper(self, *args, **kwargs):
+            from kriya.core.role_metrics import current_model_role
+
+            with attempt_evidence_scope.call_scope(current_model_role()):
+                try:
+                    return await method(self, *args, **kwargs)
+                except BaseException as error:
+                    try:
+                        bound = signature.bind_partial(self, *args, **kwargs).arguments
+                    except TypeError:
+                        bound = {}
+                    if prompt_kind == "prompt":
+                        messages = [{"role": "system", "content": bound.get("system_prompt")},
+                                    {"role": "user", "content": bound.get("user_prompt")}]
+                        attempt_evidence_scope.record_undispatched_call(error, messages)
+                    else:
+                        attempt_evidence_scope.record_undispatched_call(error, bound.get("messages"),
+                                                                        bound.get("tools"))
+                    raise
+        return wrapper
+    return decorate
 
 
 class LLMClient:
@@ -727,6 +763,7 @@ class LLMClient:
             if (result.protocol or {}).get("empty_content_floor_retry"):
                 self._note_budget_expansion(result, budget, reason="empty_content_floor_retry")
         self.last_completion = result
+        attempt_evidence_scope.record_call_result(result)
         if result.error is None:
             click.secho(
                 f"\n[Usage: {result.prompt_tokens} input tokens, {result.completion_tokens} output tokens | "
@@ -803,6 +840,7 @@ class LLMClient:
             )
         return result.content
 
+    @_evidence_call("prompt")
     async def complete_result(
         self,
         system_prompt: str,
@@ -969,6 +1007,7 @@ class LLMClient:
                         "model combination may not support JSON mode together with reasoning)."
                     )
                     result.protocol["response_format_dropped"] = True
+                    attempt_evidence_scope.next_wire_reason("response_format_dropped")
                     raw = await self._request_once(
                         client, model, system_prompt, user_prompt, temperature, max_tokens,
                         wire_body, None, stream_callback
@@ -1005,6 +1044,7 @@ class LLMClient:
                     floor = min(floor, max(max_tokens, budget.hard_output_ceiling))
                 result.protocol["empty_content_floor_retry"] = True
                 result.max_tokens = floor
+                attempt_evidence_scope.next_wire_reason("empty_content_floor")
                 raw = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, floor,
                     wire_body, response_format, stream_callback
@@ -1083,14 +1123,33 @@ class LLMClient:
         reasoning field), prompt_tokens, completion_tokens, finish_reason and
         provider_metadata. Split out from complete_result() so a reasoning
         model's response_format can be retried once without it."""
-        response = await self._within_deadline(model, lambda timeout: self._runtime(model).complete(
-            client, ChatRequest(
-                model=model,
-                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
-                response_format=response_format, stream_callback=stream_callback, timeout=timeout,
-            )))
+        runtime = self._runtime(model)
+        response = await self._recorded_dispatch(model, runtime, runtime.complete, client, lambda timeout: ChatRequest(
+            model=model,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
+            response_format=response_format, stream_callback=stream_callback, timeout=timeout,
+        ))
         return response.to_raw()
+
+    async def _recorded_dispatch(self, model, runtime, send, client, build_request):
+        """One wire request through ``_within_deadline``, recorded by the
+        attempt evidence store (LR-R1-M1 §5.3): the exact request
+        immediately before dispatch, then the response - or the error,
+        recorded before it propagates unchanged. Observational only."""
+        with attempt_evidence_scope.wire_scope():
+            def dispatch(timeout):
+                request = build_request(timeout)
+                attempt_evidence_scope.record_wire_request(runtime, request)
+                return send(client, request)
+
+            try:
+                response = await self._within_deadline(model, dispatch)
+            except BaseException as error:
+                attempt_evidence_scope.record_wire_error(error)
+                raise
+            attempt_evidence_scope.record_wire_response(response)
+            return response
 
     async def complete_with_tools(
         self,
@@ -1128,6 +1187,7 @@ class LLMClient:
             ],
         }
 
+    @_evidence_call("messages")
     async def complete_with_tools_result(
         self,
         messages: List[Dict[str, Any]],
@@ -1233,11 +1293,11 @@ class LLMClient:
             max_tokens=max_tokens,
         )
         try:
-            response = await self._within_deadline(model, lambda timeout: runtime.complete_with_tools(
-                client, ChatRequest(
+            response = await self._recorded_dispatch(
+                model, runtime, runtime.complete_with_tools, client, lambda timeout: ChatRequest(
                     model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
                     extra_body=wire_body, tools=tools, timeout=timeout,
-                )))
+                ))
         except InferenceDeadlineError as stopped:
             self._record_deadline_stop(result, stopped, started=start_time, budget=budget)
             raise

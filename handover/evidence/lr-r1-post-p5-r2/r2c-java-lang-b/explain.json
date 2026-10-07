@@ -1,0 +1,1369 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 9,
+        "seq": 181,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:40a365cdc2604195feeac091e5b35c0e294aac27b7f92bc3b49c1ba0395ae44b"
+      },
+      "failure_type": "regression_unattributed",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 175,
+      "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "regression_unattributed",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "regression_unattributed",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 178,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 37,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:7c1e52d732a85bef0eab11857aea54c206850e3d270180c1fd7b41bf0e49aca7",
+                "wire_body": "sha256:ae65427c01f2632368a57a6369cf9e3ed12efa433b38d741242a81a92880f423"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 39,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "seq": 37,
+              "targets": [
+                {
+                  "digest": "e8a94bc8dc4f0efcdce44311433a6df442b4176d7a2e74075411cf517ccb0b13",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [
+                    81,
+                    142
+                  ],
+                  "member_units_shown": 14,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_is_exact": true,
+                  "shown_member_id": "ArrayFill.fill",
+                  "shown_revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 46,
+                      "start_line": 44,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 66,
+                      "start_line": 64,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 83,
+                      "start_line": 68,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 86,
+                      "start_line": 84,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 102,
+                      "start_line": 97,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 117,
+                      "start_line": 112,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 127,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 134,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 150,
+                      "start_line": 145,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 165,
+                      "start_line": 160,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 180,
+                      "start_line": 175,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 195,
+                      "start_line": 190,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 210,
+                      "start_line": 205,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 225,
+                      "start_line": 220,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 253,
+                      "start_line": 246,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 269,
+                      "start_line": 264,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 417,
+              "content": {
+                "content": "sha256:5649df4deae12eec5069efb0d502fef679a8b6eff01bf43d78a60899c1e1d532"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 40,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:1580b2ff7f91725ecb82a484abf645c0e79114cb76360177dc276911fcce538d"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "seq": 42
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "proposed_digest": "sha256:55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 51
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:f556a4b7236e71bd023d5878739e26227124de4aeba51f7d2c5a49fedc638621",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 50,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 54,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the current attempt",
+              "seq": 67
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 34
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "seq": 65,
+              "targets": [
+                {
+                  "digest": "e8a94bc8dc4f0efcdce44311433a6df442b4176d7a2e74075411cf517ccb0b13",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    81,
+                    142,
+                    190,
+                    205
+                  ],
+                  "member_units_shown": 14,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_is_exact": true,
+                  "shown_member_id": "ArrayFill.fill",
+                  "shown_revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 46,
+                      "start_line": 44,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 66,
+                      "start_line": 64,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 83,
+                      "start_line": 68,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 86,
+                      "start_line": 84,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 102,
+                      "start_line": 97,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 117,
+                      "start_line": 112,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 127,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 134,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 150,
+                      "start_line": 145,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 165,
+                      "start_line": 160,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 180,
+                      "start_line": 175,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 195,
+                      "start_line": 190,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 210,
+                      "start_line": 205,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 225,
+                      "start_line": 220,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 253,
+                      "start_line": 246,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 269,
+                      "start_line": 264,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:f2e2740692067faacbf5b3e2fc9f30e458b8b17db9de7e1882d43feae7bc9f28",
+                "raw_output": "sha256:e9b5cf36b90b5c1b0b1e923ba38188e35ee879ec2e6e13165e673bba11548122"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 71,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 75,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "seq": 86
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 63
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "seq": 84,
+              "targets": [
+                {
+                  "digest": "e8a94bc8dc4f0efcdce44311433a6df442b4176d7a2e74075411cf517ccb0b13",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    81,
+                    142,
+                    190,
+                    205
+                  ],
+                  "member_units_shown": 14,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_is_exact": true,
+                  "shown_member_id": "ArrayFill.fill",
+                  "shown_revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 46,
+                      "start_line": 44,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 66,
+                      "start_line": 64,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 83,
+                      "start_line": 68,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 86,
+                      "start_line": 84,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 102,
+                      "start_line": 97,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 117,
+                      "start_line": 112,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 127,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 134,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 150,
+                      "start_line": 145,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 165,
+                      "start_line": 160,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 180,
+                      "start_line": 175,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 195,
+                      "start_line": 190,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 210,
+                      "start_line": 205,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 225,
+                      "start_line": 220,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 253,
+                      "start_line": 246,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 269,
+                      "start_line": 264,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:f2e2740692067faacbf5b3e2fc9f30e458b8b17db9de7e1882d43feae7bc9f28",
+                "raw_output": "sha256:e9b5cf36b90b5c1b0b1e923ba38188e35ee879ec2e6e13165e673bba11548122"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "reason_code": "ANCHOR_CONTEXT_NOT_ESCALATED",
+              "seq": 90,
+              "type": "no_progress_retry"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_progress_retry",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_ACTION",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 95,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 5,
+              "changed": [],
+              "information_gain": "UNKNOWN",
+              "reason": "no recorded Developer request in the previous attempt",
+              "role": "developer",
+              "seq": 111,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 82
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 106,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:8e310c342350d296161163ceb2b7009a00e02be980b5e97600e0221ea3ff9fb1",
+                "wire_body": "sha256:8e8889fbf2f64b40fb659b2123bace9563208d8644dead241239bde44c8f009e"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 110,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "seq": 106,
+              "targets": [
+                {
+                  "digest": "e8a94bc8dc4f0efcdce44311433a6df442b4176d7a2e74075411cf517ccb0b13",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 1,
+                  "loci": [
+                    81,
+                    142,
+                    190,
+                    205
+                  ],
+                  "member_units_shown": 14,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_is_exact": true,
+                  "shown_member_id": "ArrayFill.fill",
+                  "shown_revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 46,
+                      "start_line": 44,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 66,
+                      "start_line": 64,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 83,
+                      "start_line": 68,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 86,
+                      "start_line": 84,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 102,
+                      "start_line": 97,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 117,
+                      "start_line": 112,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 127,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 134,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 150,
+                      "start_line": 145,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 165,
+                      "start_line": 160,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 180,
+                      "start_line": 175,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 195,
+                      "start_line": 190,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 210,
+                      "start_line": 205,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 225,
+                      "start_line": 220,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 253,
+                      "start_line": 246,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 269,
+                      "start_line": 264,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 1381,
+              "content": {
+                "content": "sha256:8b2313c55d5063daec35874bece86d70c2419250879b74376f14a46fe1cc622b"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 112,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:6a4990739762557294dcd323ed23d1726889b83a9461922ff5b6717db22516c3"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "seq": 114
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "proposed_digest": "sha256:55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 124
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:ae8e9253e9d9bbc3ac5cf8e2cf684b99a245e48f770351d8f0a9ef5456c2718d",
+                "raw_output": "sha256:c5bf32748178f0185c96fc1d2abb520a718be06df8c3172cd4cd39122787ca40"
+              },
+              "evidence_class": "MEASURED",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "reason_code": "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT",
+              "seq": 123,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "full_set",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "full_set",
+                "reason": "full-set retry budget remains",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 127,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 6,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 141,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 99
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 103
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 138,
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:0340e79c11acc055137d94ce258fcddab820fa02ee421e9d50807b9618ce8bcc",
+                "wire_body": "sha256:de5994b5f4c9ad7be3d8c26b28cda4483cde6b443d8c510a763092cfb06e03de"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 140,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:8bd4148ebe9fd3d3ecd74d2c06f96b0318c3a149c53bd692d5187e763d24569d",
+                "wire_body": "sha256:8768f06ffd44df0a8da17aecb4bf53bcbcad756bb34e11c5c8e8768cf013ed6b"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 150,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:fe873d0cba51ae9bebe0647e7542713411db1bea81b10f20300176cd25f41b0c",
+                "wire_body": "sha256:91bdbc6614f8f11e2e24aafc03899adfdecaf795e0b292eb03db199cf0c14702"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 154,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:454ab82b6de14d338ccb32cfdb8ba6307e14c5efa4b50c10d3532a0f50b16608",
+                "wire_body": "sha256:3da24335132e585334befe929ea796deb7bf0d2173760123d0ed28ae6927633f"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 163,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/ArrayFill.java"
+              ],
+              "seq": 138,
+              "targets": [
+                {
+                  "digest": "5972eb35918f5df92e646e30d907c5a17470859eb76afd14fac98b3489652c88",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 2,
+                  "loci": [
+                    81,
+                    142,
+                    190,
+                    191,
+                    192,
+                    193,
+                    194,
+                    195,
+                    196,
+                    197,
+                    198,
+                    205
+                  ],
+                  "member_units_shown": 14,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_is_exact": true,
+                  "shown_member_id": "ArrayFill.fill",
+                  "shown_revision": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 46,
+                      "start_line": 44,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 66,
+                      "start_line": 64,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 83,
+                      "start_line": 68,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 86,
+                      "start_line": 84,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 102,
+                      "start_line": 97,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 117,
+                      "start_line": 112,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 132,
+                      "start_line": 127,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 144,
+                      "start_line": 134,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 150,
+                      "start_line": 145,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 165,
+                      "start_line": 160,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 180,
+                      "start_line": 175,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 213,
+                      "start_line": 180,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 195,
+                      "start_line": 190,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 210,
+                      "start_line": 205,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 225,
+                      "start_line": 220,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 253,
+                      "start_line": 246,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 269,
+                      "start_line": 264,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 6,
+              "completion_tokens": 519,
+              "content": {
+                "content": "sha256:9dea25c5c70cf240825edad77376b305bcb53e727bea44cd172a7e17766e4fa5"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 142,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 113,
+              "content": {
+                "content": "sha256:29794c77006e3bd65b4ce0cc152f38e9f76f17041e6702dfdf0d6b36b5d9ed0b"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 151,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 89,
+              "content": {
+                "content": "sha256:5e3276cd2df9efb196848795c002c129ca89e0fd4893cede5f8e707fd687bd89"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 155,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 9,
+              "completion_tokens": 443,
+              "content": {
+                "content": "sha256:af1ce840b3fd05832952a7fa300267f555abdcc98b6443376b7ce432ae58cc3c"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 164,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 6,
+              "content": {
+                "analysis_model_claimed": "sha256:f9d7401929dd9f4598854a45b605e1e7da66be03d6362880e1bca469c10a44d0"
+              },
+              "kind": "edits",
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "seq": 144
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "c7074b8432b39fdf2b7d201e83468e85083a0edd8f27b756ea61e9ce4ed55524",
+              "before_digest": "55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+              "content": {
+                "after": "sha256:c7074b8432b39fdf2b7d201e83468e85083a0edd8f27b756ea61e9ce4ed55524",
+                "before": "sha256:55bbe52fffb5173b06d945fe778a04eb795fc4436dc5038229b5341ced634a2c",
+                "diff": "sha256:ea70481bee7d7188416ef7966be60b32d57e48da886a31888bcdc10e4a091618"
+              },
+              "decision": "STAGED",
+              "lines_added": 18,
+              "lines_removed": 0,
+              "path": "src/main/java/org/apache/commons/lang3/ArrayFill.java",
+              "seq": 147
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:40a365cdc2604195feeac091e5b35c0e294aac27b7f92bc3b49c1ba0395ae44b",
+                "raw_output": "sha256:e8bafb06408aeb1e01111afd300ca09da00c2868b734a9ea99306949f72006c4"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [],
+              "seq": 172,
+              "type": "regression_unattributed"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:e8bafb06408aeb1e01111afd300ca09da00c2868b734a9ea99306949f72006c4"
+              },
+              "gate": "tests",
+              "seq": 167,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:40a365cdc2604195feeac091e5b35c0e294aac27b7f92bc3b49c1ba0395ae44b"
+              },
+              "failure_type": "regression_unattributed",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the captured PRE-mutation baseline (level1=NEW_FAILURE), but no specific test could be confirmed as caused by this candidate - every per-test failure either matches the PRE-mutation baseline exactly, or was independently replayed (in isolation) against both a pristine and a candidate copy and could not be confirmed either way (an indeterminate/non-reproducible result is never treated as a known pre-existing failure, only as unattributable). This is not a code-fixable defect signal; further Developer regeneration cannot resolve an aggregate-level delta with no attributable test.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 175,
+              "stop_loop": true,
+              "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 131
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 136
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 5,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 2
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T195809-6a6add6d",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

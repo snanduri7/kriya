@@ -1,0 +1,2448 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 20,
+        "seq": 356,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_exhausted",
+      "failure_type": "operation_contract",
+      "progress_classification": "REGRESSION",
+      "retry": false,
+      "seq": 344
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "quality_gates_exhausted",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "quality_gates_exhausted",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 352,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 38,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:938181d75c9dbc1f84c854acf710409fb0464782222737d9799d7c220b7e7b50",
+                "wire_body": "sha256:6396dcb66d6c6c417f28584ecfc4495ac31f804c8040a223052b7d35102f7737"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 40,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 38,
+              "targets": [
+                {
+                  "digest": "5354964db01ad7dbf67f506f0bd213e534c34430aa7dc010fc317f8756231427",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5365,
+                    5389,
+                    5409
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5373,
+                      "start_line": 5357,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5397,
+                      "start_line": 5381,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5417,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6275,
+                      "start_line": 6268,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 984,
+              "content": {
+                "content": "sha256:e340c95325e9f924e4932932b7b98f79d9ceeb15170396e4a4695d51f9a84104"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 41,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:7d6ed13832ee982aa4b27082c397588d58ba8a884d12d77b2db539950056aab9"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 43
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 54
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:223549b19af965af7ba834b4496d9cc7bdc76132aa08ba73b685fa2f5c2226bc",
+                "raw_output": "sha256:34e6a12f0f6d8308d151e49f33eb3095ce8867e4d0fff8b8387c88d0b9ecabb0"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 53,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 55,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 5,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 72,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 35
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 67,
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:079197224ebe93ab9c45316e20f34a3d0dc1723124fe87fbcae82943d106e40d",
+                "wire_body": "sha256:c734c21cb507c387a81e40d95a4b9496d0be7bc9fcf0ef8bf47977a716715e9c"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 71,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:480313a0e2e19bb67c24974d7527439b9905051c5efdd925486d32c5247bdafc",
+                "wire_body": "sha256:abb64080a0a44f2a44bdd90449af96c98d851fd33bd5fda4db65e84c97672f86"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 82,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:617048587c5723f54f928ca45f2576b8adff3a6f70c423c4b6e5777ecb4acefb",
+                "wire_body": "sha256:0625986d2131a888061769661c1aa8246c9d685c7deab7041448482bb65c52df"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 86,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "content": {
+                "messages": "sha256:796637063852960638da2ece37e76817d22f1037b155cc13b88cf8ed9e07b977",
+                "wire_body": "sha256:08fc4d50a3f3e15d822d795f161a7977bb1f5e2ae886033075502841e1504e62"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 96,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 67,
+              "targets": [
+                {
+                  "digest": "40b74e3620196edce6f2d6901ec576c0e4f1b288c461618758d0eb3c2aacb259",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5389,
+                    5390,
+                    5392,
+                    5395,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5409,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5356,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5413,
+                      "start_line": 5385,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5479,
+                      "start_line": 5478,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 5523,
+                      "start_line": 5522,
+                      "unit": "block"
+                    },
+                    {
+                      "end_line": 6275,
+                      "start_line": 6268,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 5,
+              "completion_tokens": 1038,
+              "content": {
+                "content": "sha256:7311d105c1a27c439706ab163b2d87ea43ddb62cf23f13242fa504252e9aba22"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 73,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 145,
+              "content": {
+                "content": "sha256:515d645c85acd58ac71786e6c5925c3634b3cbce2b1c86d7f9ed96e12b2403c5"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 83,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 75,
+              "content": {
+                "content": "sha256:41f4638b0bbf30d5266fbd92c9f1e5f24cd2b4af6f0e4a2d394215bc37d4ffa9"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 87,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 8,
+              "completion_tokens": 668,
+              "content": {
+                "content": "sha256:15489c6a50373889481c8fa7b3aacb7ab5c34499bfc030c38153efa3200af129"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 97,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 5,
+              "content": {
+                "analysis_model_claimed": "sha256:5caef3491bada5ff84895f3a6554f7dfdc9d9daa457571a59510065a738c2e20"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 75
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:d7577d461ee46d3abbc87043e64f532af7fa39b8e2c2dbd4e086c395856fe6be"
+              },
+              "decision": "STAGED",
+              "lines_added": 17,
+              "lines_removed": 3,
+              "path": "graphify/extractors/engine.py",
+              "seq": 79
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "full_set",
+              "content": {
+                "attribution_reasoning": "sha256:529720fc811eddecd52305a338ee0e080328dabb2446d488085d0b07c0841871",
+                "message": "sha256:c74a25a5fe44de8f65e3d5def25b6b15fd1745a1290c0da17c77a430e8551c24",
+                "raw_output": "sha256:dd58965f865df215fb1b266cd5700e9415daf6ae17f5a5892f3a961a5c58bc9e"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [],
+              "seq": 110,
+              "type": "regression_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:cfe9eb5cece48acfe6c27ac5a7b9c0c39fa9424fa970deac68714ed2cb4e73ee",
+                "test_execution": "sha256:590c90c831cfd5f0195d341ca482eda4557c4aa0d6cd9e5585a886585958f89d"
+              },
+              "gate": "tests",
+              "seq": 100,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:27482cca6034dc8952022b68324cae2cd3e2bfaa1db1a30a3284dc9bf579bd5b",
+                "test_execution": "sha256:1cc368f7da8271c9124644bb5cbad9971efc3d8a44481804da0e47ee3f4e6d77"
+              },
+              "gate": "tests",
+              "seq": 103,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "full_set",
+              "failure_type": "regression_test",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "full_set",
+                "reason": "full-set retry budget remains",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 111,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 9,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2",
+                "sections.mandatory#3",
+                "sections.planned_source"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 124,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 65
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 2,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 122,
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:0dc4b59befe13fc39a8a4ddec17a506abd33b8e4bb85b4bdaec2d08cb6495db6",
+                "wire_body": "sha256:23c01215fce2d98306feb655209a62e2b62a54ff9a87a5aaae76a2b2ffcc7aa8"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 123,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "authority_snapshot_seq": 122,
+              "call_seq": 10,
+              "content": {
+                "messages": "sha256:a2a9cbd7e4c3336758bf96cc5ed88856a7abed8b0090e378c698c3542a7bd72a",
+                "wire_body": "sha256:d4d4d89ffc201a493152064a4ee643e9d8ff1ae9cd08bbbec2742f4d299d46ac"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 129,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 122,
+              "targets": [
+                {
+                  "digest": "735dccf216ad1a5e0426a889402a2ffe0e772b4540a493efdaacf0cc7d4d85ef",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_full_file",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5359,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5396,
+                      "start_line": 5388,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5408,
+                      "start_line": 5398,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5424,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5480,
+                      "start_line": 5478,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5524,
+                      "start_line": 5522,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 9,
+              "completion_tokens": 13,
+              "content": {
+                "content": "sha256:ff3d83ec736c572ed0caaea4d829c24d2b1fbc458e8637da9196be4007af7896"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 125,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 10,
+              "completion_tokens": 635,
+              "content": {
+                "content": "sha256:064d13b6a8a1692055072a69a19b9277a0e2f42bec53f18dd16fe5c93ef83644"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 130,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 10,
+              "content": {
+                "analysis_model_claimed": "sha256:3055ebc7b306d706d5d096b93b067d8f103c61e2117449eeba93174c283ec03a"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 132
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 144
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:6a9fa37371382a3e9fb1357099a6d85e62c59866aeb7e86ffd5ec12c738b9cd7",
+                "raw_output": "sha256:2a7c92d461d6c860712d4f437abeb858e8b05884982d32ff070941c08eeabe6d"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "ANCHOR_NOT_IN_FILE",
+              "seq": 143,
+              "type": "anchored_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "anchored_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 145,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 11,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.graph_context",
+                "sections.mandatory",
+                "sections.mandatory#2"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 160,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 115
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 119
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 3,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 157,
+              "call_seq": 11,
+              "content": {
+                "messages": "sha256:fb55f87aae11e4783eab2e731928cbfc9469e5176e17b3fece887be70959a5b3",
+                "wire_body": "sha256:c4fcfb5295c81e02a58c263c9ffd46dbb7a8947eadf405850e8b31e904a7c842"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 159,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 157,
+              "targets": [
+                {
+                  "digest": "8544fc926b0b8e1a6e4101cdb098e8309334bdd9253ff7be1afa9db7feef1d2a",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 1,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5409,
+                      "start_line": 5387,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5425,
+                      "start_line": 5421,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5481,
+                      "start_line": 5477,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5525,
+                      "start_line": 5521,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 11,
+              "completion_tokens": 747,
+              "content": {
+                "content": "sha256:9f7f1d2de3ceb5f6bd942fc4c01baa370b3d959e94e359a28b1cdf9c3e77d988"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 161,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 11,
+              "content": {
+                "analysis_model_claimed": "sha256:35664033fe589ef5722537a5b4a4238dcb208d5717610930ba4541a7f8af24eb"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 163
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "reason_code": "diagnosis_mismatch",
+              "seq": 174
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:5e4b80354146c7fdae373712dc49ffeac875fb1c6541af6cda32e7aa9ffe0613",
+                "raw_output": "sha256:10029feca3e8bed2833cada2688c55462605ac10d88865b934ea7e174c08c3bd"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 173,
+              "type": "diagnosis_mismatch"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "diagnosis_mismatch",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 175,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 12,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 187,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 154
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 4,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 184,
+              "call_seq": 12,
+              "content": {
+                "messages": "sha256:909cc134344ba545b7f721d1f4e1d90a8aa6193d9ef735c71c22bcf290d5a1fa",
+                "wire_body": "sha256:5738b276c5388fd082a79e6ae9db5cc6523ebdf7abc313019dc75a11f28e2df3"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 186,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 184,
+              "targets": [
+                {
+                  "digest": "8544fc926b0b8e1a6e4101cdb098e8309334bdd9253ff7be1afa9db7feef1d2a",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5409,
+                      "start_line": 5387,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5425,
+                      "start_line": 5421,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5481,
+                      "start_line": 5477,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5525,
+                      "start_line": 5521,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 12,
+              "completion_tokens": 1178,
+              "content": {
+                "content": "sha256:98b5635ba00482f0586c0e8b7ad56548b83b43454999f49a7320d9a8f0ec4c21"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 188,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 12,
+              "content": {
+                "analysis_model_claimed": "sha256:5c5ab58693ddab3cff23fc859d9e214b1e917cc406f25e2298471da0266f1061"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 190
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "reason_code": "no_op_edit",
+              "seq": 201
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:2750c9fa6308e65308a42331574f912bc0b3d084a02217b3bacc75bb4c44a411",
+                "raw_output": "sha256:a871e5aae2dc7044f0ef8df63aa322cc9cacc30d682695741181ac6d880addf7"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 200,
+              "type": "no_op_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "targeted",
+              "failure_type": "no_op_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "targeted",
+                "reason": "grounded implicated files remain",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 202,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 13,
+              "changed": [
+                "failure_signature"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 215,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 182
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 5,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 212,
+              "call_seq": 13,
+              "content": {
+                "messages": "sha256:909cc134344ba545b7f721d1f4e1d90a8aa6193d9ef735c71c22bcf290d5a1fa",
+                "wire_body": "sha256:5738b276c5388fd082a79e6ae9db5cc6523ebdf7abc313019dc75a11f28e2df3"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 214,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 212,
+              "targets": [
+                {
+                  "digest": "8544fc926b0b8e1a6e4101cdb098e8309334bdd9253ff7be1afa9db7feef1d2a",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5358,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5409,
+                      "start_line": 5387,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5425,
+                      "start_line": 5421,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5481,
+                      "start_line": 5477,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5525,
+                      "start_line": 5521,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 13,
+              "completion_tokens": 1141,
+              "content": {
+                "content": "sha256:16b00c2cfe2a8e43e56060ad9a8f559256c0e0a96359364d0747f410450a78b6"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 216,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 13,
+              "content": {
+                "analysis_model_claimed": "sha256:fcf47ef90a7f55e7d222752e7b1b9180eb9e0d6822ec54a0789a4fd1f0a4a140"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 218
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "content": {
+                "proposed": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0"
+              },
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "path": "graphify/extractors/engine.py",
+              "proposed_digest": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "reason_code": "no_op_edit",
+              "seq": 230
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:2750c9fa6308e65308a42331574f912bc0b3d084a02217b3bacc75bb4c44a411",
+                "raw_output": "sha256:a871e5aae2dc7044f0ef8df63aa322cc9cacc30d682695741181ac6d880addf7"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 229,
+              "type": "no_op_edit"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "fallback_targeted",
+              "failure_type": "no_op_edit",
+              "no_progress_terminated": false,
+              "progress_classification": "REPEATED_VECTOR",
+              "retry": true,
+              "retry_decision": {
+                "action": "fallback_targeted",
+                "reason": "authoritative target retained after primary model rejected it",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 231,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 14,
+              "changed": [
+                "authority",
+                "mode",
+                "model",
+                "model_profile",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 245,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 210
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 6,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 242,
+              "call_seq": 14,
+              "content": {
+                "messages": "sha256:b13026988eb21f60b69e0b33050f78619e9dfb805b3b06cd046ec2fc35943450",
+                "wire_body": "sha256:fcea5bf1c9e058f3c38aa80bd8aad9fa761f41e197b96940b0dfe5889000ea38"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 244,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 242,
+              "targets": [
+                {
+                  "digest": "a4dab11dcc822762aab733641eab6949605838d941691015e3352d4605fe6d92",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5359,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5408,
+                      "start_line": 5388,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5424,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5480,
+                      "start_line": 5478,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5524,
+                      "start_line": 5522,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 14,
+              "completion_tokens": 5488,
+              "content": {
+                "content": "sha256:e7a2451546691cfd59c5b6db3ef9b53252cf0ad290cfc31c4905a8cf24316fd9"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 246,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 14,
+              "content": {
+                "analysis_model_claimed": "sha256:e7a2451546691cfd59c5b6db3ef9b53252cf0ad290cfc31c4905a8cf24316fd9"
+              },
+              "kind": "invalid",
+              "path": "graphify/extractors/engine.py",
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 248
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "parse_reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "parse_seq": 248,
+              "path": "graphify/extractors/engine.py",
+              "proposal_kind": "invalid",
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 259
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:5b5ec500198dd585cce8a308ebfa62054dea8c665de46e46aa0661d58ad4483b",
+                "raw_output": "sha256:e048e0be8a2f41bc6e38541bec1312a363761b55b56584efe635900c3fafd6c1"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 258,
+              "type": "operation_contract"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "full_set",
+              "failure_type": "operation_contract",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "full_set",
+                "reason": "full-set retry budget remains",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 260,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 15,
+              "changed": [
+                "failure_signature",
+                "mode",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 273,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 235
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 239
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 7,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 270,
+              "call_seq": 15,
+              "content": {
+                "messages": "sha256:11be9780da8c1a34accf75296ce511cec81a6a5fbc52b6176a48849cfee9c3ac",
+                "wire_body": "sha256:78d94a589399664189107bd026f30b1e504c9cb245104f429d516efe57dbadf3"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 272,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 16,
+              "content": {
+                "messages": "sha256:617048587c5723f54f928ca45f2576b8adff3a6f70c423c4b6e5777ecb4acefb",
+                "wire_body": "sha256:0625986d2131a888061769661c1aa8246c9d685c7deab7041448482bb65c52df"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 284,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 17,
+              "content": {
+                "messages": "sha256:dc1e5b4d7b9c8763367ce1882f7a0a4f99773eef0710a14fd079cf40fa48b10c",
+                "wire_body": "sha256:fc1d4ef9775b38078755a05cec7e1469553e8ac6319582f4c7150626980f4a16"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 294,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 270,
+              "targets": [
+                {
+                  "digest": "a4dab11dcc822762aab733641eab6949605838d941691015e3352d4605fe6d92",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5359,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5408,
+                      "start_line": 5388,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5424,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5480,
+                      "start_line": 5478,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5524,
+                      "start_line": 5522,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 15,
+              "completion_tokens": 951,
+              "content": {
+                "content": "sha256:177287d8fd6b956d966590d92bc25a24bddebdc5a9cf4129e3c18a648f93ac05"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 274,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 16,
+              "completion_tokens": 101,
+              "content": {
+                "content": "sha256:a99732446ec36244b81895ede67268fbf35b5c9e8dac9004c754c5ff30656f19"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 285,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 17,
+              "completion_tokens": 668,
+              "content": {
+                "content": "sha256:a1c785e3e23f78e0be559002cf29e77553183f5be2aa86788d2f0da9335c362c"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 295,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 15,
+              "content": {
+                "analysis_model_claimed": "sha256:e2429c4f9042c03bc5e390e1d2f0348d249f85853907647fd261170e936c6f9e"
+              },
+              "kind": "no_change",
+              "path": "graphify/extractors/engine.py",
+              "seq": 276
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:d7577d461ee46d3abbc87043e64f532af7fa39b8e2c2dbd4e086c395856fe6be"
+              },
+              "decision": "STAGED",
+              "lines_added": 17,
+              "lines_removed": 3,
+              "path": "graphify/extractors/engine.py",
+              "seq": 280
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "full_set",
+              "content": {
+                "attribution_reasoning": "sha256:529720fc811eddecd52305a338ee0e080328dabb2446d488085d0b07c0841871",
+                "message": "sha256:c74a25a5fe44de8f65e3d5def25b6b15fd1745a1290c0da17c77a430e8551c24",
+                "raw_output": "sha256:dd58965f865df215fb1b266cd5700e9415daf6ae17f5a5892f3a961a5c58bc9e"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [],
+              "seq": 308,
+              "type": "regression_test"
+            }
+          ],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:7879ad12ef4eb82a66adcb9132499be5b440f99af5aa1154b1da77b5f4416cd1",
+                "test_execution": "sha256:4504f295a66b390037b5c85d18fcd3a0e2617dd47f8f713051a9154ac236ab5e"
+              },
+              "gate": "tests",
+              "seq": 298,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:c66b8d4e6566b73c51e2b57e7e473ef79da6bccd6b2be5fbccbed1c21fa641c3",
+                "test_execution": "sha256:d5e3f45a2b5857b39bc092b2fc62911faa68e988beab25d8d0c3f47c928c7c2b"
+              },
+              "gate": "tests",
+              "seq": 301,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "full_set",
+              "failure_type": "regression_test",
+              "no_progress_terminated": false,
+              "progress_classification": "NO_PROGRESS",
+              "retry": true,
+              "retry_decision": {
+                "action": "full_set",
+                "reason": "full-set retry budget remains",
+                "reserved_fallback": false,
+                "should_continue": true
+              },
+              "seq": 309,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "items": [
+            {
+              "call_seq": 18,
+              "changed": [
+                "authority",
+                "failure_signature",
+                "retry_evidence",
+                "sections.mandatory"
+              ],
+              "information_gain": "PRESENT",
+              "role": "developer",
+              "seq": 322,
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 264
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 268
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 8,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 320,
+              "call_seq": 18,
+              "content": {
+                "messages": "sha256:0dc4b59befe13fc39a8a4ddec17a506abd33b8e4bb85b4bdaec2d08cb6495db6",
+                "wire_body": "sha256:23c01215fce2d98306feb655209a62e2b62a54ff9a87a5aaae76a2b2ffcc7aa8"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 321,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "authority_snapshot_seq": 320,
+              "call_seq": 19,
+              "content": {
+                "messages": "sha256:15b8e4e8494eba3dde06e90953748f4571c39d49c57f2dad31a398084c064046",
+                "wire_body": "sha256:6d872c578c450965d8ef33e501caba794a3a1443cac9509bf8b36b0e659d2385"
+              },
+              "dispatched": true,
+              "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 327,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 320,
+              "targets": [
+                {
+                  "digest": "a4dab11dcc822762aab733641eab6949605838d941691015e3352d4605fe6d92",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5360,
+                    5361,
+                    5362,
+                    5363,
+                    5364,
+                    5365,
+                    5366,
+                    5367,
+                    5370,
+                    5389,
+                    5390,
+                    5392,
+                    5394,
+                    5395,
+                    5396,
+                    5397,
+                    5398,
+                    5399,
+                    5400,
+                    5401,
+                    5403,
+                    5404,
+                    5405,
+                    5407,
+                    5423,
+                    5479,
+                    5523
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_full_file",
+                  "revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "8a0f23e9d55cf1403f0c52860abf6b8ba3a78b3bb4c8d51d6be57015bdeb00c0",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5370,
+                      "start_line": 5359,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5408,
+                      "start_line": 5388,
+                      "unit": "merged"
+                    },
+                    {
+                      "end_line": 5424,
+                      "start_line": 5422,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5480,
+                      "start_line": 5478,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5524,
+                      "start_line": 5522,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6289,
+                      "start_line": 6282,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 18,
+              "completion_tokens": 13,
+              "content": {
+                "content": "sha256:ff3d83ec736c572ed0caaea4d829c24d2b1fbc458e8637da9196be4007af7896"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 323,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 19,
+              "completion_tokens": 1459,
+              "content": {
+                "content": "sha256:1902f3ef84d18a6369faaa8ca00dc319877067b6694ea1305441055fd8a74ae3"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 328,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 19,
+              "content": {
+                "analysis_model_claimed": "sha256:1902f3ef84d18a6369faaa8ca00dc319877067b6694ea1305441055fd8a74ae3"
+              },
+              "kind": "invalid",
+              "path": "graphify/extractors/engine.py",
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 330
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "NOT_APPLICABLE",
+              "candidate_staged": false,
+              "decision": "REFUSED",
+              "diff": "NOT_APPLICABLE",
+              "parse_reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "parse_seq": 330,
+              "path": "graphify/extractors/engine.py",
+              "proposal_kind": "invalid",
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 343
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "attribution_tier": "judge",
+              "content": {
+                "attribution_reasoning": "sha256:46d2d13c0aef233114cf92a1e9ac0a9e4f179e082f6614140b96f01cb80e800c",
+                "message": "sha256:5b5ec500198dd585cce8a308ebfa62054dea8c665de46e46aa0661d58ad4483b",
+                "raw_output": "sha256:e048e0be8a2f41bc6e38541bec1312a363761b55b56584efe635900c3fafd6c1"
+              },
+              "evidence_class": "DERIVED_DETERMINISTIC",
+              "likely_files": [
+                "graphify/extractors/engine.py"
+              ],
+              "reason_code": "MODEL_EDIT_PROTOCOL_INVALID",
+              "seq": 342,
+              "type": "operation_contract"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_exhausted",
+              "failure_type": "operation_contract",
+              "no_progress_terminated": false,
+              "progress_classification": "REGRESSION",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_exhausted",
+                "reason": "all applicable retry budgets are exhausted",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 344,
+              "stop_loop": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "newly_rejected": [],
+              "patch_rejected": [],
+              "phase": "escalation",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 313
+            },
+            {
+              "fallback": true,
+              "phase": "call",
+              "requested": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "requested_rejection": [],
+              "selected": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+              "seq": 318
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 9,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 2,
+    "review": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261006T204410-5388017f",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

@@ -1,0 +1,28 @@
+diff --git a/graphify/extractors/engine.py b/graphify/extractors/engine.py
+index 4d9fb1f..7e23376 100644
+--- a/graphify/extractors/engine.py
++++ b/graphify/extractors/engine.py
+@@ -5363,6 +5363,9 @@ def _extract_generic(
+                     recv = fn_node.child_by_field_name("expression")
+                     if mname is not None:
+                         callee_name = _read_text(mname, source)
++                        # Handle generic names by stripping type arguments
++                        if "<" in callee_name:
++                            callee_name = callee_name.split("<")[0]
+                         is_member_call = True
+                         if recv is not None and recv.type == "identifier":
+                             member_receiver = _read_text(recv, source)
+@@ -5388,6 +5391,13 @@ def _extract_generic(
+                                 member_receiver = _read_text(fname, source)
+                 elif fn_node is not None and fn_node.type == "identifier":
+                     callee_name = _read_text(fn_node, source)
++                elif fn_node is not None and fn_node.type == "generic_name":
++                    # Strip type arguments from generic names like "Get<int>" to "Get"
++                    generic_text = _read_text(fn_node, source)
++                    if "<" in generic_text:
++                        callee_name = generic_text.split("<")[0]
++                    else:
++                        callee_name = generic_text
+                 else:
+                     # Fallback: original name-field / first-named-child scan.
+                     name_node = node.child_by_field_name("name")

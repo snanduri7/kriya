@@ -1,0 +1,1 @@
+Add `public static boolean isAsciiWhitespace(final char ch)` to org.apache.commons.lang3.CharUtils that returns true for ' ', '\t', '\n', '\u000B', '\f' and '\r' and false for every other character, and add unit tests for it in CharUtilsTest.

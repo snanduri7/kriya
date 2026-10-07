@@ -1,0 +1,52 @@
+{
+  "base_revision": "5cba51c7e97b29c4e8ab8031197bd1432758c0b5",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 4,
+    "attempt.concluded": 4,
+    "attempt.opened": 4,
+    "authority.snapshot": 4,
+    "candidate.change": 2,
+    "developer.parse": 2,
+    "diagnosis": 4,
+    "fallback.decision": 5,
+    "gate.result": 3,
+    "mirror.decision": 6,
+    "mirror.event": 58,
+    "mirror.evidence": 5,
+    "mirror.gate_outcome": 6,
+    "model.request": 8,
+    "model.response": 8,
+    "model.result": 8,
+    "obligations.snapshot": 4,
+    "prompt.sections": 7,
+    "recovery.decision": 4,
+    "retry.delta": 3,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 1,
+    "unit.opened": 1
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "bb0e29ba9176f6b5905754e6abcafde0f82b9f8d",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-p1/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "b95c47f9e597fb7fa24abcc7129b3c1f74c659b9",
+    "version": "0.1.0"
+  },
+  "records": 153,
+  "run_id": "20261005T151242-6123e867",
+  "seal": {
+    "blob_count": 113,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/p1live-lang-countwords"
+}

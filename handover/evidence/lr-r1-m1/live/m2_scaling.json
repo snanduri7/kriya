@@ -1,0 +1,55 @@
+{
+ "source_runs": [
+  "20261005T132321-13cbc1d7",
+  "20261005T133256-87d73817"
+ ],
+ "files_per_source_store": [
+  70,
+  89
+ ],
+ "measurements": [
+  {
+   "stores": 1,
+   "median_seconds": 0.00178,
+   "max_seconds": 0.00203,
+   "retained_bytes": 209283,
+   "would_prune": 0
+  },
+  {
+   "stores": 10,
+   "median_seconds": 0.01764,
+   "max_seconds": 0.02057,
+   "retained_bytes": 2570050,
+   "would_prune": 0
+  },
+  {
+   "stores": 50,
+   "median_seconds": 0.09889,
+   "max_seconds": 0.10878,
+   "retained_bytes": 12850250,
+   "would_prune": 0
+  },
+  {
+   "stores": 100,
+   "median_seconds": 0.20473,
+   "max_seconds": 0.21216,
+   "retained_bytes": 25700500,
+   "would_prune": 0
+  },
+  {
+   "stores": 200,
+   "median_seconds": 0.43779,
+   "max_seconds": 0.45377,
+   "retained_bytes": 51401000,
+   "would_prune": 0
+  },
+  {
+   "stores": 400,
+   "median_seconds": 1.40136,
+   "max_seconds": 1.489,
+   "retained_bytes": 60945400,
+   "would_prune": 200
+  }
+ ],
+ "note": "dry_run; page cache warm after the first sample; packaged retention defaults"
+}

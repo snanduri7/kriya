@@ -1,0 +1,2 @@
+a40b975f0f0edb7b52e67b1b8268e832a9ec41b9b5a9b79aecf81d5270a8f65f  acceptance/b3-a3-java-lang/KriyaAcceptanceTest.java
+49c05c59b612f5c57d47680b9633e583b67670d6ef9b77811d6a5f325bfcd6c7  acceptance/b3-a3-java-lang/approval.json

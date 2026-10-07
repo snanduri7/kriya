@@ -1,0 +1,228 @@
+{
+ "BASE-1 vs BASE-2": {
+  "raw_identical": false,
+  "raw_differing_lines": 44,
+  "raw_by_category": {
+   "memory_address (random identifier)": 40,
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1,
+   "summary duration (timing)": 1
+  },
+  "first_example_by_category": {
+   "memory_address (random identifier)": {
+    "line": 3257,
+    "old": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff74cfe330>",
+    "new": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff6baf02f0>"
+   },
+   "timing value in assertion text (timing)": {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: 0.0447s -> 0.1489s (3.3x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: 0.0450s -> 0.1478s (3.3x for 2x input)"
+   },
+   "container hostname / env ordering (environment chatter)": {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '225df5982f65', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': 'a458dc25b141', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}"
+   },
+   "summary duration (timing)": {
+    "line": 18812,
+    "old": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.56s ==========",
+    "new": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.19s =========="
+   }
+  },
+  "other": [],
+  "kriya_normalized_identical": false,
+  "after_kriya_normalization": [
+   {
+    "line": 18152,
+    "old": "E       assert 0.14888862400000136 < (0.04471737499999762 * 3)",
+    "new": "E       assert 0.14779624899999533 < (0.044988084000003425 * 3)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '225df5982f65', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': 'a458dc25b141', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "category": "container hostname / env ordering (environment chatter)"
+   }
+  ],
+  "after_kriya_normalization_by_category": {
+   "timing value in assertion text (timing)": 1,
+   "container hostname / env ordering (environment chatter)": 1
+  }
+ },
+ "CANDIDATE-1 vs CANDIDATE-2": {
+  "raw_identical": false,
+  "raw_differing_lines": 44,
+  "raw_by_category": {
+   "memory_address (random identifier)": 40,
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1,
+   "summary duration (timing)": 1
+  },
+  "first_example_by_category": {
+   "memory_address (random identifier)": {
+    "line": 3257,
+    "old": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff6ac25460>",
+    "new": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff8e843ce0>"
+   },
+   "timing value in assertion text (timing)": {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: 0.0433s -> 0.1511s (3.5x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: 0.0429s -> 0.1624s (3.8x for 2x input)"
+   },
+   "container hostname / env ordering (environment chatter)": {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '9277846ce08a', 'SHELL': '/bin/zsh', 'HOME': '/tmp/pytest-of-sriramnanduri/pytest-0/sandbox-home5115', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '5e3203d54cab', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}"
+   },
+   "summary duration (timing)": {
+    "line": 18812,
+    "old": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 58.96s ==========",
+    "new": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.64s =========="
+   }
+  },
+  "other": [],
+  "kriya_normalized_identical": false,
+  "after_kriya_normalization": [
+   {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.5x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.8x for 2x input)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18152,
+    "old": "E       assert 0.1510697500000049 < (0.043309373999996126 * 3)",
+    "new": "E       assert 0.16240799999999922 < (0.04286245800000188 * 3)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '9277846ce08a', 'SHELL': '/bin/zsh', 'HOME': '<volatile> ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '5e3203d54cab', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "category": "container hostname / env ordering (environment chatter)"
+   }
+  ],
+  "after_kriya_normalization_by_category": {
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1
+  }
+ },
+ "BASE-1 vs CANDIDATE-1": {
+  "raw_identical": false,
+  "raw_differing_lines": 44,
+  "raw_by_category": {
+   "memory_address (random identifier)": 40,
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1,
+   "summary duration (timing)": 1
+  },
+  "first_example_by_category": {
+   "memory_address (random identifier)": {
+    "line": 3257,
+    "old": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff74cfe330>",
+    "new": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff6ac25460>"
+   },
+   "timing value in assertion text (timing)": {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: 0.0447s -> 0.1489s (3.3x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: 0.0433s -> 0.1511s (3.5x for 2x input)"
+   },
+   "container hostname / env ordering (environment chatter)": {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '225df5982f65', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '9277846ce08a', 'SHELL': '/bin/zsh', 'HOME': '/tmp/pytest-of-sriramnanduri/pytest-0/sandbox-home5115', ...}"
+   },
+   "summary duration (timing)": {
+    "line": 18812,
+    "old": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.56s ==========",
+    "new": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 58.96s =========="
+   }
+  },
+  "other": [],
+  "kriya_normalized_identical": false,
+  "after_kriya_normalization": [
+   {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.3x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.5x for 2x input)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18152,
+    "old": "E       assert 0.14888862400000136 < (0.04471737499999762 * 3)",
+    "new": "E       assert 0.1510697500000049 < (0.043309373999996126 * 3)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '225df5982f65', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '9277846ce08a', 'SHELL': '/bin/zsh', 'HOME': '<volatile> ...}",
+    "category": "container hostname / env ordering (environment chatter)"
+   }
+  ],
+  "after_kriya_normalization_by_category": {
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1
+  }
+ },
+ "BASE-2 vs CANDIDATE-2": {
+  "raw_identical": false,
+  "raw_differing_lines": 44,
+  "raw_by_category": {
+   "memory_address (random identifier)": 40,
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1,
+   "summary duration (timing)": 1
+  },
+  "first_example_by_category": {
+   "memory_address (random identifier)": {
+    "line": 3257,
+    "old": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff6baf02f0>",
+    "new": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xffff8e843ce0>"
+   },
+   "timing value in assertion text (timing)": {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: 0.0450s -> 0.1478s (3.3x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: 0.0429s -> 0.1624s (3.8x for 2x input)"
+   },
+   "container hostname / env ordering (environment chatter)": {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': 'a458dc25b141', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '5e3203d54cab', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}"
+   },
+   "summary duration (timing)": {
+    "line": 18812,
+    "old": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.19s ==========",
+    "new": "========== 217 failed, 4896 passed, 257 skipped, 3 warnings in 59.64s =========="
+   }
+  },
+  "other": [],
+  "kriya_normalized_identical": false,
+  "after_kriya_normalization": [
+   {
+    "line": 18151,
+    "old": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.3x for 2x input)",
+    "new": "E       AssertionError: scaling looks super-linear: <volatile> -> <volatile> (3.8x for 2x input)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18152,
+    "old": "E       assert 0.14779624899999533 < (0.044988084000003425 * 3)",
+    "new": "E       assert 0.16240799999999922 < (0.04286245800000188 * 3)",
+    "category": "timing value in assertion text (timing)"
+   },
+   {
+    "line": 18409,
+    "old": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': 'a458dc25b141', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "new": "env = {'PATH': '/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOSTNAME': '5e3203d54cab', 'LANG': 'en_IN.UTF-8', 'USER': 'sriramnanduri', ...}",
+    "category": "container hostname / env ordering (environment chatter)"
+   }
+  ],
+  "after_kriya_normalization_by_category": {
+   "timing value in assertion text (timing)": 2,
+   "container hostname / env ordering (environment chatter)": 1
+  }
+ }
+}

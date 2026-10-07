@@ -1,0 +1,142 @@
+{
+  "commit": "5ab9d69",
+  "tests": [
+    "tests/test_b2c_jvm_acceptance.py",
+    "tests/test_b2cov_claim_strength.py",
+    "tests/test_b2a_acceptance_oracle.py",
+    "tests/test_fs1c1_requirement_claims.py",
+    "tests/test_prd020_requirement_lineage.py"
+  ],
+  "mutants": [
+    {
+      "name": "candidate-pom-config-trusted",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "3 failed, 70 passed in 37.17s",
+      "seconds": 38.0
+    },
+    {
+      "name": "candidate-tests-treated-as-acceptance",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "3 failed, 60 passed in 36.75s",
+      "seconds": 37.6
+    },
+    {
+      "name": "model-claim-closes-behavior-write",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 195 passed in 49.98s",
+      "seconds": 50.9
+    },
+    {
+      "name": "model-claim-closes-behavior-read",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "1 failed, 231 passed in 50.94s",
+      "seconds": 51.8
+    },
+    {
+      "name": "c0-closes-behavior",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "2 failed, 68 passed in 37.13s",
+      "seconds": 38.0
+    },
+    {
+      "name": "finite-jvm-examples-close-general-claim",
+      "file": "kriya/workflow/acceptance_oracle.py",
+      "status": "KILLED",
+      "tail": "2 failed, 63 passed in 42.93s",
+      "seconds": 43.9
+    },
+    {
+      "name": "counterexample-fails-to-violate",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "4 failed, 113 passed in 21.04s",
+      "seconds": 21.9
+    },
+    {
+      "name": "missing-junit-identity-treated-as-pass",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 227 passed in 49.75s",
+      "seconds": 50.6
+    },
+    {
+      "name": "stale-surefire-report-accepted",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "2 failed, 223 passed in 49.93s",
+      "seconds": 50.8
+    },
+    {
+      "name": "wrong-candidate-digest-accepted",
+      "file": "kriya/workflow/requirements.py",
+      "status": "KILLED",
+      "tail": "2 failed, 143 passed in 46.78s",
+      "seconds": 47.8
+    },
+    {
+      "name": "wrong-acceptance-digest-accepted",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 132 passed in 45.37s",
+      "seconds": 46.2
+    },
+    {
+      "name": "acceptance-collision-silently-overwritten",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 72 passed in 43.37s",
+      "seconds": 44.3
+    },
+    {
+      "name": "trust-surface-output-root-ignored",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 82 passed in 44.19s",
+      "seconds": 45.1
+    },
+    {
+      "name": "harness-compile-error-treated-as-violation",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "2 failed, 113 passed in 37.42s",
+      "seconds": 38.3
+    },
+    {
+      "name": "candidate-compile-failure-treated-as-violation",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 231 passed in 50.58s",
+      "seconds": 51.5
+    },
+    {
+      "name": "harness-exception-treated-as-contradiction",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 202 passed in 45.92s",
+      "seconds": 46.8
+    },
+    {
+      "name": "assertion-without-candidate-reference-violates",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "1 failed, 230 passed in 50.75s",
+      "seconds": 51.7
+    },
+    {
+      "name": "report-files-not-reverified",
+      "file": "kriya/workflow/acceptance_jvm.py",
+      "status": "KILLED",
+      "tail": "2 failed, 114 passed in 45.58s",
+      "seconds": 46.5
+    }
+  ],
+  "baseline": "232 passed in 52.98s",
+  "counts": {
+    "KILLED": 18
+  }
+}

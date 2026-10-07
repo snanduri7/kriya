@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 from _protocol_responses import as_requested
 
 from kriya.config import AppConfig
+from kriya.config.config import FallbackModelConfig
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -100,6 +101,7 @@ FULL_FILE = "FIX ANALYSIS: rewrite.\nFILE CONTENT:\n" + TARGET_SOURCE.replace(NA
 class EditRun:
     result: dict
     developer: List[tuple] = field(default_factory=list)  # (system, user) per Developer generation request
+    developer_models: List[str] = field(default_factory=list)  # the model each Developer request went to
     events: list = field(default_factory=list)
 
     def kinds(self, kind):
@@ -110,11 +112,12 @@ def _git(workspace, *args):
     subprocess.run(["git", *args], cwd=workspace, check=True, capture_output=True)
 
 
-def make_workspace(tmp_path, source=TARGET_SOURCE):
+def make_workspace(tmp_path, source=TARGET_SOURCE, target=TARGET):
     workspace = tmp_path / "ws"
-    (workspace / "pkg").mkdir(parents=True)
-    (workspace / "pkg" / "__init__.py").write_text("")
-    (workspace / TARGET).write_text(source)
+    (workspace / target).parent.mkdir(parents=True)
+    if target == TARGET:
+        (workspace / "pkg" / "__init__.py").write_text("")
+    (workspace / target).write_text(source)
     _git(workspace, "init", "-q")
     _git(workspace, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
     _git(workspace, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
@@ -127,7 +130,7 @@ PRODUCTION_CAPABILITIES = {"native_tool_calls": True, "json_mode": True, "reliab
                            "preferred_edit_protocol": "small_native_tools"}
 
 
-def make_config(tmp_path, window=32768, capabilities=None, max_tokens=None):
+def make_config(tmp_path, window=32768, capabilities=None, max_tokens=None, fallback=None):
     cfg = AppConfig()
     if max_tokens is not None:
         cfg.llm.max_tokens = max_tokens
@@ -136,7 +139,8 @@ def make_config(tmp_path, window=32768, capabilities=None, max_tokens=None):
     cfg.llm.model = "dev-model"
     cfg.llm.context_window = window
     cfg.llm.extra_body = {}
-    cfg.llm_chain = []
+    cfg.llm_chain = [] if fallback is None else [FallbackModelConfig(
+        model=fallback, context_window=window, capabilities=cfg.llm.capabilities)]
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.spec_compliance_enabled = False
@@ -149,26 +153,33 @@ def make_config(tmp_path, window=32768, capabilities=None, max_tokens=None):
 
 def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, window=32768,
                       probe: Callable = None, goal: str = GOAL, capabilities=PRODUCTION_CAPABILITIES,
-                      source: str = TARGET_SOURCE, max_tokens=None) -> EditRun:
+                      source: str = TARGET_SOURCE, max_tokens=None, target: str = TARGET,
+                      fallback: str = None, fallback_answers: List[str] = (), requirement_contract=None) -> EditRun:
     """One real direct run of the brownfield repair. The Developer gives the
-    scripted answers in order, then keeps giving the last one."""
+    scripted answers in order, then keeps giving the last one. With
+    ``fallback`` the chain has that one fallback model, which answers from
+    ``fallback_answers`` the same way. ``requirement_contract`` (GR-R1A) is
+    bound to the engine as the CLI binds ``--requirements``."""
     if probe is not None:
         monkeypatch.setattr(model_runtime, "probe_model_runtime", probe)
     model_runtime.clear_model_runtime_cache()
-    cfg = make_config(tmp_path, window, capabilities, max_tokens)
-    workspace = make_workspace(tmp_path, source)
+    cfg = make_config(tmp_path, window, capabilities, max_tokens, fallback)
+    workspace = make_workspace(tmp_path, source, target)
     answers = list(developer_answers)
+    backup = list(fallback_answers)
     run = EditRun(result={})
     real_record = GenerationState.record_event
 
     async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
-        del llm, client, model, args, kwargs
+        del llm, client, args, kwargs
         first = (system_prompt or "").splitlines()[0] if system_prompt else ""
         if "File List Planner" in first:
-            content = json.dumps({"files": [TARGET]})
+            content = json.dumps({"files": [target]})
         elif "Developer Agent" in first:
             run.developer.append((system_prompt, user_prompt))
-            content = as_requested(answers.pop(0) if len(answers) > 1 else answers[0], system_prompt, TARGET)
+            run.developer_models.append(model)
+            script = backup if fallback is not None and model == fallback else answers
+            content = as_requested(script.pop(0) if len(script) > 1 else script[0], system_prompt, target)
         else:
             content = "Review: Approved"
         # A plausible provider count (about 3.5 bytes per token): an
@@ -183,6 +194,7 @@ def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, wi
         return real_record(state, event)
 
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    engine.requirement_contract = requirement_contract
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record_spy), \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
@@ -191,8 +203,8 @@ def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, wi
                new=lambda *a, **k: {"success": True, "output": "ok"}):
         run.result = asyncio.run(engine.run_generation_workflow(
             goal=goal, workspace_path=str(workspace),
-            predetermined_plan=f"Repair {TARGET}", predetermined_design="",
-            predetermined_architect_files=[TARGET],
+            predetermined_plan=f"Repair {target}", predetermined_design="",
+            predetermined_architect_files=[target],
             approval_callback=AsyncMock(return_value=True)))
     run.workspace, run.config = workspace, cfg
     return run

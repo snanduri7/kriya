@@ -52,6 +52,10 @@ class _FakeState:
         self.attempt_number = 1
         self.gate_outcomes = []
 
+    def record_gate_outcome(self, outcome):
+        """GenerationState's one gate-outcome producer (LR-R1-M1.3)."""
+        self.gate_outcomes.append(outcome)
+
 
 class _FakeCtx:
     def __init__(self, worktree_path):

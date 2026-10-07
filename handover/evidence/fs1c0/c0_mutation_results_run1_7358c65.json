@@ -1,0 +1,168 @@
+{
+ "commit": "7358c65",
+ "tests": [
+  "tests/test_fs1c0_named_test_oracle.py",
+  "tests/test_fs1c_named_test_oracle_dependency.py",
+  "tests/test_prd020_requirement_lineage.py",
+  "tests/test_d8_terminal_toolchain_authority.py",
+  "tests/test_fs1a_test_execution_evidence.py",
+  "tests/test_fs1_false_success_reproducer.py"
+ ],
+ "mutants": [
+  {
+   "label": "ignore-conftest-and-package-files",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "6 failed, 15 passed in 8.66s",
+   "seconds": 9.5
+  },
+  {
+   "label": "ignore-support-module-closure",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "3 failed, 75 passed in 6.48s",
+   "seconds": 7.4
+  },
+  {
+   "label": "ignore-runner-ini-files",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 59 passed in 6.09s",
+   "seconds": 6.9
+  },
+  {
+   "label": "ignore-pyproject-pytest-config",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 41 passed in 5.45s",
+   "seconds": 6.3
+  },
+  {
+   "label": "ignore-setup-cfg-pytest-config",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 29 passed in 5.52s",
+   "seconds": 6.5
+  },
+  {
+   "label": "ignore-declared-dependencies",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 29 passed in 5.29s",
+   "seconds": 6.2
+  },
+  {
+   "label": "candidate-report-trusted-blindly",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 54 passed in 5.77s",
+   "seconds": 6.7
+  },
+  {
+   "label": "candidate-exit-code-trusted-blindly",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "3 failed, 42 passed in 5.02s",
+   "seconds": 5.9
+  },
+  {
+   "label": "runner-failure-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 53 passed in 5.57s",
+   "seconds": 6.5
+  },
+  {
+   "label": "missing-baseline-identity-accepted",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 50 passed in 5.02s",
+   "seconds": 6.0
+  },
+  {
+   "label": "skipped-or-deselected-baseline-identity-accepted",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 53 passed in 5.17s",
+   "seconds": 6.0
+  },
+  {
+   "label": "stale-inventory-from-candidate-tree",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 71 passed in 5.38s",
+   "seconds": 6.2
+  },
+  {
+   "label": "stale-inventory-head-not-run-base",
+   "file": "kriya/workflow/workflow.py",
+   "status": "KILLED",
+   "summary": "1 failed, 94 passed in 7.83s",
+   "seconds": 8.7
+  },
+  {
+   "label": "incomplete-baseline-inventory-accepted",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 58 passed in 5.83s",
+   "seconds": 6.7
+  },
+  {
+   "label": "digest-mismatch-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "4 failed, 64 passed in 5.33s",
+   "seconds": 6.2
+  },
+  {
+   "label": "change-during-run-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 137 passed in 8.20s",
+   "seconds": 9.1
+  },
+  {
+   "label": "parameter-cases-collapsed",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "2 failed, 46 passed in 6.27s",
+   "seconds": 7.2
+  },
+  {
+   "label": "output-root-writes-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "SURVIVED",
+   "summary": "151 passed in 18.51s",
+   "seconds": 19.4
+  },
+  {
+   "label": "unsupported-runner-accepted",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 82 passed in 6.91s",
+   "seconds": 7.8
+  },
+  {
+   "label": "jvm-test-classpath-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "SURVIVED",
+   "summary": "151 passed in 13.13s",
+   "seconds": 14.0
+  },
+  {
+   "label": "test-resources-ignored",
+   "file": "kriya/workflow/named_test_oracle.py",
+   "status": "KILLED",
+   "summary": "1 failed, 29 passed in 5.86s",
+   "seconds": 6.7
+  },
+  {
+   "label": "closure-binding-dropped",
+   "file": "kriya/workflow/requirements.py",
+   "status": "KILLED",
+   "summary": "2 failed, 83 passed in 6.71s",
+   "seconds": 7.6
+  }
+ ],
+ "baseline": "151 passed in 17.56s"
+}

@@ -1,0 +1,1 @@
+Add a function `count_unique(iterable, key=None)` to more_itertools/more.py that returns the number of distinct items in the iterable (distinct by `key(item)` when a key function is given), add it to the module's `__all__`, and add tests for it in tests/test_more.py.

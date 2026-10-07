@@ -57,6 +57,10 @@ REPEATED_VECTOR = "REPEATED_VECTOR"
 SAMPLING_RESAMPLE = "SAMPLING_RESAMPLE"
 # Terminal reason when the configured no-progress bound is reached.
 NO_PROGRESS_TERMINAL_REASON = "RETRY_NO_PROGRESS_EXHAUSTED"
+# LR-R1-P4: a failed verification-only attempt whose next attempt could only
+# repeat the same verification on the same inputs (no mutation authority, no
+# changed input, no recovery route): stopped before an equivalent retry.
+VERIFICATION_RETRY_NO_CHANGE_POSSIBLE = "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
 # Reason an identical-evidence retry is refused (no stochastic variation).
 SAMPLING_NOT_PERMITTED = "SAMPLING_NOT_PERMITTED"
 

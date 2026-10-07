@@ -8,7 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, Tuple
 
 import click
 
@@ -1304,6 +1304,150 @@ def model_certification(ctx: click.Context, json_output: bool) -> None:
         ctx.exit(1)
 
 
+@main.group(name="evidence")
+def evidence_group() -> None:
+    """LR-R1-M1: the per-run attempt evidence store (local-only). Read-only,
+    except ``prune``; built on the store's reader API."""
+
+
+def _evidence_state_dir(ctx: click.Context) -> str:
+    from kriya.core.state_paths import resolve_state_directory
+
+    return resolve_state_directory(ctx.obj["config"])[0]
+
+
+def _answer_line(label: str, question: str, answer: Mapping[str, Any]) -> str:
+    status = answer.get("status")
+    if status == "RECORDED":
+        return f"  {label} {question} RECORDED ({len(answer.get('items') or [])} record(s))"
+    return f"  {label} {question} {str(status).replace('_', ' ')} ({answer.get('reason')})"
+
+
+@evidence_group.command(name="show")
+@click.argument("run_id", required=False)
+@click.option("--content", "content_ref", help="Print the exact bytes of one content reference (sha256:...).")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_show(ctx: click.Context, run_id: Optional[str], content_ref: Optional[str], json_output: bool) -> None:
+    """List recorded runs, or show one run's identity, integrity and records."""
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.attempt_evidence.explain import run_summary
+
+    state_dir = _evidence_state_dir(ctx)
+    if run_id is None:
+        runs = reader.list_runs(state_dir)
+        if json_output:
+            click.echo(json.dumps({"state_dir": state_dir, "runs": runs}, indent=2))
+        else:
+            click.echo(f"Attempt evidence in {state_dir}: {len(runs)} run(s)")
+            for name in runs:
+                click.echo(f"  {name}")
+        return
+    if content_ref:
+        try:
+            data = reader.open_run(state_dir, run_id).blob(content_ref)
+        except (reader.BlobCorrupt, OSError) as error:
+            click.secho(f"content unavailable: {error}", fg="red", err=True)
+            sys.exit(2)
+        sys.stdout.buffer.write(data)
+        return
+    summary = run_summary(state_dir, run_id)
+    if json_output:
+        click.echo(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    elif summary["verification"] == reader.NOT_FOUND:
+        click.echo(f"Run {run_id}: ATTEMPT EVIDENCE UNAVAILABLE (no store for this run)")
+    else:
+        click.echo(f"Run {run_id}: {summary['verification']}, {summary['records']} record(s), "
+                   f"capture {summary.get('capture')}, sealed {summary['sealed']}")
+        for kind, count in summary.get("kinds", {}).items():
+            click.echo(f"  {kind}: {count}")
+    if summary["verification"] == reader.NOT_FOUND:
+        sys.exit(1)
+
+
+@evidence_group.command(name="explain")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_explain(ctx: click.Context, run_id: str, json_output: bool) -> None:
+    """Answer the nine attempt-evidence questions for each attempt of a run."""
+    from kriya.core.attempt_evidence.explain import QUESTIONS, explain_run
+
+    result = explain_run(_evidence_state_dir(ctx), run_id)
+    if json_output:
+        click.echo(json.dumps(result, indent=2, sort_keys=True, default=str))
+    elif "unavailable" in result:
+        click.echo(f"Run {run_id}: {result['unavailable']}")
+    else:
+        click.echo(f"Run {run_id}: evidence {result['verification']}, capture {result.get('capture')}")
+        for attempt in result["attempts"]:
+            click.echo(f"Attempt {attempt['attempt']} (unit {attempt['unit_id']}, "
+                       f"invocation {attempt['invocation_seq']}):")
+            for label, question in QUESTIONS.items():
+                if label in attempt["answers"]:
+                    click.echo(_answer_line(label, question, attempt["answers"][label]))
+        if result["calls_outside_attempts"]:
+            click.echo("Model calls outside attempts: " + ", ".join(
+                f"{phase} {count}" for phase, count in result["calls_outside_attempts"].items()))
+        click.echo("Run:")
+        click.echo(_answer_line("Q9", QUESTIONS["Q9"], result["Q9"]))
+    if "unavailable" in result:
+        sys.exit(1)
+
+
+@evidence_group.command(name="verify")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_verify(ctx: click.Context, run_id: str, json_output: bool) -> None:
+    """Recompute a run's hash chain, blobs and seal (exit 0 only when VERIFIED)."""
+    from kriya.core.attempt_evidence import reader
+
+    try:
+        verification = reader.open_run(_evidence_state_dir(ctx), run_id).verify()
+    except (reader.UnsupportedEvidenceSchema, ValueError, OSError) as error:
+        click.secho(f"evidence for {run_id} could not be read: {error}", fg="red", err=True)
+        sys.exit(2)
+    payload = {"run_id": run_id, "status": verification.status, "records": verification.record_count,
+               "sealed": verification.sealed, "broken_seq": verification.broken_seq,
+               "detail": verification.detail, "blob_problems": verification.blob_problems}
+    if json_output:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        click.echo(f"{run_id}: {verification.status} ({verification.record_count} record(s)"
+                   + (f"; {verification.detail}" if verification.detail else "") + ")")
+        for problem in verification.blob_problems:
+            click.echo(f"  {problem}")
+    if verification.status != reader.VERIFIED:
+        sys.exit(1 if verification.status in (reader.UNSEALED, reader.NOT_FOUND) else 2)
+
+
+@evidence_group.command(name="prune")
+@click.option("--dry-run", is_flag=True, help="Show what would be pruned; write nothing.")
+@click.option("--workspace", type=click.Path(file_okay=False), default=".",
+              help="Protect the runs this workspace references (default: the current directory).")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_prune(ctx: click.Context, dry_run: bool, workspace: str, json_output: bool) -> None:
+    """Apply evidence.attempt_recorder.retention to the store now."""
+    from kriya.control.retention import workspace_run_references
+    from kriya.core.attempt_evidence.retention import prune_evidence
+
+    cfg: AppConfig = ctx.obj["config"]
+    bounds = cfg.evidence.attempt_recorder.retention
+    report = prune_evidence(_evidence_state_dir(ctx), keep_runs=bounds.keep_runs, max_bytes=bounds.max_bytes,
+                            protect_run_ids=workspace_run_references(os.path.realpath(workspace)),
+                            dry_run=dry_run)
+    if json_output:
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        return
+    verb = "Would prune" if dry_run else "Pruned"
+    click.echo(f"{verb} {len(report.pruned)} run store(s) ({report.freed_bytes} bytes); kept {len(report.kept)}, "
+               f"protected {len(report.protected)}; {report.retained_bytes} bytes retained")
+    for run_id in report.pruned:
+        click.echo(f"  {run_id}")
+
+
 @main.group(name="metrics")
 def metrics_group() -> None:
     """PRD-033: production metrics derived from persisted run evidence, and
@@ -2453,16 +2597,64 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
 @click.option('--from-milestones', type=click.Path(exists=True), default=None, help="Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.")
+@click.option('--acceptance', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.")
+@click.option('--acceptance-approval', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator approval (JSON, outside the workspace) that the --acceptance suite is SUFFICIENT evidence for named GENERAL requirements - human authority, not a proof (B3). Every binding (goal, requirement text, acceptance digest, cases, runner contract, base revision) must match.")
+@click.option('--requirements', 'requirements_file', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
-                       resume, resume_id, json_output, from_milestones, output)
+                       resume, resume_id, json_output, from_milestones, output, acceptance=acceptance,
+                       acceptance_approval=acceptance_approval, requirements_file=requirements_file)
+
+
+def _bind_requirement_contract(cfg: AppConfig, contract_path: str, requirement_goal: str) -> Any:
+    """GR-R1A: reads, validates and stores the operator's explicit requirement
+    contract before any model call, bound to ``requirement_goal``. Raises
+    RequirementContractError."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.requirement_contract import load_requirement_contract
+
+    return load_requirement_contract(contract_path, requirement_goal, state_root=resolve_state_directory(cfg)[0],
+                                     workspace=os.getcwd())
+
+
+def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str, contract: Any = None) -> Any:
+    """FS-1C2 B2-a: reads, validates and stores the operator's acceptance file
+    before any model call, bound to the requirements derived from
+    ``requirement_goal`` (the goal the run verifies: the direct goal, or a
+    milestone plan's original goal). Raises AcceptanceError on refusal."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.acceptance_oracle import load_acceptance
+    from kriya.workflow.requirement_contract import requirement_set_for
+
+    return load_acceptance(acceptance_path, requirement_set_for(requirement_goal, contract),
+                           resolve_state_directory(cfg)[0])
+
+
+def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, acceptance: Any,
+                   contract: Any = None) -> Any:
+    """FS-1C2 B3: reads, validates and stores the operator's approval before
+    any model call, bound to this goal's requirements, the bound acceptance
+    artifact and the workspace's base revision. Raises AcceptanceError."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.acceptance_approval import load_approval
+    from kriya.workflow.requirement_contract import requirement_set_for
+    from kriya.workflow.worktree import git_read_lines
+
+    workspace = os.getcwd()
+    try:
+        base_revision = git_read_lines(workspace, "rev-parse", "HEAD")[0]
+    except Exception:  # no repository: no base to bind; load_approval refuses
+        base_revision = None
+    return load_approval(approval_path, requirement_set_for(requirement_goal, contract), acceptance,
+                         state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=base_revision)
 
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
-                   resume, resume_id, json_output, from_milestones, output):
+                   resume, resume_id, json_output, from_milestones, output, acceptance=None,
+                   acceptance_approval=None, requirements_file=None):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -2483,9 +2675,62 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd(),
                                       milestone_plan=from_milestones)
 
+    acceptance_artifact = None
+    approval_artifact = None
+    contract_artifact = None
+    requirement_goal = goal
+    if from_milestones and (acceptance or requirements_file):
+        try:
+            with open(from_milestones, "r", encoding="utf-8") as fh:
+                requirement_goal = json.load(fh)["original_goal"]
+        except (OSError, ValueError, KeyError) as e:
+            click.secho(f"[Milestone plan refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+    if requirements_file:
+        # GR-R1A: the operator's closed requirement set, bound before any model
+        # call and before the acceptance file (whose ids must resolve in it).
+        from kriya.workflow.requirement_contract import RequirementContractError
+        try:
+            contract_artifact = _bind_requirement_contract(cfg, requirements_file, requirement_goal or "")
+        except RequirementContractError as e:
+            click.secho(f"[Requirement contract refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        click.secho(f"Requirement contract bound: {contract_artifact.source_name} sha256 "
+                    f"{contract_artifact.digest[:12]} ({len(contract_artifact.requirement_set.requirements)} "
+                    f"requirement(s), closed set: {', '.join(contract_artifact.requirement_set.ids)})",
+                    dim=True, err=True)
+    if acceptance_approval and not acceptance:
+        click.secho("[Acceptance approval refused] --acceptance-approval needs the --acceptance suite it approves",
+                    bold=True, fg="red")
+        output.fail("--acceptance-approval without --acceptance")
+        sys.exit(1)
+    if acceptance:
+        from kriya.workflow.acceptance_oracle import AcceptanceError
+        try:
+            acceptance_artifact = _bind_acceptance(cfg, acceptance, requirement_goal, contract_artifact)
+            if acceptance_approval:
+                approval_artifact = _bind_approval(cfg, acceptance_approval, requirement_goal, acceptance_artifact,
+                                                   contract_artifact)
+        except (AcceptanceError, OSError, ValueError, KeyError) as e:
+            click.secho(f"[Acceptance file refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        click.secho(f"Acceptance file bound: {acceptance_artifact.source_name} sha256 "
+                    f"{acceptance_artifact.digest[:12]} ({len(acceptance_artifact.cases)} case(s) for "
+                    f"{', '.join(acceptance_artifact.requirement_ids)})", dim=True, err=True)
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
+    we.acceptance = acceptance_artifact
+    we.acceptance_approval = approval_artifact
+    we.requirement_contract = contract_artifact
+    if approval_artifact is not None:
+        click.secho(f"Acceptance approval bound: {approval_artifact.source_name} sha256 {approval_artifact.digest[:12]} "
+                    f"(human acceptance authority for {', '.join(sorted(approval_artifact.entries))}; not a proof)",
+                    dim=True, err=True)
     
     current_step = None
 

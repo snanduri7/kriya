@@ -1,0 +1,50 @@
+{
+ "subtask_status": {
+  "s1": "completed",
+  "s2": "completed"
+ },
+ "legacy_status": "failed",
+ "integration_log": [
+  "INTEGRATION_OBLIGATION_VIOLATED id=plan.integration.ir1 consumer=s2 missing=['shop/service.py']"
+ ],
+ "terminal_obligations_log": [
+  "TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): plan.integration.ir1 (violated, authority=deterministic)"
+ ],
+ "files_by_trace_row": {
+  "d066114a": "shop/service.py",
+  "b5d45fb0": "",
+  "20261005T162621-2d93f36d.enforce": "shop/service.py"
+ },
+ "workspace_service_applied": false,
+ "model_calls": 3,
+ "model_calls_by_role": {
+  "developer": 2,
+  "reviewer": 1
+ },
+ "integration_events": [],
+ "evidence_verify": "VERIFIED",
+ "Q9": {
+  "terminal_cause": {
+   "source": "terminal_gates",
+   "failed_gates": [
+    {
+     "seq": 83,
+     "gate": "terminal_obligations",
+     "content": {
+      "output": "sha256:36e5d12a22dc40cabecbe898406bf173ac0c03f6722b49c671223d05bbcb9834"
+     }
+    }
+   ]
+  },
+  "failed_terminal_gates": [
+   {
+    "seq": 83,
+    "gate": "terminal_obligations",
+    "content": {
+     "output": "sha256:36e5d12a22dc40cabecbe898406bf173ac0c03f6722b49c671223d05bbcb9834"
+    }
+   }
+  ],
+  "integration_obligations": null
+ }
+}

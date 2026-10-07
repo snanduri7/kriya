@@ -1,0 +1,7 @@
+baseline 38 passed in 6.65s
+gap-loci-dropped KILLED 2 failed, 23 passed in 8.21s
+stitch-detection-skipped KILLED 3 failed, 20 passed in 4.94s
+ambiguous-part-accepted KILLED 1 failed, 23 passed in 5.02s
+out-of-order-parts-accepted KILLED 1 failed, 24 passed in 4.96s
+shortest-part-not-longest KILLED 1 failed, 28 passed in 4.91s
+TOTAL 5 {'KILLED': 5}

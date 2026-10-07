@@ -1,0 +1,49 @@
+{
+  "base_revision": "5cba51c7e97b29c4e8ab8031197bd1432758c0b5",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 1,
+    "attempt.concluded": 1,
+    "attempt.opened": 1,
+    "authority.snapshot": 1,
+    "diagnosis": 1,
+    "fallback.decision": 1,
+    "gate.result": 1,
+    "mirror.decision": 6,
+    "mirror.event": 21,
+    "mirror.evidence": 2,
+    "mirror.gate_outcome": 1,
+    "model.request": 3,
+    "model.response": 3,
+    "model.result": 3,
+    "obligations.snapshot": 1,
+    "prompt.sections": 2,
+    "recovery.decision": 1,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 1,
+    "unit.opened": 1
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "6530138fc6106b19b9329baab84ef903c2df2b2d",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-p5/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "265b9a507f4bbb1179fcb56e8c78dfb9b5ce6d25",
+    "version": "0.1.0"
+  },
+  "records": 54,
+  "run_id": "20261005T183121-9434e9d6",
+  "seal": {
+    "blob_count": 42,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/v5-t4-lang-count-true"
+}

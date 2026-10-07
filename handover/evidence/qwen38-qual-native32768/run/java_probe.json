@@ -1,0 +1,170 @@
+{
+ "probe": "java_edit_probe",
+ "affects_8_verdict": false,
+ "status": "OK",
+ "budget": {
+  "prompt_tokens": 705,
+  "exact": false,
+  "approximate": true,
+  "counting_method": "qualified_byte_bound",
+  "context_window": 32768,
+  "window_source": "served_observed",
+  "requested_max_tokens": 12288,
+  "max_tokens": 12288,
+  "min_output_tokens": 1024,
+  "reasoning_allowance": 2048,
+  "satisfiable": true,
+  "output_reduced": false,
+  "policy_mode": "strict",
+  "preferred_context_window": 32768,
+  "preferred_output_tokens": 12288,
+  "selected_context_window": 32768,
+  "selected_output_tokens": 12288,
+  "required_tokens": 4033,
+  "expected_output_tokens": null,
+  "output_grounding": null,
+  "context_expanded": false,
+  "output_expanded": false,
+  "selection_reason": "fits_preferred",
+  "qualification_source": "preferred",
+  "hard_context_ceiling": 262144,
+  "hard_output_ceiling": null,
+  "safety_margin": 256,
+  "context_state": {
+   "requested_context_window": 32768,
+   "served_context_window": 32768,
+   "served_context_provenance": "server_observed",
+   "budget_context_window": 32768
+  },
+  "reasoning_reserve_source": "unqualified_default",
+  "considered_tiers": [
+   {
+    "tokens": 32768,
+    "source": "preferred",
+    "room": 31807,
+    "fits": true
+   }
+  ],
+  "tier_note": "strict policy: the preferred window is the limit",
+  "reported_prompt_tokens": 302,
+  "under_predicted": false
+ },
+ "analysis": true,
+ "edit_count": 1,
+ "applied": true,
+ "applied_parses": true,
+ "defines_total": true,
+ "changed": true,
+ "convention_kept": true,
+ "protocol_reason_code": null,
+ "notes": [],
+ "applied_text": "package demo;\n\npublic class Calc {\n    public static int total(int[] prices) {\n        int result = 0;\n        for (int p : prices) {\n            if (p >= 0) {\n                result += p;\n            }\n        }\n        return result;\n    }\n}\n",
+ "raw_response": "Add a guard inside the loop so that only non-negative prices are accumulated into the result.\n<<<KRIYA:EDIT path=\"src/main/java/demo/Calc.java\">>>\n<<<KRIYA:SEARCH>>>\n        for (int p : prices) {\n            result += p;\n        }\n<<<KRIYA:REPLACE>>>\n        for (int p : prices) {\n            if (p >= 0) {\n                result += p;\n            }\n        }\n<<<KRIYA:END_EDIT>>>",
+ "model": "qwen3.8:27b",
+ "runtime_fingerprint": "b9acd699817e65ae545a2a3c0f55296f7cf3b99eb45738e26589a886c02ccce4",
+ "runtime_fingerprint_exact": true,
+ "inference_settings_digest": "sha256:c6e806f1338d52179afadde5d916cb9cd5b9f5d8919a84ec5a9afb88dcccf4ac",
+ "protocol": {
+  "json_mode": false,
+  "json_schema": false,
+  "streaming": false,
+  "tools": false,
+  "reasoning_model": true,
+  "response_format_dropped": false,
+  "empty_content_floor_retry": false,
+  "provider_contract": {
+   "adapter": "ollama_native",
+   "settings": {
+    "context_window": {
+     "effective": 32768,
+     "provenance": "request"
+    },
+    "min_p": {
+     "effective": 0,
+     "provenance": "server_model_config"
+    },
+    "presence_penalty": {
+     "effective": null,
+     "provenance": "unverified",
+     "server_config_observed": 0
+    },
+    "reasoning": {
+     "effective": "model_default",
+     "provenance": "request"
+    },
+    "repeat_penalty": {
+     "effective": 1,
+     "provenance": "server_model_config"
+    },
+    "temperature": {
+     "effective": 0.2,
+     "provenance": "request"
+    },
+    "top_k": {
+     "effective": 20,
+     "provenance": "server_model_config"
+    },
+    "top_p": {
+     "effective": 0.95,
+     "provenance": "server_model_config"
+    }
+   },
+   "context": {
+    "requested_context_window": 32768,
+    "served_context_window": 32768,
+    "served_context_provenance": "server_observed",
+    "budget_context_window": 32768
+   },
+   "timeout_seconds": {
+    "connect": 10.0,
+    "read": 900.0
+   },
+   "inference_deadline_bound": false,
+   "deadline": {
+    "deadline_bound": false,
+    "deadline_source": null,
+    "configured_transport_timeout_ms": 900000,
+    "effective_request_timeout_ms": 900000,
+    "elapsed_request_ms": 20362
+   },
+   "sdk_max_retries": 0,
+   "proxy_policy": "direct",
+   "served_context_observation": {
+    "status": "observed",
+    "window": 32768,
+    "reason": null
+   },
+   "served_context_window_after_call": 32768,
+   "prompt_tokens_reported": 302,
+   "dispatched_bytes": 1118,
+   "prompt_consumption": "consistent"
+  }
+ },
+ "reasoning_present": true,
+ "reasoning_chars": 476,
+ "reasoning_source": "reasoning_field",
+ "tool_call_count": 0,
+ "tool_call_sources": [],
+ "finish_reason": "stop",
+ "prompt_tokens": 302,
+ "completion_tokens": 241,
+ "tokens_estimated": false,
+ "elapsed_seconds": 20.363,
+ "parser_status": "not_applicable",
+ "backend_status": "ok",
+ "backend_error": null,
+ "max_tokens": 12288,
+ "output_truncated": false,
+ "content_chars": 382,
+ "provider_metadata": {
+  "prompt_eval_ms": 2777,
+  "load_ms": 30,
+  "model": "qwen3.8:27b"
+ },
+ "prefix_reuse": {
+  "prefix_shared_chars": 0,
+  "prefix_break": "first_request"
+ },
+ "probe_status": "PASS",
+ "probe_status_note": "recomputed post-hoc from the recorded fields with the probe's own rule: the original output's 'status' key was the merged completion status (OK), which overwrote the probe verdict (script bug, fixed)"
+}

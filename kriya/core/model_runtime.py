@@ -249,10 +249,14 @@ def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint", 
 def kriya_protocol_identity(config: Any, model: str) -> str:
     """The Kriya-side protocol selected for this model: the resolved
     capability profile (which decides native tool calls, JSON mode, edit
-    protocol and tool-argument limits) plus its provenance."""
-    from kriya.core.model_capabilities import resolve_model_capability_profile
+    protocol and tool-argument limits) plus its provenance. LR-R1-P1: the
+    DECLARED profile (operator declaration / known profile / conservative
+    default), never the qualification-derived one - the record that derives
+    capabilities is found by this fingerprint, so it cannot also be an input
+    to it. Every existing fingerprint is unchanged."""
+    from kriya.core.model_capabilities import declared_capability_profile
 
-    profile = resolve_model_capability_profile(config, model)
+    profile = declared_capability_profile(config, model)
     caps = profile.capabilities.model_dump() if hasattr(profile.capabilities, "model_dump") else dict(profile.capabilities)
     canonical = json.dumps({"capabilities": caps, "source": profile.source}, sort_keys=True, separators=(",", ":"))
     return "capabilities-sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -1280,24 +1284,31 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         if isinstance(model, str) and model and "model" not in out.provider_metadata:
             out.provider_metadata["model"] = model
 
+    def wire_payload(self, request: ChatRequest, *, stream: bool) -> Dict[str, Any]:
+        """The exact JSON body posted to ``/api/chat``."""
+        return self._payload(request, stream=stream)
+
     async def complete(self, client: Any, request: ChatRequest) -> ChatResponse:
         http = self._http(client)
         timeout = request.timeout if request.timeout is not None else http.timeout
         out = ChatResponse(content="")
         if request.stream_callback is None:
-            response = await http.post(self._url(client), json=self._payload(request, stream=False),
+            response = await http.post(self._url(client), json=self.wire_payload(request, stream=False),
                                        headers=self._headers(client), timeout=timeout)
             if response.status_code >= 400:
                 self._raise_for(response.status_code, response.text)
             data = response.json()
             message = data.get("message") or {}
-            out.content = (message.get("content") or "").strip()
+            out.raw_content = message.get("content") or ""
+            out.content = out.raw_content.strip()
+            out.reasoning_text = message.get("thinking") or None
             out.reasoning_chars = len(message.get("thinking") or "")
             self._read(out, {**data, "done": True})
             return out
         # Exactly one request, streamed as NDJSON.
         chunks: List[str] = []
-        async with http.stream("POST", self._url(client), json=self._payload(request, stream=True),
+        thinking: List[str] = []
+        async with http.stream("POST", self._url(client), json=self.wire_payload(request, stream=True),
                                headers=self._headers(client), timeout=timeout) as response:
             if response.status_code >= 400:
                 self._raise_for(response.status_code, (await response.aread()).decode("utf-8", "replace"))
@@ -1309,24 +1320,29 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                     self._raise_for(500, str(chunk["error"]))
                 message = chunk.get("message") or {}
                 out.reasoning_chars += len(message.get("thinking") or "")
+                if message.get("thinking"):
+                    thinking.append(message["thinking"])
                 piece = message.get("content") or ""
                 if piece:
                     chunks.append(piece)
                     request.stream_callback(piece)
                 self._read(out, chunk)
-        out.content = "".join(chunks).strip()
+        out.raw_content = "".join(chunks)
+        out.reasoning_text = "".join(thinking) or None
+        out.content = out.raw_content.strip()
         return out
 
     async def complete_with_tools(self, client: Any, request: ChatRequest) -> ChatResponse:
         http = self._http(client)
         timeout = request.timeout if request.timeout is not None else http.timeout
-        response = await http.post(self._url(client), json=self._payload(request, stream=False),
+        response = await http.post(self._url(client), json=self.wire_payload(request, stream=False),
                                    headers=self._headers(client), timeout=timeout)
         if response.status_code >= 400:
             self._raise_for(response.status_code, response.text)
         data = response.json()
         message = data.get("message") or {}
-        out = ChatResponse(content=message.get("content") or "", reasoning_chars=len(message.get("thinking") or ""))
+        out = ChatResponse(content=message.get("content") or "", reasoning_chars=len(message.get("thinking") or ""),
+                           raw_content=message.get("content") or "", reasoning_text=message.get("thinking") or None)
         for index, call in enumerate(message.get("tool_calls") or []):
             function = (call or {}).get("function") or {}
             arguments = function.get("arguments")

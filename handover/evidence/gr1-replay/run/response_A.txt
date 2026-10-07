@@ -1,0 +1,99 @@
+Analysis:
+The issue is in the C# call site extraction logic in `graphify/extractors/engine.py`. When processing generic method calls like `Get<int>("port")` or `this.Get<int>("port")`, the code incorrectly extracts the full name including type arguments (`"Get<int>"`) instead of just the bare method name (`"Get"`). This causes callee lookups to fail because methods are indexed by their bare names. The fix needs to extract the base method name from `generic_name` nodes when they appear in call sites.
+
+Looking at the current code, I can see that:
+1. For member access expressions with generic names, it calls `_read_text(mname, source)` which returns the full generic name including type arguments
+2. There's already logic elsewhere in the same file that properly handles `generic_name` nodes by descending into them to read `type_argument_list`
+3. The fix should extract just the method name part from `generic_name` nodes
+
+I need to modify the code to detect when `mname` is a `generic_name` and extract only its identifier part, similar to how other parts of the codebase already handle this pattern.
+
+<<<KRIYA:EDIT path="graphify/extractors/engine.py">>>
+<<<KRIYA:SEARCH>>>
+                fn_node = node.child_by_field_name("function")
+                if fn_node is not None and fn_node.type == "member_access_expression":
+                    mname = fn_node.child_by_field_name("name")
+                    recv = fn_node.child_by_field_name("expression")
+                    if mname is not None:
+                        callee_name = _read_text(mname, source)
+                        is_member_call = True
+                        if recv is not None and recv.type == "identifier":
+                            member_receiver = _read_text(recv, source)
+                        elif recv is not None and recv.type in ("this", "this_expression"):
+                            member_receiver = "this"
+<<<KRIYA:REPLACE>>>
+                fn_node = node.child_by_field_name("function")
+                if fn_node is not None and fn_node.type == "member_access_expression":
+                    mname = fn_node.child_by_field_name("name")
+                    recv = fn_node.child_by_field_name("expression")
+                    if mname is not None:
+                        # Handle generic_name nodes by extracting just the identifier part
+                        if mname.type == "generic_name":
+                            # Extract the base method name from generic_name (e.g., "Get" from "Get<int>")
+                            identifier = mname.child_by_field_name("identifier")
+                            if identifier is not None:
+                                callee_name = _read_text(identifier, source)
+                            else:
+                                callee_name = _read_text(mname, source)
+                        else:
+                            callee_name = _read_text(mname, source)
+                        is_member_call = True
+                        if recv is not None and recv.type == "identifier":
+                            member_receiver = _read_text(recv, source)
+                        elif recv is not None and recv.type in ("this", "this_expression"):
+                            member_receiver = "this"
+<<<KRIYA:END_EDIT>>>
+
+<<<KRIYA:EDIT path="graphify/extractors/engine.py">>>
+<<<KRIYA:SEARCH>>>
+                elif fn_node is not None and fn_node.type == "identifier":
+                    callee_name = _read_text(fn_node, source)
+                else:
+                    # Fallback: original name-field / first-named-child scan.
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        callee_name = _read_text(name_node, source)
+                    else:
+                        for child in node.children:
+                            if child.is_named:
+                                raw = _read_text(child, source)
+                                if "." in raw:
+                                    callee_name = raw.split(".")[-1]
+                                    is_member_call = True
+                                    parts = raw.split(".")
+                                    if len(parts) == 2 and parts[0]:
+                                        member_receiver = parts[0]
+                                else:
+                                    callee_name = raw
+                                break
+<<<KRIYA:REPLACE>>>
+                elif fn_node is not None and fn_node.type == "identifier":
+                    callee_name = _read_text(fn_node, source)
+                else:
+                    # Fallback: original name-field / first-named-child scan.
+                    name_node = node.child_by_field_name("name")
+                    if name_node:
+                        # Handle generic_name nodes in fallback case as well
+                        if name_node.type == "generic_name":
+                            # Extract the base method name from generic_name (e.g., "Get" from "Get<int>")
+                            identifier = name_node.child_by_field_name("identifier")
+                            if identifier is not None:
+                                callee_name = _read_text(identifier, source)
+                            else:
+                                callee_name = _read_text(name_node, source)
+                        else:
+                            callee_name = _read_text(name_node, source)
+                    else:
+                        for child in node.children:
+                            if child.is_named:
+                                raw = _read_text(child, source)
+                                if "." in raw:
+                                    callee_name = raw.split(".")[-1]
+                                    is_member_call = True
+                                    parts = raw.split(".")
+                                    if len(parts) == 2 and parts[0]:
+                                        member_receiver = parts[0]
+                                else:
+                                    callee_name = raw
+                                break
+<<<KRIYA:END_EDIT>>>

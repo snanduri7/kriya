@@ -1,0 +1,94 @@
+{
+ "kriya": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/before-69465d3/kriya",
+ "stability_policy": 2,
+ "run_id": "20261007T071630-e21ca9b2",
+ "m1": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "faithful_to_sealed": {
+  "baseline_cases": true,
+  "post_cases": true,
+  "timing_observations": true
+ },
+ "replays_served": [
+  94,
+  95
+ ],
+ "timing_test_observations": {
+  "baseline": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "1724cc2302e414fbd666bd42b47eb0e4a87e855b89746da430dddfbfe59e5f16"
+  },
+  "replay1": {
+   "outcome": "passed",
+   "failure_type": null,
+   "message": null
+  },
+  "replay2": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "382c5d1e6c2e82514121f49c136e6b72785e80b69dcf9769f083bfcf8f6ae1fd"
+  },
+  "candidate": {
+   "outcome": "failed",
+   "failure_type": "AssertionError",
+   "message": "36148bbdb050dcca4094da31903178af27c68e3687aa1ce40d94f65e123aca68"
+  }
+ },
+ "live_sealed_verdict": {
+  "blocking": true,
+  "blocking_reasons": [
+   "level2:tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files:STABILITY_UNRESOLVED"
+  ]
+ },
+ "replayed_verdict": {
+  "authority": "pytest_per_test",
+  "blocking": true,
+  "blocking_reasons": [
+   "level2:tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files:STABILITY_UNRESOLVED"
+  ],
+  "diagnostic_level1": "CHANGED_FAILURE",
+  "level2_counts": {
+   "PRE_EXISTING_FAILURE": 216,
+   "STABILITY_UNRESOLVED": 1
+  },
+  "timing_test": "STABILITY_UNRESOLVED",
+  "non_pre_existing": {
+   "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "STABILITY_UNRESOLVED"
+  }
+ },
+ "stability_records": [
+  {
+   "test": "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "context_id": "93cc150c368f71ba8774e874e354b14223d01b620961331809e3cc02f14db948",
+   "source": "replay",
+   "outcome": "BASELINE_OUTCOME_UNSTABLE",
+   "failure_type": "BASELINE_TYPE_UNSTABLE",
+   "message": "UNRESOLVED",
+   "body": "UNRESOLVED",
+   "reason": "BASELINE_OUTCOME_UNSTABLE",
+   "observations": [
+    "e9f79f0b5a905775b62c92b2cf8ddee0aa94f43bb775d721e28847ce72e1adfc",
+    "d7038c6409ce646e2df6ad97c3390b8321a79960d8412497d2c057119b7893fc",
+    "92b78b0d3e717c4f10f7de5ca2f0b4e5e63ccdb712e7174089e81351d9a899dd"
+   ]
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "context_id": "93cc150c368f71ba8774e874e354b14223d01b620961331809e3cc02f14db948",
+   "source": "replay",
+   "outcome": "STABLE",
+   "failure_type": "STABLE",
+   "message": "STABLE",
+   "body": "VOLATILE",
+   "reason": null,
+   "observations": [
+    "e49922a4bf3726c8bd1f24b19100c15d13f1073c381579a25bd35212368c32d8",
+    "8f3c281c162b583d5824cf4ee8a610fe1490c08554f8b1022173730f204b0f1d",
+    "3b6fd0725d46beb9fa7f7a93be61e534f60f4c069b690f71508a11ba6a2a6fa6"
+   ]
+  }
+ ]
+}

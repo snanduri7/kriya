@@ -1,0 +1,31 @@
+{
+ "head": "ec24d78f78a912b3d0af8dd2483f9fee8213f5a2",
+ "baseline": {
+  "exit": 0,
+  "summary": "322 passed in 25.35s"
+ },
+ "tests": [
+  "tests/test_lr_r1_p1_capability_routing.py",
+  "tests/test_lr_r1_p1_fallback_incompatible_reproducer.py",
+  "tests/test_prd017_fallback_transition.py",
+  "tests/test_model_capabilities.py",
+  "tests/test_prd014_model_qualification.py",
+  "tests/test_retry_policy.py",
+  "tests/test_best_of_n.py",
+  "tests/test_prd031_coordinators.py",
+  "tests/test_context_edit_protocol_001.py",
+  "tests/test_lr_r1_m1_recovery.py",
+  "tests/test_lr_r1_m1_t6_paths.py",
+  "tests/state_machine"
+ ],
+ "mutants": [
+  {
+   "group": "derive",
+   "label": "ignore-runtime-identity (corrected)",
+   "file": "kriya/core/model_capabilities.py",
+   "status": "KILLED",
+   "summary": "1 failed, 134 passed in 6.10s",
+   "seconds": 6.9
+  }
+ ]
+}

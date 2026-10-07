@@ -1,0 +1,65 @@
+{
+ "workspace": "r2c-py-moreit",
+ "commit": "1ea82a711c69f590054987b5cb194157f8ce8ac4",
+ "stack": "python",
+ "commands": [
+  {
+   "argv": [
+    "python3",
+    "-c",
+    "import sys, os; sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; sys.path.extend(['/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-moreit']); import pytest; sys.exit(pytest.main(sys.argv[1:]))",
+    "--"
+   ],
+   "cwd": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-moreit"
+  }
+ ],
+ "success": false,
+ "runner": "unknown",
+ "summary": null,
+ "passed": null,
+ "failed": null,
+ "errors": null,
+ "skipped": null,
+ "duration_seconds": 1.3,
+ "execution_evidence": {
+  "toolchain_identity": {
+   "language": "python",
+   "runtime": "cpython",
+   "runtime_version": "3.12",
+   "build_tool": "pip",
+   "build_tool_version": null,
+   "containment_image": "python:3.12-slim",
+   "requirement_source": "pyproject.toml:project.requires-python",
+   "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+   "observed_runtime_version": "3.12.14",
+   "observed_build_tool_version": null,
+   "runtime_constraint": null,
+   "selection": {
+    "baseline": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "target": {
+     "runtime_version": "3.12",
+     "runtime_constraint": null,
+     "requirement_source": "pyproject.toml:project.requires-python",
+     "containment_image": "python:3.12-slim"
+    },
+    "basis": "repository_declaration",
+    "declaration_mutable": false
+   }
+  },
+  "egress": {
+   "capability": "denied",
+   "network_authority": "denied",
+   "destinations": [],
+   "authority_source": "containment profile (no network)",
+   "backend": "OCIContainmentBackend"
+  }
+ },
+ "gate": "RED",
+ "output_tail": "\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'pytest'\n",
+ "restored_clean": true
+}

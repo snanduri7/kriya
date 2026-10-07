@@ -424,8 +424,12 @@ _ABSENT = object()
 
 
 def split_config_by_owner(config_dump: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """{"config": remainder, owner: {"a.b": value}} - each leaf in one bucket."""
-    remainder = copy.deepcopy(dict(config_dump))
+    """{"config": remainder, owner: {"a.b": value}} - each leaf in one bucket.
+    Observational configuration (what Kriya records, never what it does) is
+    in no bucket: LR-R1-M1 invariant I-2."""
+    from kriya.workflow.checkpoint import without_observational_config
+
+    remainder = copy.deepcopy(without_observational_config(dict(config_dump)))
     owned: Dict[str, Dict[str, Any]] = {
         "config": remainder, "model_runtime": {}, "containment": {}, "verification_policy": {},
     }
@@ -805,11 +809,33 @@ def generation_resume_fingerprints(
     input_obligation_fingerprint: Optional[Fingerprint] = None,
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
     candidate_files: Optional[Mapping[str, str]] = None,
+    acceptance_digest: Optional[str] = None,
+    approval_digest: Optional[str] = None,
+    requirement_contract_digest: Optional[str] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
     validate a checkpoint and to save one, so the two cannot diverge.
-    ``effective_obligation_ledger`` None means the run's starting ledger."""
+    ``effective_obligation_ledger`` None means the run's starting ledger.
+    ``acceptance_digest`` (FS-1C2 B2-a: the operator acceptance file bound
+    to the run) joins the verification inputs only when there is one, so a
+    run without it keeps its fingerprints byte-identical. ``approval_digest``
+    (B3: the operator's human approval of that suite) is authority, not
+    evidence: it joins the goal inputs (planning and the candidate depend on
+    them), so an approval added or changed after a candidate was generated
+    never reaches that candidate - the resumed run regenerates it.
+    ``requirement_contract_digest`` (GR-R1A: the operator's explicit
+    requirement contract) is authority the same way: it joins the goal
+    inputs only when there is one, so a changed contract - or a contract
+    added to or removed from a run - never reuses a candidate."""
+    verification_inputs: Dict[str, Any] = {
+        "required_verification": required_verification,
+        "runtime_verification_required": runtime_verification_required,
+        "strict_spec_compliance": strict_spec_compliance,
+        "strict_dependency_index": strict_dependency_index,
+    }
+    if acceptance_digest is not None:
+        verification_inputs["acceptance_digest"] = acceptance_digest
     if skill_engine_override is None:
         from kriya.skills.skill import SkillEngine
 
@@ -823,6 +849,9 @@ def generation_resume_fingerprints(
         effective_obligation_fingerprint=effective_obligation_fingerprint,
         config_dump=config.model_dump(),
         goal_inputs={
+            **({"acceptance_approval_digest": approval_digest} if approval_digest is not None else {}),
+            **({"requirement_contract_digest": requirement_contract_digest}
+               if requirement_contract_digest is not None else {}),
             "goal": goal,
             "error_context": error_context or "",
             "supplementary_context": supplementary_context,
@@ -857,12 +886,7 @@ def generation_resume_fingerprints(
             "write_scope_mode": write_scope_mode,
             "protected_source_file": protected_source_file,
         },
-        verification_inputs={
-            "required_verification": required_verification,
-            "runtime_verification_required": runtime_verification_required,
-            "strict_spec_compliance": strict_spec_compliance,
-            "strict_dependency_index": strict_dependency_index,
-        },
+        verification_inputs=verification_inputs,
     )
 
 

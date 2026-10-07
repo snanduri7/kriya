@@ -118,7 +118,9 @@ def test_only_the_integration_unit_verifies_the_plans_original_requirements(tmp_
     derived = _events(cfg, "requirement.derived")
     assert [d["digest"] for d in derived] == [expected.digest]
     verdicts = _events(cfg, "requirement.verdicts")
-    assert verdicts and set(verdicts[-1]["outcomes"].values()) == {"satisfied"}
+    # The verifier's "satisfied" is recorded as its claim, never as satisfied (FS-1B).
+    assert verdicts and set(verdicts[-1]["outcomes"].values()) == {"unverified"}
+    assert {v["model_outcome"] for v in verdicts[-1]["verdicts"].values()} == {"satisfied"}
 
 
 def test_a_milestone_plan_is_not_successful_with_an_unverified_original_requirement(tmp_path, monkeypatch):

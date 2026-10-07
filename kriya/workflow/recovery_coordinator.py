@@ -28,14 +28,16 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.failure import Failure
+from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.repair_contract import RepairContractStatus
-from kriya.workflow.retry_policy import RetryAction, decide_for_state
+from kriya.workflow.retry_policy import RetryAction, RetryDecision, decide_for_state
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import GenerationState
 from kriya.workflow.worktree import remove_git_worktree
@@ -84,6 +86,10 @@ class RecoveryDecision:
     stop_loop: bool
     action: Optional[RetryAction]
     budgets_exhausted: bool
+    # LR-R1-M1: the retry policy's full decision, for the evidence record
+    # only (None when the attempt stopped before the policy). Not compared:
+    # the decision is the three fields above.
+    retry_decision: Optional[RetryDecision] = field(default=None, compare=False)
 
 
 def classify_attempt_exception(
@@ -243,11 +249,14 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
         _capture_final_contents_and_remove_sandbox(state, ctx, cleanup="scope-conflict cleanup")
         return RecoveryDecision(stop_loop=True, action=None, budgets_exhausted=False)
 
+    routing = fallback_routing_for_context(state, ctx)
     retry_decision = decide_for_state(
         state, max_retries=ctx.max_retries,
         targeted_max_retries=ctx.targeted_max_retries,
-        has_fallback_model=bool(ctx.chain),
+        has_fallback_model=routing.available,
     )
+    if routing.patch_excluded:
+        retry_decision = _route_around_patch_incompatible_fallbacks(state, ctx, routing, retry_decision)
     budgets_exhausted = not retry_decision.should_continue
     if budgets_exhausted:
         _abandon_active_repair_contract_if_any(state, reason=retry_decision.action.value)
@@ -262,8 +271,61 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
     # and the loop would otherwise continue into another pointless retry.
     return RecoveryDecision(
         stop_loop=budgets_exhausted and retry_decision.action is RetryAction.STOP_ENVIRONMENT,
-        action=retry_decision.action, budgets_exhausted=budgets_exhausted,
+        action=retry_decision.action, budgets_exhausted=budgets_exhausted, retry_decision=retry_decision,
     )
+
+
+def _route_around_patch_incompatible_fallbacks(state: GenerationState, ctx: Any, routing: Any,
+                                               decision: RetryDecision) -> RetryDecision:
+    """LR-R1-P1 Option (b): some remaining fallback is proven unable to
+    serve the patch-only next attempt, so routing treated it as unavailable
+    and ``decision`` is the route that remains. When that route stops only
+    because the fallback's route is gone - with the configured chain the run
+    would have continued on a fallback (fallback-targeted, or the reserved
+    fallback allowance) - the terminal is the typed
+    FALLBACK_MODEL_INCOMPATIBLE, decided here with no further model
+    invocation. The decision and every candidate's evidence are recorded
+    (run event ``model.fallback_routing``, attempt evidence
+    ``fallback.decision`` phase ``routing``)."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    terminal = False
+    if not decision.should_continue and decision.action is RetryAction.STOP_EXHAUSTED:
+        configured = decide_for_state(state, max_retries=ctx.max_retries,
+                                      targeted_max_retries=ctx.targeted_max_retries,
+                                      has_fallback_model=bool(ctx.chain))
+        terminal = configured.should_continue and (
+            configured.action is RetryAction.FALLBACK_TARGETED or configured.reserved_fallback)
+    details = {
+        **routing.to_dict(), "decision_point": "recovery.conclude_attempt_failure",
+        "other_route_remained": decision.should_continue,
+        "resulting_strategy": FALLBACK_MODEL_INCOMPATIBLE if terminal else decision.action.value,
+        "reason_code": FALLBACK_MODEL_INCOMPATIBLE,
+    }
+    state.record_event(RunEvent(
+        kind="model.fallback_routing", attempt=state.attempt_number, source="recovery_coordinator",
+        authority=EventAuthority.ADVISORY,
+        message=(f"Fallback(s) {', '.join(routing.patch_excluded)} cannot serve the patch-only next attempt "
+                 f"({', '.join(sorted({f for c in routing.candidates for f in c.patch_only_files}))}): "
+                 + ("no recovery route remains" if terminal else f"route {details['resulting_strategy']}")),
+        details=details,
+    ))
+    attempt_evidence_scope.record_fallback_decision({"phase": "routing", **details})
+    if not terminal:
+        return decision
+    reasons = [reason for c in routing.candidates for reason in c.reasons]
+    message = (f"{FALLBACK_MODEL_INCOMPATIBLE}: no remaining configured fallback can serve the patch-only next "
+               "attempt and no other recovery route remains - "
+               + "; ".join(f"{c.model}: {'; '.join(c.reasons)}" for c in routing.candidates))
+    state.environment_failure = message
+    state.record_event(RunEvent(
+        kind="model.fallback_incompatible", attempt=state.attempt_number, source="recovery_coordinator",
+        authority=EventAuthority.ADVISORY, message=message,
+        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "reasons": reasons, "phase": "routing",
+                 "rejected": [c.to_dict() for c in routing.candidates]},
+    ))
+    logger.error(message)
+    return RetryDecision(RetryAction.STOP_ENVIRONMENT, message)
 
 
 RecordFailure = Callable[[GenerationState, Any, Exception, ClassifiedAttemptFailure], Awaitable[None]]
@@ -281,5 +343,58 @@ class RecoveryCoordinator:
             exc, ctx, last_attempt_mode=state.last_attempt_mode, ground_scope_denial=self._ground_scope_denial,
         )
         await self._record_failure(state, ctx, exc, classified)
-        return conclude_attempt_failure(state, ctx)
+        decision = conclude_attempt_failure(state, ctx)
+        _record_recovery_decision(state, classified, decision)
+        return decision
+
+
+def _typed_stop_reason(state: GenerationState) -> Optional[str]:
+    """The D7 code typing the CURRENT stop message, else None (a code set
+    for an earlier, since replaced message is not reported). Evidence only."""
+    typed = state.stop_reason_evidence
+    if typed is None or state.environment_failure is None or typed.message != state.environment_failure:
+        return None
+    return typed.code
+
+
+def _record_recovery_decision(state: GenerationState, classified: ClassifiedAttemptFailure,
+                              decision: RecoveryDecision) -> None:
+    """LR-R1-M1 ``recovery.decision``: the classification, the decision and
+    the retry policy's reason, after the decision was made (observational)."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        retry = decision.retry_decision
+        conflict = state.plan_scope_conflict
+        payload = {
+            "attempt": state.attempt_number, "failure_type": classified.failure.type,
+            "attempt_mode": classified.attempt_mode,
+            "unrecoverable_scope_denial": classified.unrecoverable_scope_denial,
+            "unrecoverable_denial_reason": classified.unrecoverable_denial_reason,
+            "internal_framework_bug": classified.internal_framework_bug,
+            "containment_setup_failure": classified.containment_setup_failure,
+            "stop_loop": decision.stop_loop, "action": decision.action.value if decision.action else None,
+            "budgets_exhausted": decision.budgets_exhausted,
+            "retry_decision": None if retry is None else {
+                "action": retry.action.value, "reason": retry.reason,
+                "reserved_fallback": retry.reserved_fallback, "should_continue": retry.should_continue},
+            "retry": bool(not decision.stop_loop and retry is not None and retry.should_continue),
+            "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
+            "no_progress_terminated": state.no_progress_terminated,
+            # The runtime's own, already-computed progress facts (never
+            # recomputed here): this attempt's classification, and the
+            # terminal no-progress reason once the run stops on it.
+            "progress_classification": state.last_progress_classification,
+            "no_progress_reason": state.no_progress_reason,
+            "plan_scope_conflict": None if conflict is None else {
+                "required_files": list(conflict.get("required_files") or []),
+                "reason_code": conflict.get("reason_code")},
+            "environment_failure": state.environment_failure is not None,
+            "stop_reason_code": _typed_stop_reason(state),
+        }
+    except Exception as error:  # observational: never alters the decision
+        logger.warning("Attempt evidence: recovery.decision not built (%s: %s)", type(error).__name__, error)
+        return
+    attempt_evidence_scope.emit("recovery.decision", payload,
+                                content={"environment_failure": state.environment_failure})
 

@@ -1,0 +1,22 @@
+=== EXACT CURRENT SOURCE (authoritative, byte-exact - copy SEARCH text only from here): graphify/extractors/engine.py lines 215-232 [block] ===
+    if t == "generic_name":
+        name_child = node.child_by_field_name("name")
+        if name_child is None:
+            for sub in node.children:
+                if sub.type == "identifier":
+                    name_child = sub
+                    break
+        if name_child is not None:
+            qualified = name_child.type == "qualified_name"
+            prefix, _, name = _read_text(name_child, source).rpartition(".")
+            if name and name not in skip:
+                out.append((name, "generic_arg" if generic else "type", qualified, prefix if qualified else ""))
+        for sub in node.children:
+            if sub.type == "type_argument_list":
+                for arg in sub.children:
+                    if arg.is_named:
+                        _csharp_collect_type_refs(arg, source, True, out, skip)
+        return
+=== END EXACT SOURCE graphify/extractors/engine.py lines 215-232 ===
+
+

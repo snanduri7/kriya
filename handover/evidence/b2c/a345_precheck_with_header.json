@@ -1,0 +1,87 @@
+{
+  "A3": {
+    "repository": "~/kriya-bench/commons-lang @ 4ee346e59",
+    "requirements": [
+      "REQ-1",
+      "REQ-2"
+    ],
+    "maven": true,
+    "junit5": true,
+    "surefire_declared_in_pom": true,
+    "intended_change_paths": [
+      "src/main/java/org/apache/commons/lang3/math/NumberUtils.java"
+    ],
+    "intended_change_on_trust_surface": false,
+    "claim_class": "GENERAL",
+    "claim_reasons": [
+      "general rule (otherwise): 'max when value is greater than max and value otherwise'",
+      "no concrete example case is stated"
+    ],
+    "probe_code": "ACCEPTANCE_PASSED",
+    "probe_reason": "",
+    "probe_case_results": {
+      "org.apache.commons.lang3.math.KriyaAcceptanceProbeTest.targetClassLoads": [
+        "passed"
+      ]
+    },
+    "probe_seconds": 22.3,
+    "trust_surface_digest": "294e73c8aa2025f3b1f3637df06ca3bef8e6fd3d46fc697ebad916825d70629c"
+  },
+  "A4": {
+    "repository": "~/kriya-bench-r2/commons-cli @ d95484f",
+    "requirements": [
+      "REQ-1",
+      "REQ-2"
+    ],
+    "maven": true,
+    "junit5": true,
+    "surefire_declared_in_pom": false,
+    "intended_change_paths": [
+      "src/main/java/org/apache/commons/cli/CommandLine.java"
+    ],
+    "intended_change_on_trust_surface": false,
+    "claim_class": "GENERAL",
+    "claim_reasons": [
+      "general rule (at least): 'Add  CODE  to org.apache.commons.cli.CommandLine in src/main/java/org/apache/commons/cli/CommandLine.java that returns true when at least one of the given option names is present'",
+      "general rule (none): 'and false when none is present or no names are given'",
+      "no concrete example case is stated"
+    ],
+    "probe_code": "ACCEPTANCE_PASSED",
+    "probe_reason": "",
+    "probe_case_results": {
+      "org.apache.commons.cli.KriyaAcceptanceProbeTest.targetClassLoads": [
+        "passed"
+      ]
+    },
+    "probe_seconds": 9.0,
+    "trust_surface_digest": "56fb698d1e77d95683f7b90d3d1bb7242619984388a4cb21a128526653fd135a"
+  },
+  "A5": {
+    "repository": "~/kriya-bench/spring-framework-petclinic @ 09351b3",
+    "requirements": [
+      "REQ-1",
+      "REQ-2"
+    ],
+    "maven": true,
+    "junit5": true,
+    "surefire_declared_in_pom": true,
+    "intended_change_paths": [
+      "src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java"
+    ],
+    "intended_change_on_trust_surface": false,
+    "claim_class": "GENERAL",
+    "claim_reasons": [
+      "general rule (match): 'still throwing ParseException when no pet type matches'",
+      "no concrete example case is stated"
+    ],
+    "probe_code": "ACCEPTANCE_PASSED",
+    "probe_reason": "",
+    "probe_case_results": {
+      "org.springframework.samples.petclinic.web.KriyaAcceptanceProbeTest.targetClassLoads": [
+        "passed"
+      ]
+    },
+    "probe_seconds": 5.5,
+    "trust_surface_digest": "cdf70d218c935ca2d57b8d5025734606232693c4a2676fa910484972b69bba40"
+  }
+}

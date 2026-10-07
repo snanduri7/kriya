@@ -1,0 +1,92 @@
+{
+ "base_revision": "bba7689c625508feb81b3e8c024c8ec52ea0f844db0462dd789d5bb803c7600b",
+ "wall_seconds": 211.3,
+ "pre": {
+  "evidence": true,
+  "reason": null,
+  "collected": 5370
+ },
+ "post": {
+  "evidence": true,
+  "collected": 5370
+ },
+ "a049c02_whole_output": {
+  "level1": "CHANGED_FAILURE",
+  "blocking": true,
+  "reasons": [
+   "level1:CHANGED_FAILURE"
+  ]
+ },
+ "reg_r1": {
+  "authority": "pytest_per_test",
+  "blocking": true,
+  "blocking_reasons": [
+   "level2:tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files:STABILITY_UNRESOLVED"
+  ],
+  "diagnostic_level1": "CHANGED_FAILURE",
+  "level2_counts": {
+   "PRE_EXISTING_FAILURE": 216,
+   "STABILITY_UNRESOLVED": 1
+  },
+  "non_pre_existing": {
+   "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": "STABILITY_UNRESOLVED"
+  },
+  "volatile_fields_ignored": {
+   "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo": [
+    "body"
+   ]
+  }
+ },
+ "stability_replays": [
+  [
+   "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo"
+  ],
+  [
+   "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files",
+   "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo"
+  ]
+ ],
+ "stability": [
+  {
+   "test": "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "node_id": "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files",
+   "source": "replay",
+   "binding": "9de163e1f844df8474ba42bc8f449d94ba7ad701514b9489c662f154dd0b0ca4",
+   "reason": "BASELINE_REPLAY_OUTCOME_DIFFERS",
+   "fields": {
+    "message": "INDETERMINATE",
+    "body": "INDETERMINATE"
+   },
+   "baseline_observation": "dc98b9466cf6129439f9277fa3221eea802944c089827b98783383eb14908f33",
+   "replay_observations": [
+    "d7038c6409ce646e2df6ad97c3390b8321a79960d8412497d2c057119b7893fc",
+    "d7038c6409ce646e2df6ad97c3390b8321a79960d8412497d2c057119b7893fc"
+   ],
+   "replay_reports": [
+    "90717f080fac1cb259c786a07548215b0f1e423d9fdb5845f6c1d9cbc44dd4ea",
+    "33ab881314d1332ce28e00c523878938dfdeb7f5ce057bec95b8a9565c53810d"
+   ]
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "node_id": "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo",
+   "source": "replay",
+   "binding": "140f7abf96d7b7f1978187c72ec16a76640c7142931ecf42e2b47173a3159b64",
+   "reason": null,
+   "fields": {
+    "message": "STABLE",
+    "body": "VOLATILE"
+   },
+   "baseline_observation": "78904907e4aa80ab60104d3a2e373fc6d746ca92e67b1b7e47c853e8d557a0c4",
+   "replay_observations": [
+    "353e6888968f35e60ecf1b257c6629b4feb2d26a04876684e5d9f44a9e5b4a3a",
+    "8fadfd2a4afdcbcab5ae40eba0291050323e561f23fd991769b338d42a8f3e68"
+   ],
+   "replay_reports": [
+    "90717f080fac1cb259c786a07548215b0f1e423d9fdb5845f6c1d9cbc44dd4ea",
+    "33ab881314d1332ce28e00c523878938dfdeb7f5ce057bec95b8a9565c53810d"
+   ]
+  }
+ ]
+}

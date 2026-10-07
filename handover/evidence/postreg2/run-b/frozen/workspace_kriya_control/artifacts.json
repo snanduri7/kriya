@@ -1,0 +1,30 @@
+{
+  "_run_record": {
+    "classification": "derived",
+    "revision": 11,
+    "run_id": "20261007T093122-df65c5d3"
+  },
+  "_workspace": {
+    "version": "1",
+    "workspace_id": "c404ee53785dee41dffff2828fdd7b683631fa0a293207ab9a8df1991ada49e4"
+  },
+  "artifacts": {
+    "20261007T093122-df65c5d3": [
+      {
+        "content_hash": null,
+        "coordinates": {
+          "name": "graphifyy",
+          "version": "0.9.56"
+        },
+        "ecosystem": "python",
+        "entrypoints": [],
+        "kind": "library",
+        "milestone_id": "20261007T093122-df65c5d3",
+        "module_path": "",
+        "packaging": "wheel",
+        "resolved_at_commit": null,
+        "resource_roots": []
+      }
+    ]
+  }
+}

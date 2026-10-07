@@ -1,0 +1,597 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "COMMITTED",
+        "lifecycle_state": "SUCCESS",
+        "model_calls": 13,
+        "seq": 161,
+        "terminal_status": "SUCCESS"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": null,
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": null,
+      "quality_gates_passed": true,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 79,
+        "unit_id": "s1"
+      },
+      {
+        "outcome": "RETURNED",
+        "quality_gates_passed": true,
+        "seq": 145,
+        "unit_id": "s2"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 40,
+              "call_seq": 4,
+              "content": {
+                "messages": "sha256:f4efad40a21a1f492f70cfb983b401e9e52ff469cc69ef359cc0e04e00d9a708",
+                "wire_body": "sha256:826a65b53c99baea78729271cb6903fed75d874656af36a848f9c631cb9a2773"
+              },
+              "dispatched": true,
+              "model": "qwen3.8:27b",
+              "requested_operations": {
+                "graphify/extractors/engine.py": "repair_with_patch"
+              },
+              "role": "developer",
+              "seq": 42,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "content": {
+                "messages": "sha256:26049d578b514627870814350ae3f836b3d45f9a02e5a286f05a76f187b7d0ec",
+                "wire_body": "sha256:294e96f336d17789bd8ae3236c13530a66017e9ccf067306f1f77f9df8045c60"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 51,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "content": {
+                "messages": "sha256:abd06910b05e89772e1fdf6194913520ce331975fe421d5fd1c55e1423b10f50",
+                "wire_body": "sha256:098faa2198d7f78d709a454a67d0fd6964d5efc290749f463bce21c0828bc6e9"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 55,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "content": {
+                "messages": "sha256:f15198334d60be6798127b0a2d329160162ec72ec07a1d9ed099bf52aeace023",
+                "wire_body": "sha256:ed61ce4df65d9acc8fa0b355ca9fd3453af80acfb4aec2c128bb9ca8bbba8a47"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 65,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "graphify/extractors/engine.py"
+              ],
+              "seq": 40,
+              "targets": [
+                {
+                  "digest": "5354964db01ad7dbf67f506f0bd213e534c34430aa7dc010fc317f8756231427",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    5365,
+                    5389,
+                    5409
+                  ],
+                  "member_units_shown": 1,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "graphify/extractors/engine.py",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_is_exact": true,
+                  "shown_member_id": "_ts_emit_decorator_edges.emit",
+                  "shown_revision": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 5373,
+                      "start_line": 5357,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5397,
+                      "start_line": 5381,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 5417,
+                      "start_line": 5401,
+                      "unit": "window"
+                    },
+                    {
+                      "end_line": 6275,
+                      "start_line": 6268,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 4,
+              "completion_tokens": 545,
+              "content": {
+                "content": "sha256:23ce48136092383952a37a9590e274c331c1814474c08e909395f92ec291256e"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 43,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 5,
+              "completion_tokens": 162,
+              "content": {
+                "content": "sha256:e6fb27cce9c6303eae724fb3e95c0d78d15af2b66e07988be94bc5a4f47d2679"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 52,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 6,
+              "completion_tokens": 101,
+              "content": {
+                "content": "sha256:6139e06618e3ef53d881ebf45392f2aab9f77f8c56a567e52fb247789c19ec78"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 56,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 7,
+              "completion_tokens": 619,
+              "content": {
+                "content": "sha256:5f06181586e45504eb9fc29d259b600aaeb0e45d8552f9ba361135f6d9e39b0b"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 66,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 4,
+              "content": {
+                "analysis_model_claimed": "sha256:df8676928ddc3a40c88cfb528893ec9b267d6f37182cf02784df3adc13942289"
+              },
+              "kind": "edits",
+              "path": "graphify/extractors/engine.py",
+              "seq": 45
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "9cb72f8a7fdbbf25551fadfc1d271a9b4a93dd64e62a76bc9b6e65d3ac7cb4f2",
+              "before_digest": "1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+              "content": {
+                "after": "sha256:9cb72f8a7fdbbf25551fadfc1d271a9b4a93dd64e62a76bc9b6e65d3ac7cb4f2",
+                "before": "sha256:1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78",
+                "diff": "sha256:57a08234708dbb9258f998436558fb790d75581461ecbff0a5107fdacbfb2324"
+              },
+              "decision": "STAGED",
+              "lines_added": 14,
+              "lines_removed": 1,
+              "path": "graphify/extractors/engine.py",
+              "seq": 48
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:5e47c797956ff299a81dbe1b44c6ee2c64f38e1950e89f7356729b7e3c9aad53",
+                "pytest_junit": "sha256:c08a2371afbede4bca0d792504b1450db2d55ce54394b380bf7ebc0c00915a96",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:5af7d39875152d703734f11d51203f82f4bf87b1d321d1274cfbde8d6d0a354f",
+                "test_execution": "sha256:1fea49a7a889a9da6a32fd13693b5706a5d12777d9053bc9cecdef73ec3594c9"
+              },
+              "gate": "tests",
+              "seq": 69,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:1c29cdecc1de4f39db875f15862f21a7a05e08bc198389b1e63b7c73f3be32ca",
+                "pytest_junit": "sha256:e7bc03e71379e9bc1360b4f7347bced884027245ea474e759d437ea5a6154fba",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:a00f9087bb932df0e6f32bec806434c15dfe21b9a49e857f232c6196b3f518fe",
+                "test_execution": "sha256:3458e316104ba5421651e8f7059e8df392b1742c868f455a12af22304b164a22"
+              },
+              "gate": "tests",
+              "seq": 70,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:10971b96788100a706d2df391aab014c257509311b72914cdc7a4c3cf92b7a82",
+                "pytest_junit": "sha256:2cb4c006e3ff0a70505a5d96d4ee4e3649afc2ba13757e8516e67742b6aebf3c",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:d58d31346ce7bc18d61f2c8015589e5715e85a9fa6a6aa96c10cf97b743a9dfa",
+                "test_execution": "sha256:de7e3f12743c0182652a21778686c83fa910334cc59c4be49ee58df23ab414dc"
+              },
+              "gate": "tests",
+              "seq": 71,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3.8:27b",
+              "requested_rejection": [],
+              "selected": "qwen3.8:27b",
+              "seq": 37
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    },
+    {
+      "answers": {
+        "Q1": {
+          "items": [
+            {
+              "authority_snapshot_seq": 103,
+              "call_seq": 9,
+              "content": {
+                "messages": "sha256:3160dc7e41bc9d855701a71910383a1ddd7d3bff0d577d4af3444cdc0ef2b745",
+                "wire_body": "sha256:326a594a24cf157e23094e316c7aa16697137ede18bf9f26505a3d2d84502f60"
+              },
+              "dispatched": true,
+              "model": "qwen3.8:27b",
+              "requested_operations": {
+                "tests/test_csharp_call_site_generic_args.py": "repair_with_full_file"
+              },
+              "role": "developer",
+              "seq": 106,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 10,
+              "content": {
+                "messages": "sha256:274aed7e3d1eb6db867462bc9e6b9eda2fd2466c8a21f4f35494751c249eec0d",
+                "wire_body": "sha256:df9aefdf47e3693897078130fda02cf7d44587c30c6d4ee82b676512f1434fc1"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "run_verifier",
+              "seq": 118,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 11,
+              "content": {
+                "messages": "sha256:1a4e812eb177706547dea73f49a3810281f44ffc24cde45d08c2d794b69532be",
+                "wire_body": "sha256:8b446b85009a3116e3a09518bd0d6cf1c2f7424987eef88968bb3696450a4a36"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "spec_compliance",
+              "seq": 122,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "content": {
+                "messages": "sha256:cd404bf743789ac8552247304a4a3ad06cddc51f01e551fc697d9b2463c9b124",
+                "wire_body": "sha256:41b7915901ffa41d0919d282612fec4440e680c0b1cffef32ee1fa5d61edc3b5"
+              },
+              "dispatched": true,
+              "model": "qwen3-coder:30b-kriya-e52213655394",
+              "role": "reviewer",
+              "seq": 131,
+              "temperature": 0.7,
+              "wire_reason": "initial",
+              "wire_seq": 1
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "tests/test_csharp_call_site_generic_args.py"
+              ],
+              "seq": 103,
+              "targets": [
+                {
+                  "digest": "5e9c8a8faafff5b27457285768a7d2d25669630f11144705c6c9ddb7d18ae4a5",
+                  "full_file": true,
+                  "in_write_scope": true,
+                  "insertion": null,
+                  "level": 0,
+                  "loci": [
+                    4
+                  ],
+                  "member_units_shown": 0,
+                  "operations": [
+                    "anchored_edit",
+                    "full_file_replacement"
+                  ],
+                  "path": "tests/test_csharp_call_site_generic_args.py",
+                  "requested_operation": "repair_with_full_file",
+                  "revision": "128c7892101bbce52b080b1cd7d5f9278355e599e352ccc7cd6355361237e46a",
+                  "shown_is_exact": true,
+                  "shown_member_id": null,
+                  "shown_revision": "128c7892101bbce52b080b1cd7d5f9278355e599e352ccc7cd6355361237e46a",
+                  "shown_tier": "full",
+                  "spans": [
+                    {
+                      "end_line": 228,
+                      "start_line": 1,
+                      "unit": "shown_full"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": true
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "items": [
+            {
+              "call_seq": 9,
+              "completion_tokens": 3655,
+              "content": {
+                "content": "sha256:6d6bb06b47190df0a53d3b8c1ab61994d12e34ee4e59f28356abd4caedfd2e04"
+              },
+              "finish_reason": "stop",
+              "role": "developer",
+              "seq": 107,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 10,
+              "completion_tokens": 124,
+              "content": {
+                "content": "sha256:4980edccb5a0bcd084961b29528f9f98bc101ca39dc2c893d31bd3fb6b646d79"
+              },
+              "finish_reason": "stop",
+              "role": "run_verifier",
+              "seq": 119,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 11,
+              "completion_tokens": 121,
+              "content": {
+                "content": "sha256:fcdcdf0fcfb69b932f169764bb8c575529c92c5f3ca46df9994d5f4cfa91acca"
+              },
+              "finish_reason": "stop",
+              "role": "spec_compliance",
+              "seq": 123,
+              "wire_seq": 1
+            },
+            {
+              "call_seq": 12,
+              "completion_tokens": 391,
+              "content": {
+                "content": "sha256:6d3d09396df589720d30b06725e5d27874ecad5344d2609531ec57f7f58ff565"
+              },
+              "finish_reason": "stop",
+              "role": "reviewer",
+              "seq": 132,
+              "wire_seq": 1
+            }
+          ],
+          "parses": [
+            {
+              "call_seq_parsed": 9,
+              "kind": "file",
+              "path": "tests/test_csharp_call_site_generic_args.py",
+              "seq": 109
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q4": {
+          "items": [
+            {
+              "after_digest": "f4409083677f776cba94e614717db68659db19cae9a8e3487eedba2e579724b1",
+              "before_digest": "128c7892101bbce52b080b1cd7d5f9278355e599e352ccc7cd6355361237e46a",
+              "content": {
+                "after": "sha256:f4409083677f776cba94e614717db68659db19cae9a8e3487eedba2e579724b1",
+                "before": "sha256:128c7892101bbce52b080b1cd7d5f9278355e599e352ccc7cd6355361237e46a",
+                "diff": "sha256:db585a880fcf6226c09c48dd4859e2755584dbb8483792cb49764b88a5865617"
+              },
+              "decision": "STAGED",
+              "lines_added": 120,
+              "lines_removed": 0,
+              "path": "tests/test_csharp_call_site_generic_args.py",
+              "seq": 113
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q5": {
+          "diagnoses": [],
+          "items": [
+            {
+              "content": {
+                "output": "sha256:f02a982fb7fc14667a32e03f51a79355d09f4800b0247449c57f10a8e54c2753",
+                "pytest_junit": "sha256:827dd9be28b7e1d3bab2c5ceb9cfd89e81c47d6fb1e6ec933a3046b086d1fb42",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:ed610357feb54a1cee09d05c0e6d0dca638b1f1d5b748ba84d71c0556e98c33e",
+                "test_execution": "sha256:fa0999f985a7a5d5c7d196fc4b9244a8486fdc84dfae3b52d18ed8e74efcaa21"
+              },
+              "gate": "tests",
+              "seq": 135,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:42eefed6c19d67343b9ce768e6a01fad36dd57408d165b06702f6dd66b3d6ddd",
+                "pytest_junit": "sha256:c2a9347a8859068c2a10bd3ffe82eec3712737800190a26dc59608261e7654fe",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:fa6f2f4984f12b921ffffea3446bf5c15c93d6774fc7d876fc1f76432364f24a",
+                "test_execution": "sha256:0d0cbc0eb90672fb422439c4825a72da0ed0c2101af6ebe5e7834c8a1328a9af"
+              },
+              "gate": "tests",
+              "seq": 136,
+              "stage": "validator",
+              "success": false
+            },
+            {
+              "content": {
+                "output": "sha256:31dce1e480f0eb46ce8f569512635a4464be2bb1cb23a96e665a043160bf5157",
+                "pytest_junit": "sha256:2e0932684faa4a362eaf2326f7a81dea08e2ff4cc6e3665116360b40026688ac",
+                "pytest_stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "pytest_stdout": "sha256:9d89877871e1fd113fb4c29932a37a7c6c63ad1d8900ae0a600dca1035736c2a",
+                "test_execution": "sha256:feaa47c104a1ff0d5381faf87231573353065ce80ba0e8e4d988062f70c50af4"
+              },
+              "gate": "tests",
+              "seq": 137,
+              "stage": "validator",
+              "success": false
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "reason": "no failure was recorded for this attempt; nothing was retried",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3.8:27b",
+              "requested_rejection": [],
+              "selected": "qwen3.8:27b",
+              "seq": 100
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s2"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 2,
+    "planning": 2,
+    "requirement_verification": 1
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261007T093122-df65c5d3",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

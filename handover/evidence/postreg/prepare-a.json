@@ -1,0 +1,42 @@
+{
+ "arm": "a",
+ "name": "postreg-a",
+ "regenerated_by_verification": true,
+ "workspace": {
+  "path": "/Users/sriramnanduri/kriya-m1-live/ws-postreg-a/gr1-graphify",
+  "head": "67f99bd0059dd1bac9e44382907ef9f10098b39f",
+  "tree": "975f0667afa68908d7ab758551cb8cec6a9456f2",
+  "status": "",
+  "remotes": "",
+  "maintainer_fix_absent": true,
+  "content_hash": "bba7689c625508feb81b3e8c024c8ec52ea0f844db0462dd789d5bb803c7600b"
+ },
+ "auto_skill": {
+  "path": "/Users/sriramnanduri/kriya-m1-live/skills-postreg-a/auto-gr1-graphify",
+  "files": {
+   "instructions.md": "ea34cb4278ed29f0227a5de3ce1faa67359613699639233b041e29f9b9df62d1",
+   "rules.txt": "4b167e8021312bdbbe30d7e077f7711a96668c9eedfc29ceffb774838ba7d814",
+   "skill.yaml": "43d0527b2e8f42fe1eb73ee647a63df48c2c659befe6ce2591876fb2f09b7164"
+  },
+  "aggregate": "b4a91e1aaefc8653c635c35c636d373bb7c06a0fc2eebd0674daabff6e122a9f",
+  "examples_empty": true
+ },
+ "config": {
+  "path": "/Users/sriramnanduri/kriya-m1-live/config/postreg-a.yaml",
+  "sha256": "7dc51dc97b0387e259ece2a62c3d2977529ed762a35f024cfb9e30c6a4a55d5d",
+  "source": "/Users/sriramnanduri/kriya-m1-live/config/gr1-graphify.yaml",
+  "source_sha256": "4ebd97b49143322307378a834a16d2897f7cafbdcff1cddd05090e73abd1c1e6",
+  "diff_vs_source": [
+   "-  skills: /Users/sriramnanduri/kriya-m1-live/skills-gr1",
+   "-  state: /Users/sriramnanduri/kriya-m1-live/state",
+   "-  memory: /Users/sriramnanduri/kriya-m1-live/memory/gr1-graphify",
+   "+  skills: /Users/sriramnanduri/kriya-m1-live/skills-postreg-a",
+   "+  state: /Users/sriramnanduri/kriya-m1-live/state-postreg-a",
+   "+  memory: /Users/sriramnanduri/kriya-m1-live/memory/postreg-a"
+  ]
+ },
+ "env": {
+  "path": "/Users/sriramnanduri/kriya-m1-live/env-postreg-a.sh",
+  "sha256": "be8e144d6005add33de33e452dd9d70684dec4d4d0737739739da33f7cbcc1c0"
+ }
+}

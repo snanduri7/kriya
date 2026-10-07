@@ -24,6 +24,7 @@ import time
 from contextvars import ContextVar
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.run_events import EventAuthority, RunEvent
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ def write_outcome_trace(
     metrics_event = unreported_role_metrics_event(llm, source=source)
     if metrics_event is not None:
         run_events.append(metrics_event)
+    for event in run_events:  # LR-R1-M1: outcome-row events are mirrored too
+        attempt_evidence_scope.mirror_event(event)
     try:
         from kriya.core.trace import TraceLogger
 
@@ -91,6 +94,33 @@ def note_run_trace(**fields: Any) -> None:
         holder.update(fields)
 
 
+def _unit_evidence(args: Any, kwargs: Dict[str, Any]):
+    """(unit_id, unit_kind, unit.opened payload, goal) from the call's own
+    arguments - never inferred: a direct call with no work unit is the
+    direct unit."""
+    unit = kwargs.get("work_unit")
+    subtask = kwargs.get("current_subtask_id")
+    unit_id = getattr(unit, "work_unit_id", None) or subtask or "direct"
+    kind = getattr(getattr(unit, "source_kind", None), "value", None)
+    unit_kind = str(kind) if kind else ("structured" if subtask else "direct")
+    goal = args[0] if args else kwargs.get("goal")
+    scope = kwargs.get("allowed_write_relpaths")
+    mode = kwargs.get("write_scope_mode")
+    payload = {
+        "plan_id": getattr(unit, "plan_id", None),
+        "plan_fingerprint": getattr(unit, "plan_fingerprint", None),
+        "current_subtask_id": subtask,
+        "authorized_write_scope": sorted(scope) if scope is not None else None,
+        "write_scope_mode": getattr(mode, "value", mode),
+        "planned_source_files": list(kwargs.get("planned_source_files") or []),
+        "resume": bool(kwargs.get("resume")),
+        "resume_id": kwargs.get("resume_id"),
+        "milestone_group_id": kwargs.get("milestone_group_id"),
+        "milestone_index": kwargs.get("milestone_index"),
+    }
+    return unit_id, unit_kind, payload, goal if isinstance(goal, str) else None
+
+
 def record_run_exceptions(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Decorates ``WorkflowEngine.run_generation_workflow``: an exception
     (or cancellation) escaping the run writes its ``.exception`` trace row
@@ -100,7 +130,16 @@ def record_run_exceptions(func: Callable[..., Awaitable[Any]]) -> Callable[..., 
         holder: Dict[str, Any] = {}
         token = _RUN_TRACE.set(holder)
         try:
-            return await func(self, *args, **kwargs)
+            # LR-R1-M1: one unit/invocation scope per call (observational).
+            unit_id, unit_kind, opened, goal = _unit_evidence(args, kwargs)
+            cfg = getattr(getattr(self, "kernel", None), "config", None)
+            with attempt_evidence_scope.unit_scope(cfg, unit_id, unit_kind, opened,
+                                                   content={"goal": goal}) as closing:
+                result = await func(self, *args, **kwargs)
+                if isinstance(result, dict):
+                    closing.update({key: result.get(key) for key in (
+                        "status", "failure_category", "quality_gates_passed")})
+                return result
         except BaseException as error:
             from kriya.workflow.workflow import _record_run_exception
 

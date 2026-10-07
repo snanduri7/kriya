@@ -1,0 +1,7 @@
+freezegun-92d61b3/*.py.txt: the `freezegun` package of spulec/freezegun at commit 92d61b3f5c31942a1039713574487bdcfcdbbfff
+(the LR-R1 post-P3 / FS-1C1 A1 base), byte-identical, stored with a .txt suffix so neither pytest nor the linters
+treat it as Kriya source. Copyright (c) 2012 Steve Pulec, Apache License 2.0
+(https://github.com/spulec/freezegun/blob/master/LICENSE).
+
+a1_live_candidate.diff.txt: the A1 Developer change Kriya refused at the FS-1C1 live sentinel
+(run 20261006T094757-e713dddd, M1 blob cd47531a..., after-digest 10e78782...), identical to the post-P3 applied diff.

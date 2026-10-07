@@ -1,0 +1,18 @@
+{
+ "file": "src/main/java/org/apache/commons/lang3/StringUtils.java",
+ "bytes": 402131,
+ "lines": 9384,
+ "patch_30_lines": {
+  "construction_median_s": 0.0099,
+  "construction_max_s": 0.0107,
+  "gzip_blobs_median_s": 0.011,
+  "diff_bytes": 1191
+ },
+ "every_line_changed": {
+  "construction_median_s": 0.0091,
+  "construction_max_s": 0.0092,
+  "gzip_blobs_median_s": 0.0224,
+  "diff_bytes": 832516
+ },
+ "note": "offline; real attempt._record_candidate_change at ceb9943 with emit stubbed; gzip level 6"
+}

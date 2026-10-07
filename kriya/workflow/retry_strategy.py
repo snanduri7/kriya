@@ -25,10 +25,12 @@ the stop/continue decision (reads only the recorded state). Everything with
 the data dependencies above stays together here as _record_attempt_failure.
 """
 import hashlib
+import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attribution import (
@@ -43,7 +45,9 @@ from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
     evaluate_candidate_independent_failure,
 )
+from kriya.workflow.diagnosis_codes import NO_AUTHORIZED_REPAIR_TARGET, REGRESSION_UNATTRIBUTED, StopReasonEvidence
 from kriya.workflow.edit_capability import ANCHOR_CONTEXT_NOT_ESCALATED
+from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.failure import (
     Failure,
     FailureAttributionKind,
@@ -64,6 +68,7 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
+from kriya.workflow.model_transition import fallback_routing_for_context
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
@@ -77,12 +82,14 @@ from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
     REPEATED_ACTION,
+    VERIFICATION_RETRY_NO_CHANGE_POSSIBLE,
     ProgressVector,
     build_progress_vector,
     classify_progress,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import APIContractRecovery, GenerationState
+from kriya.workflow.verification_coordinator import is_verification_only_unit
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +171,7 @@ def record_workspace_progress(
     action: Optional[str] = None,
     vector: Optional[ProgressVector] = None,
     capability_unchanged: bool = False,
+    refusal_repeated: bool = False,
 ) -> bool:
     """Classify every failed attempt and bound retries without progress.
 
@@ -176,7 +184,10 @@ def record_workspace_progress(
     ``capability_unchanged`` (CONTEXT-EDIT-PROTOCOL-001): the attempt stopped
     before inference because the edit capability for the same model and
     failure could not change; a strategy change that cannot change it is
-    not a transition, so it always counts."""
+    not a transition, so it always counts. ``refusal_repeated`` (GR-R0): the
+    very same refusal (path, capability, model, requested operation) came
+    back after a strategy change, so no remaining attempt can change the
+    request either; the no-progress limit is reached now."""
     normalized_files = tuple(sorted(set(files or ())))
     same_workspace = workspace_hash == state.last_failed_workspace_hash
     stage_order = {
@@ -209,6 +220,8 @@ def record_workspace_progress(
         state.consecutive_no_progress_attempts += 1
     else:
         state.consecutive_no_progress_attempts = 0
+    if refusal_repeated:
+        state.consecutive_no_progress_attempts = max(state.consecutive_no_progress_attempts, limit)
     if vector is not None:
         previous = state.last_progress_vector
         state.progress_vector_digests.setdefault(vector.digest(), state.attempt_number)
@@ -332,6 +345,79 @@ def compute_effective_workspace_hash(workspace_path: str, known_files=None) -> s
     return digest.hexdigest()
 
 
+def verification_inputs_digest(state: GenerationState, ctx) -> str:
+    """LR-R1-P4: the inputs a verification-only attempt verifies - the
+    effective workspace content (compute_effective_workspace_hash over every
+    file the run wrote or the unit established, the PRD-026 workspace
+    identity) and the unit's declared verifiers. Content only: no attempt
+    number, run id or time, so neither another attempt nor a resumed process
+    is a change."""
+    workspace = compute_effective_workspace_hash(
+        ctx.worktree_path, set(state.all_files_written) | set(ctx.established_files))
+    canonical = json.dumps({"workspace": workspace, "required_verification": ctx.required_verification},
+                           sort_keys=True, default=repr, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _admit_verification_only_retry(state: GenerationState, ctx, failure: Failure) -> None:
+    """LR-R1-P4: a failed verification-only attempt earns another attempt only
+    when something can change what the next verification sees. Its next
+    attempt is again verification-only (no Developer, no write scope), so the
+    only mechanism is a change of its inputs since the failed verification.
+    Remaining retry budget, another attempt number or a new process are not
+    mechanisms. An existing typed route decided first is left alone: an
+    infrastructure/environment stop, a plan-scope conflict (the controller
+    reopens the owner - a recovery that can change the workspace) or the
+    no-progress terminal. Otherwise, with nothing able to change, the
+    attempt ends on the PRD-026 no-progress terminal, typed
+    VERIFICATION_RETRY_NO_CHANGE_POSSIBLE - the same truthful failure,
+    without the equivalent retries. The decision is a
+    ``retry.verification_admission`` run event either way."""
+    if state.verification_only_inputs is None or state.verification_only_inputs_attempt != state.attempt_number:
+        return   # this failure was not a verification-only attempt's
+    if state.environment_failure or state.plan_scope_conflict is not None or state.no_progress_terminated:
+        return
+    next_attempt_verification_only = is_verification_only_unit(ctx.write_scope_mode, ctx.required_verification)
+    now = verification_inputs_digest(state, ctx)
+    workspace_changed = now != state.verification_only_inputs
+    retryable = not next_attempt_verification_only or workspace_changed
+    reason = (None if retryable else VERIFICATION_RETRY_NO_CHANGE_POSSIBLE)
+    state.record_event(RunEvent(
+        kind="retry.verification_admission",
+        attempt=state.attempt_number,
+        source="retry_strategy._admit_verification_only_retry",
+        authority=EventAuthority.ADVISORY,
+        message=("Verification-only retry admitted: its inputs can change." if retryable else
+                 f"{VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}: no mutation authority, no changed input and no "
+                 "recovery route - another attempt would repeat the same verification on the same inputs."),
+        details={
+            "unit_kind": "verification_only", "verification_only": True,
+            "write_scope_mode": getattr(ctx.write_scope_mode, "value", ctx.write_scope_mode),
+            "mutation_possible": not next_attempt_verification_only,
+            "inputs_digest_at_verification": state.verification_only_inputs, "inputs_digest_now": now,
+            "workspace_changed": workspace_changed, "recovery_route": None,
+            "failure_type": failure.type, "retryable": retryable, "reason_code": reason,
+        },
+    ))
+    if retryable:
+        return
+    state.no_progress_terminated = True
+    state.no_progress_reason = VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+    state.record_event(RunEvent(
+        kind="retry.no_progress_terminal",
+        attempt=state.attempt_number,
+        source="retry_strategy._admit_verification_only_retry",
+        authority=EventAuthority.ADVISORY,
+        message=f"{VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}: the verification-only unit cannot change its inputs.",
+        details={"reason_code": VERIFICATION_RETRY_NO_CHANGE_POSSIBLE,
+                 "classification": state.last_progress_classification, "limit": None,
+                 "last_vector_digest": (state.last_progress_vector.digest()
+                                        if state.last_progress_vector is not None else None)},
+    ))
+    logger.error("Quality Gates stopped - %s (verification-only unit, attempt %s).",
+                 VERIFICATION_RETRY_NO_CHANGE_POSSIBLE, state.attempt_number)
+
+
 async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> bool:
     """Called from workflow.py's `except Exception as e:` after a failed
     run_attempt() call. Mutates state (error_context, last_implicated_files/
@@ -349,6 +435,24 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         ground_scope_denial=_failure_from_validated_scope_denial, record_failure=_record_attempt_failure,
     ).handle(state, ctx, e)
     return decision.stop_loop
+
+
+def _grounded_locations(worktree_path: str, failure: Any, paths: Sequence[str]) -> List[Dict[str, Any]]:
+    """The failure's file:line locators in ``paths``, each with the file's
+    raw revision now; a file that cannot be read is left out."""
+    wanted = set(paths)
+    located: List[Dict[str, Any]] = []
+    for location in failure.file_locations:
+        if location.filepath not in wanted or not location.line:
+            continue
+        try:
+            revision = read_file_revision(os.path.join(worktree_path, location.filepath))
+        except OSError:
+            continue
+        entry = {"filepath": location.filepath, "line": int(location.line), "revision": revision}
+        if entry not in located:
+            located.append(entry)
+    return located
 
 
 async def _record_attempt_failure(
@@ -390,7 +494,8 @@ async def _record_attempt_failure(
     previous_error_source_context = dict(state.last_error_source_context)
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
-    state.record_failure(failure, operation=attempt_mode)
+    # The M1 diagnosis record is written below, once attribution has run (P2).
+    state.record_failure(failure, operation=attempt_mode, diagnosis=False)
     failed_mode = state.last_attempt_mode or "full_set"
     state.failed_attempts_by_mode[failed_mode] = state.failed_attempts_by_mode.get(failed_mode, 0) + 1
     state.record_event(RunEvent(
@@ -536,6 +641,8 @@ async def _record_attempt_failure(
             known_files=set(state.all_files_written) | set(ctx.established_files) | set(ctx.expected_files_upfront),
         )
     )
+    if failure.type == "regression_unattributed" and state.environment_failure is not None:
+        state.stop_reason_evidence = StopReasonEvidence(REGRESSION_UNATTRIBUTED, state.environment_failure)
     if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
         # PRV-17 preflight correction (2026-09-03): stop on the FIRST
         # deterministically unrecoverable denial, not the second - once
@@ -713,6 +820,10 @@ async def _record_attempt_failure(
     no_progress_limit = max(
         3, ctx.kernel.config.autonomy.max_consecutive_no_progress_attempts,
     )
+    capability_unchanged = (
+        isinstance(getattr(failure, "diagnostics", None), dict)
+        and failure.diagnostics.get("reason_code") == ANCHOR_CONTEXT_NOT_ESCALATED
+    )
     if not record_workspace_progress(
         state,
         current_workspace_hash,
@@ -728,10 +839,8 @@ async def _record_attempt_failure(
             state, ctx, failure, current_failure_signature, current_workspace_hash,
             e.missing_files if is_incomplete_generation else (),
         ),
-        capability_unchanged=(
-            isinstance(getattr(failure, "diagnostics", None), dict)
-            and failure.diagnostics.get("reason_code") == ANCHOR_CONTEXT_NOT_ESCALATED
-        ),
+        capability_unchanged=capability_unchanged,
+        refusal_repeated=capability_unchanged and bool(failure.diagnostics.get("refusal_repeated")),
     ):
         logger.error(
             "Quality Gates stopped after %s consecutive attempts produced no "
@@ -741,7 +850,14 @@ async def _record_attempt_failure(
         )
     elif force_strategy_transition(
         state.budgets, consecutive_no_progress=state.consecutive_no_progress_attempts,
-        targeted_max_retries=ctx.targeted_max_retries, has_fallback_model=bool(ctx.chain),
+        # GR-R0: a pre-inference refusal proves the same model cannot be sent
+        # anything new, so another attempt on it would be the same refusal.
+        immediate=capability_unchanged,
+        targeted_max_retries=ctx.targeted_max_retries,
+        # LR-R1-P1: a fallback proven unable to serve the patch-only next
+        # attempt is not requested (Option b); the retry decision after this
+        # failure's attribution re-reads the same resolver.
+        has_fallback_model=(routing := fallback_routing_for_context(state, ctx)).available,
     ):
         state.record_event(RunEvent(
             kind="retry.strategy_transition",
@@ -751,10 +867,12 @@ async def _record_attempt_failure(
             message="No material progress on consecutive attempts - forcing a strategy transition.",
             details={
                 "reason": state.last_progress_classification,
+                "refused_before_inference": capability_unchanged,
                 "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
                 "from_mode": state.last_attempt_mode,
                 "targeted_budget_closed": True,
-                "fallback_targeted_requested": bool(ctx.chain),
+                "fallback_targeted_requested": routing.available,
+                "fallback_routing": routing.to_dict() if routing.patch_excluded else None,
                 "last_vector_digest": (
                     state.last_progress_vector.digest() if state.last_progress_vector is not None else None
                 ),
@@ -1097,6 +1215,10 @@ async def _record_attempt_failure(
                     # obligation needs to quote. Bounded length - this
                     # becomes Developer-facing prompt text, not a log dump.
                     "raw_evidence": grounded_evidence_excerpt(failure.raw_output or "", outside_scope),
+                    # P2: the exact grounded loci outside the scope, bound to
+                    # the raw revision they were observed on - the plan-scope
+                    # re-invocation shows exactly these lines (never a stale one).
+                    "grounded_locations": _grounded_locations(ctx.worktree_path, failure, outside_scope),
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/
@@ -1306,6 +1428,7 @@ async def _record_attempt_failure(
                     "Developer call rather than paying for a full-set retry that cannot "
                     "possibly address it."
                 )
+                state.stop_reason_evidence = StopReasonEvidence(NO_AUTHORIZED_REPAIR_TARGET, state.environment_failure)
 
     # MA9 (2026-08-29): the ONE place attribution's own output ordinarily
     # already narrows to "which file(s) does THIS failure implicate" - reused
@@ -1329,6 +1452,10 @@ async def _record_attempt_failure(
         )
         if narrowed:
             state.repair_contract.immediate_correction_targets = narrowed
+
+    # LR-R1-M1 diagnosis with the failure's final attribution (P2: a
+    # regression grounded by the compiler's locator records its tier).
+    attempt_evidence_scope.record_diagnosis(failure, attempt_mode)
 
     # Charged before the scope override below, so the override sees whether
     # this attempt spent the last of recovery's own budget. Nothing after this
@@ -1412,4 +1539,5 @@ async def _record_attempt_failure(
     # append - chiefly IncompleteGenerationError, plus the general_error
     # defensive path.
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
+    _admit_verification_only_retry(state, ctx, failure)

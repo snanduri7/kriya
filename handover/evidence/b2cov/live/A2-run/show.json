@@ -1,0 +1,52 @@
+{
+  "base_revision": "92d61b3f5c31942a1039713574487bdcfcdbbfff",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 3,
+    "attempt.concluded": 3,
+    "attempt.opened": 3,
+    "authority.snapshot": 2,
+    "candidate.change": 2,
+    "developer.parse": 2,
+    "diagnosis": 1,
+    "fallback.decision": 2,
+    "gate.result": 13,
+    "mirror.decision": 4,
+    "mirror.event": 55,
+    "mirror.evidence": 3,
+    "mirror.gate_outcome": 6,
+    "model.request": 9,
+    "model.response": 9,
+    "model.result": 9,
+    "obligations.snapshot": 3,
+    "prompt.sections": 9,
+    "recovery.decision": 1,
+    "retry.delta": 1,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 2,
+    "unit.opened": 2
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "74d745f5aef79c8481c437ecb4e67c80db676ae0",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-b2cov/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "2d1f73340ddd439a80e7a5e4ee39f24d373303e4",
+    "version": "0.1.0"
+  },
+  "records": 146,
+  "run_id": "20261006T125843-1e9629b6",
+  "seal": {
+    "blob_count": 117,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/b2cov-a2-py-freezegun"
+}

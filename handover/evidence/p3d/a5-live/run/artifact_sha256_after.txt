@@ -1,0 +1,3 @@
+5f2318b62834c726c6ca9499be1c2e79060aee80a1cd1f05c2743967c7d45736  acceptance/p3v-a5-spring-xml/approval.json
+d6bdc9427c70d843f79f358c405f64c6ebe86c8a7d84bfc3ed2bda839557bf4e  acceptance/p3v-a5-spring-xml/KriyaAcceptanceTest.java
+5f2318b62834c726c6ca9499be1c2e79060aee80a1cd1f05c2743967c7d45736  approvals/A5_approval.json

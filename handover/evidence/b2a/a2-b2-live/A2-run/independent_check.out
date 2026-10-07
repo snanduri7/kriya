@@ -1,0 +1,16 @@
+_parse_tz_offset('+05:30') -> datetime.timedelta(seconds=19800)
+_parse_tz_offset('-02:00') -> datetime.timedelta(days=-1, seconds=79200)
+_parse_tz_offset('+00:00') -> datetime.timedelta(0)
+_parse_tz_offset('-05:30') -> datetime.timedelta(days=-1, seconds=66600)
+_parse_tz_offset('abc') -> ValueError Invalid timezone offset format: abc. Expected '+HH:MM' or '-HH:MM'
+_parse_tz_offset('05:30') -> ValueError Invalid timezone offset format: 05:30. Expected '+HH:MM' or '-HH:MM'
+_parse_tz_offset('+5:30') -> datetime.timedelta(seconds=19800)
+_parse_tz_offset('+05:3') -> ValueError Invalid timezone offset format: +05:3. Expected '+HH:MM' or '-HH:MM'
+_parse_tz_offset('+05:30x') -> ValueError Invalid timezone offset format: +05:30x. Expected '+HH:MM' or '-HH:MM'
+_parse_tz_offset('') -> ValueError Invalid timezone offset format: . Expected '+HH:MM' or '-HH:MM'
+_parse_tz_offset(datetime.timedelta(seconds=10800)) -> datetime.timedelta(seconds=10800)
+_parse_tz_offset(4) -> datetime.timedelta(seconds=14400)
+_parse_tz_offset(-1.5) -> datetime.timedelta(days=-1, seconds=81000)
+_parse_tz_offset(0) -> datetime.timedelta(0)
+freeze_time(tz_offset='+05:30') now -> 2012-01-14 17:30:00
+freeze_time(tz_offset='-02:00') now -> 2012-01-14 10:00:00

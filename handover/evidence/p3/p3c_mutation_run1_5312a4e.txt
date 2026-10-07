@@ -1,0 +1,9 @@
+baseline 869 passed in 82.82s (0:01:22)
+baseline-subtraction-removed KILLED 1 failed, 231 passed in 24.20s
+subtract-by-identity-not-count KILLED 1 failed, 233 passed in 28.07s
+new-file-treated-as-all-baseline SURVIVED 869 passed in 84.53s (0:01:24)
+check-skipped-entirely KILLED 1 failed, 280 passed in 39.17s
+edit-path-baseline-is-the-candidate KILLED 1 failed, 280 passed in 39.52s
+TOTAL 5 {'SURVIVED': 1, 'KILLED': 4}
+
+[exited with code 0]

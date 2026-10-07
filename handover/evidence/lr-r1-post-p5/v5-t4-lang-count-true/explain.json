@@ -1,0 +1,212 @@
+{
+  "Q9": {
+    "failed_terminal_gates": [],
+    "integration_obligations": null,
+    "items": [
+      {
+        "commit_result": "NOT_COMMITTED",
+        "lifecycle_state": "FAILURE",
+        "model_calls": 3,
+        "seq": 54,
+        "terminal_status": "FAILURE"
+      }
+    ],
+    "last_fallback_routing": null,
+    "last_recovery_decision": {
+      "action": "stop_environment",
+      "content": {
+        "environment_failure": "sha256:0a941655034ffcdf61c7b8f543b558346ad5b465801f7a3f73646fae3104032c"
+      },
+      "failure_type": "context_edit_protocol_unsatisfiable",
+      "progress_classification": "PROGRESS",
+      "retry": false,
+      "seq": 47
+    },
+    "plan_scope_conflicts": [],
+    "status": "RECORDED",
+    "terminal_cause": {
+      "failure_category": "context_edit_protocol_unsatisfiable",
+      "quality_gates_passed": false,
+      "unit_outcome": "RETURNED"
+    },
+    "units": [
+      {
+        "failure_category": "context_edit_protocol_unsatisfiable",
+        "outcome": "RETURNED",
+        "quality_gates_passed": false,
+        "seq": 51,
+        "unit_id": "s1"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "answers": {
+        "Q1": {
+          "reason": "no_model_call: no model request was made in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q2": {
+          "items": [
+            {
+              "authorized_write_scope": [
+                "src/main/java/org/apache/commons/lang3/BooleanUtils.java",
+                "src/test/java/org/apache/commons/lang3/BooleanUtilsTest.java"
+              ],
+              "seq": 38,
+              "targets": [
+                {
+                  "digest": "c06c4670b329c71611e6beab38e523b7b40a4ca687e71345f2a0a07dcfd0e2ec",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 0,
+                  "operations": [],
+                  "path": "src/main/java/org/apache/commons/lang3/BooleanUtils.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "bb7abd0d28eb1cde6015bb9e7faec06001acc28e82b7ac4567deff25e6fb9cd9",
+                  "shown_is_exact": false,
+                  "shown_member_id": null,
+                  "shown_revision": "bb7abd0d28eb1cde6015bb9e7faec06001acc28e82b7ac4567deff25e6fb9cd9",
+                  "shown_tier": "skeleton",
+                  "spans": [],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                },
+                {
+                  "digest": "fb6c7f54324f2ecd8052b8897fd58891fafca93b0eee2db2205db76ce2bf0c0d",
+                  "full_file": false,
+                  "in_write_scope": true,
+                  "level": 0,
+                  "loci": [],
+                  "member_units_shown": 3,
+                  "operations": [
+                    "anchored_edit"
+                  ],
+                  "path": "src/test/java/org/apache/commons/lang3/BooleanUtilsTest.java",
+                  "requested_operation": "repair_with_patch",
+                  "revision": "0eec320ab77cb6c98c5d2c8ee1b6dce63d04f0b3af0245ef23249ef752dd43af",
+                  "shown_is_exact": true,
+                  "shown_member_id": "BooleanUtilsTest.testOr_object_nullInput",
+                  "shown_revision": "0eec320ab77cb6c98c5d2c8ee1b6dce63d04f0b3af0245ef23249ef752dd43af",
+                  "shown_tier": "member_exact",
+                  "spans": [
+                    {
+                      "end_line": 464,
+                      "start_line": 462,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 781,
+                      "start_line": 779,
+                      "unit": "member_exact"
+                    },
+                    {
+                      "end_line": 962,
+                      "start_line": 960,
+                      "unit": "member_exact"
+                    }
+                  ],
+                  "uncovered_loci": [],
+                  "whole_file_authority": false
+                }
+              ],
+              "write_scope_mode": "allowlist"
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q3": {
+          "reason": "no_model_call: no model response in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q4": {
+          "reason": "no_model_call: no Developer request in this attempt",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q5": {
+          "diagnoses": [
+            {
+              "content": {
+                "message": "sha256:0a941655034ffcdf61c7b8f543b558346ad5b465801f7a3f73646fae3104032c",
+                "raw_output": "sha256:0a941655034ffcdf61c7b8f543b558346ad5b465801f7a3f73646fae3104032c"
+              },
+              "evidence_class": "UNKNOWN",
+              "likely_files": [
+                "src/main/java/org/apache/commons/lang3/BooleanUtils.java"
+              ],
+              "reason_code": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE",
+              "seq": 43,
+              "type": "context_edit_protocol_unsatisfiable"
+            }
+          ],
+          "items": [],
+          "status": "RECORDED"
+        },
+        "Q6": {
+          "items": [
+            {
+              "action": "stop_environment",
+              "content": {
+                "environment_failure": "sha256:0a941655034ffcdf61c7b8f543b558346ad5b465801f7a3f73646fae3104032c"
+              },
+              "failure_type": "context_edit_protocol_unsatisfiable",
+              "no_progress_terminated": false,
+              "progress_classification": "PROGRESS",
+              "retry": false,
+              "retry_decision": {
+                "action": "stop_environment",
+                "reason": "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: no mutation operation is feasible under the authoritative context of this Developer invocation - src/main/java/org/apache/commons/lang3/BooleanUtils.java: no authoritative full source, and no exact source for any located edit region. Nothing was sent to the model.",
+                "reserved_fallback": false,
+                "should_continue": false
+              },
+              "seq": 47,
+              "stop_loop": true
+            }
+          ],
+          "status": "RECORDED"
+        },
+        "Q7": {
+          "reason": "no later attempt in this unit invocation",
+          "status": "NOT_APPLICABLE"
+        },
+        "Q8": {
+          "items": [
+            {
+              "fallback": false,
+              "phase": "call",
+              "requested": "qwen3-coder:30b-kriya-e52213655394",
+              "requested_rejection": [],
+              "selected": "qwen3-coder:30b-kriya-e52213655394",
+              "seq": 35
+            }
+          ],
+          "status": "RECORDED"
+        }
+      },
+      "attempt": 1,
+      "invocation_seq": 1,
+      "unit_id": "s1"
+    }
+  ],
+  "calls_outside_attempts": {
+    "localization": 1,
+    "planning": 2
+  },
+  "capture": "full",
+  "questions": {
+    "Q1": "What exactly was the model asked?",
+    "Q2": "What authoritative source did it receive?",
+    "Q3": "What did it return?",
+    "Q4": "What candidate change resulted?",
+    "Q5": "What deterministic check failed?",
+    "Q6": "Why did Kriya retry?",
+    "Q7": "What changed in the next retry?",
+    "Q8": "Why was fallback selected or refused?",
+    "Q9": "Why did the run finally succeed or fail?"
+  },
+  "run_id": "20261005T183121-9434e9d6",
+  "sealed": true,
+  "verification": "VERIFIED"
+}

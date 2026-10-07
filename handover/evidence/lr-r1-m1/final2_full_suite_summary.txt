@@ -1,0 +1,4 @@
+revision: ceb9943
+command: ulimit -n 256; pytest -q -n 8 --dist loadgroup
+8658 passed, 14 warnings in 540.05s (0:09:00)
+exit=0 wall=541s

@@ -1,0 +1,52 @@
+{
+  "base_revision": "262a247d2d99a47a520cdb2d46adb90df88b4326",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 4,
+    "attempt.concluded": 4,
+    "attempt.opened": 4,
+    "authority.snapshot": 3,
+    "candidate.change": 4,
+    "developer.parse": 4,
+    "diagnosis": 3,
+    "fallback.decision": 4,
+    "gate.result": 6,
+    "mirror.decision": 4,
+    "mirror.event": 74,
+    "mirror.evidence": 5,
+    "mirror.gate_outcome": 9,
+    "model.request": 13,
+    "model.response": 13,
+    "model.result": 13,
+    "obligations.snapshot": 4,
+    "prompt.sections": 13,
+    "recovery.decision": 3,
+    "retry.delta": 2,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 2,
+    "unit.opened": 2
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "6530138fc6106b19b9329baab84ef903c2df2b2d",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-p5/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "265b9a507f4bbb1179fcb56e8c78dfb9b5ce6d25",
+    "version": "0.1.0"
+  },
+  "records": 195,
+  "run_id": "20261005T192055-bd4ff7df",
+  "seal": {
+    "blob_count": 150,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/r2c-py-inflect"
+}

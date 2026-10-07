@@ -1,0 +1,13 @@
+{
+ "process_wall_seconds": 0.5059433749993332,
+ "recorder_seconds": 0.0,
+ "functions": {},
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/ctrl-httpx-isvalid-off.yaml",
+  "generate",
+  "Add a classmethod `codes.is_valid(value)` to httpx/_status_codes.py that returns True when the integer value is a defined status code in `codes` and False otherwise, and add tests for it in tests/test_status_codes.py.",
+  "-y"
+ ]
+}

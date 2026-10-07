@@ -1,0 +1,107 @@
+{
+ "subtask_status": {
+  "s1": "completed",
+  "s2": "completed"
+ },
+ "legacy_status": "success",
+ "integration_log": [
+  "INTEGRATION_OBLIGATION_SATISFIED id=plan.integration.ir1 consumer=s2 missing=[]"
+ ],
+ "terminal_obligations_log": [],
+ "files_by_trace_row": {
+  "5279c137": "shop/service.py",
+  "aa86460e": "",
+  "20261005T162746-879203bd.enforce": "shop/service.py"
+ },
+ "workspace_service_applied": true,
+ "model_calls": 3,
+ "model_calls_by_role": {
+  "developer": 2,
+  "reviewer": 1
+ },
+ "integration_events": [
+  {
+   "attempt": 0,
+   "authority": "authoritative",
+   "created_at": 1791197868.350345,
+   "details": {
+    "completed_consumer": "s2",
+    "consumer_evidence": {
+     "paths": [
+      "shop/controller.py"
+     ],
+     "sources": {
+      "shop/controller.py": "current_workspace"
+     },
+     "verification": [
+      "tool:test"
+     ]
+    },
+    "consumer_subtask_ids": [
+     "s2"
+    ],
+    "evaluation": "reference",
+    "missing_producer_references": [],
+    "obligation_id": "plan.integration.ir1",
+    "producer_subtask_ids": [
+     "s1"
+    ],
+    "provider_evidence": {
+     "shop/service.py": {
+      "established_by": "s1",
+      "state": "valid"
+     }
+    },
+    "relationship_kind": "uses",
+    "status": "satisfied"
+   },
+   "failure_type": null,
+   "kind": "integration.obligation",
+   "message": "plan.integration.ir1 SATISFIED",
+   "operation": null,
+   "source": "workflow_controller.integration_check"
+  }
+ ],
+ "evidence_verify": "VERIFIED",
+ "Q9": {
+  "terminal_cause": {
+   "failure_category": null,
+   "quality_gates_passed": true,
+   "unit_outcome": "RETURNED"
+  },
+  "failed_terminal_gates": [],
+  "integration_obligations": [
+   {
+    "seq": 79,
+    "obligation_id": "plan.integration.ir1",
+    "status": "satisfied",
+    "evaluation": "reference",
+    "producer_subtask_ids": [
+     "s1"
+    ],
+    "consumer_subtask_ids": [
+     "s2"
+    ],
+    "provider_evidence": {
+     "shop/service.py": {
+      "established_by": "s1",
+      "state": "valid"
+     }
+    },
+    "consumer_evidence": {
+     "paths": [
+      "shop/controller.py"
+     ],
+     "sources": {
+      "shop/controller.py": "current_workspace"
+     },
+     "verification": [
+      "tool:test"
+     ]
+    },
+    "missing_producer_references": [],
+    "failure_reason": null
+   }
+  ]
+ }
+}

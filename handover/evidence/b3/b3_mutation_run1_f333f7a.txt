@@ -1,0 +1,22 @@
+baseline 327 passed in 17.75s
+general-b2-pass-closes-without-approval KILLED 6 failed, 61 passed in 7.47s
+wrong-acceptance-digest-in-approval-accepted KILLED 2 failed, 112 passed in 15.19s
+approval-for-req-a-closes-req-b SURVIVED 327 passed in 20.49s
+approval-survives-changed-goal KILLED 2 failed, 100 passed in 13.45s
+approval-survives-changed-requirement-text KILLED 1 failed, 126 passed in 14.18s
+candidate-can-create-approval KILLED 2 failed, 109 passed in 14.66s
+model-can-create-approval KILLED 1 failed, 189 passed in 15.58s
+candidate-test-becomes-approved-oracle KILLED 1 failed, 127 passed in 14.22s
+human-approval-overrides-failing-acceptance KILLED 4 failed, 99 passed in 13.00s
+missing-identity-still-human-accepted KILLED 1 failed, 152 passed in 15.47s
+stale-report-accepted KILLED 1 failed, 155 passed in 14.82s
+resume-restores-stale-human-closure KILLED 1 failed, 88 passed in 7.38s
+resume-restores-whole-human-closure KILLED 1 failed, 97 passed in 6.94s
+approval-not-in-resume-identity KILLED 1 failed, 87 passed in 6.98s
+enforce-resume-ignores-approval-change KILLED 1 failed, 220 passed in 15.78s
+wildcard-extra-field-accepted KILLED 1 failed, 99 passed in 13.31s
+duplicate-approval-accepted KILLED 1 failed, 98 passed in 13.22s
+unapproved-template-accepted KILLED 1 failed, 108 passed in 14.91s
+base-revision-not-bound KILLED 2 failed, 110 passed in 14.31s
+runner-contract-not-bound KILLED 1 failed, 129 passed in 14.95s
+TOTAL 20 {'KILLED': 19, 'SURVIVED': 1}

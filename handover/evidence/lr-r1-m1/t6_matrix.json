@@ -1,0 +1,112 @@
+{
+ "Planner repair": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "REPEATED_VECTOR": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "PASS",
+  "Q6": "PASS",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "TOOL subtask": {
+  "Q1": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
+  "Q2": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
+  "Q3": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
+  "Q4": "NOT_APPLICABLE(tool_action: no Developer candidate)",
+  "Q5": "NOT_APPLICABLE(no_verification_gate)",
+  "Q6": "NOT_APPLICABLE(tool_subtask: executed once, never retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "NOT_APPLICABLE(no_model_call: a tool subtask makes no model call)",
+  "Q9": "PASS"
+ },
+ "deadline stop": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "NOT_APPLICABLE(no_model_answer: InferenceDeadlineError)",
+  "Q5": "PASS",
+  "Q6": "PASS",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "exception escape": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "final-review refusal": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "investigation turns": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "iterative per-file": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "output-budget retry": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "NOT_APPLICABLE(every recorded check passed (2 gate result(s)))",
+  "Q6": "NOT_APPLICABLE(no failure was recorded for this attempt; nothing was retried)",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ },
+ "plan-scope conflict": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "PASS",
+  "Q6": "PASS",
+  "Q7": "NOT_APPLICABLE(no later attempt in this unit invocation)",
+  "Q8": "PASS",
+  "Q9": "PASS"
+ }
+}

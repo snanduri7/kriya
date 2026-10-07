@@ -1,0 +1,75 @@
+{
+ "requirements_derived": 22,
+ "covered": [
+  "REQ-15"
+ ],
+ "strength": {
+  "REQ-15": "GENERAL"
+ },
+ "acceptance_digest": "ed8b90b12af06fdda4a5c3eb09d1bc9fdcf2fd29f7ce320bbf6d29aac7c5afe5",
+ "cases": [
+  "kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+  "kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge",
+  "kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+  "kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+  "kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge"
+ ],
+ "refusal": null,
+ "integrity_problem": null,
+ "case_results": {
+  "version": 1,
+  "gate_id": "0e9343b0944a44a4876fe5e4f817fb82",
+  "runner": "pytest",
+  "completeness": "COMPLETE",
+  "reason": null,
+  "cases": 5,
+  "status_counts": {
+   "failed": 3,
+   "passed": 2
+  },
+  "report_files": [
+   {
+    "path": ".kriya/test-reports/0e9343b0944a44a4876fe5e4f817fb82.xml",
+    "sha256": "2b0aa7a27ec176187351b0cc98d67645424e046a0736de2074403860074bcdb4"
+   }
+  ],
+  "cleared_reports": 0,
+  "workspace": "/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/b9c46006-cadc-4425-8a7d-b8d6ae5cfcb7/scratchpad/gfy/base",
+  "test_cases": [
+   {
+    "identity": "kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge",
+    "status": "failed"
+   },
+   {
+    "identity": "kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case2_generic_call_through_this_gets_a_calls_edge",
+    "status": "failed"
+   },
+   {
+    "identity": "kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge",
+    "status": "failed"
+   },
+   {
+    "identity": "kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_control3_unqualified_non_generic_call_keeps_its_calls_edge",
+    "status": "passed"
+   },
+   {
+    "identity": "kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge",
+    "classname": "kriya_acceptance",
+    "name": "test_control4_non_generic_call_through_this_keeps_its_calls_edge",
+    "status": "passed"
+   }
+  ]
+ },
+ "judgment": {
+  "REQ-15": "AcceptanceJudgment(code='ACCEPTANCE_VIOLATED', reason='acceptance case(s) observed the behaviour contradicted: kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge, kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge, kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge', evidence={'acceptance_digest': 'ed8b90b12af06fdda4a5c3eb09d1bc9fdcf2fd29f7ce320bbf6d29aac7c5afe5', 'contract': 1, 'runner_contract_digest': '806f453647de48b218b4a1ec7e46a9e2a99817203986a0959d94f8d09b7db259', 'runner': 'pytest', 'acceptance_requirement_set_digest': '1f98a210ba0e17f6762f2263523c743e1c8ae169f108335304c8283f58c44745', 'gate_id': '0e9343b0944a44a4876fe5e4f817fb82', 'report_files': [{'path': '.kriya/test-reports/0e9343b0944a44a4876fe5e4f817fb82.xml', 'sha256': '2b0aa7a27ec176187351b0cc98d67645424e046a0736de2074403860074bcdb4'}], 'completeness': 'COMPLETE', 'exit_code': 1, 'candidate_modules': ['graphify'], 'candidate_digest': 'd4846a5c5be93caab25fb204586a04f18212c18c4b3f8b9cdea5e78ea3cfd3a2', 'cases': ['kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge', 'kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge', 'kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge', 'kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge', 'kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge'], 'case_results': {'kriya_acceptance.test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge': ['failed'], 'kriya_acceptance.test_case2_generic_call_through_this_gets_a_calls_edge': ['failed'], 'kriya_acceptance.test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge': ['failed'], 'kriya_acceptance.test_control3_unqualified_non_generic_call_keeps_its_calls_edge': ['passed'], 'kriya_acceptance.test_control4_non_generic_call_through_this_keeps_its_calls_edge': ['passed']}})"
+ },
+ "output_tail": "\".A()\", \"reader\", \".Get()\", \"settings\")\nE       AssertionError: assert False\nE        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.A()', 'reader', '.Get()', 'settings')\n\n.kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py:61: AssertionError\n____________ test_case2_generic_call_through_this_gets_a_calls_edge ____________\n\ngraph = ({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})\n\n    @pytest.mark.kriya_requirement(\"REQ-15\")\n    def test_case2_generic_call_through_this_gets_a_calls_edge(graph):\n>       assert _edge(graph, \".B()\", \"reader\", \".Get()\", \"settings\")\nE       AssertionError: assert False\nE        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.B()', 'reader', '.Get()', 'settings')\n\n.kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py:66: AssertionError\n_ test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge _\n\ngraph = ({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...})\n\n    @pytest.mark.kriya_requirement(\"REQ-15\")\n    def test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge(graph):\n>       assert _edge(graph, \".E()\", \"local\", \".Make()\", \"local\")\nE       AssertionError: assert False\nE        +  where False = _edge(({('src_reader_demo_reader_c', 'src_settings_demo_settings_getraw'), ('src_reader_demo_reader_d', 'src_settings_demo_s...mo_reader', 'relation': 'contains', 'confidence': 'EXTRACTED', ...}, ...], 'input_tokens': 0, 'output_tokens': 0, ...}), '.E()', 'local', '.Make()', 'local')\n\n.kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py:71: AssertionError\n=========================== short test summary info ============================\nFAILED .kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py::test_case1_unqualified_generic_call_to_a_base_class_method_gets_a_calls_edge\nFAILED .kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py::test_case2_generic_call_through_this_gets_a_calls_edge\nFAILED .kriya/acceptance-runs/9a0bcd81bf4b4f8aa55a2f1155bbc211/kriya_acceptance.py::test_case5_unqualified_generic_call_to_a_same_class_method_gets_a_calls_edge\n3 failed, 2 passed in 0.96s\n\n"
+}

@@ -1,0 +1,252 @@
+{
+ "killed": 41,
+ "total": 41,
+ "results": [
+  {
+   "mutant": "privilege the original baseline observation over its replays",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.42s"
+  },
+  {
+   "mutant": "add the candidate state to the baseline envelope",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 3 passed in 0.45s"
+  },
+  {
+   "mutant": "ignore an unseen candidate outcome (match on type only)",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 17 passed in 0.61s"
+  },
+  {
+   "mutant": "ignore an unseen candidate exception type (match on outcome only)",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 4 passed in 0.46s"
+  },
+  {
+   "mutant": "treat one conditional observation as stable message evidence",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 7 passed in 0.43s"
+  },
+  {
+   "mutant": "treat a known volatile conditional message as blocking",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.45s"
+  },
+  {
+   "mutant": "reuse an envelope across verification-context identity",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 10 passed in 0.46s"
+  },
+  {
+   "mutant": "reuse an envelope across base revision",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 11 passed in 0.50s"
+  },
+  {
+   "mutant": "allow incomplete replay evidence",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.47s"
+  },
+  {
+   "mutant": "allow an incomplete report",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.49s"
+  },
+  {
+   "mutant": "restore aggregate-output authority",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 6 passed in 0.46s"
+  },
+  {
+   "mutant": "lack of stability evidence becomes evidence against the candidate",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 7 passed in 0.47s"
+  },
+  {
+   "mutant": "a stable same-state field the candidate changed is not blamed",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 5 passed in 0.46s"
+  },
+  {
+   "mutant": "a state change never requests the envelope (original privileged)",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 2 passed in 0.47s"
+  },
+  {
+   "mutant": "an unmeasured state change is excused",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 42 passed in 3.39s"
+  },
+  {
+   "mutant": "a candidate state outside the envelope is excused",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 2 passed in 0.46s"
+  },
+  {
+   "mutant": "a test absent from a replay is treated as observed",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.48s"
+  },
+  {
+   "mutant": "a flaky test loses its FLAKY_PREEXISTING label",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.52s"
+  },
+  {
+   "mutant": "FLAKY_PREEXISTING made blocking",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.45s"
+  },
+  {
+   "mutant": "a known envelope never relabels a non-blocking resolution",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 1 passed in 0.45s"
+  },
+  {
+   "mutant": "the flake-rate verdict is not recorded",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.44s"
+  },
+  {
+   "mutant": "reuse isolated-test stability for the suite context (replay only the failing tests)",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.45s"
+  },
+  {
+   "mutant": "ignore context binding: working directory",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 10 passed in 0.44s"
+  },
+  {
+   "mutant": "ignore context binding: pytest session facts",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 52 passed in 4.87s"
+  },
+  {
+   "mutant": "ignore context binding: selection",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 53 passed in 4.80s"
+  },
+  {
+   "mutant": "ignore context binding: environment",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 44 passed in 3.23s"
+  },
+  {
+   "mutant": "ignore context binding: command",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 44 passed in 3.33s"
+  },
+  {
+   "mutant": "ignore context binding: baseline run/report",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 44 passed in 3.28s"
+  },
+  {
+   "mutant": "ignore the replay session check",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 54 passed in 4.80s"
+  },
+  {
+   "mutant": "replay the full suite again for every dispute (cache ignored)",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 8 passed in 0.47s"
+  },
+  {
+   "mutant": "single same-context replay",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.47s"
+  },
+  {
+   "mutant": "skip the pre-replay revision check",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 63 passed in 4.79s"
+  },
+  {
+   "mutant": "skip the post-replay revision check",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 79 passed in 8.79s"
+  },
+  {
+   "mutant": "ignore a new failing test",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.46s"
+  },
+  {
+   "mutant": "ignore missing test",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.51s"
+  },
+  {
+   "mutant": "aggregate match passes incomplete evidence",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.49s"
+  },
+  {
+   "mutant": "allow old checkpoint without new evidence",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 45 passed in 3.34s"
+  },
+  {
+   "mutant": "skip JUnit integrity check",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 12 passed in 0.46s"
+  },
+  {
+   "mutant": "raw-evidence integrity ignored (duplicates/counts)",
+   "file": "kriya/tools/test_execution.py",
+   "status": "KILLED",
+   "tests": "1 failed, 40 passed in 3.27s"
+  },
+  {
+   "mutant": "failure message omitted from signature",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed in 0.48s"
+  },
+  {
+   "mutant": "failure body omitted from signature",
+   "file": "kriya/workflow/validation_baseline.py",
+   "status": "KILLED",
+   "tests": "1 failed, 5 passed in 0.44s"
+  }
+ ]
+}

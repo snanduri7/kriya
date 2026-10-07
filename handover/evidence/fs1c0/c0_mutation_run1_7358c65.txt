@@ -1,0 +1,24 @@
+baseline 151 passed in 17.56s
+ignore-conftest-and-package-files KILLED 6 failed, 15 passed in 8.66s
+ignore-support-module-closure KILLED 3 failed, 75 passed in 6.48s
+ignore-runner-ini-files KILLED 2 failed, 59 passed in 6.09s
+ignore-pyproject-pytest-config KILLED 2 failed, 41 passed in 5.45s
+ignore-setup-cfg-pytest-config KILLED 1 failed, 29 passed in 5.52s
+ignore-declared-dependencies KILLED 1 failed, 29 passed in 5.29s
+candidate-report-trusted-blindly KILLED 1 failed, 54 passed in 5.77s
+candidate-exit-code-trusted-blindly KILLED 3 failed, 42 passed in 5.02s
+runner-failure-ignored KILLED 1 failed, 53 passed in 5.57s
+missing-baseline-identity-accepted KILLED 2 failed, 50 passed in 5.02s
+skipped-or-deselected-baseline-identity-accepted KILLED 2 failed, 53 passed in 5.17s
+stale-inventory-from-candidate-tree KILLED 2 failed, 71 passed in 5.38s
+stale-inventory-head-not-run-base KILLED 1 failed, 94 passed in 7.83s
+incomplete-baseline-inventory-accepted KILLED 1 failed, 58 passed in 5.83s
+digest-mismatch-ignored KILLED 4 failed, 64 passed in 5.33s
+change-during-run-ignored KILLED 1 failed, 137 passed in 8.20s
+parameter-cases-collapsed KILLED 2 failed, 46 passed in 6.27s
+output-root-writes-ignored SURVIVED 151 passed in 18.51s
+unsupported-runner-accepted KILLED 1 failed, 82 passed in 6.91s
+jvm-test-classpath-ignored SURVIVED 151 passed in 13.13s
+test-resources-ignored KILLED 1 failed, 29 passed in 5.86s
+closure-binding-dropped KILLED 2 failed, 83 passed in 6.71s
+TOTAL 22 {'SURVIVED': 2, 'KILLED': 20}

@@ -1,0 +1,3 @@
+total 0
+drwxr-xr-x@  2 sriramnanduri  staff    64  6 Oct 23:10 .
+drwxr-xr-x@ 60 sriramnanduri  staff  1920  6 Oct 23:10 ..

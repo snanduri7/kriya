@@ -397,6 +397,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "persistence.checkpoints",
     "persistence.traces",
     "persistence.logs",
+    "evidence.attempt_recorder",
     "capacity.workspace",
     "capacity.temp",
     "git.worktree",
@@ -595,6 +596,78 @@ def _check_logs(ctx: _Context) -> DoctorCheck:
         return _check("persistence.logs", CheckStatus.WARN, evidence=evidence,
                       remediation="Enable logging.file_enabled or logging.run_file_enabled to keep a durable log.")
     return _check("persistence.logs", CheckStatus.PASS, evidence=evidence, remediation=remediation)
+
+
+def _check_attempt_recorder(ctx: _Context) -> DoctorCheck:
+    """LR-R1-M1: the attempt evidence store - capture mode, whether the
+    store root is writable (without creating it), the newest store's
+    integrity, and the newest traced run whose recorder was unavailable.
+    Never required (D5: the recorder never blocks a run)."""
+    from kriya.core.attempt_evidence import reader
+    from kriya.core.attempt_evidence.writer import store_root
+    from kriya.core.state_paths import StateDirectoryError, resolve_state_directory, trace_db_path
+
+    recorder = ctx.cfg.evidence.attempt_recorder
+    evidence: Dict[str, Any] = {"capture": recorder.capture, "keep_runs": recorder.retention.keep_runs,
+                                "max_bytes": recorder.retention.max_bytes}
+    remediation = ("Make the state directory (KRIYA_STATE_DIR > paths.state > ~/.kriya/state) writable; "
+                   "inspect a run with `kriya evidence verify <run_id>`.")
+    if recorder.capture == "off":
+        return _recorder_check(CheckStatus.WARN, evidence,
+                               "evidence.attempt_recorder.capture is off: no attempt evidence is recorded.")
+    try:
+        state_dir, _source = resolve_state_directory(ctx.cfg)
+        root = store_root(state_dir)
+        evidence.update({"store": _store_probe(root)})
+    except (StateDirectoryError, OSError) as error:
+        return _recorder_check(CheckStatus.WARN, {**evidence, "error": str(error)}, remediation)
+    runs = reader.list_runs(state_dir)
+    evidence["runs"] = len(runs)
+    newest = reader.newest_run(state_dir)
+    if newest is not None:
+        evidence["newest_run"] = {"run_id": newest, "verification": reader.open_run(state_dir, newest).verify().status}
+    unavailable = _last_recorder_unavailable_run(trace_db_path(ctx.cfg))
+    if unavailable:
+        evidence["last_unavailable_run"] = unavailable
+    degraded = evidence.get("newest_run", {}).get("verification") not in (None, reader.VERIFIED, reader.UNSEALED)
+    if degraded or unavailable:
+        return _recorder_check(CheckStatus.WARN, evidence, remediation)
+    return _recorder_check(CheckStatus.PASS, evidence, remediation)
+
+
+_RECENT_TRACE_ROWS = 50
+
+
+def _last_recorder_unavailable_run(trace_db: str) -> Optional[Dict[str, Any]]:
+    """The newest of the recent trace rows whose evidence.attempt_store event
+    says RECORDER_UNAVAILABLE (read-only), or None."""
+    import sqlite3
+
+    if not os.path.exists(trace_db):
+        return None
+    connection = sqlite3.connect(f"file:{trace_db}?mode=ro", uri=True)
+    try:
+        rows = connection.execute("SELECT run_id, timestamp, run_events FROM runs ORDER BY timestamp DESC, rowid DESC "
+                                  "LIMIT ?", (_RECENT_TRACE_ROWS,)).fetchall()
+    except sqlite3.DatabaseError:
+        return None
+    finally:
+        connection.close()
+    for run_id, timestamp, run_events in rows:
+        try:
+            events = json.loads(run_events or "[]")
+        except ValueError:
+            continue
+        for event in events if isinstance(events, list) else []:
+            details = event.get("details") if isinstance(event, dict) else None
+            if event.get("kind") == "evidence.attempt_store" and isinstance(details, dict) \
+                    and details.get("status") == "RECORDER_UNAVAILABLE":
+                return {"run_id": run_id, "timestamp": timestamp, "reason": details.get("reason")}
+    return None
+
+
+def _recorder_check(status: CheckStatus, evidence: Dict[str, Any], remediation: str) -> DoctorCheck:
+    return _check("evidence.attempt_recorder", status, required=False, evidence=evidence, remediation=remediation)
 
 
 def _capacity_check(check_id: str, path: str) -> DoctorCheck:
@@ -1371,6 +1444,8 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("persistence.checkpoints", True, _check_checkpoints),
     ("persistence.traces", True, _check_traces),
     ("persistence.logs", True, _check_logs),
+    # LR-R1-M1 D5: the recorder is observational; this row never blocks.
+    ("evidence.attempt_recorder", False, _check_attempt_recorder),
     ("capacity.workspace", True, _check_workspace_capacity),
     ("capacity.temp", True, _check_temp_capacity),
     ("git.worktree", True, _check_git_worktree),

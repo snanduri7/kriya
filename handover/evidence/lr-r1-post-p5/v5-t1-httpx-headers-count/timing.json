@@ -1,0 +1,122 @@
+{
+ "process_wall_seconds": 184.70731504098512,
+ "recorder_seconds": 0.11739941890118644,
+ "functions": {
+  "kriya.core.attempt_evidence.scope.attempt_opened": {
+   "calls": 1,
+   "seconds": 3.629201091825962e-05
+  },
+  "kriya.core.attempt_evidence.scope.capture_mode": {
+   "calls": 1,
+   "seconds": 1.167005393654108e-06
+  },
+  "kriya.core.attempt_evidence.scope.close_run": {
+   "calls": 1,
+   "seconds": 0.0005934579530730844
+  },
+  "kriya.core.attempt_evidence.scope.emit": {
+   "calls": 4,
+   "seconds": 0.0009021649602800608
+  },
+  "kriya.core.attempt_evidence.scope.ensure_store": {
+   "calls": 2,
+   "seconds": 0.002131749060936272
+  },
+  "kriya.core.attempt_evidence.scope.enter_attempt_iteration": {
+   "calls": 1,
+   "seconds": 2.0916981156915426e-05
+  },
+  "kriya.core.attempt_evidence.scope.exit_attempt_iteration": {
+   "calls": 1,
+   "seconds": 6.120797479525208e-05
+  },
+  "kriya.core.attempt_evidence.scope.mirror_decision": {
+   "calls": 5,
+   "seconds": 0.003730833879671991
+  },
+  "kriya.core.attempt_evidence.scope.mirror_event": {
+   "calls": 29,
+   "seconds": 0.02497958211461082
+  },
+  "kriya.core.attempt_evidence.scope.mirror_evidence": {
+   "calls": 2,
+   "seconds": 0.003945834003388882
+  },
+  "kriya.core.attempt_evidence.scope.mirror_gate_outcome": {
+   "calls": 3,
+   "seconds": 0.004169875057414174
+  },
+  "kriya.core.attempt_evidence.scope.note_retry_evidence": {
+   "calls": 1,
+   "seconds": 1.5840050764381886e-06
+  },
+  "kriya.core.attempt_evidence.scope.prune_after_run": {
+   "calls": 1,
+   "seconds": 0.018765707965940237
+  },
+  "kriya.core.attempt_evidence.scope.record_call_result": {
+   "calls": 7,
+   "seconds": 0.0007866249652579427
+  },
+  "kriya.core.attempt_evidence.scope.record_developer_parse": {
+   "calls": 1,
+   "seconds": 0.0006756249931640923
+  },
+  "kriya.core.attempt_evidence.scope.record_diagnosis": {
+   "calls": 1,
+   "seconds": 0.0009615839808247983
+  },
+  "kriya.core.attempt_evidence.scope.record_fallback_decision": {
+   "calls": 1,
+   "seconds": 4.691700451076031e-05
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_request": {
+   "calls": 7,
+   "seconds": 0.01833204401191324
+  },
+  "kriya.core.attempt_evidence.scope.record_wire_response": {
+   "calls": 7,
+   "seconds": 0.01621470903046429
+  },
+  "kriya.core.attempt_evidence.scope.store_pointer": {
+   "calls": 1,
+   "seconds": 1.0083953384310007e-05
+  },
+  "kriya.tools.validate._record_gate_result": {
+   "calls": 3,
+   "seconds": 0.010728874010965228
+  },
+  "kriya.workflow.attempt._record_authority_snapshot": {
+   "calls": 1,
+   "seconds": 9.69160464592278e-05
+  },
+  "kriya.workflow.attempt._record_candidate_change": {
+   "calls": 1,
+   "seconds": 0.009302707971073687
+  },
+  "kriya.workflow.context_budget._record_developer_sections": {
+   "calls": 1,
+   "seconds": 9.14999982342124e-05
+  },
+  "kriya.workflow.context_budget._recorded_section_fit": {
+   "calls": 4,
+   "seconds": 0.00046529294922947884
+  },
+  "kriya.workflow.recovery_coordinator._record_recovery_decision": {
+   "calls": 1,
+   "seconds": 0.0003409999771974981
+  },
+  "kriya.workflow.run_trace._unit_evidence": {
+   "calls": 1,
+   "seconds": 5.167035851627588e-06
+  }
+ },
+ "argv": [
+  "/Users/sriramnanduri/kriya-m1-live/venv-p5/bin/kriya",
+  "--config",
+  "/Users/sriramnanduri/kriya-m1-live/config/v5-t1-httpx-headers-count.yaml",
+  "generate",
+  "Add a method `Headers.count(key)` to httpx/_models.py that returns how many values are present for the given header name (case-insensitive), 0 when the header is absent, and add tests for it in tests/models/test_headers.py.",
+  "-y"
+ ]
+}

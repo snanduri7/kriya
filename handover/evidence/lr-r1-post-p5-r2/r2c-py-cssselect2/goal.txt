@@ -1,0 +1,1 @@
+Add a read-only property `depth` to `cssselect2.tree.ElementWrapper` in cssselect2/tree.py that returns the number of ancestors of the element (0 for the root element), and add tests for it in tests/test_cssselect2.py.

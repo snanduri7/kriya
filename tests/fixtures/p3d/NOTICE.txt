@@ -1,0 +1,3 @@
+NumberUtils.java.txt: src/main/java/org/apache/commons/lang3/math/NumberUtils.java of apache/commons-lang at
+4ee346e59eecccdaefbdd74ac53698da4a1f348a (the frozen A3 base), byte-identical, stored with a .txt suffix. Apache License
+2.0. a3_goal.txt: the frozen A3 goal (~/kriya-m1-live/goals/p3v-a3-java-lang.txt), byte-identical.

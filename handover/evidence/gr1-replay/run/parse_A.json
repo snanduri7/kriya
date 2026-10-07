@@ -1,0 +1,32 @@
+{
+ "arm": "A",
+ "kind": "edits",
+ "reason_code": null,
+ "detail": null,
+ "edit_count": 2,
+ "edits": [
+  {
+   "search_spans": [
+    [
+     5360,
+     5370
+    ]
+   ],
+   "inside_shown_windows": true,
+   "no_op": false
+  },
+  {
+   "search_spans": [
+    [
+     5389,
+     5408
+    ]
+   ],
+   "inside_shown_windows": true,
+   "no_op": false
+  }
+ ],
+ "applicable": true,
+ "candidate_sha256": "eb11703ab461ad52598d0d41ab85c174de3075d8bf07bf7fe4fd073092244148",
+ "changed": true
+}

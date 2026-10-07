@@ -1,0 +1,1 @@
+Add a method `Headers.count(key)` to httpx/_models.py that returns how many values are present for the given header name (case-insensitive), 0 when the header is absent, and add tests for it in tests/models/test_headers.py.

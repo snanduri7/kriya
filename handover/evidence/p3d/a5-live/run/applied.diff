@@ -1,0 +1,15 @@
+diff --git a/src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java b/src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java
+index c7bb491..2760528 100644
+--- a/src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java
++++ b/src/main/java/org/springframework/samples/petclinic/web/PetTypeFormatter.java
+@@ -54,8 +54,9 @@ public class PetTypeFormatter implements Formatter<PetType> {
+     @Override
+     public PetType parse(String text, Locale locale) throws ParseException {
+         Collection<PetType> findPetTypes = this.clinicService.findPetTypes();
++        String trimmedText = text.trim();
+         for (PetType type : findPetTypes) {
+-            if (type.getName().equals(text)) {
++            if (type.getName().equalsIgnoreCase(trimmedText)) {
+                 return type;
+             }
+         }

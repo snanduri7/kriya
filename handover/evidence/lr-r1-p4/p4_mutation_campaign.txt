@@ -1,0 +1,15 @@
+retry-whenever-budget-remains KILLED 1 failed, 303 passed in 13.53s
+verification-only-flag-ignored KILLED 1 failed, 295 passed in 17.35s
+verification-only-predicate-ignores-executable-verifiers KILLED 1 failed, 295 passed in 11.36s
+workspace-change-check-ignored KILLED 1 failed, 305 passed in 10.79s
+new-recovery-input-check-ignored KILLED 1 failed, 309 passed in 10.46s
+mutable-recovery-suppressed KILLED 1 failed, 298 passed in 10.45s
+transient-infrastructure-stop-overridden KILLED 1 failed, 308 passed in 10.48s
+attempt-number-is-new-information KILLED 1 failed, 299 passed in 10.56s
+resume-is-a-state-change KILLED 1 failed, 299 passed in 10.84s
+typed-failure-converted-to-success SURVIVED 461 passed in 23.89s
+stop-without-typed-reason KILLED 1 failed, 303 passed in 10.68s
+non-verification-attempt-guard-removed KILLED 1 failed, 311 passed in 10.63s
+admission-never-called KILLED 1 failed, 311 passed in 11.96s
+admission-evidence-unrecorded KILLED 1 failed, 303 passed in 11.09s
+TOTAL 14 {'KILLED': 13, 'SURVIVED': 1}

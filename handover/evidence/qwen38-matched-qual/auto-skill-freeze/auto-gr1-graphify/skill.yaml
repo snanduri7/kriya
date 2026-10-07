@@ -1,0 +1,11 @@
+category: Auto-Generated
+description: The repository follows a flat/modular package layout with Python as the
+  primary language. It uses Setuptools/Poetry for packaging and pytest for testing.
+  The project is structured around a core 'graphify' module, with tools, scripts,
+  tests, and documentation folders. The codebase emphasizes support for multiple programming
+  languages via tree-sitter parsers, and includes a skill generation framework in
+  'tools/skillgen'.
+name: auto-gr1-graphify
+tags:
+- gr1-graphify
+- auto-generated

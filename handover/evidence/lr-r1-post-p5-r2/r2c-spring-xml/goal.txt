@@ -1,0 +1,1 @@
+Add a method `public boolean hasPet(String name)` to org.springframework.samples.petclinic.model.Owner that returns true when the owner has a pet with that name (matched the same way as the existing `getPet(String name)`) and false otherwise, and add a unit test for it in OwnerTests.

@@ -1,0 +1,20 @@
+import datetime
+
+import pytest
+from freezegun.api import _parse_tz_offset
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_plus_offset_string():
+    assert _parse_tz_offset("+05:30") == datetime.timedelta(hours=5, minutes=30)
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_minus_offset_string():
+    assert _parse_tz_offset("-02:00") == datetime.timedelta(hours=-2)
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_any_other_string_raises_value_error():
+    with pytest.raises(ValueError):
+        _parse_tz_offset("abc")

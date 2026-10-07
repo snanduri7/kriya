@@ -277,14 +277,20 @@ def reset_scoped_budgets_for_new_family(budgets) -> None:
 
 def force_strategy_transition(
     budgets, *, consecutive_no_progress: int, targeted_max_retries: int, has_fallback_model: bool,
+    immediate: bool = False,
 ) -> bool:
     """After STRATEGY_TRANSITION_AFTER_NO_PROGRESS consecutive attempts
     without material progress (and before the no-progress ceiling), close
     the primary's targeted budget and request the one fallback-targeted
     repair, so the next attempt changes strategy: the fallback when one is
     configured, else the full-set route. Changes strategy only, never
-    authorization or file scope. Returns whether it fired."""
-    if consecutive_no_progress < STRATEGY_TRANSITION_AFTER_NO_PROGRESS:
+    authorization or file scope. Returns whether it fired.
+
+    ``immediate`` (GR-R0): the attempt was refused before inference because
+    the same model, capability and requested operation could only resend the
+    same request; repeating that attempt carries no information, so the
+    strategy changes now."""
+    if not immediate and consecutive_no_progress < STRATEGY_TRANSITION_AFTER_NO_PROGRESS:
         return False
     budgets.targeted_retry_count = max(budgets.targeted_retry_count, targeted_max_retries)
     if has_fallback_model:

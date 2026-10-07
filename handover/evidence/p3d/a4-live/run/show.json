@@ -1,0 +1,49 @@
+{
+  "base_revision": "d95484f57dfa4b99ac9069bb3f44df680306e8e9",
+  "capture": "full",
+  "kinds": {
+    "attempt.closed": 2,
+    "attempt.concluded": 2,
+    "attempt.opened": 2,
+    "authority.snapshot": 1,
+    "candidate.change": 1,
+    "developer.parse": 1,
+    "fallback.decision": 1,
+    "gate.result": 16,
+    "mirror.decision": 5,
+    "mirror.event": 45,
+    "mirror.evidence": 2,
+    "mirror.gate_outcome": 5,
+    "model.request": 8,
+    "model.response": 8,
+    "model.result": 8,
+    "obligations.snapshot": 2,
+    "prompt.sections": 6,
+    "run.closed": 1,
+    "run.opened": 1,
+    "unit.closed": 2,
+    "unit.opened": 2
+  },
+  "kriya_build": {
+    "build_provenance": "embedded",
+    "commit": "bcb0c1db84e74f70ef277824c596c8fdde29c83f",
+    "dirty": false,
+    "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-p3d/lib/python3.14/site-packages/kriya",
+    "product": "kriya",
+    "python": "3.14.6",
+    "tree": "b0d543bb68d7f2d3581e5d57d700972977312078",
+    "version": "0.1.0"
+  },
+  "records": 121,
+  "run_id": "20261006T174455-d5de8fa7",
+  "seal": {
+    "blob_count": 102,
+    "closed_reason": "run.closed",
+    "complete": true,
+    "degraded": [],
+    "gaps": 0
+  },
+  "sealed": true,
+  "verification": "VERIFIED",
+  "workspace_path": "/Users/sriramnanduri/kriya-m1-live/ws/p3v-a4-java-cli"
+}

@@ -904,6 +904,24 @@ declares a raw-javac build (`detects` is always False); the validator calls it a
 compile undecided, so the ordering is unchanged. The runtime-verification step's own `javac -d` directory
 preparation stays with runtime verification. Ruby remains inline.
 
+### 2.9l Attempt Evidence Recorder (LR-R1-M1, `kriya/core/attempt_evidence/`)
+
+Every mutating run records, per attempt, what the model was asked, what it returned and what Kriya decided, in an append-only, hash-chained store. The recorder is **observational**: it never changes a request byte, the workspace, the result, a retry, a fallback or any control-plane outcome (invariant I-2, proven by an equivalence suite across capture modes and injected faults). Design and deviations: `handover/LR_R1_M1_ATTEMPT_EVIDENCE_RECORDER_DESIGN.md`, `handover/LR_R1_M1_0_INVESTIGATION_NOTES.md` §7.
+
+- **Store.** `<state dir>/attempt-evidence/<run_id>/`: a create-exclusive manifest, append-only records (each line carries the previous line's digest), content-addressed gzip blobs, and a seal at run close. The layout is internal (invariant I-1): consumers use `reader.py` or `kriya evidence ... --json`; a tripwire rejects code in `kriya/`, `scripts/` or `benchmarks/` that names the store's files.
+- **Identity, never from the caller.** ContextVar scopes set it: run (`begin_mutating_run`) > unit invocation (`run_generation_workflow`) > attempt (the whole retry-loop iteration; `run_attempt` emits `attempt.opened`/`closed`, the iteration `attempt.concluded`) > call (`LLMClient.complete_result`/`complete_with_tools_result`) > wire (each physical provider request).
+- **Records.**
+  - Model calls: `model.request` (exact messages, tools and the adapter's `wire_payload` body), `model.response` (transport content verbatim, before any stripping or reasoning split; reasoning as digest + length unless `full_with_reasoning`), `model.result`.
+  - Developer: `prompt.sections` (a segment map that tiles the sent message byte for byte), `authority.snapshot`, `developer.parse`.
+  - Candidate and checks: `candidate.change` (STAGED, with base/candidate raw digests, both versions and a diff `git apply` reproduces; REFUSED for content never staged), `gate.result` (every validator gate, passing or failing, and every terminal gate), `obligations.snapshot`.
+  - Decisions: `diagnosis`, `recovery.decision` (with the retry policy's own action and reason), `fallback.decision`, `retry.delta` (the input-side change between consecutive attempts; descriptive only).
+  - Mirrors of run events, decision-ledger records, evidence and gate outcomes.
+- **Typed stop codes (D7).** `NO_AUTHORIZED_REPAIR_TARGET` and `REGRESSION_UNATTRIBUTED` are typed by `GenerationState.stop_reason_evidence` (an evidence-only `StopReasonEvidence(code, message)`; neither stop is an environment failure) beside their unchanged messages (`kriya/workflow/diagnosis_codes.py`). Only their producers and the recorder use them; no decision reads them.
+- **Failure handling (D5).** Every emit catches `Exception` and degrades the store (logged, `complete: false` in the seal); a store that cannot be opened is `RECORDER_UNAVAILABLE` and the run continues. Nothing ever blocks a run.
+- **Capture modes (D4).** `full` (default), `full_with_reasoning`, `digest_only` (digests, no content), `off`. The `evidence` config section is SECURITY_AUTHORITY and excluded from the config fingerprint (it is observational).
+- **Retention.** At run close, under the workspace lock: protected are the run itself, runs the workspace references (resume checkpoints, ControlState, milestone ledgers), unsealed stores younger than 24 h and stores of unknown age; then the newest `keep_runs` (200) are kept and the oldest dropped until `max_bytes` (5 GiB) fits.
+- **Not claimed.** The hash chain detects corruption and casual edits; it is not a signature. Records are fsynced at boundaries, not per record. Evidence stays local; there is no export.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

@@ -892,6 +892,18 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
 
 Every case must succeed. A failed case, even a typed one, means the identity is not certified.
 
+### 2.1k Attempt evidence (LR-R1-M1)
+
+Every `generate`/`fix` run records what each attempt asked the model, what came back, the candidate change, each check and each retry or fallback decision, under `<state dir>/attempt-evidence/<run_id>/` (state dir: `KRIYA_STATE_DIR` > `paths.state` > `~/.kriya/state`). Recording never changes a run, and a recording failure never stops one.
+
+- **`kriya evidence show [RUN_ID] [--content sha256:...] [--json]`.** Lists recorded runs; with a run id, its integrity and record counts; with `--content`, the exact bytes of one recorded prompt, response, diff or gate output.
+- **`kriya evidence explain RUN_ID [--json]`.** For each attempt: what the model was asked, what authority it had, what it returned, what candidate change resulted, which check failed, why Kriya retried, what changed in the next retry and why a fallback was selected or refused; and why the run finally succeeded or failed. An answer the run cannot give says `NOT RECORDED (<reason>)` or `NOT APPLICABLE (<reason>)`, never blank.
+- **`kriya evidence verify RUN_ID`.** Recomputes the hash chain, blobs and seal: exit 0 only for `VERIFIED`; 1 for `UNSEALED` (crashed or still running) or no store; 2 for a broken chain, corrupt blob or seal mismatch.
+- **`kriya evidence prune [--dry-run] [--workspace DIR] [--json]`.** Applies retention now (it also runs at the end of every run).
+- **Configuration.** `evidence.attempt_recorder.capture`: `full` (default), `full_with_reasoning`, `digest_only` or `off`; `evidence.attempt_recorder.retention.keep_runs` (200) and `.max_bytes` (5 GiB). The section is security-authority configuration: a repository cannot set it.
+- **Privacy.** In `full` mode the store holds prompts, model output and code. It stays on this machine, with owner-only file modes; use `digest_only` to keep digests without content.
+- **Doctor.** `kriya doctor --production` reports `evidence.attempt_recorder` (never required): capture mode, a writable store, the newest store's integrity, and the last run whose recorder was unavailable.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
@@ -1010,6 +1022,55 @@ Four things can pause a `generate` run beyond the usual human-approval gate:
 *   **Skill gap detection**: if the goal touches a skill Kriya doesn't have verified information for, or names a technology with no matching skill at all, Kriya pauses and asks you for a URL, a file path, or pasted text before proceeding - see [Section 6](#6-creating-custom-engineering-skills) and [Section 4](#4-engineering-skills) below. `-y` skips the prompt (the run proceeds on unverified skill content, same as before this feature existed). If `autonomy.web_lookup_enabled` is on, Kriya tries to resolve the gap itself first - see 4.6 below - and only falls back to asking you if that doesn't turn up anything.
 *   **Skill conflict detection**: if two or more skills matched for this goal turn out to have rules that genuinely contradict each other (e.g. two broker skills each pinning a different port for what must be a single shared setting), Kriya pauses and asks which one should govern this run - see [Section 4.4](#44-resolving-skill-conflicts) below. Your answer is remembered, so the same pair of skills is never asked about again. `-y` skips the prompt for that run without excluding either rule and without remembering anything.
 *   **Live lookup batch confirmation**: if `autonomy.web_lookup_enabled` is on and Kriya auto-resolved one or more skill gaps via search, it shows you everything it found in one batch and asks for a single confirm/decline before using any of it - see [Section 4.6](#46-live-lookup) below.
+
+#### Proving behaviour requirements: the acceptance file (`--acceptance`)
+A requirement that asks for new behaviour ("`freeze_time(0)` freezes time at the epoch") is never closed by the
+model's own verdict, by tests the run writes, or by a pre-existing test the goal names (that only proves the old
+behaviour still works). Under `runtime_profile: production` such a requirement therefore stays UNVERIFIED and blocks,
+unless you give Kriya an acceptance file - a pytest module you write before the run, whose cases name the requirement
+they prove:
+
+```python
+import datetime
+
+import pytest
+from freezegun import freeze_time
+
+
+@pytest.mark.kriya_requirement("REQ-1")
+def test_freeze_time_at_epoch():
+    with freeze_time(0):
+        assert datetime.datetime.now() == datetime.datetime(1970, 1, 1)
+```
+
+```bash
+kriya -c kriya.yaml generate -f goal.txt --acceptance acceptance.py
+```
+
+The requirement ids are the ones Kriya derives from the goal (`REQ-1`, `REQ-2`, ... in statement order; the run prints
+them). The file is checked, digested and copied into Kriya's state directory before any model call: an unknown id, a
+case without `kriya_requirement`, a `skip`/`xfail` mark or a requirement that only limits which files may change is
+refused (exit 1). Kriya runs it on the final candidate with its own pytest configuration - never the project's
+`conftest.py`, pytest settings or installed plugins. Every case of a requirement passing closes its behaviour claim; a
+case observing the behaviour contradicted (an assertion against the candidate's result, or an exception raised by the
+candidate's code) makes the requirement VIOLATED; anything else (an import error, a case that did not run, no report)
+leaves it UNVERIFIED. Evidence counts only at the strength it shows: a requirement stated as concrete examples ("`freeze_time(0)` freezes time at the epoch") closes when its cases pass, but one stated as a rule ("accepts strings of the form +HH:MM", "raises ValueError for any other string", "returns 2 * x") never closes from a finite list of passing cases - they are recorded as supporting evidence and the requirement stays UNVERIFIED - while a single case that contradicts the rule still makes it VIOLATED. Supported today: Python projects whose package or module sits at the repository root (a flat
+layout, with or without a `tests/` package); a `src/` layout, a namespace package, or importing test code is refused
+with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come from the plan's original goal.
+
+For a Maven project with JUnit 5, the acceptance file can be one Java test class instead (`--acceptance KriyaAcceptanceTest.java`): one `package`, one class, and every `@Test` method preceded by a `// kriya_requirement: REQ-1` comment. Kriya runs it in a private copy of the candidate (never in your workspace), only when the candidate left the build and test configuration (poms, `.mvn`, `src/test`, ...) exactly as it was, and never overwrites an existing file at `src/test/java/<package>/<Class>.java`. Gradle projects are not supported yet.
+
+When the goal is written as an issue report (headings, a reproducer, version notes, a description of the current bug), every sentence of it would otherwise become a requirement the run must close. Name the requirements yourself instead with a requirement contract kept outside the repository (`--requirements requirements.json`):
+
+```json
+{"format": "kriya.requirements/1",
+ "requirements": [{"id": "REQ-1", "text": "double(5) returns 10.", "kind": "requirement"},
+                  {"id": "REQ-2", "text": "double(x) returns 2 * x for any number x.", "kind": "requirement"}]}
+```
+
+The contract is the complete set: nothing derived from the goal is added. The goal is still what the agents read and plan from. `kind` is `requirement` or `constraint`; an empty set, a duplicate id or another kind is refused before any model call. Acceptance files and approvals must name these ids; an approval for a contract run uses format `kriya.acceptance_approval/2` with the contract's `requirement_set_sha256`, so an approval made for another requirement set never applies. Changing the contract (or the goal it was bound to) on a resumed run regenerates the candidate.
+
+A requirement stated as a general rule cannot be closed by any finite list of passing cases. If you decide that a specific acceptance suite is good enough evidence for such a requirement, say so explicitly with an approval file kept outside the repository (`--acceptance-approval approval.json`). Each approval names one requirement and binds the goal, that requirement's exact text, the acceptance file's digest, its exact cases, the runner contract and the starting revision, with `"accept_suite_as_sufficient": true`; any mismatch refuses it. The requirement is then reported `human_accepted` - your decision, recorded as such, not a proof. A failing case still makes it VIOLATED, and changing or dropping the approval on a resumed run regenerates the candidate.
 
 #### Resuming an interrupted run
 `generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint of a plain `generate`/`fix` run (a milestone's checkpoint is never picked up here - see §3.4.1), or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):

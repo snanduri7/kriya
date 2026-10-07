@@ -27,6 +27,7 @@ from kriya.agents.response_protocol import (
     structured_contract,
 )
 from kriya.config.config import FallbackModelConfig, LLMConfig
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_runtime import binding_output_tokens
 from kriya.core.role_metrics import model_role
@@ -1398,6 +1399,8 @@ class DeveloperAgent(BaseAgent):
                     # too - only a whole-payload wrapper is removed, and an
                     # ambiguous one is refused typed, never guessed.
                     parsed = self.parse_file_payload(reused["content"], filepath)
+                    attempt_evidence_scope.record_developer_parse(parsed, filepath, selected_protocol=None,
+                                                                  source="reused_batch_entry")
                     if parsed.kind == RESPONSE_INVALID:
                         reused.update(content=None, protocol_error=parsed.error,
                                       protocol_reason_code=parsed.reason_code)
@@ -2007,6 +2010,8 @@ class DeveloperAgent(BaseAgent):
                 parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)
             else:
                 parsed = self.parse_file_payload(content, filepath)
+            attempt_evidence_scope.record_developer_parse(parsed, filepath, selected_protocol=protocol,
+                                                          source="developer_response")
             analysis = parsed.analysis if repair_protocol or protocol == STRUCTURED_PROTOCOL else None
             content = None
             if parsed.kind == RESPONSE_INVALID:

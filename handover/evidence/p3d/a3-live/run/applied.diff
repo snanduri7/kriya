@@ -1,0 +1,31 @@
+diff --git a/src/main/java/org/apache/commons/lang3/math/NumberUtils.java b/src/main/java/org/apache/commons/lang3/math/NumberUtils.java
+index c2a1673a1..09b0a9147 100644
+--- a/src/main/java/org/apache/commons/lang3/math/NumberUtils.java
++++ b/src/main/java/org/apache/commons/lang3/math/NumberUtils.java
+@@ -1693,4 +1693,26 @@ private static void validateArray(final Object array) {
+     public NumberUtils() {
+         // empty
+     }
++
++    /**
++     * Clamps a value between a minimum and maximum.
++     *
++     * @param value the value to clamp
++     * @param min   the minimum value (inclusive)
++     * @param max   the maximum value (inclusive)
++     * @return the clamped value
++     * @throws IllegalArgumentException if {@code min > max}
++     */
++    public static int clamp(final int value, final int min, final int max) {
++        if (min > max) {
++            throw new IllegalArgumentException("min cannot be greater than max.");
++        }
++        if (value < min) {
++            return min;
++        }
++        if (value > max) {
++            return max;
++        }
++        return value;
++    }
+ }

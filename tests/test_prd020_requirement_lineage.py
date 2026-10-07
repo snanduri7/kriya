@@ -22,6 +22,7 @@ from kriya.config.authority import classify_field
 from kriya.config.config import runtime_profile_preset_fields
 from kriya.core.kernel import Kernel
 from kriya.core.state_paths import trace_db_path
+from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_schema import (
     ChangeKind,
@@ -42,6 +43,7 @@ from kriya.workflow.requirements import (
     requirement_lineage,
     requirement_obligation_id,
     requirement_outcomes,
+    requirement_verdict_details,
     seed_requirement_obligations,
 )
 
@@ -99,6 +101,9 @@ def test_accepted_clarifications_extend_the_set_without_renumbering_the_goal():
 # ------------------------------------------------------------ ledger/policy
 
 def test_the_verifiers_verdict_becomes_authoritative_over_the_seed():
+    """The verifier's verdict replaces the seed, but (FS-1B) a model's
+    "satisfied" is a claim, recorded as UNVERIFIED with the claim preserved:
+    it never satisfies a requirement, so the production policy blocks it."""
     reqs = derive_requirements(GOAL)
     ledger = ObligationLedger()
     seed_requirement_obligations(ledger, reqs)
@@ -107,14 +112,18 @@ def test_the_verifiers_verdict_becomes_authoritative_over_the_seed():
         ledger, reqs, {rid: (RequirementOutcome.SATISFIED, "found") for rid in reqs.ids},
         revision=1, evidence_fingerprint="fp1", source="test",
     )
-    assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.SATISFIED}
-    assert blocking_requirements(ledger, reqs, unknown_policy="block", unverified_policy="block") == []
+    assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.UNVERIFIED}
+    assert blocking_requirements(ledger, reqs) == []  # default policies: record
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="block",
+                                                   unverified_policy="block")] == reqs.ids
     record = ledger.current(requirement_obligation_id("REQ-2"))
     assert record.kind is ObligationKind.ORIGINAL_REQUIREMENT and record.terminal_required
+    assert record.status is ObligationStatus.INDETERMINATE
     assert record.evidence["evidence_id"] == "fp1"
+    assert record.evidence["model_outcome"] == "satisfied" and record.evidence["evidence_class"] == "MODEL_CLAIMED"
 
 
-def test_a_later_violation_is_a_recorded_regression_and_always_blocks():
+def test_a_later_violation_always_blocks():
     reqs = derive_requirements(GOAL)
     ledger = ObligationLedger()
     seed_requirement_obligations(ledger, reqs)
@@ -122,9 +131,13 @@ def test_a_later_violation_is_a_recorded_regression_and_always_blocks():
                                 revision=1, evidence_fingerprint="a", source="test")
     record_requirement_verdicts(ledger, reqs, {"REQ-3": (RequirementOutcome.VIOLATED, "absent")},
                                 revision=2, evidence_fingerprint="b", source="test", only=["REQ-3"])
-    assert [event.obligation_id for event in ledger.regressions] == [requirement_obligation_id("REQ-3")]
+    # A model claim was never satisfied (FS-1B), so the later "missing" is not a
+    # SATISFIED->VIOLATED ledger regression. GR-R0: it is a model claim too, so
+    # it is never VIOLATED by itself - but it blocks all the same.
+    assert ledger.regressions == []
+    assert ledger.current(requirement_obligation_id("REQ-3")).status is ObligationStatus.INDETERMINATE
     blocking = blocking_requirements(ledger, reqs)  # default policies: record
-    assert [(req.id, outcome) for req, outcome in blocking] == [("REQ-3", RequirementOutcome.VIOLATED)]
+    assert [(req.id, outcome) for req, outcome in blocking] == [("REQ-3", RequirementOutcome.UNVERIFIED)]
 
 
 def test_unknown_and_unverified_block_only_under_their_policy():
@@ -138,7 +151,8 @@ def test_unknown_and_unverified_block_only_under_their_policy():
     )  # REQ-3 had no verdict: UNKNOWN
     assert blocking_requirements(ledger, reqs) == []
     assert [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="block")] == ["REQ-3"]
-    assert [r.id for r, _ in blocking_requirements(ledger, reqs, unverified_policy="block")] == ["REQ-2"]
+    # REQ-1's "satisfied" is a model claim: UNVERIFIED like REQ-2 (FS-1B).
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, unverified_policy="block")] == ["REQ-1", "REQ-2"]
 
 
 def test_the_generic_terminal_aggregation_leaves_original_requirements_to_their_policy():
@@ -157,7 +171,8 @@ def test_seeding_is_idempotent_and_survives_a_checkpoint_round_trip():
     restored = ObligationLedger.from_snapshot(json.loads(json.dumps(ledger.to_snapshot())))
     seed_requirement_obligations(restored, derive_requirements(GOAL))  # a resumed run seeds again
     assert restored.fingerprint() == ledger.fingerprint()
-    assert requirement_outcomes(restored, reqs)["REQ-1"] is RequirementOutcome.SATISFIED
+    assert requirement_outcomes(restored, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+    assert restored.current(requirement_obligation_id("REQ-1")).evidence["model_outcome"] == "satisfied"
 
 
 def test_lineage_is_citation_only_and_an_omitted_requirement_stays_listed():
@@ -331,11 +346,12 @@ def _events(cfg, kind):
 
 
 @pytest.mark.asyncio
-async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names_it(tmp_path):
+async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_terminal_gate_names_it(tmp_path):
     """The plan cites only REQ-1. The Architect still sees all three; the
-    verifier finds REQ-3 missing on the first candidate, the retry is told
-    exactly REQ-3 and its original text, and the run passes only once every
-    requirement has the verifier's evidence."""
+    verifier finds REQ-3 missing on the first candidate. GR-R1B: that is the
+    model's word alone - advisory, so no retry is spent on it - and the
+    terminal gate still holds REQ-3 open by its id and the user's own text:
+    a paraphrasing plan cannot drop it."""
     def responses(n, prompt):
         return _verdict_json(prompt, missing=("REQ-3",) if n == 1 else ())
 
@@ -346,19 +362,21 @@ async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names
     with p1, p2:
         res = await engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace))
 
-    assert res["quality_gates_passed"] is True
-    assert res["requirements"]["outcomes"] == {"REQ-1": "satisfied", "REQ-2": "satisfied", "REQ-3": "satisfied"}
+    # An unrefuted model negative blocks under every policy (GR-R0); nothing applied.
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "requirements_unresolved"
+    assert "REQ-3 (unverified): Add a DEFAULT_NAME constant set to 'World'" in res["environment_failure"]
+    # The verifier's "satisfied" is a model claim: UNVERIFIED, never satisfied (FS-1B).
+    assert res["requirements"]["outcomes"] == {"REQ-1": "unverified", "REQ-2": "unverified", "REQ-3": "unverified"}
     assert "REQ-2: greet returns the text 'Hello, <name>'" in calls["planner"][0]
     assert "REQ-3: Add a DEFAULT_NAME constant set to 'World'" in calls["architect"][0]
     lineage = {e["stage"]: e for e in _events(cfg, "requirement.lineage")}
     assert lineage["plan"]["cited"] == ["REQ-1"] and lineage["plan"]["omitted"] == ["REQ-2", "REQ-3"]
     verdicts = _events(cfg, "requirement.verdicts")
-    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["violated", "satisfied"]
+    # GR-R0: the verifier's "missing" is a model claim, recorded UNVERIFIED (never VIOLATED by itself).
+    assert [v["outcomes"]["REQ-3"] for v in verdicts] == ["unverified"]
     assert verdicts[0]["evidence_id"] != "" and verdicts[0]["requirement_set_digest"] == derive_requirements(GOAL).digest
-    # The retry is driven by the unresolved id and the user's own text.
-    retry_kwargs = engine.developer.run_generation.await_args_list[1].kwargs
-    assert "REQ-3: Add a DEFAULT_NAME constant set to 'World'" in json.dumps(retry_kwargs, default=str)
-    assert len(calls["spec"]) == 2 and all("REQ-1:" in p and "REQ-3:" in p for p in calls["spec"])
+    assert engine.developer.run_generation.await_count == 1  # no retry spent on the model's word (GR-R1B)
+    assert len(calls["spec"]) == 1 and all("REQ-1:" in p and "REQ-3:" in p for p in calls["spec"])
 
 
 @pytest.mark.asyncio
@@ -422,8 +440,8 @@ async def test_a_resumed_run_keeps_the_same_requirement_ids_not_the_saved_plans_
     assert calls2["planner"] == [] and planner_calls == 1  # the saved plan was reused
     derived = _events(cfg2, "requirement.derived")
     assert [d["digest"] for d in derived] == [derive_requirements(GOAL).digest] * 2
-    assert second["requirements"]["outcomes"] == {
-        "REQ-1": "satisfied", "REQ-2": "satisfied", "REQ-3": "satisfied"}
+    assert second["requirements"]["outcomes"] == {  # model claims only (FS-1B)
+        "REQ-1": "unverified", "REQ-2": "unverified", "REQ-3": "unverified"}
 
 
 # ------------------------------------------------------------ enforce path, terminal gate
@@ -482,7 +500,8 @@ async def test_enforce_terminal_gate_holds_a_requirement_no_subtask_mapped(tmp_p
 
     assert "REQ-2: Log every call to run()" in planner_requests[0]
     assert result.legacy_result["quality_gates_passed"] is False
-    assert "REQ-2 (violated): Log every call to run()" in result.legacy_result["global_requirement_gap"]
+    # GR-R0: reported missing by the model only - unresolved (blocks), never VIOLATED by itself.
+    assert "REQ-2 (unverified): Log every call to run()" in result.legacy_result["global_requirement_gap"]
     assert checked and checked[0]["files_written"] == ["app.py"]
 
 
@@ -535,6 +554,9 @@ from kriya.workflow.requirements import (  # noqa: E402
 
 PRODUCTION = {"unknown_policy": "block", "unverified_policy": "block"}
 CLOSE_GOAL = "Add a DEFAULT_NAME constant.\n- Behaviour stays compatible with the legacy check test_legacy\n"
+# Every requirement of this goal is closable by the named test alone, so a run's
+# outcome turns on that closure (FS-1B: the verifier's "satisfied" closes nothing).
+LEGACY_ONLY_GOAL = "Behaviour stays compatible with the legacy check test_legacy\n"
 
 
 def _ledger_with(outcomes, goal=GOAL, evidence_id="cand-1"):
@@ -551,10 +573,14 @@ def test_production_blocks_no_verdict_cannot_confirm_and_violated():
                                  "REQ-3": RequirementOutcome.VIOLATED}, )
     # REQ-4 does not exist in GOAL; every id without a verdict is NO_VERDICT.
     blocking = {req.id: outcome for req, outcome in blocking_requirements(ledger, reqs, **PRODUCTION)}
-    assert blocking == {"REQ-2": RequirementOutcome.UNVERIFIED, "REQ-3": RequirementOutcome.VIOLATED}
+    # REQ-1's "satisfied" is a model claim (FS-1B): UNVERIFIED, blocked like REQ-2; REQ-3's "missing" is a
+    # model claim too (GR-R0): UNVERIFIED, and blocked.
+    assert blocking == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.UNVERIFIED,
+                        "REQ-3": RequirementOutcome.UNVERIFIED}
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED})
     blocking = {req.id: outcome for req, outcome in blocking_requirements(ledger, reqs, **PRODUCTION)}
-    assert blocking == {"REQ-2": RequirementOutcome.UNKNOWN, "REQ-3": RequirementOutcome.UNKNOWN}
+    assert blocking == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.UNKNOWN,
+                        "REQ-3": RequirementOutcome.UNKNOWN}
 
 
 def test_cannot_confirm_from_code_is_never_satisfied_without_other_evidence():
@@ -566,17 +592,29 @@ def test_cannot_confirm_from_code_is_never_satisfied_without_other_evidence():
 def test_closure_evidence_for_the_same_candidate_closes_cannot_confirm():
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.UNVERIFIED,
                                  "REQ-3": RequirementOutcome.SATISFIED})
-    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
-                               detail={"tests": ["tests/test_x.py"]}, source="test", revision=1)
+    # The closure mechanics below are the same for every whole-requirement
+    # closure method; the stand-in is a neutral deterministic one (finite
+    # acceptance cases cannot close these general statements - B2-COV - and
+    # B3 human acceptance closes only a BEHAVIOR claim, never a whole record).
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="deterministic_stand_in",
+                               detail={}, source="test", revision=1)
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.CLOSED_BY_EVIDENCE
+    # The model's "satisfied" on REQ-1/REQ-3 closes nothing by itself (FS-1B) ...
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-3"]
+    # ... the same deterministic closure for the same candidate does.
+    for rid in ("REQ-1", "REQ-3"):
+        record_requirement_closure(ledger, reqs, rid, evidence_id="cand-1", method="deterministic_stand_in",
+                                   detail={}, source="test", revision=1)
+    assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.CLOSED_BY_EVIDENCE}
     assert blocking_requirements(ledger, reqs, **PRODUCTION) == []
-    # The verdict record itself is untouched: still the verifier's UNVERIFIED.
+    # The verdict records themselves are untouched: still the verifier's words.
     assert ledger.current(requirement_obligation_id("REQ-2")).evidence["outcome"] == "unverified"
+    assert ledger.current(requirement_obligation_id("REQ-1")).evidence["model_outcome"] == "satisfied"
 
 
 def test_closure_evidence_never_carries_over_to_another_candidate():
     reqs, ledger = _ledger_with({"REQ-2": RequirementOutcome.UNVERIFIED})
-    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="named_test_run",
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="deterministic_stand_in",
                                detail={}, source="test", revision=1)
     record_requirement_verdicts(ledger, reqs, {"REQ-2": (RequirementOutcome.UNVERIFIED, "")}, revision=2,
                                 evidence_fingerprint="cand-2", source="test", only=["REQ-2"])
@@ -593,9 +631,11 @@ def test_violated_and_no_verdict_always_block_even_with_closure_evidence():
                                 evidence_fingerprint="cand-1", source="test", only=["REQ-2"])
     blocking = {req.id: outcome for req, outcome in blocking_requirements(
         ledger, reqs, unknown_policy="block", unverified_policy="record")}
-    assert blocking["REQ-2"] is RequirementOutcome.VIOLATED
+    # GR-R0: the model's "missing" is never VIOLATED by itself; this closure (a named-test run) proves only
+    # regression preservation for a behaviour statement, so nothing stronger outranks it and it still blocks.
+    assert blocking["REQ-2"] is RequirementOutcome.UNVERIFIED
     assert blocking["REQ-3"] is RequirementOutcome.UNKNOWN
-    # VIOLATED blocks under every policy.
+    # A reported-missing requirement blocks under every policy.
     assert [r.id for r, _ in blocking_requirements(ledger, reqs, unknown_policy="record",
                                                    unverified_policy="record")] == ["REQ-2"]
 
@@ -607,31 +647,36 @@ def test_named_tests_come_from_the_requirement_text_only():
     assert named_existing_tests("keep the legacy behaviour", files) == []
 
 
-@pytest.mark.parametrize("modified, result, closed, reason", [
-    ((), {"success": True, "output": "1 passed"}, True, None),
-    (("tests/test_legacy.py",), {"success": True, "output": "1 passed"}, False, "written or changed"),
-    ((), {"success": True, "output": "no tests ran"}, False, "did not execute"),
-    ((), {"success": False, "output": "1 failed"}, False, "failed"),
+@pytest.mark.parametrize("modified, judgment, closed, reason", [
+    ((), ("ORACLE_PASSED", ""), True, None),
+    (("tests/test_legacy.py",), ("ORACLE_PASSED", ""), False, "written or changed"),
+    ((), ("ORACLE_IDENTITY_NOT_EXECUTED", "expected case(s) did not execute: t::a"), False, "did not execute"),
+    ((), ("ORACLE_IDENTITY_NOT_PASSED", "expected case(s) did not pass: t::a"), False, "did not pass"),
 ])
-def test_a_named_test_closes_only_when_unmodified_executed_and_passing(modified, result, closed, reason):
+def test_a_named_test_closes_only_when_unmodified_and_the_oracle_passes(modified, judgment, closed, reason):
+    """The requirement-level rule; what "the oracle passes" means (FS-1C0:
+    independent trust surface, base inventory, complete evidence) is
+    tests/test_fs1c0_named_test_oracle.py."""
+    from kriya.workflow.named_test_oracle import OracleJudgment
+
     reqs, ledger = _ledger_with({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.UNVERIFIED},
                                 goal=CLOSE_GOAL)
     runs = []
 
-    def run_tests(paths):
-        runs.append(list(paths))
-        return result
-
-    from kriya.workflow.acceptance import output_confirms_nonzero_test_execution
+    def judge(named):
+        runs.append(list(named))
+        return OracleJudgment(judgment[0], judgment[1], {"method": "named_test_oracle", "base_revision": "b"})
 
     [attempt] = close_unverified_requirements_with_named_tests(
         ledger, reqs, test_files=["tests/test_legacy.py", "tests/test_other.py"], modified=modified,
-        run_tests=run_tests, confirms_execution=output_confirms_nonzero_test_execution,
-        source="test", revision=1)
+        judge=judge, source="test", revision=1)
     assert attempt["closed"] is closed and (reason is None or reason in attempt["reason"])
     assert runs == ([] if modified else [["tests/test_legacy.py"]])  # exactly the named test, never more
     expected = RequirementOutcome.CLOSED_BY_EVIDENCE if closed else RequirementOutcome.UNVERIFIED
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is expected
+    if closed:
+        closure = ledger.current("requirement.REQ-2.closure").evidence
+        assert closure["method"] == "named_test_oracle" and closure["base_revision"] == "b"
 
 
 def _verdicts_json(prompt, unverifiable=()):
@@ -642,40 +687,70 @@ def _verdicts_json(prompt, unverifiable=()):
                             "evidence": "greeting.py"} for rid in ids]})
 
 
-def _legacy_workspace(tmp_path):
-    workspace = tmp_path / "ws"
-    (workspace / "tests").mkdir(parents=True)
-    (workspace / "tests" / "test_legacy.py").write_text("def test_legacy():\n    assert True\n")
-    return workspace
+# The candidate (greeting.py) breaks the "failing" legacy check; the other one
+# holds on any candidate.
+LEGACY_TESTS = {
+    True: "def test_legacy():\n    assert True\n",
+    False: ("import os\n\n\ndef test_legacy():\n"
+            "    assert not os.path.exists(os.path.join(os.path.dirname(__file__), \"..\", \"greeting.py\"))\n"),
+}
 
 
-@pytest.mark.parametrize("named_result, passes", [
-    ({"success": True, "output": "1 passed"}, True),
-    ({"success": False, "output": "1 failed"}, False),
-])
-@pytest.mark.asyncio
-async def test_production_run_closes_cannot_confirm_only_by_running_the_named_test(tmp_path, named_result, passes):
-    cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdicts_json(prompt, unverifiable=("REQ-2",)),
-                                 requirement_unknown_policy="block", requirement_unverified_policy="block")
-    workspace = _legacy_workspace(tmp_path)
-    runs = []
+def _git_base(root, files):
+    """``root`` as a git repository whose HEAD (the run's base) holds ``files``."""
+    import subprocess
+
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=root, check=True,
+                       capture_output=True)
+    return root
+
+
+def _real_named_test_runs(runs, other):
+    """run_tests stubbed for the gates; the named test (on the candidate and
+    on the base export) runs for real - FS-1C0 judges its structured report."""
+    real = PolymorphicValidator.run_tests
 
     def run_tests(self, target_test=None, *args, **kwargs):
         runs.append(target_test)
-        return named_result if target_test == ["tests/test_legacy.py"] else {"success": True, "output": "3 passed"}
+        if target_test == ["tests/test_legacy.py"]:
+            return real(self, target_test)
+        return other
+
+    return run_tests
+
+
+@pytest.mark.parametrize("passes", [True, False])
+@pytest.mark.asyncio
+async def test_production_run_closes_cannot_confirm_only_by_running_the_named_test(tmp_path, passes):
+    """The verifier says "satisfied" - a model claim (FS-1B) - so the run passes
+    exactly when the named test, run deterministically, passes."""
+    cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdicts_json(prompt),
+                                 requirement_unknown_policy="block", requirement_unverified_policy="block")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    _git_base(workspace, {"tests/test_legacy.py": LEGACY_TESTS[passes]})
+    runs = []
 
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
                return_value={"success": True, "output": ""}), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests):
-        res = await engine.run_generation_workflow(goal=CLOSE_GOAL, workspace_path=str(workspace))
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               new=_real_named_test_runs(runs, {"success": True, "output": "3 passed"})):
+        res = await engine.run_generation_workflow(goal=LEGACY_ONLY_GOAL, workspace_path=str(workspace))
 
     assert ["tests/test_legacy.py"] in runs
     [closure] = _events(cfg, "requirement.closure")[:1]
-    assert closure["closures"][0]["requirement"] == "REQ-2" and closure["closures"][0]["closed"] is passes
+    assert closure["closures"][0]["requirement"] == "REQ-1" and closure["closures"][0]["closed"] is passes
+    assert closure["closures"][0]["reason_code"] == ("ORACLE_PASSED" if passes else "ORACLE_IDENTITY_NOT_PASSED")
     assert res["quality_gates_passed"] is passes
+    assert res["requirements"]["verdicts"]["REQ-1"]["model_outcome"] == "satisfied"
     if passes:
-        assert res["requirements"]["outcomes"]["REQ-2"] == "closed_by_evidence"
+        assert res["requirements"]["outcomes"]["REQ-1"] == "closed_by_evidence"
     else:
+        assert res["requirements"]["outcomes"]["REQ-1"] == "unverified"
         assert res.get("failure_category") and "REQUIREMENTS_UNRESOLVED" in json.dumps(res, default=str)
 
 
@@ -720,21 +795,18 @@ def test_the_migration_gate_closes_only_the_requirement_stating_the_migration():
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.UNVERIFIED
 
 
-@pytest.mark.parametrize("named_result, passes", [
-    ({"success": True, "output": "1 passed"}, True),
-    ({"success": False, "output": "1 failed"}, False),
-])
+@pytest.mark.parametrize("passes", [True, False])
 @pytest.mark.asyncio
-async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_test(
-        tmp_path, monkeypatch, named_result, passes):
+async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_test(tmp_path, monkeypatch, passes):
     from kriya.workflow import workflow_controller as wc
     from kriya.workflow.plan_validation import PlanValidationResult
     from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 
-    goal = "Create app.py with a run() entry point.\n- Behaviour stays compatible with the legacy check test_legacy\n"
-    (tmp_path / "app.py").write_text("original\n")
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_legacy.py").write_text("def test_legacy():\n    assert True\n")
+    goal = LEGACY_ONLY_GOAL
+    legacy = ("def test_legacy():\n    assert True\n" if passes else
+              "import os\n\n\ndef test_legacy():\n    with open(os.path.join(os.path.dirname(__file__), \"..\", "
+              "\"app.py\")) as f:\n        assert f.read() == \"original\\n\"\n")
+    _git_base(tmp_path, {"app.py": "original\n", "tests/test_legacy.py": legacy})
     monkeypatch.setattr(wc, "create_git_worktree", lambda workspace: workspace)
     plan = EngineeringPlan(plan_id="prd020", kind=ChangeKind.TASK, subtasks=[Subtask(
         id="s1", description="add run()", execution_method=ExecutionMethod.MODEL,
@@ -754,7 +826,7 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
 
     async def check(**kwargs):
         prompt = "\n".join(f"{r.id}: {r.text}" for r in kwargs["requirements"].requirements)
-        return json.loads(_verdicts_json(prompt, unverifiable=("REQ-2",)))
+        return json.loads(_verdicts_json(prompt))  # "satisfied": a model claim (FS-1B)
 
     we.spec_compliance.check = check
 
@@ -766,24 +838,21 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
     we.planner.run = AsyncMock(return_value="fake plan text")
     runs = []
 
-    def run_tests(self, target_test=None, *args, **kwargs):
-        runs.append(target_test)
-        return named_result if target_test == ["tests/test_legacy.py"] else {"success": True, "output": "2 passed"}
-
     with patch.object(wc, "parse_planner_structured_output", return_value=(MagicMock(), None)), \
          patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
          patch.object(wc, "validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests):
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               new=_real_named_test_runs(runs, {"success": True, "output": "2 passed"})):
         result = await wc.WorkflowController(we).execute(goal, str(tmp_path), migration_mode="enforce")
 
     assert ["tests/test_legacy.py"] in runs
     gap = result.legacy_result.get("global_requirement_gap")
     outcomes = result.legacy_result["requirements"]["outcomes"]
-    assert outcomes["REQ-2"] == ("closed_by_evidence" if passes else "unverified")
+    assert outcomes["REQ-1"] == ("closed_by_evidence" if passes else "unverified")
     if passes:
         assert not gap, gap
     else:
-        assert "REQ-2 (unverified)" in gap and result.legacy_result["quality_gates_passed"] is False
+        assert "REQ-1 (unverified)" in gap and result.legacy_result["quality_gates_passed"] is False
 
 
 @pytest.mark.asyncio
@@ -797,7 +866,9 @@ async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(
     from kriya.workflow.plan_validation import PlanValidationResult
     from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 
-    goal = "Migrate the JSON layer from gson to jackson-databind.\n- Keep the run() entry point in app.py\n"
+    # A single requirement the migration gate can close (FS-1B: a verifier's
+    # "satisfied" on any other requirement would be a claim that blocks).
+    goal = "Migrate the JSON layer from gson to jackson-databind.\n"
     (tmp_path / "app.py").write_text("original\n")
     monkeypatch.setattr(wc, "create_git_worktree", lambda workspace: workspace)
     monkeypatch.setattr(wc, "resolve_migration_resolution", lambda goal, workspace: MigrationResolution(
@@ -845,5 +916,51 @@ async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(
         result = await wc.WorkflowController(we).execute(goal, str(tmp_path), migration_mode="enforce")
 
     outcomes = result.legacy_result["requirements"]["outcomes"]
-    assert outcomes == {"REQ-1": "closed_by_evidence", "REQ-2": "satisfied"}
+    assert outcomes == {"REQ-1": "closed_by_evidence"}
     assert not result.legacy_result.get("global_requirement_gap")
+
+
+def _pre_fs1_checkpoint(outcomes):
+    """A ledger as a pre-FS-1 checkpoint holds it: the verifier's "satisfied"
+    stored as the outcome itself (no model_outcome / evidence_class)."""
+    reqs, ledger = _ledger_with(outcomes)
+    snapshot = json.loads(json.dumps(ledger.to_snapshot()))
+    rewritten = 0
+
+    def to_pre_fs1(node):
+        nonlocal rewritten
+        if isinstance(node, dict):
+            if node.get("model_outcome") == "satisfied" and node.get("outcome") == "unverified":
+                node["outcome"] = "satisfied"
+                del node["model_outcome"], node["evidence_class"]
+                rewritten += 1
+            for value in node.values():
+                to_pre_fs1(value)
+        elif isinstance(node, list):
+            for value in node:
+                to_pre_fs1(value)
+
+    to_pre_fs1(snapshot)
+    assert rewritten == len(outcomes)
+    return reqs, ObligationLedger.from_snapshot(snapshot)
+
+
+def test_a_resumed_pre_fs1_satisfied_record_authorizes_nothing():
+    """FS-1B on resume: a SATISFIED verdict read back from an older checkpoint
+    is UNVERIFIED (blocked in production), reports as UNVERIFIED with the
+    claim kept, still closes with deterministic evidence, and deterministic
+    counter-evidence still makes it VIOLATED."""
+    reqs, ledger = _pre_fs1_checkpoint({"REQ-1": RequirementOutcome.SATISFIED, "REQ-2": RequirementOutcome.SATISFIED,
+                                        "REQ-3": RequirementOutcome.SATISFIED})
+    assert set(requirement_outcomes(ledger, reqs).values()) == {RequirementOutcome.UNVERIFIED}
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == ["REQ-1", "REQ-2", "REQ-3"]
+    details = requirement_verdict_details(ledger, reqs)
+    assert (details["REQ-1"]["outcome"], details["REQ-1"]["model_outcome"]) == ("unverified", "satisfied")
+    record_requirement_closure(ledger, reqs, "REQ-2", evidence_id="cand-1", method="deterministic_stand_in",
+                               detail={}, source="test", revision=1)
+    record_requirement_closure(ledger, reqs, "REQ-3", evidence_id="cand-1", method="mutation_scope",
+                               detail={}, source="test", revision=1, violated=True)
+    outcomes = requirement_outcomes(ledger, reqs)
+    assert outcomes == {"REQ-1": RequirementOutcome.UNVERIFIED, "REQ-2": RequirementOutcome.CLOSED_BY_EVIDENCE,
+                        "REQ-3": RequirementOutcome.VIOLATED}
+    assert {r.id: o for r, o in blocking_requirements(ledger, reqs)} == {"REQ-3": RequirementOutcome.VIOLATED}

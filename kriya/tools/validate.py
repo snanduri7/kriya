@@ -1,5 +1,6 @@
 import functools
 import hashlib
+import json
 import logging
 import os
 import re
@@ -13,11 +14,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.tools import test_execution
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -243,6 +246,51 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
 
 
 RUNTIME_VERIFICATION_GATE = "runtime_verification"
+# FS-1C2 B2-a: the operator acceptance file (PolymorphicValidator.run_acceptance).
+ACCEPTANCE_GATE = "acceptance"
+
+
+def _record_gate_result(name: str, result: Any, started: float, *, error: Optional[BaseException] = None) -> None:
+    """LR-R1-M1 ``gate.result`` for one validator gate invocation, passing or
+    failing, recorded after the gate (and its tree check) - observational."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        output = result.get("output") if isinstance(result, dict) else None
+        text, meta = attempt_evidence_scope.bounded_output(output)
+        payload = {
+            "stage": "validator", "gate": name, "duration_seconds": round(time.monotonic() - started, 3),
+            "success": result.get("success") if isinstance(result, dict) else None,
+            "exit_code": result.get("exit_code", result.get("returncode")) if isinstance(result, dict) else None,
+            "timed_out": result.get("timed_out") if isinstance(result, dict) else None,
+            "runtime_artifacts": result.get("runtime_artifacts") if isinstance(result, dict) else None,
+            "error_type": type(error).__name__ if error is not None else None,
+            **meta,
+        }
+        content = {"output": text}
+        report = test_execution.report_from_result(result)
+        if report is not None:
+            # FS-1A: which test identities this invocation executed (summary in
+            # the payload, the full per-identity report as content).
+            payload["test_execution"] = report.summary()
+            content["test_execution"] = json.dumps(report.to_dict(), sort_keys=True)
+        pytest_evidence = result.get("pytest_evidence") if isinstance(result, dict) else None
+        if isinstance(pytest_evidence, dict):
+            # REG-R1: the raw streams and the JUnit report behind a pytest
+            # verdict, each bounded like the output (content-addressed blobs).
+            integrity = (pytest_evidence.get("evidence") or {}).get("integrity") or {}
+            payload["pytest_evidence"] = {"complete": pytest_evidence.get("complete"),
+                                          "integrity_ok": integrity.get("ok"),
+                                          "integrity_reason": integrity.get("reason")}
+            for name, raw in (pytest_evidence.get("raw") or {}).items():
+                raw_text, raw_meta = attempt_evidence_scope.bounded_output(raw)
+                if raw_text is not None:
+                    content[f"pytest_{name}"] = raw_text
+                    payload[f"pytest_{name}"] = raw_meta
+    except Exception as record_error:  # observational: never alters the gate
+        logger.warning("Attempt evidence: gate.result not built (%s)", record_error)
+        return
+    attempt_evidence_scope.emit("gate.result", payload, content=content)
 
 
 def _verification_gate(name: str):
@@ -266,9 +314,11 @@ def _verification_gate(name: str):
             if self.tree_binding is not None:
                 self.tree_binding.check(name, "before")
             previous, self._gate = self._gate, name
+            started = time.monotonic()
             try:
                 result = method(self, *args, **kwargs)
-            except BaseException:
+            except BaseException as error:
+                _record_gate_result(name, None, started, error=error)
                 if self.tree_binding is not None:
                     self.tree_binding.check(name, ephemeral_untracked=ephemeral)
                 raise
@@ -278,6 +328,7 @@ def _verification_gate(name: str):
                 artifacts = self.tree_binding.check(name, ephemeral_untracked=ephemeral)
                 if ephemeral and isinstance(result, dict):
                     result["runtime_artifacts"] = artifacts
+            _record_gate_result(name, result, started)
             return result
         return wrapper
     return decorate
@@ -305,6 +356,10 @@ class PolymorphicValidator:
         # (_verification_gate) is followed by a check that the repository
         # content and candidate are exactly what was bound.
         self.tree_binding: Any = None
+        # FS-1A: the structured report destination of the test gate now
+        # running (run_tests); the adapters pass it to the runner and record
+        # the runner process on it.
+        self.test_report_binding: Optional[test_execution.ReportBinding] = None
         self._gate = "command"
         # Whether this run may change the repository's toolchain declaration
         # (the caller's structured write scope - see
@@ -1477,8 +1532,85 @@ class PolymorphicValidator:
             ),
         }
 
+    @_verification_gate(ACCEPTANCE_GATE)
+    def run_acceptance(self, runner_script: str, arguments: Sequence[str]) -> Dict[str, Any]:
+        """FS-1C2 B2-a: the operator's acceptance file, run by Kriya's own
+        runner script (``runner_script``, workspace-relative, staged by
+        kriya/workflow/acceptance_oracle.py) in the project's interpreter, never the
+        repository's test configuration. ``python -I -B``: no environment
+        paths, no script directory on ``sys.path``, no bytecode written into
+        the candidate. The ordinary test gate (``run_tests``) is untouched.
+        The result carries this invocation's TestExecutionReport."""
+        binding = self._bind_test_report()
+        try:
+            interpreter, install_error = self._resolve_python_interpreter()
+            if install_error:
+                return {"success": False, "output": install_error, "acceptance_environment_error": True,
+                        "test_execution": test_execution.collect(binding).to_dict()}
+            cmd = [interpreter, "-I", "-B", runner_script]
+            if binding.pytest_argument:
+                cmd.append(binding.pytest_argument)
+            cmd.extend(arguments)
+            res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+        except BaseException:
+            test_execution.collect(binding)  # removes Kriya's own report destination
+            raise
+        binding.observe(res)
+        result = self._validation_result(res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res)
+        result["test_execution"] = test_execution.collect(binding).to_dict()
+        return result
+
     @_verification_gate("tests")
     def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+        """The test gate (``_run_tests``), bound to a fresh structured report
+        destination before it runs; the result carries the
+        TestExecutionReport of exactly this invocation as ``test_execution``
+        (FS-1A, kriya/tools/test_execution.py): which test identities ran
+        and how, or INDETERMINATE - never inferred from console text."""
+        binding = self._bind_test_report()
+        self.test_report_binding = binding
+        try:
+            result = self._run_tests(target_test)
+        except BaseException:
+            test_execution.collect(binding)  # removes Kriya's own report destination
+            raise
+        finally:
+            self.test_report_binding = None
+        if isinstance(result, dict):
+            report = test_execution.collect(binding)
+            result["test_execution"] = report.to_dict()
+            pytest_evidence = report.pytest_evidence()
+            if pytest_evidence is not None:
+                # REG-R1: per-test evidence for the regression authority.
+                result["pytest_evidence"] = pytest_evidence
+        return result
+
+    def test_runner(self) -> str:
+        """The runner the test gate will invoke for this workspace
+        (``pytest``, ``maven``, ``gradle``, ``javac``, ``rspec``, ``none``)."""
+        return self._test_runner()
+
+    def _test_runner(self) -> str:
+        """The runner the test gate will invoke for this workspace."""
+        if self.stack == "python":
+            return "pytest"
+        if self.stack == "java":
+            for adapter in BUILD_ADAPTERS:
+                if adapter.language == "java" and adapter.detects(self.workspace_path):
+                    return adapter.build_system
+            return "javac"
+        return "rspec" if self.stack == "ruby" else "none"
+
+    def _bind_test_report(self) -> "test_execution.ReportBinding":
+        runner = self._test_runner()
+        try:
+            return test_execution.prepare(self.workspace_path, runner)
+        except OSError as error:  # no fresh destination: the invocation has no structured evidence
+            return test_execution.ReportBinding(
+                gate_id="", runner=runner, workspace=self.workspace_path,
+                unsupported=f"REPORT_DESTINATION_UNAVAILABLE:{type(error).__name__}")
+
+    def _run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite.
 
         `target_test` accepts either a single string (unchanged, existing

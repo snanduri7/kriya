@@ -83,6 +83,9 @@ class GradleBuildAdapter(BuildAdapter):
         if test_class:
             cmd.extend(["--tests", test_class])
         res = v._run_cmd_with_timeout(cmd, cwd=v.workspace_path)
+        binding = getattr(v, "test_report_binding", None)
+        if binding is not None:
+            binding.observe(res)  # FS-1A: build/test-results is read after this run
         return v._validation_result(
             res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
         )

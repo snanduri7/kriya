@@ -1,0 +1,5 @@
+developer requests: 0
+edit capabilities: [[([], 0, [])]]
+failures: ['CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: no mutation operation is feasible under the authoritative context of this Developer invocation - src/main/java/org/apache/commons/lang3/math/NumberUtils.java: no a']
+quality_gates_passed: False | failure_category: context_edit_protocol_unsatisfiable
+clamp applied: False

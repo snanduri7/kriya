@@ -1,0 +1,286 @@
+1,15c1,14
+< # QWEN3.8 HISTORICAL-PROFILE QUALIFICATION config (GR-R1 follow-up, 2026-10-06; operator-owned, outside every
+< # workspace). Derived from ~/.kriya/operator/graphify-qwen38-production.yaml with ONLY: inference_runtime
+< # ollama_native (llm + llm_chain; /8 over_context_refusal), llm.context_window 32768 (the window, carried per
+< # request as options.num_ctx), and paths.skills/state/memory. Sampling unchanged: temperature 0.2,
+< # reasoning true, max_tokens 4096, extra_body {}.
+< # Graphify canonical acceptance config (operator-owned, outside every workspace).
+< # Derived from ~/.kriya/operator/prd036-production.yaml (sha256 a5be2e83...) - every
+< # production control kept byte-identical (runtime_profile, autonomy, skills, paths,
+< # embedding, static_analysis, llm.capabilities, reviewer_temperature). Changed ONLY
+< # the model-identity fields, set to the historical Graphify qwen3.8 validation values
+< # recovered from val001-g1-graphify-c3406/g1_devinv_evidence/campaign_kriya.yaml
+< # (rounds 7ec06f51 @6c1791a and 2ad87038 @1891ba0):
+< #   llm.model qwen3.8:27b, temperature 0.2, reasoning true, max_tokens 4096,
+< #   extra_body {} (no num_ctx/top_p/top_k/reasoning_effort sent historically),
+< #   llm_chain = same-model qwen3.8:27b with identical settings.
+---
+> # QWEN3.8 MATCHED DEVELOPER PROFILE (comparison against canonical run 20261006T204410-5388017f; PREPARED, NOT
+> # APPROVED). Derived from that run's own config (~/kriya-m1-live/config/gr1-graphify.yaml, sha256 4ebd97b4...)
+> # with ONLY: llm.model -> qwen3.8:27b (sha256:22130167...); llm.extra_body.options.repeat_penalty 1.05 (the
+> # canonical effective value); the five non-planner agent roles bound verbatim to the canonical qwen3-coder
+> # binding; paths.skills/memory. Fallback (llm_chain qwen3.6) and the Planner binding are unchanged.
+> # provider-contract-v5-production: v4 (sha256 of v4 unchanged) + a static Planner role binding (agent_llms.planner.llm).
+> # PROVIDER-CONTRACT-001A successor production configuration (operator-owned,
+> # outside every workspace). Identical to provider-contract-v3-production.yaml
+> # (sha256 667831f0...f3f75e0d8, which stays frozen as the PROVIDER-CONTRACT-001
+> # identity) except that every model binding uses the native Ollama adapter
+> # (/api/chat with truncate:false): a prompt larger than the served window is
+> # refused by the provider, typed, instead of being answered from a silently
+> # truncated prompt as /v1 does (measured). Pinned model tags and all settings
+> # are unchanged; both are QUALIFIED under kriya-qualification/8 on this adapter.
+29c28
+<   skills: /Users/sriramnanduri/kriya-m1-live/skills-qwen38
+---
+>   skills: /Users/sriramnanduri/kriya-m1-live/skills-qwen38m
+31c30
+<   memory: /Users/sriramnanduri/kriya-m1-live/memory/qwen38-qual
+---
+>   memory: /Users/sriramnanduri/kriya-m1-live/memory/qwen38-matched
+36d34
+<   context_window: 32768
+39,40c37
+<   temperature: 0.2
+<   reasoning: true
+---
+>   temperature: 0.7
+42c39,46
+<   max_tokens: 4096
+---
+>   max_tokens: 16384
+>   planner_max_tokens: 8192
+>   # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>   transport:
+>     connect_timeout_seconds: 10.0
+>     read_timeout_seconds: 900.0
+>     write_timeout_seconds: 60.0
+>     pool_timeout_seconds: 10.0
+50,51c54,61
+<   extra_body: {}
+< # Developer fallback: historical same-model retry (qwen3.8:27b, identical settings).
+---
+>   extra_body:
+>     options:
+>       num_ctx: 32768
+>       top_p: 0.8
+>       top_k: 20
+>       # canonical qwen3-coder's effective repeat_penalty (its Modelfile default, 1.05); qwen3.8's own is 1
+>       repeat_penalty: 1.05
+> # Developer fallback: the pinned qwen3.6 identity, qualified under policy /4.
+53c63
+< - model: qwen3.8:27b
+---
+> - model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+58,61c68,261
+<   temperature: 0.2
+<   reasoning: true
+<   max_tokens: 4096
+<   extra_body: {}
+---
+>   temperature: 0.7
+>   extra_body:
+>     options:
+>       num_ctx: 32768
+>       top_p: 0.8
+>       top_k: 20
+>     reasoning_effort: none
+> # Per-role output budgets: exactly the values these roles resolved to before
+> # the per-role mechanism existed (planner = llm.planner_max_tokens; every
+> # other agent role = llm.max_tokens). Preserved, not tuned.
+> agent_llms:
+>   planner:
+>     # Static Planner role specialization (2026-10-03): the already-qualified
+>     # llm_chain[0] binding, verbatim. Selected from the measured cross-task
+>     # Planner matrix (commons-lang, Spring Boot, Python, Spring XML): correct
+>     # targets 4/4 and no over-scoped unit, vs qwen3-coder 4/4 and 1 over-scoped
+>     # unit (Spring XML 9/9 earlier). The Developer stays qwen3-coder (llm).
+>     llm:
+>       provider: openai
+>       model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       context_window: 32768
+>       temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>         reasoning_effort: none
+>     max_output_tokens: 8192
+>   architect:
+>     # Held on the canonical qwen3-coder binding (verbatim copy of the canonical llm block) so this role
+>     # does not follow llm to qwen3.8: only the Developer changes.
+>     llm:
+>       provider: openai
+>       model: qwen3-coder:30b-kriya-e52213655394
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       temperature: 0.7
+>       reviewer_temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>       transport:
+>         connect_timeout_seconds: 10.0
+>         read_timeout_seconds: 900.0
+>         write_timeout_seconds: 60.0
+>         pool_timeout_seconds: 10.0
+>       capabilities:
+>         native_tool_calls: true
+>         json_mode: true
+>         reliable_multiline_json: false
+>         streaming: true
+>         max_tool_argument_chars: 8192
+>         preferred_edit_protocol: small_native_tools
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>     max_output_tokens: 16384
+>   reviewer:
+>     # Held on the canonical qwen3-coder binding (verbatim copy of the canonical llm block) so this role
+>     # does not follow llm to qwen3.8: only the Developer changes.
+>     llm:
+>       provider: openai
+>       model: qwen3-coder:30b-kriya-e52213655394
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       temperature: 0.7
+>       reviewer_temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>       transport:
+>         connect_timeout_seconds: 10.0
+>         read_timeout_seconds: 900.0
+>         write_timeout_seconds: 60.0
+>         pool_timeout_seconds: 10.0
+>       capabilities:
+>         native_tool_calls: true
+>         json_mode: true
+>         reliable_multiline_json: false
+>         streaming: true
+>         max_tool_argument_chars: 8192
+>         preferred_edit_protocol: small_native_tools
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>     max_output_tokens: 16384
+>   run_verifier:
+>     # Held on the canonical qwen3-coder binding (verbatim copy of the canonical llm block) so this role
+>     # does not follow llm to qwen3.8: only the Developer changes.
+>     llm:
+>       provider: openai
+>       model: qwen3-coder:30b-kriya-e52213655394
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       temperature: 0.7
+>       reviewer_temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>       transport:
+>         connect_timeout_seconds: 10.0
+>         read_timeout_seconds: 900.0
+>         write_timeout_seconds: 60.0
+>         pool_timeout_seconds: 10.0
+>       capabilities:
+>         native_tool_calls: true
+>         json_mode: true
+>         reliable_multiline_json: false
+>         streaming: true
+>         max_tool_argument_chars: 8192
+>         preferred_edit_protocol: small_native_tools
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>     max_output_tokens: 16384
+>   skill_gap:
+>     # Held on the canonical qwen3-coder binding (verbatim copy of the canonical llm block) so this role
+>     # does not follow llm to qwen3.8: only the Developer changes.
+>     llm:
+>       provider: openai
+>       model: qwen3-coder:30b-kriya-e52213655394
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       temperature: 0.7
+>       reviewer_temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>       transport:
+>         connect_timeout_seconds: 10.0
+>         read_timeout_seconds: 900.0
+>         write_timeout_seconds: 60.0
+>         pool_timeout_seconds: 10.0
+>       capabilities:
+>         native_tool_calls: true
+>         json_mode: true
+>         reliable_multiline_json: false
+>         streaming: true
+>         max_tool_argument_chars: 8192
+>         preferred_edit_protocol: small_native_tools
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>     max_output_tokens: 16384
+>   spec_compliance:
+>     # Held on the canonical qwen3-coder binding (verbatim copy of the canonical llm block) so this role
+>     # does not follow llm to qwen3.8: only the Developer changes.
+>     llm:
+>       provider: openai
+>       model: qwen3-coder:30b-kriya-e52213655394
+>       inference_runtime: ollama_native
+>       api_key: local-key
+>       base_url: http://localhost:11434/v1
+>       temperature: 0.7
+>       reviewer_temperature: 0.7
+>       max_tokens: 16384
+>       planner_max_tokens: 8192
+>       # PROVIDER-CONTRACT-001 transport policy, stated explicitly (the defaults).
+>       transport:
+>         connect_timeout_seconds: 10.0
+>         read_timeout_seconds: 900.0
+>         write_timeout_seconds: 60.0
+>         pool_timeout_seconds: 10.0
+>       capabilities:
+>         native_tool_calls: true
+>         json_mode: true
+>         reliable_multiline_json: false
+>         streaming: true
+>         max_tool_argument_chars: 8192
+>         preferred_edit_protocol: small_native_tools
+>       extra_body:
+>         options:
+>           num_ctx: 32768
+>           top_p: 0.8
+>           top_k: 20
+>     max_output_tokens: 16384
+77,88d276
+< # QUAL-CAPACITY-REASONING-001 calibration (2026-09-29, evidence:
+< # graphify-canonical-qwen38/evidence/qualification_investigation/capacity_calibration_n5.json):
+< # 5 samples, max total completion 130 tokens (reasoning 97-113 + answer 15-17).
+< # reasoning_max_tokens = ceil(130 x 4 / 64) x 64 = 576 (4x margin: the calibration
+< # prompt was ~546 tokens, the real probe ~31.9k; reasoning growth with context is unmeasured).
+< # reasoning_headroom_tokens = 576 + 320 (the historical template allowance, 384 - 64) = 896.
+< # Only context_capacity; every other qualification value keeps its default.
+< model_qualification:
+<   cases:
+<     context_capacity:
+<       reasoning_max_tokens: 576
+<       reasoning_headroom_tokens: 896

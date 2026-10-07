@@ -1,0 +1,251 @@
+{
+ "workspace": "r2c-java-lang-a",
+ "goal": "Add `public static boolean containsOnly(final String str, final String... set)` to org.apache.commons.lang3.CharSetUtils that returns true when every character of str is in the character set defined by the set strings (the same set syntax as the existing `CharSetUtils.containsAny`), returns true for a null or empty str, and returns false for a non-empty str when set is null or empty, and add unit tests for it in CharSetUtilsTest.",
+ "run_id": "20261005T193554-02bd0660",
+ "generate_exit": 0,
+ "wall_seconds": 1055.3226881027222,
+ "process_wall_seconds": 1055.1064511670265,
+ "recorder_seconds": 0.22831066697835922,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0001,
+  "capture_mode": 0.0,
+  "close_run": 0.0005,
+  "emit": 0.0019,
+  "ensure_store": 0.0022,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0005,
+  "mirror_decision": 0.004,
+  "mirror_event": 0.0424,
+  "mirror_evidence": 0.0016,
+  "mirror_gate_outcome": 0.0083,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.0887,
+  "record_call_result": 0.0013,
+  "record_developer_parse": 0.0015,
+  "record_fallback_decision": 0.0001,
+  "record_wire_request": 0.0321,
+  "record_wire_response": 0.026,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.0106,
+  "_record_authority_snapshot": 0.0002,
+  "_record_candidate_change": 0.0051,
+  "_record_developer_sections": 0.0002,
+  "_recorded_section_fit": 0.0007,
+  "_unit_evidence": 0.0,
+  "_record_terminal_report": 0.0003
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 2,
+  "capture_mode": 2,
+  "close_run": 1,
+  "emit": 8,
+  "ensure_store": 3,
+  "enter_attempt_iteration": 2,
+  "exit_attempt_iteration": 2,
+  "mirror_decision": 5,
+  "mirror_event": 52,
+  "mirror_evidence": 2,
+  "mirror_gate_outcome": 7,
+  "note_retry_evidence": 2,
+  "prune_after_run": 1,
+  "record_call_result": 10,
+  "record_developer_parse": 2,
+  "record_fallback_decision": 2,
+  "record_wire_request": 10,
+  "record_wire_response": 10,
+  "store_pointer": 2,
+  "_record_gate_result": 6,
+  "_record_authority_snapshot": 2,
+  "_record_candidate_change": 2,
+  "_record_developer_sections": 2,
+  "_recorded_section_fit": 6,
+  "_unit_evidence": 2,
+  "_record_terminal_report": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 2,
+  "seconds": 0.005133208120241761
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.00047829095274209976
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.0886527500115335
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 139,
+ "records_by_kind": {
+  "mirror.event": 52,
+  "gate.result": 13,
+  "model.request": 10,
+  "model.response": 10,
+  "model.result": 10,
+  "prompt.sections": 8,
+  "mirror.gate_outcome": 7,
+  "mirror.decision": 5,
+  "unit.opened": 2,
+  "mirror.evidence": 2,
+  "attempt.opened": 2,
+  "fallback.decision": 2,
+  "authority.snapshot": 2,
+  "developer.parse": 2,
+  "candidate.change": 2,
+  "obligations.snapshot": 2,
+  "attempt.closed": 2,
+  "attempt.concluded": 2,
+  "unit.closed": 2,
+  "run.opened": 1,
+  "run.closed": 1
+ },
+ "store_kib": 776,
+ "capture": "full",
+ "model_calls": 10,
+ "model_seconds": 183.67,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "run_verifier",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  },
+  {
+   "role": "spec_compliance",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 3
+  },
+  {
+   "role": "reviewer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "0769fe6214918434",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 2
+  }
+ ],
+ "attempts": 2,
+ "calls_outside_attempts": {
+  "planning": 1,
+  "requirement_verification": 1
+ },
+ "completeness": {
+  "Q1:RECORDED": 2,
+  "Q2:RECORDED": 2,
+  "Q3:RECORDED": 2,
+  "Q4:RECORDED": 2,
+  "Q5:NOT_APPLICABLE": 2,
+  "Q6:NOT_APPLICABLE": 2,
+  "Q7:NOT_APPLICABLE": 2,
+  "Q8:RECORDED": 2
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q5",
+   "status": "NOT_APPLICABLE",
+   "reason": "every recorded check passed (2 gate result(s))"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q6",
+   "status": "NOT_APPLICABLE",
+   "reason": "no failure was recorded for this attempt; nothing was retried"
+  },
+  {
+   "unit": "s1",
+   "attempt": 1,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  },
+  {
+   "unit": "s2",
+   "attempt": 1,
+   "question": "Q5",
+   "status": "NOT_APPLICABLE",
+   "reason": "every recorded check passed (3 gate result(s))"
+  },
+  {
+   "unit": "s2",
+   "attempt": 1,
+   "question": "Q6",
+   "status": "NOT_APPLICABLE",
+   "reason": "no failure was recorded for this attempt; nothing was retried"
+  },
+  {
+   "unit": "s2",
+   "attempt": 1,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "COMMITTED",
+    "lifecycle_state": "SUCCESS",
+    "model_calls": 10,
+    "seq": 139,
+    "terminal_status": "SUCCESS"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": null,
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": null,
+   "quality_gates_passed": true,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "outcome": "RETURNED",
+    "quality_gates_passed": true,
+    "seq": 65,
+    "unit_id": "s1"
+   },
+   {
+    "outcome": "RETURNED",
+    "quality_gates_passed": true,
+    "seq": 124,
+    "unit_id": "s2"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.022,
+ "non_model_seconds": 871.66,
+ "recorder_pct_non_model": 0.026
+}

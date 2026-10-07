@@ -1,0 +1,39 @@
+{
+ "commit": "75a3a5a",
+ "tests": [
+  "tests/test_p3c_prose_candidate_delta.py",
+  "tests/test_p3_developer_protocol_reproducers.py",
+  "tests/test_workflow.py"
+ ],
+ "mutants": [
+  {
+   "label": "baseline-subtraction-removed",
+   "file": "kriya/workflow/file_resolution.py",
+   "status": "KILLED",
+   "summary": "1 failed, 231 passed in 24.94s",
+   "seconds": 25.8
+  },
+  {
+   "label": "subtract-by-identity-not-count",
+   "file": "kriya/workflow/file_resolution.py",
+   "status": "KILLED",
+   "summary": "1 failed, 233 passed in 24.53s",
+   "seconds": 25.4
+  },
+  {
+   "label": "check-skipped-entirely",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 280 passed in 41.66s",
+   "seconds": 42.5
+  },
+  {
+   "label": "edit-path-baseline-is-the-candidate",
+   "file": "kriya/workflow/attempt.py",
+   "status": "KILLED",
+   "summary": "1 failed, 280 passed in 39.41s",
+   "seconds": 40.3
+  }
+ ],
+ "baseline": "869 passed in 83.77s (0:01:23)"
+}

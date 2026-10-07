@@ -1,0 +1,3 @@
+262a247 Merge https://github.com/jaraco/skeleton
+684a315 Bump badge for 2026.
+606a7a5 Fix CI warning in diffcov report (jaraco/skeleton#194)

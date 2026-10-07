@@ -1,0 +1,31 @@
+diff --git a/freezegun/api.py b/freezegun/api.py
+index 5ba9f40..028b635 100644
+--- a/freezegun/api.py
++++ b/freezegun/api.py
+@@ -493,9 +493,25 @@ def _parse_time_to_freeze(time_to_freeze_str: Optional[_Freezable]) -> datetime.
+     return convert_to_timezone_naive(time_to_freeze)
+ 
+ 
+-def _parse_tz_offset(tz_offset: Union[datetime.timedelta, float]) -> datetime.timedelta:
++import re
++from typing import Union
++import datetime
++
++def _parse_tz_offset(tz_offset: Union[datetime.timedelta, float, str]) -> datetime.timedelta:
+     if isinstance(tz_offset, datetime.timedelta):
+         return tz_offset
++    elif isinstance(tz_offset, str):
++        # Parse string offset of the form "+HH:MM" or "-HH:MM"
++        match = re.match(r'^([+-])(\d{1,2}):(\d{2})$', tz_offset)
++        if not match:
++            raise ValueError(f"Invalid timezone offset format: {tz_offset}. Expected '+HH:MM' or '-HH:MM'")
++        
++        sign, hours, minutes = match.groups()
++        total_minutes = int(hours) * 60 + int(minutes)
++        if sign == '-':
++            total_minutes = -total_minutes
++            
++        return datetime.timedelta(minutes=total_minutes)
+     else:
+         return datetime.timedelta(hours=tz_offset)
+ 

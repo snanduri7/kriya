@@ -1,0 +1,8 @@
+_parse_tz_offset('+05:30') -> NameError name 're' is not defined
+_parse_tz_offset('-02:00') -> NameError name 're' is not defined
+_parse_tz_offset('abc') -> NameError name 're' is not defined
+_parse_tz_offset('+5:30') -> NameError name 're' is not defined
+_parse_tz_offset('+05:30\n') -> NameError name 're' is not defined
+_parse_tz_offset(datetime.timedelta(seconds=10800)) -> datetime.timedelta(seconds=10800)
+_parse_tz_offset(4) -> datetime.timedelta(seconds=14400)
+_parse_tz_offset(-1.5) -> datetime.timedelta(days=-1, seconds=81000)

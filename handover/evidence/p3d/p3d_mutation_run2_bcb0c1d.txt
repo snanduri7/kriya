@@ -1,0 +1,22 @@
+baseline 67 passed in 7.40s
+raw-final-brace-search KILLED 4 failed, 43 passed in 5.28s
+ignore-owner-identity KILLED 1 failed, 55 passed in 5.52s
+ignore-revision-mismatch KILLED 2 failed, 52 passed in 5.82s
+ignore-context-digest-mismatch KILLED 1 failed, 55 passed in 5.74s
+allow-neighbouring-replacement KILLED 3 failed, 46 passed in 5.38s
+accept-locus-not-in-final-request KILLED 2 failed, 52 passed in 5.55s
+insertion-in-a-different-class KILLED 2 failed, 50 passed in 5.47s
+reuse-a-stale-locus KILLED 1 failed, 55 passed in 5.67s
+full-file-authority-from-insertion KILLED 2 failed, 53 passed in 5.74s
+fallback-to-full-file-context KILLED 5 failed, 40 passed in 4.78s
+ambiguous-owner-takes-first KILLED 1 failed, 55 passed in 5.75s
+enum-owner-accepted KILLED 2 failed, 51 passed in 5.89s
+no-new-member-required KILLED 1 failed, 55 passed in 6.06s
+grounded-member-tier-ignored KILLED 2 failed, 50 passed in 5.58s
+insertion-edit-not-verified KILLED 5 failed, 41 passed in 5.57s
+any-anchor-is-insertion-only KILLED 3 failed, 46 passed in 5.61s
+declaration-loss-accepted KILLED 1 failed, 55 passed in 5.68s
+no-declaration-insertion-accepted KILLED 1 failed, 55 passed in 5.67s
+unparsable-result-accepted KILLED 1 failed, 56 passed in 5.59s
+python-supported KILLED 1 failed, 55 passed in 5.73s
+TOTAL 20 {'KILLED': 20}

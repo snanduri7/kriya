@@ -1,0 +1,11 @@
+--- a/freezegun/api.py
++++ b/freezegun/api.py
+@@ -487,6 +487,8 @@
+         time_to_freeze = datetime.datetime.combine(time_to_freeze_str, datetime.time())
+     elif isinstance(time_to_freeze_str, datetime.timedelta):
+         time_to_freeze = datetime.datetime.now(datetime.timezone.utc) + time_to_freeze_str
++    elif isinstance(time_to_freeze_str, (int, float)):
++        time_to_freeze = datetime.datetime.fromtimestamp(time_to_freeze_str, tz=datetime.timezone.utc)
+     else:
+         time_to_freeze = parser.parse(time_to_freeze_str)  # type: ignore
+ 

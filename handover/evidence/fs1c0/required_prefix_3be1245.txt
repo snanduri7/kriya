@@ -1,0 +1,8 @@
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[conftest_hook]
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[support_module]
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[runner_config]
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[identity_skipped]
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[identity_missing]
+FAILED handover/evidence/fs1c0/test_c0_required.py::test_a_wrong_candidate_never_closes_the_requirement[rewritten_during_run]
+FAILED handover/evidence/fs1c/test_named_test_oracle_required.py::test_a_candidate_changed_oracle_dependency_never_closes_a_requirement
+7 failed, 1 passed in 3.47s

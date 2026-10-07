@@ -1,0 +1,181 @@
+{
+ "model": "qwen3-coder:30b-kriya-e52213655394",
+ "roles_using_model": [
+  "architect",
+  "reviewer",
+  "run_verifier",
+  "skill_gap",
+  "spec_compliance"
+ ],
+ "qualify_identities": [
+  {
+   "roles": [
+    "architect",
+    "reviewer",
+    "run_verifier",
+    "skill_gap",
+    "spec_compliance"
+   ],
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "settings": {
+    "version": 3,
+    "temperature": 0.7,
+    "reasoning": false,
+    "extra_body": {
+     "options": {
+      "num_ctx": 32768,
+      "top_k": 20,
+      "top_p": 0.8
+     },
+     "think": false,
+     "truncate": false
+    },
+    "server_config": {},
+    "digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+    "output_ceiling": 16384
+   },
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "exact": true,
+   "capability_profile": "native_tool_calls=True json_mode=True reliable_multiline_json=False streaming=True max_tool_argument_chars=8192 preferred_edit_protocol='small_native_tools'",
+   "fingerprint": {
+    "alias": "qwen3-coder:30b-kriya-e52213655394",
+    "endpoint": "http://localhost:11434/v1",
+    "provider": "ollama",
+    "provider_version": "0.34.4",
+    "artifact_digest": "sha256:141e95d786b871df832f727594b8229e6bd91097e1701738085661521ab00086",
+    "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a",
+    "model_format": "gguf",
+    "family": "qwen3moe",
+    "parameter_size": "30.5B",
+    "quantization": "Q4_K_M",
+    "chat_template": "renderer:qwen3-coder",
+    "tool_call_parser": "parser:qwen3-coder",
+    "tokenizer_identity": "gpt2/qwen2",
+    "tokenizer_digest": "sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b",
+    "runtime_parameters_digest": "sha256:e78bb89813de74d2f001c9811a2e0a47f5de88bd4fd90f0a5ece1f6c07847645",
+    "served_capabilities": [
+     "completion",
+     "tools"
+    ],
+    "server_parameters": [
+     "num_ctx 32768",
+     "repeat_penalty 1.05",
+     "stop \"<|endoftext|>\"",
+     "stop \"<|im_end|>\"",
+     "stop \"<|im_start|>\"",
+     "temperature 0.7",
+     "top_k 20",
+     "top_p 0.8"
+    ],
+    "model_context_length": 262144,
+    "configured_context_window": 32768,
+    "effective_context_window": 32768,
+    "kriya_protocol": "capabilities-sha256:23c8c96401ef571c86231ba9c47284705b92dad5352da4d01e7a073a60a76fd6",
+    "adapter_version": "kriya-ollama-native/2",
+    "schema_version": 1,
+    "digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+    "exact": true,
+    "missing_components": [],
+    "probe_errors": []
+   }
+  }
+ ],
+ "status_identities": [
+  {
+   "role": "architect",
+   "identity": "normal",
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "required": [
+    "plain_completion",
+    "finish_reason_stop",
+    "output_truncation",
+    "reasoning_behavior",
+    "endpoint_error_semantics",
+    "over_context_refusal",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "structured_json",
+    "streaming_assembly"
+   ]
+  },
+  {
+   "role": "reviewer",
+   "identity": "normal",
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "required": [
+    "plain_completion",
+    "finish_reason_stop",
+    "output_truncation",
+    "reasoning_behavior",
+    "endpoint_error_semantics",
+    "over_context_refusal",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "structured_json",
+    "streaming_assembly"
+   ]
+  },
+  {
+   "role": "run_verifier",
+   "identity": "normal",
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "required": [
+    "plain_completion",
+    "finish_reason_stop",
+    "output_truncation",
+    "reasoning_behavior",
+    "endpoint_error_semantics",
+    "over_context_refusal",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "structured_json",
+    "streaming_assembly"
+   ]
+  },
+  {
+   "role": "skill_gap",
+   "identity": "normal",
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "required": [
+    "plain_completion",
+    "finish_reason_stop",
+    "output_truncation",
+    "reasoning_behavior",
+    "endpoint_error_semantics",
+    "over_context_refusal",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "structured_json",
+    "streaming_assembly"
+   ]
+  },
+  {
+   "role": "spec_compliance",
+   "identity": "normal",
+   "settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15",
+   "fingerprint_digest": "375715b7b4a726244497cb35c669b49edcb78bc07545827cd4f47911e5f9aaab",
+   "required": [
+    "plain_completion",
+    "finish_reason_stop",
+    "output_truncation",
+    "reasoning_behavior",
+    "endpoint_error_semantics",
+    "over_context_refusal",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "structured_json",
+    "streaming_assembly"
+   ]
+  }
+ ],
+ "qualify_covers_status": true
+}

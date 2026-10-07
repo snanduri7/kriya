@@ -1,0 +1,235 @@
+{
+ "workspace": "gr1q-graphify",
+ "goal": "C#: an unqualified generic call (Get<T>(...), this.Get<T>(...)) drops its `calls` edge\n\n## Summary\n\nIn C#, a call with an explicit type argument and no receiver never gets a `calls` edge, even\nwhen the target method is declared on the caller's own class or on its base class. The\nnon-generic spelling of the same call resolves normally, so the type-argument list at the call\nsite is the whole trigger.\n\nMeasured on v0.9.56, the current release. v0.9.55 behaves identically.\n\n## Reproducer\n\nThree files, no corpus, no build needed. `dotnet build` on net8.0: 0 errors, 0 warnings.\n\n```csharp\n// Settings.cs\nnamespace Demo\n{\n    public class Settings\n    {\n        public T Get<T>(string key) { return default(T); }   // target\n        public string GetRaw(string key) { return key; }     // control target\n    }\n}\n\n// Reader.cs\nnamespace Demo\n{\n    public class Reader : Settings\n    {\n        public int A() { return Get<int>(\"port\"); }        // 1) no edge\n        public int B() { return this.Get<int>(\"port\"); }   // 2) no edge\n        public string C() { return GetRaw(\"host\"); }       // 3) edge\n        public string D() { return this.GetRaw(\"host\"); }  // 4) edge\n    }\n}\n\n// Local.cs\nnamespace Demo\n{\n    public class Local\n    {\n        public T Make<T>() { return default(T); }\n        public int E() { return Make<int>(); }             // 5) no edge, same class\n    }\n}\n```\n\n```\ngraphify extract src --code-only --no-cluster --out out\n```\n\n| # | Call site | v0.9.56 |\n|---|---|---|\n| 1 | `Get<int>(\"port\")` \u2014 unqualified, generic, target on base class | no edge |\n| 2 | `this.Get<int>(\"port\")` \u2014 same through `this` | no edge |\n| 3 | `GetRaw(\"host\")` \u2014 control, unqualified, non-generic | edge |\n| 4 | `this.GetRaw(\"host\")` \u2014 control, through `this` | edge |\n| 5 | `Make<int>()` \u2014 unqualified, generic, target on the same class | no edge |\n\n2 of 5. All five target member nodes exist in the graph, and `method`/`inherits` edges are\ncorrect \u2014 only the call-site-to-member match fails. Case 5 shows inheritance is not involved.\n\n## Expected\n\nCases 1, 2 and 5 should produce a `calls` edge to `.Get()` / `.Make()`, exactly as the\nnon-generic controls 3 and 4 do. The type-argument list is not part of the method's identity.\n\n## Where it happens (v0.9.56, graphify/extractors/engine.py)\n\n- `elif fn_node is not None and fn_node.type == \"identifier\":` \u2014 for `Get<int>(\"port\")`\n  tree-sitter gives the `function` field as a `generic_name`, not an `identifier`, so this branch\n  is skipped. Control flow falls into the generic fallback further down, which takes the node\n  text verbatim and so assigns `callee_name = \"Get<int>\"`.\n- `callee_name = _read_text(mname, source)` \u2014 for `this.Get<int>(\"port\")` the `name` field of the\n  `member_access_expression` is a `generic_name`, so `callee_name` becomes `\"Get<int>\"`.\n- In both cases the member index is keyed on the bare declared name, the lookup misses, and the\n  edge is dropped silently.\n\nWhat makes this worth one small change: a few lines further down, the very same call node is\nwalked structurally to emit `references[generic_arg]` edges \u2014 the code descends into\n`generic_name` and reads its `type_argument_list` properly. So v0.9.56 already recognises these\ncall sites as generic and already records what they instantiate; only the callee name a few\nlines above is still taken as raw text.",
+ "run_id": "20261006T231821-fb31caad",
+ "generate_exit": 1,
+ "wall_seconds": 464.83931708335876,
+ "process_wall_seconds": 464.6460974579677,
+ "recorder_seconds": 0.45626784150954336,
+ "recorder_function_seconds": {
+  "attempt_opened": 0.0001,
+  "capture_mode": 0.0,
+  "close_run": 0.0005,
+  "emit": 0.0012,
+  "ensure_store": 0.0024,
+  "enter_attempt_iteration": 0.0,
+  "exit_attempt_iteration": 0.0001,
+  "mirror_decision": 0.0032,
+  "mirror_event": 0.033,
+  "mirror_evidence": 0.0234,
+  "mirror_gate_outcome": 0.0247,
+  "note_retry_evidence": 0.0,
+  "prune_after_run": 0.1267,
+  "record_call_result": 0.0009,
+  "record_developer_parse": 0.0016,
+  "record_diagnosis": 0.0052,
+  "record_fallback_decision": 0.0001,
+  "record_wire_request": 0.0185,
+  "record_wire_response": 0.0169,
+  "store_pointer": 0.0,
+  "_record_gate_result": 0.1184,
+  "_record_authority_snapshot": 0.0002,
+  "_record_candidate_change": 0.0775,
+  "_record_developer_sections": 0.0004,
+  "_recorded_section_fit": 0.0006,
+  "_record_recovery_decision": 0.0005,
+  "_unit_evidence": 0.0
+ },
+ "recorder_function_calls": {
+  "attempt_opened": 2,
+  "capture_mode": 2,
+  "close_run": 1,
+  "emit": 6,
+  "ensure_store": 2,
+  "enter_attempt_iteration": 2,
+  "exit_attempt_iteration": 2,
+  "mirror_decision": 4,
+  "mirror_event": 39,
+  "mirror_evidence": 3,
+  "mirror_gate_outcome": 4,
+  "note_retry_evidence": 2,
+  "prune_after_run": 1,
+  "record_call_result": 7,
+  "record_developer_parse": 2,
+  "record_diagnosis": 2,
+  "record_fallback_decision": 2,
+  "record_wire_request": 7,
+  "record_wire_response": 7,
+  "store_pointer": 1,
+  "_record_gate_result": 3,
+  "_record_authority_snapshot": 2,
+  "_record_candidate_change": 1,
+  "_record_developer_sections": 2,
+  "_recorded_section_fit": 5,
+  "_record_recovery_decision": 2,
+  "_unit_evidence": 1
+ },
+ "missing_targets": [],
+ "record_candidate_change": {
+  "calls": 1,
+  "seconds": 0.07749770802911371
+ },
+ "close_run": {
+  "calls": 1,
+  "seconds": 0.0005115410313010216
+ },
+ "prune_after_run": {
+  "calls": 1,
+  "seconds": 0.12668600003235042
+ },
+ "verify": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "records": 106,
+ "records_by_kind": {
+  "mirror.event": 39,
+  "prompt.sections": 7,
+  "model.request": 7,
+  "model.response": 7,
+  "model.result": 7,
+  "mirror.decision": 4,
+  "mirror.gate_outcome": 4,
+  "mirror.evidence": 3,
+  "gate.result": 3,
+  "attempt.opened": 2,
+  "fallback.decision": 2,
+  "authority.snapshot": 2,
+  "developer.parse": 2,
+  "obligations.snapshot": 2,
+  "attempt.closed": 2,
+  "diagnosis": 2,
+  "candidate.change": 2,
+  "recovery.decision": 2,
+  "attempt.concluded": 2,
+  "run.opened": 1,
+  "unit.opened": 1,
+  "retry.delta": 1,
+  "unit.closed": 1,
+  "run.closed": 1
+ },
+ "store_kib": 1116,
+ "capture": "full",
+ "model_calls": 7,
+ "model_seconds": 277.36,
+ "model_identities": [
+  {
+   "role": "planner",
+   "model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+   "runtime": "26cb2deb79ae4314",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "localization",
+   "model": "qwen3.8:27b",
+   "runtime": "b9acd699817e65ae",
+   "exact": true,
+   "settings": "sha256:8bbe07eb1",
+   "calls": 1
+  },
+  {
+   "role": "developer",
+   "model": "qwen3.8:27b",
+   "runtime": "b9acd699817e65ae",
+   "exact": true,
+   "settings": "sha256:8bbe07eb1",
+   "calls": 2
+  },
+  {
+   "role": "run_verifier",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "375715b7b4a72624",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "spec_compliance",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "375715b7b4a72624",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  },
+  {
+   "role": "reviewer",
+   "model": "qwen3-coder:30b-kriya-e52213655394",
+   "runtime": "375715b7b4a72624",
+   "exact": true,
+   "settings": "sha256:482067b2e",
+   "calls": 1
+  }
+ ],
+ "attempts": 2,
+ "calls_outside_attempts": {
+  "localization": 1,
+  "planning": 1
+ },
+ "completeness": {
+  "Q1:RECORDED": 2,
+  "Q2:RECORDED": 2,
+  "Q3:RECORDED": 2,
+  "Q4:RECORDED": 2,
+  "Q5:RECORDED": 2,
+  "Q6:RECORDED": 2,
+  "Q7:NOT_APPLICABLE": 1,
+  "Q7:RECORDED": 1,
+  "Q8:RECORDED": 2
+ },
+ "absent_answers": [
+  {
+   "unit": "s1",
+   "attempt": 2,
+   "question": "Q7",
+   "status": "NOT_APPLICABLE",
+   "reason": "no later attempt in this unit invocation"
+  }
+ ],
+ "blank_answers": [],
+ "Q9": {
+  "failed_terminal_gates": [],
+  "integration_obligations": null,
+  "items": [
+   {
+    "commit_result": "NOT_COMMITTED",
+    "lifecycle_state": "FAILURE",
+    "model_calls": 7,
+    "seq": 106,
+    "terminal_status": "FAILURE"
+   }
+  ],
+  "last_fallback_routing": null,
+  "last_recovery_decision": {
+   "action": "stop_environment",
+   "content": {
+    "environment_failure": "sha256:e1a364f761e55eaaf37b45dde95f1a8847975ec7d8f59b16cdd6439815140901"
+   },
+   "failure_type": "regression_unattributed",
+   "progress_classification": "PROGRESS",
+   "retry": false,
+   "seq": 100,
+   "stop_reason_code": "REGRESSION_UNATTRIBUTED"
+  },
+  "plan_scope_conflicts": [],
+  "status": "RECORDED",
+  "terminal_cause": {
+   "failure_category": "regression_unattributed",
+   "quality_gates_passed": false,
+   "unit_outcome": "RETURNED"
+  },
+  "units": [
+   {
+    "failure_category": "regression_unattributed",
+    "outcome": "RETURNED",
+    "quality_gates_passed": false,
+    "seq": 103,
+    "unit_id": "s1"
+   }
+  ]
+ },
+ "recorder_pct_wall": 0.098,
+ "non_model_seconds": 187.48,
+ "recorder_pct_non_model": 0.243
+}

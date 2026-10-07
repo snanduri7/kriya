@@ -1,0 +1,55 @@
+{
+ "kriya": {
+  "product": "kriya",
+  "version": "0.1.0",
+  "commit": "69465d3e324739b5e71e3807fa60ba5c13517cd6",
+  "tree": "770713950381720ea1c852725ffb660a4ae582d0",
+  "dirty": false,
+  "build_provenance": "embedded",
+  "python": "3.14.6",
+  "install_path": "/Users/sriramnanduri/kriya-m1-live/venv-postreg/lib/python3.14/site-packages/kriya"
+ },
+ "base_revision": "bba7689c625508feb81b3e8c024c8ec52ea0f844db0462dd789d5bb803c7600b",
+ "wall_seconds": 272.0,
+ "baseline_complete": true,
+ "post_complete": true,
+ "authority": "pytest_per_test",
+ "blocking": false,
+ "blocking_reasons": [],
+ "diagnostic_level1": "CHANGED_FAILURE",
+ "level2_counts": {
+  "PRE_EXISTING_FAILURE": 217
+ },
+ "volatile_fields_ignored": {
+  "tests/test_ts_import_type_arguments.py::test_ts_normalizer_scales_linearly_on_large_files": [
+   "message",
+   "body"
+  ],
+  "tests/test_watch_manifest_location.py::test_built_at_commit_comes_from_the_target_repo": [
+   "body"
+  ]
+ },
+ "replay_selections": [
+  null,
+  null
+ ],
+ "stability": [
+  {
+   "test": "tests.test_ts_import_type_arguments::test_ts_normalizer_scales_linearly_on_large_files",
+   "reason": null,
+   "outcome": "STABLE",
+   "failure_type": "STABLE",
+   "message": "VOLATILE",
+   "body": "VOLATILE"
+  },
+  {
+   "test": "tests.test_watch_manifest_location::test_built_at_commit_comes_from_the_target_repo",
+   "reason": null,
+   "outcome": "STABLE",
+   "failure_type": "STABLE",
+   "message": "STABLE",
+   "body": "VOLATILE"
+  }
+ ],
+ "verdict": "NO REGRESSION"
+}

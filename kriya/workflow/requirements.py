@@ -19,22 +19,25 @@ user's text, verbatim:
   passed and judges the exact candidate files (fingerprinted). Planner,
   Architect, Developer and Reviewer text never writes an outcome; citing a
   requirement id in a plan or design is lineage, not evidence.
-- Outcomes: SATISFIED (the verifier found the requirement in the code),
-  VIOLATED (a concrete, literally-named requirement is absent - the gate
-  fails and the retry names the REQ id and its original text), UNVERIFIED
-  (CANNOT_CONFIRM_FROM_CODE: the requirement describes behaviour the
-  verifier cannot confirm from source text), UNKNOWN (NO_VERDICT).
-  ``blocking_requirements`` applies the policy: VIOLATED always blocks
-  success; UNKNOWN and UNVERIFIED block when
+- Verifier verdicts: satisfied, missing (a concrete, literally-named
+  requirement is absent - the gate fails and the retry names the REQ id and
+  its original text), unverifiable (CANNOT_CONFIRM_FROM_CODE), none
+  (UNKNOWN, NO_VERDICT). Both satisfied and missing are MODEL_CLAIMED and
+  recorded UNVERIFIED with the model's verdict as provenance (FS-1B, GR-R0):
+  only deterministic or human-bound evidence decides CLOSED_BY_EVIDENCE /
+  HUMAN_ACCEPTED or VIOLATED. ``blocking_requirements`` applies the policy:
+  VIOLATED always blocks success; UNKNOWN and UNVERIFIED block when
   ``autonomy.requirement_unknown_policy`` / ``requirement_unverified_policy``
-  say ``block`` (production seals both to ``block``).
+  say ``block`` (production seals both to ``block``); an UNVERIFIED the
+  verifier reported missing blocks whatever the policy.
 - UNVERIFIED is never SATISFIED. It can be closed only by another
   authoritative verifier's positive evidence for that exact requirement on
   that exact candidate (``record_requirement_closure``): a separate
   DETERMINISTIC record whose ``evidence_id`` must equal the verifier
   verdict's own, so evidence about an earlier candidate never closes a later
   one. The closed outcome is CLOSED_BY_EVIDENCE, distinct from the
-  verifier's SATISFIED. VIOLATED and UNKNOWN are never closed this way.
+  verifier's SATISFIED, whatever the verifier said (a model "missing" is
+  outranked by it). VIOLATED and UNKNOWN are never closed this way.
 - Mutation-scope requirements ("do not modify any other file", recognized
   only as a whole statement, ``is_mutation_scope_requirement``) are decided
   from Kriya's own mutation record (``close_mutation_scope_requirements``):
@@ -114,6 +117,11 @@ def names_a_concrete_literal(text: str) -> bool:
     return bool(_CONCRETE_LITERAL.search(text or ""))
 
 
+# FS-1B: the class of the verifier's verdict - a model's semantic assessment,
+# never authorization (recorded on every verdict record).
+MODEL_CLAIMED = "MODEL_CLAIMED"
+
+
 class RequirementOutcome(str, Enum):
     PENDING = "pending"
     SATISFIED = "satisfied"
@@ -123,6 +131,10 @@ class RequirementOutcome(str, Enum):
     # UNVERIFIED by the verifier, then positively verified for this exact
     # requirement and candidate by deterministic evidence (a test run).
     CLOSED_BY_EVIDENCE = "closed_by_evidence"
+    # B3: a GENERAL behaviour claim an operator accepted on the exact approved
+    # acceptance suite (kriya/workflow/acceptance_approval.py) - human
+    # authority, never a proof. Derived only, like CLOSED_BY_EVIDENCE.
+    HUMAN_ACCEPTED = "human_accepted"
 
 
 # MODEL-EVIDENCE-HARDENING-001: why a requirement has its verdict.
@@ -157,6 +169,7 @@ _OUTCOME_STATUS = {
     RequirementOutcome.UNVERIFIED: ObligationStatus.INDETERMINATE,
     RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
     RequirementOutcome.CLOSED_BY_EVIDENCE: ObligationStatus.SATISFIED,
+    RequirementOutcome.HUMAN_ACCEPTED: ObligationStatus.SATISFIED,
 }
 
 
@@ -174,12 +187,17 @@ class RequirementSet:
     goal_digest: str
     version: int
     requirements: Tuple[Requirement, ...]
+    # GR-R1A: the digest of the operator's explicit requirement contract this
+    # closed set came from (kriya/workflow/requirement_contract.py); None for
+    # a set derived from the goal, whose digest stays byte-identical.
+    contract_digest: Optional[str] = None
 
     @property
     def digest(self) -> str:
         payload = json.dumps(
             {"version": self.version, "goal_digest": self.goal_digest,
-             "requirements": [asdict(r) for r in self.requirements]},
+             "requirements": [asdict(r) for r in self.requirements],
+             **({"contract_digest": self.contract_digest} if self.contract_digest is not None else {})},
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -195,11 +213,19 @@ class RequirementSet:
         return {
             "version": self.version, "goal_digest": self.goal_digest, "digest": self.digest,
             "requirements": [asdict(r) for r in self.requirements],
+            **({"contract_digest": self.contract_digest} if self.contract_digest is not None else {}),
         }
 
 
 def _goal_digest(goal: str) -> str:
     return hashlib.sha256(goal.encode("utf-8")).hexdigest()
+
+
+def goal_identity(goal: str) -> str:
+    """The goal digest a requirement set derived from ``goal`` (with no
+    clarifications) carries - the identity an explicit requirement contract
+    binds (GR-R1A)."""
+    return _goal_digest(goal + "\x00")
 
 
 def _clean(text: str) -> str:
@@ -364,6 +390,16 @@ def record_requirement_verdicts(
         else:
             outcome, detail = entry[0], entry[1]
             reason = entry[2] if len(entry) > 2 and entry[2] else _DEFAULT_REASON[outcome.value]
+        # FS-1B / GR-R0: LLM output can authorize nothing, in either
+        # direction. A verifier's verdict is a MODEL_CLAIMED assessment, never
+        # proof: SATISFIED and VIOLATED alike are recorded UNVERIFIED (the
+        # model's own verdict, reason and detail kept as provenance). Only
+        # deterministic or human-bound evidence for this exact candidate
+        # closes it or makes it VIOLATED (requirement_outcomes); a model
+        # "missing" alone still blocks success (blocking_requirements).
+        model_outcome = outcome
+        if outcome in (RequirementOutcome.SATISFIED, RequirementOutcome.VIOLATED):
+            outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
         ledger.record(ObligationRecord(
             id=requirement_obligation_id(requirement.id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
@@ -373,6 +409,7 @@ def record_requirement_verdicts(
                 "requirement_set_digest": requirements.digest, "outcome": outcome.value,
                 "reason_code": reason, "detail": detail, "evidence_id": evidence_fingerprint,
                 "gate_evidence": gate_evidence, "verifier": dict(verifier or {}),
+                "model_outcome": model_outcome.value, "evidence_class": MODEL_CLAIMED,
             },
             terminal_required=True,
         ))
@@ -388,10 +425,16 @@ def requirement_verdict_details(ledger: ObligationLedger, requirements: Requirem
     for requirement in requirements.requirements:
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence = (record.evidence or {}) if record is not None else {}
-        outcome = str(evidence.get("outcome") or RequirementOutcome.PENDING.value)
+        recorded = str(evidence.get("outcome") or RequirementOutcome.PENDING.value)
+        # FS-1B: the verifier's own verdict is kept as the model's claim; a
+        # pre-FS-1 "satisfied" record reports as UNVERIFIED, like requirement_outcomes.
+        outcome = (RequirementOutcome.UNVERIFIED.value if recorded == RequirementOutcome.SATISFIED.value
+                   else recorded)
         details[requirement.id] = {
             "outcome": outcome,
-            "reason_code": evidence.get("reason_code") or _DEFAULT_REASON.get(outcome, NOT_YET_VERIFIED),
+            "reason_code": evidence.get("reason_code") or _DEFAULT_REASON.get(recorded, NOT_YET_VERIFIED),
+            "model_outcome": evidence.get("model_outcome") or (recorded if record is not None else None),
+            "evidence_class": evidence.get("evidence_class"),
             "detail": evidence.get("detail") or "",
             "verifier": evidence.get("verifier") or {},
             "evidence_id": evidence.get("evidence_id"),
@@ -399,6 +442,275 @@ def requirement_verdict_details(ledger: ObligationLedger, requirements: Requirem
             "source": record.source if record is not None else None,
         }
     return details
+
+
+# ------------------------------------------------------------ claims (FS-1C1)
+#
+# A requirement statement can make more than one claim. "Implement X, keeping
+# test T passing" claims new BEHAVIOR (X) and REGRESSION_PRESERVATION (T still
+# passes). A named pre-existing test is a known-good oracle: it passed before X
+# existed, so it can prove only that it still passes - never X. Each claim is
+# closed only by evidence of its own kind; a requirement closes only when every
+# claim it makes is closed for the same candidate.
+
+REGRESSION_PRESERVATION = "REGRESSION_PRESERVATION"
+BEHAVIOR = "BEHAVIOR"
+# Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
+# ever proves regression preservation. BEHAVIOR needs independent acceptance
+# evidence: the operator's executable acceptance file (FS-1C2 B2-a,
+# kriya/workflow/acceptance_oracle.py, ``acceptance_oracle``) or human-bound acceptance
+# authority over an exact approved suite (B3, ``human_bound_acceptance``,
+# kriya/workflow/acceptance_approval.py).
+NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle"})
+BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance"})
+REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
+
+# Words a pure regression-preservation statement is made of besides the test
+# references themselves ("tests/test_legacy.py keeps passing", "Behaviour stays
+# compatible with the legacy check test_legacy"). Closed on purpose: any other
+# word is read as a behaviour claim, so an unknown phrasing fails closed (the
+# requirement stays UNVERIFIED), never open.
+_PRESERVATION_WORDS = frozenset({
+    "a", "all", "an", "and", "are", "be", "behavior", "behaviors", "behaviour", "behaviours", "break",
+    "breaking", "breaks", "broken", "check", "checks", "compatibility", "compatible", "continue", "continues",
+    "continuing", "ensure", "ensures", "existing", "fail", "failing", "fails", "green", "has", "have", "in",
+    "intact", "is", "it", "its", "keep", "keeping", "keeps", "kept", "legacy", "make", "must", "need", "needs",
+    "no", "not", "of", "or", "pass", "passed", "passes", "passing", "regress", "regression", "regressions",
+    "remain", "remaining", "remains", "shall", "should", "stay", "staying", "stays", "still", "suite", "sure",
+    "test", "tests", "that", "the", "their", "they", "to", "unchanged", "will", "with", "without",
+})
+
+
+def requirement_claims(text: str, named_tests: Iterable[str]) -> Tuple[str, ...]:
+    """The claims a requirement statement makes, decided deterministically
+    from its own words: REGRESSION_PRESERVATION when it names existing tests
+    (``named_tests``), and BEHAVIOR when anything remains once the test
+    references and the closed preservation vocabulary are removed (or when it
+    names no test at all)."""
+    references = set()
+    for path in named_tests:
+        base = path.rsplit("/", 1)[-1]
+        references.update({path.lower(), base.lower(), base.rsplit(".", 1)[0].lower()})
+    leftover = [
+        token for token in (raw.strip("./").lower() for raw in _TEST_REFERENCE.findall(text or ""))
+        if any(ch.isalnum() for ch in token) and token not in references and token not in _PRESERVATION_WORDS
+    ]
+    named = bool(references)
+    return (((BEHAVIOR,) if leftover or not named else ())
+            + ((REGRESSION_PRESERVATION,) if named else ()))
+
+
+# ------------------------------------------------------------ claim strength (B2-COV)
+#
+# Evidence closes a claim only at the strength it demonstrates. A trusted
+# counterexample disproves a general rule; finite passing examples never prove
+# one. So a BEHAVIOR statement is EXACT (enumerated: every observable
+# expectation is a stated concrete case, e.g. "`f(0)` returns X") or GENERAL (a
+# rule over a domain: "of the form", "any other string", "returns 2 * x").
+# Deterministic, from the user's words only; anything uncertain is GENERAL.
+# Acceptance cases (finite examples) close only an EXACT statement; for a
+# GENERAL one they are supporting evidence (BEHAVIOR_EXAMPLES) and the claim
+# stays open - only a counterexample (VIOLATED) is decisive. Another authority
+# for a general rule (B3: a human approving a suite as sufficient) is separate.
+
+BEHAVIOR_EXACT = "EXACT"
+BEHAVIOR_GENERAL = "GENERAL"
+# Supporting evidence for a GENERAL statement: the operator's cases passed. Never
+# a closure claim (``_effective_closure`` never requires or accepts it).
+BEHAVIOR_EXAMPLES = "BEHAVIOR_EXAMPLES"
+# Producers whose positive evidence is a finite set of cases.
+FINITE_EVIDENCE_METHODS = frozenset({"acceptance_oracle"})
+# B3: human authority over an exact approved suite (not finite-evidence gated;
+# only ever a BEHAVIOR claim, never a whole-requirement closure record).
+HUMAN_ACCEPTANCE_METHOD = "human_bound_acceptance"
+
+_UNIVERSAL_WORDS = frozenset({
+    "any", "anything", "every", "everything", "all", "each", "only", "never", "always", "whatever", "whichever",
+    "arbitrary", "regardless", "otherwise", "none", "nothing",
+})
+_UNIVERSAL_PHRASES = ("of the form", "no other", "for any", "for all", "for every", "in any", "in all",
+                      "match", "pattern", "range", "between", "at least", "at most", "up to")
+_PRESERVATION_MARKER = re.compile(
+    r"\b(?:as before|unchanged|keeps? working|keeps? passing|keeping\b.*\bpassing|continues? to (?:work|pass)"
+    r"|still (?:works?|passes|pass)|stays? the same|remains? the same)\b")
+_CODE_SPAN = re.compile(r"`[^`]*`|\"[^\"]*\"|'[^']*'")
+_LITERAL = r"(?:-?\d+(?:\.\d+)?|'[^']*'|\"[^\"]*\"|None|True|False)"
+_EXAMPLE_CALL = re.compile(r"[A-Za-z_][\w.]*\(\s*" + _LITERAL + r"(?:\s*,\s*" + _LITERAL + r")*\s*\)")
+_EMPTY_CALL_EXAMPLE = re.compile(r"`[A-Za-z_][\w.]*\(\s*\)`")
+_SIGNATURE = re.compile(r"\b[A-Za-z_]\w*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)")
+_PLACEHOLDER = re.compile(r"<[^<>\s]+>")
+_CLAUSE_SPLIT = re.compile(r"[,;:()]|\bwhile\b")
+
+
+def behavior_strength(text: str, *, regression_covered: bool) -> Tuple[str, Dict[str, Any]]:
+    """EXACT or GENERAL for a requirement's BEHAVIOR claim, with why.
+
+    GENERAL when any behaviour clause carries a universal quantifier or domain
+    phrase, a ``<placeholder>``, or a declared parameter used as a formula
+    ("double(x) returns 2 * x"); when the statement states no concrete example
+    call; or when it has a preservation clause ("keeps working as before") that
+    no named regression oracle covers (``regression_covered``). Preservation
+    clauses covered by the regression claim are that claim's, not behaviour's.
+    Quoted text and code spans are content, never quantifiers."""
+    raw = text or ""
+    reasons: List[str] = []
+    parameters = {name.strip() for match in _SIGNATURE.finditer(raw) for name in match.group(1).split(",")}
+    parameters -= {"None", "True", "False"}
+    # Example calls, signatures and quoted/code text are content, never prose.
+    prose = _CODE_SPAN.sub(" CODE ", _SIGNATURE.sub(" CODE ", _EXAMPLE_CALL.sub(" CODE ", raw)))
+    for clause in _CLAUSE_SPLIT.split(prose):
+        lowered = clause.lower()
+        words = set(re.findall(r"[a-z]+", lowered))
+        if _PRESERVATION_MARKER.search(lowered):
+            if not regression_covered:
+                reasons.append(f"preservation without a regression oracle: {clause.strip()!r}")
+            continue
+        cues = sorted(words & _UNIVERSAL_WORDS) + [p for p in _UNIVERSAL_PHRASES if re.search(rf"\b{p}", lowered)]
+        if cues:
+            reasons.append(f"general rule ({', '.join(cues)}): {clause.strip()!r}")
+        formula = sorted(name for name in parameters if re.search(rf"(?<![\w(]){re.escape(name)}(?![\w(])", clause))
+        if formula:
+            reasons.append(f"formula over parameter(s) {', '.join(formula)}: {clause.strip()!r}")
+    if _PLACEHOLDER.search(raw):
+        reasons.append("placeholder pattern: " + ", ".join(sorted(set(_PLACEHOLDER.findall(raw)))))
+    examples = sorted(set(_EXAMPLE_CALL.findall(raw)) | set(m.strip("`") for m in _EMPTY_CALL_EXAMPLE.findall(raw)))
+    if not examples:
+        reasons.append("no concrete example case is stated")
+    strength = BEHAVIOR_GENERAL if reasons else BEHAVIOR_EXACT
+    return strength, {"strength": strength, "reasons": reasons, "examples": examples}
+
+
+def requirement_claim_id(requirement_id: str, claim: str) -> str:
+    """The obligation id one claim's evidence is recorded under (never the
+    verdict's or the whole requirement's closure id)."""
+    return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}.claim.{claim.lower()}"
+
+
+# What one claim judgment recorded: SATISFIED closes the claim, VIOLATED is
+# deterministic counter-evidence (the requirement becomes VIOLATED), and
+# INDETERMINATE says the evidence could not be obtained - it closes nothing and
+# revokes any earlier judgment of the same claim on the same candidate.
+_CLAIM_STATUSES = frozenset({ObligationStatus.SATISFIED, ObligationStatus.VIOLATED, ObligationStatus.INDETERMINATE})
+
+
+def record_requirement_claim(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, claim: str, *,
+    evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
+    status: ObligationStatus = ObligationStatus.SATISFIED,
+) -> None:
+    """Deterministic evidence about one claim of ``requirement_id`` for the
+    candidate ``evidence_id`` (``status``: SATISFIED closes it, VIOLATED is
+    counter-evidence, INDETERMINATE closes nothing). Only the producer kinds
+    allowed for that claim may record it: a regression oracle can never judge
+    BEHAVIOR. The latest record for a candidate is its judgment."""
+    allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
+               BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS}
+    if method not in allowed.get(claim, frozenset()):
+        raise ValueError(f"method {method!r} cannot close a {claim} claim")
+    if status not in _CLAIM_STATUSES:
+        raise ValueError(f"a claim judgment is SATISFIED, VIOLATED or INDETERMINATE, not {status}")
+    requirement = requirements.get(requirement_id)
+    if requirement is None:
+        raise ValueError(f"unknown requirement id {requirement_id!r}")
+    ledger.record(ObligationRecord(
+        id=requirement_claim_id(requirement_id, claim), kind=ObligationKind.ORIGINAL_REQUIREMENT,
+        status=status, authority=ObligationAuthority.DETERMINISTIC,
+        description=requirement.text, source=source, revision=revision,
+        evidence={"requirement_set_digest": requirements.digest, "evidence_id": evidence_id,
+                  "claim": claim, "method": method, **detail},
+        terminal_required=False,
+    ))
+
+
+def requirement_claim_record(
+    ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
+) -> Optional[ObligationRecord]:
+    """The latest judgment of ``claim`` of ``requirement_id`` on the candidate
+    ``evidence_id`` (any status), if any. A later judgment of the same
+    candidate replaces an earlier one: a failed or unobtainable re-run never
+    leaves an older closure standing."""
+    if not evidence_id:
+        return None
+    for record in reversed(ledger.history(requirement_claim_id(requirement_id, claim))):
+        if (record.evidence or {}).get("evidence_id") == evidence_id:
+            return record
+    return None
+
+
+def requirement_claim(
+    ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """The evidence closing ``claim`` of ``requirement_id`` on the candidate
+    ``evidence_id``, if its latest judgment closed it."""
+    record = requirement_claim_record(ledger, requirement_id, claim, evidence_id)
+    if record is not None and record.status is ObligationStatus.SATISFIED:
+        return record.evidence or {}
+    return None
+
+
+def _claim_counter_evidence(
+    ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """BEHAVIOR counter-evidence: the latest acceptance judgment of this
+    candidate observed the behaviour contradicted (B2-a)."""
+    record = requirement_claim_record(ledger, requirement_id, BEHAVIOR, evidence_id)
+    if record is not None and record.status is ObligationStatus.VIOLATED:
+        return record.evidence or {}
+    return None
+
+
+def _effective_closure(
+    ledger: ObligationLedger, requirement: Requirement, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """The evidence that closes ``requirement`` for ``evidence_id``: its own
+    closure record - except a named-test closure of a statement that also
+    claims BEHAVIOR (a pre-FS-1C1 record read back on resume, or any other
+    writer), which proves only regression preservation - or else every claim
+    the statement makes closed by its own kind of evidence. Which claims the
+    statement makes is what the BEHAVIOR producer decided from the statement
+    and the repository's test files (``required_claims``); without it, both."""
+    closure = requirement_closure(ledger, requirement.id, evidence_id)
+    if (closure is not None and closure.get("method") in NAMED_TEST_CLOSURE_METHODS
+            and BEHAVIOR in requirement_claims(requirement.text, closure.get("tests") or ())):
+        closure = None
+    if (closure is not None and closure.get("method") in FINITE_EVIDENCE_METHODS
+            and not _finite_evidence_may_close(requirement, tuple(closure.get("required_claims") or ()))):
+        closure = None
+    if closure is not None and closure.get("method") == HUMAN_ACCEPTANCE_METHOD:
+        closure = None  # B3 closes only the BEHAVIOR claim, never a whole requirement
+    if closure is not None:
+        return closure
+    claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
+              for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
+    behavior = claims[BEHAVIOR]
+    required = tuple((behavior or {}).get("required_claims") or (BEHAVIOR, REGRESSION_PRESERVATION))
+    if (behavior is not None and behavior.get("method") in FINITE_EVIDENCE_METHODS
+            and not _finite_evidence_may_close(requirement, required)):
+        return None  # B2-COV: finite cases never close a general rule, whatever a record says
+    if (behavior is not None and behavior.get("method") == HUMAN_ACCEPTANCE_METHOD
+            and not _human_acceptance_binds(requirement, behavior)):
+        return None  # B3: the approval was for other words (a resumed or altered record)
+    if BEHAVIOR in required and all(claims.get(claim) for claim in required):
+        return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
+    return None
+
+
+def _human_acceptance_binds(requirement: Requirement, evidence: Mapping[str, Any]) -> bool:
+    """B3, re-checked at read time: the approval was granted for exactly this
+    requirement's words (the closure site checks every other binding)."""
+    entry = evidence.get("approval") or {}
+    return (bool(evidence.get("approval_digest")) and entry.get("requirement_id") == requirement.id
+            and entry.get("requirement_text_sha256")
+            == hashlib.sha256((requirement.text or "").encode("utf-8")).hexdigest())
+
+
+def _finite_evidence_may_close(requirement: Requirement, required: Sequence[str]) -> bool:
+    """B2-COV, decided again at read time from the user's words (a resumed or
+    pre-B2-COV record cannot carry a broader closure than they allow): finite
+    cases close only an EXACT statement. A preservation clause counts as
+    covered only when the closure also requires the regression claim."""
+    covered = REGRESSION_PRESERVATION in required
+    return behavior_strength(requirement.text, regression_covered=covered)[0] == BEHAVIOR_EXACT
 
 
 def record_requirement_closure(
@@ -472,16 +784,25 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
         except ValueError:
             outcome = RequirementOutcome.UNKNOWN
-        if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE:
+        if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED):
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
+        if outcome is RequirementOutcome.VIOLATED:
+            # GR-R0: a verdict record is the verifier's MODEL_CLAIMED judgment
+            # (a pre-GR-R0 record, e.g. read back on resume): never VIOLATED by
+            # itself; deterministic counter-evidence below decides that.
+            outcome = RequirementOutcome.UNVERIFIED
         evidence_id = evidence.get("evidence_id")
-        closure = requirement_closure(ledger, requirement.id, evidence_id)
-        if requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None:
+        closure = _effective_closure(ledger, requirement, evidence_id)
+        if (requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None
+                or _claim_counter_evidence(ledger, requirement.id, evidence_id) is not None):
             outcome = RequirementOutcome.VIOLATED
-        elif closure is not None and (
-                outcome is RequirementOutcome.UNVERIFIED
-                or (outcome is RequirementOutcome.SATISFIED and closure.get("kind") == MUTATION_SCOPE)):
-            outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
+        elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
+            human = ((closure.get("claims") or {}).get(BEHAVIOR) or {}).get("method") == HUMAN_ACCEPTANCE_METHOD
+            outcome = RequirementOutcome.HUMAN_ACCEPTED if human else RequirementOutcome.CLOSED_BY_EVIDENCE
+        elif outcome is RequirementOutcome.SATISFIED:
+            # FS-1B: a SATISFIED verdict record without deterministic closure
+            # (a pre-FS-1 record, e.g. read back on resume) authorizes nothing.
+            outcome = RequirementOutcome.UNVERIFIED
         outcomes[requirement.id] = outcome
     return outcomes
 
@@ -495,7 +816,15 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
         evidence = (requirement_counter_evidence(ledger, requirement.id, evidence_id)
-                    or requirement_closure(ledger, requirement.id, evidence_id))
+                    or _claim_counter_evidence(ledger, requirement.id, evidence_id)
+                    or _effective_closure(ledger, requirement, evidence_id))
+        if evidence is None:
+            # FS-1C1: an open requirement whose claims are partly proven shows
+            # which (e.g. regression preserved, behaviour unverified).
+            claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
+                      for claim in (BEHAVIOR, BEHAVIOR_EXAMPLES, REGRESSION_PRESERVATION)}
+            if any(claims.values()):
+                evidence = {"method": "claims", "closed": False, "claims": claims}
         if evidence is not None:
             found[requirement.id] = dict(evidence)
     return found
@@ -712,7 +1041,9 @@ def blocking_requirements(
 ) -> List[Tuple[Requirement, RequirementOutcome]]:
     """The requirements that forbid a successful terminal state. VIOLATED
     always blocks; PENDING and UNKNOWN (no verdict) block under
-    ``unknown_policy == "block"``; UNVERIFIED under ``unverified_policy``."""
+    ``unknown_policy == "block"``; UNVERIFIED under ``unverified_policy``, and
+    always when the verifier reported it missing (GR-R0: an unrefuted model
+    negative is not evidence either way, so it cannot become success)."""
     blocking: List[Tuple[Requirement, RequirementOutcome]] = []
     outcomes = requirement_outcomes(ledger, requirements)
     for requirement in requirements.requirements:
@@ -720,9 +1051,17 @@ def blocking_requirements(
         if (outcome is RequirementOutcome.VIOLATED
                 or (outcome in (RequirementOutcome.PENDING, RequirementOutcome.UNKNOWN)
                     and unknown_policy == "block")
-                or (outcome is RequirementOutcome.UNVERIFIED and unverified_policy == "block")):
+                or (outcome is RequirementOutcome.UNVERIFIED
+                    and (unverified_policy == "block" or _model_reported_missing(ledger, requirement.id)))):
             blocking.append((requirement, outcome))
     return blocking
+
+
+def _model_reported_missing(ledger: ObligationLedger, requirement_id: str) -> bool:
+    """The verifier's current verdict for ``requirement_id`` is "missing"."""
+    record = ledger.current(requirement_obligation_id(requirement_id))
+    evidence = (record.evidence or {}) if record is not None else {}
+    return RequirementOutcome.VIOLATED.value in (evidence.get("model_outcome"), evidence.get("outcome"))
 
 
 def cited_requirement_ids(text: str, requirements: RequirementSet) -> List[str]:
@@ -818,21 +1157,21 @@ def verifier_result_verdicts(
 
 def close_unverified_requirements_with_named_tests(
     ledger: ObligationLedger, requirements: RequirementSet, *,
-    test_files: Iterable[str], modified: Iterable[str],
-    run_tests: Any, confirms_execution: Any, source: str, revision: Any,
+    test_files: Iterable[str], modified: Iterable[str], judge: Any, source: str, revision: Any,
 ) -> List[Dict[str, Any]]:
     """Close each UNVERIFIED requirement whose own text names existing tests,
     by running exactly those tests on the candidate the verifier judged.
 
-    Authoritative only under all of: the binding is the user's words
-    (``named_existing_tests``); every named test file is unchanged by the
-    candidate (``modified`` - a test the run wrote or edited is the model's
-    evidence, not an independent verifier); the run executed tests
-    (``confirms_execution(output)``) and passed. ``run_tests(paths)`` returns
-    the validator's ``{"success", "output"}``; it runs against the same
-    candidate the verdict's ``evidence_id`` identifies (the caller's
-    worktree, before anything else changes it). Returns one record per
-    attempted closure (closed or not, with why)."""
+    The binding is the user's words (``named_existing_tests``). A named test
+    file the candidate wrote or edited (``modified``) is the model's evidence,
+    not an independent verifier, and is refused without running anything.
+    Otherwise ``judge(named)`` - the FS-1C0 named-test oracle
+    (kriya/workflow/named_test_oracle.py), run against the same candidate the
+    verdict's ``evidence_id`` identifies - decides: it closes only when the
+    oracle is independent of the candidate (its trust surface equals the
+    authorized base), every case the base revision executes ran and passed,
+    and the evidence is complete; the closure record carries its bindings.
+    Returns one record per attempted closure (closed or not, with why)."""
     changed = set(modified)
     files = list(test_files)
     attempts: List[Dict[str, Any]] = []
@@ -852,19 +1191,35 @@ def close_unverified_requirements_with_named_tests(
         elif not evidence_id:
             entry["reason"] = "the verdict has no evidence id to bind to"
         else:
-            try:
-                result = run_tests(named) or {}
-            except Exception as exc:  # a runner failure is no evidence either way
-                result = {"success": False, "output": f"runner raised: {exc}"}
-            executed = bool(confirms_execution(str(result.get("output", ""))))
-            if result.get("success") and executed:
+            judgment = judge(named)
+            entry["reason_code"] = judgment.reason_code
+            claims = requirement_claims(requirement.text, named)
+            entry["claims"] = list(claims)
+            if not judgment.closed:
+                entry["reason"] = judgment.reason
+            elif BEHAVIOR not in claims:
                 record_requirement_closure(
-                    ledger, requirements, requirement.id, evidence_id=evidence_id, method="named_test_run",
-                    detail={"tests": named, "passed": True}, source=source, revision=revision,
+                    ledger, requirements, requirement.id, evidence_id=evidence_id, method=judgment.evidence["method"],
+                    detail={**judgment.evidence, "tests": named, "claim": REGRESSION_PRESERVATION}, source=source,
+                    revision=revision,
                 )
                 entry["closed"] = True
             else:
-                entry["reason"] = ("named tests did not execute" if not executed
-                                   else "named tests failed")
+                # FS-1C1: the oracle proves only that the named tests still
+                # pass; the new behaviour the same statement asks for needs
+                # its own independent evidence.
+                record_requirement_claim(
+                    ledger, requirements, requirement.id, REGRESSION_PRESERVATION, evidence_id=evidence_id,
+                    method=judgment.evidence["method"], detail={**judgment.evidence, "tests": named}, source=source,
+                    revision=revision,
+                )
+                entry["regression_preserved"] = True
+                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] in (
+                    RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED)
+                if not entry["closed"]:
+                    entry["reason_code"] = REQUIREMENT_BEHAVIOR_UNVERIFIED
+                    entry["reason"] = ("the named pre-existing test(s) still pass (regression preserved), but they "
+                                       "passed before the requested behaviour existed and cannot prove it; the "
+                                       "behaviour has no independent evidence")
         attempts.append(entry)
     return attempts

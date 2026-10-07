@@ -20,6 +20,20 @@ from kriya.capabilities.ports import BuildAdapter
 
 MARKERS = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
 
+# FS-1A: pytest prints "generated xml file: <path>" after the run. The path
+# is unique per invocation, and the console output is gate evidence that
+# reaches retry prompts and the no-progress fingerprint (measured: T6's
+# repeated-vector detection saw a "new" failure every attempt). The launcher
+# silences only that one summary line, so the output stays byte-identical to
+# a run without the report; the report itself is still written.
+_SILENT_REPORT_SUMMARY = (
+    "\ntry:\n"
+    "    import _pytest.junitxml as _kriya_junitxml\n"
+    "    _kriya_junitxml.LogXML.pytest_terminal_summary = lambda *args, **kwargs: None\n"
+    "except Exception:\n"
+    "    pass\n"
+)
+
 
 class PipBuildAdapter(BuildAdapter):
     build_system = "pip"
@@ -35,12 +49,17 @@ class PipBuildAdapter(BuildAdapter):
 
     def output_roots(self, cmd: List[str], cwd: str) -> List[str]:
         """``__pycache__/`` of every directory holding ``.py`` sources (PEP
-        3147) plus pytest's ``.pytest_cache/``."""
+        3147), pytest's ``.pytest_cache/`` and the directory of the
+        ``--junitxml`` report the command names."""
         from kriya.tools.validate import _project_dirs
 
-        return ([os.path.join(d, "__pycache__") for d in _project_dirs(
+        roots = ([os.path.join(d, "__pycache__") for d in _project_dirs(
             cwd, lambda files: any(name.endswith(".py") for name in files))]
-                + [os.path.join(cwd, ".pytest_cache")])
+                 + [os.path.join(cwd, ".pytest_cache")])
+        # FS-1A: the JUnit XML destination this exact command names (Kriya's own).
+        roots += [os.path.join(cwd, os.path.dirname(arg.split("=", 1)[1]))
+                  for arg in cmd if arg.startswith("--junitxml=")]
+        return roots
 
     def compile(self, v: Any, files: List[str], *, deadline: Optional[float]) -> Optional[Dict[str, Any]]:
         """A syntax check of the changed ``.py`` files: ``python3 -m
@@ -135,15 +154,22 @@ class PipBuildAdapter(BuildAdapter):
         if install_error:
             return {"success": False, "output": install_error}
 
+        binding = getattr(v, "test_report_binding", None)
+        report_argument = binding.pytest_argument if binding is not None else None
         cmd = [
             python_interpreter,
             "-c",
             "import sys, os; "
             "sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; "
             f"sys.path.extend({extra_roots!r}); "
-            "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
-            "--"
+            + (_SILENT_REPORT_SUMMARY if report_argument else "")
+            + "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
         ]
+        if report_argument:
+            # FS-1A: the Kriya-owned per-invocation JUnit XML destination. An
+            # option, so before "--" (after it pytest reads a file path - measured).
+            cmd.append(report_argument)
+        cmd.append("--")
         if targets:
             # Each target its OWN argv entry - never joined into one
             # string (see this method's own docstring: a single
@@ -151,6 +177,8 @@ class PipBuildAdapter(BuildAdapter):
             # empirically confirmed, not assumed).
             cmd.extend(targets)
         res = v._run_cmd_with_timeout(cmd, cwd=v.workspace_path)
+        if binding is not None:
+            binding.observe(res)
         return v._validation_result(
             res["returncode"] in (0, 5), res["stdout"] + "\n" + res["stderr"], res,
         )

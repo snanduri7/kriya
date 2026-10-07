@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Tuple
 from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.control.workspace_identity import WorkspaceOwnershipError, workspace_identity
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.workflow.edit_safety import read_file_revision
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ class DecisionLedger:
     def record(self, decision_type: str, **fields: Any) -> Decision:
         decision = Decision(type=decision_type, fields=_truncate_field_values(fields))
         self._decisions.append(decision)
+        attempt_evidence_scope.mirror_decision(decision)
         return decision
 
     def all(self) -> Tuple[Decision, ...]:

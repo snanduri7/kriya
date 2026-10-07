@@ -1,0 +1,19 @@
+0a1,5
+> # QWEN3.8 HISTORICAL-PROFILE QUALIFICATION config (GR-R1 follow-up, 2026-10-06; operator-owned, outside every
+> # workspace). Derived from ~/.kriya/operator/graphify-qwen38-production.yaml with ONLY: inference_runtime
+> # ollama_native (llm + llm_chain; /8 over_context_refusal), llm.context_window 32768 (the window, carried per
+> # request as options.num_ctx), and paths.skills/state/memory. Sampling unchanged: temperature 0.2,
+> # reasoning true, max_tokens 4096, extra_body {}.
+24,26c29,31
+<   skills: /Users/sriramnanduri/.kriya/operator/prd036/skills
+<   state: /Users/sriramnanduri/.kriya/operator/prd036/state
+<   memory: /Users/sriramnanduri/.kriya/operator/prd036/memory
+---
+>   skills: /Users/sriramnanduri/kriya-m1-live/skills-qwen38
+>   state: /Users/sriramnanduri/kriya-m1-live/state
+>   memory: /Users/sriramnanduri/kriya-m1-live/memory/qwen38-qual
+29a35,36
+>   inference_runtime: ollama_native
+>   context_window: 32768
+46a54
+>   inference_runtime: ollama_native

@@ -1,0 +1,15 @@
+consumer-writes-only KILLED 2 failed, 117 passed in 9.88s
+all-subtask-writes-blindly-unioned KILLED 1 failed, 155 passed in 4.12s
+provider-identity-ignored / unrelated-sibling-accepted KILLED 1 failed, 264 passed in 9.25s
+wrong-provider-accepted (any subtask's planned files count) KILLED 1 failed, 276 passed in 9.01s
+provider-local-pass-implies-global-pass KILLED 2 failed, 127 passed in 3.69s
+final-workspace-state-ignored KILLED 1 failed, 256 passed in 8.64s
+no-change-consumer-treated-as-missing KILLED 1 failed, 127 passed in 3.83s
+verification-only-consumer-treated-as-missing KILLED 2 failed, 125 passed in 3.56s
+verification-only-without-verification-passes KILLED 1 failed, 128 passed in 4.24s
+missing-artifact-converted-to-success KILLED 2 failed, 124 passed in 3.66s
+production-call-passes-no-provenance KILLED 2 failed, 145 passed in 4.23s
+resume-provenance-unrecorded KILLED 1 failed, 147 passed in 4.18s
+decision-not-mirrored-to-m1 KILLED 1 failed, 154 passed in 4.23s
+q9-drops-integration-decisions KILLED 1 failed, 154 passed in 4.23s
+TOTAL 14 {'KILLED': 14}

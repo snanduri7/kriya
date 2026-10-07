@@ -139,6 +139,7 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
     so Best-of-N never actually re-attempts a resumed run.
     """
     from kriya.workflow.attempt import run_attempt
+    from kriya.workflow.model_transition import fallback_routing_for_context
     from kriya.workflow.retry_policy import decide_for_state
     from kriya.workflow.retry_strategy import handle_attempt_failure
     from kriya.workflow.worktree import create_git_worktree
@@ -160,7 +161,7 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
             if should_stop or _authoritative_repair_active(state) or not decide_for_state(
                 state, max_retries=attempt_ctx.max_retries,
                 targeted_max_retries=attempt_ctx.targeted_max_retries,
-                has_fallback_model=bool(attempt_ctx.chain),
+                has_fallback_model=fallback_routing_for_context(state, attempt_ctx).available,
             ).should_continue:
                 raise BestOfNFailureRecorded(e, stop_loop=should_stop) from e
             # The fresh sandbox comes first: the state is reset for an

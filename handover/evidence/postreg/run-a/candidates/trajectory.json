@@ -1,0 +1,31 @@
+{
+ "run_id": "20261007T071630-e21ca9b2",
+ "m1": {
+  "status": "VERIFIED",
+  "sealed": true
+ },
+ "attempts": 2,
+ "stageable_candidates": 1,
+ "candidates": [
+  {
+   "candidate": 1,
+   "attempt_seq": 54,
+   "unit": "s1",
+   "carried_from_committed_units": [],
+   "files": {
+    "graphify/extractors/engine.py": "1adbc4baed6cc42e8f05b1a271952727eca672945b7ec151f1fa9c6beb38641b"
+   },
+   "acceptance_passed": 5,
+   "acceptance_exit": 0,
+   "external_score": 5,
+   "external_exit": 0,
+   "external_sites": {
+    "E": "PASS"
+   },
+   "regression76": "76 passed in 0.60s",
+   "regression_exit": 0,
+   "best_external_so_far": 5
+  }
+ ],
+ "best_external": 5
+}

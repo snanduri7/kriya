@@ -198,6 +198,9 @@ class MavenBuildAdapter(BuildAdapter):
         if test_class:
             goals.append(f"-Dtest={test_class}")
         res = v._run_maven_cmd(goals, cwd=v.workspace_path, timeout=300)
+        binding = getattr(v, "test_report_binding", None)
+        if binding is not None:
+            binding.observe(res)  # FS-1A: Surefire's reports are read after this run
         return v._validation_result(
             res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
         )

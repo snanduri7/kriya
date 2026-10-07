@@ -1,0 +1,13 @@
+{
+ "level1": "CHANGED_FAILURE",
+ "level2": {
+  "tests/test_suite.py::test_message_varies_each_run": "PRE_EXISTING_FAILURE",
+  "tests/test_suite.py::test_stable_failure": "PRE_EXISTING_FAILURE",
+  "tests/test_suite.py::test_traceback_arguments_vary_each_run": "PRE_EXISTING_FAILURE"
+ },
+ "blocking": true,
+ "blocking_reasons": [
+  "level1:CHANGED_FAILURE"
+ ],
+ "outputs_identical": false
+}

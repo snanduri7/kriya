@@ -11,6 +11,7 @@ to-workspace, lesson extraction, the full regression suite) deliberately
 stays in workflow.py - out of scope for this slice.
 """
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -26,6 +27,7 @@ from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
+from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
@@ -40,6 +42,12 @@ from kriya.policy.filesystem import (
     trusted_control_path_denial,
 )
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+
+# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
+# names here, imported at runtime so typing.get_type_hints() on this module's
+# dataclasses and functions resolves (PRD-001; none of these modules imports
+# attempt.py, so there is no cycle).
+from kriya.tools import test_execution
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
     ManagedServiceVerificationSpec,
@@ -49,11 +57,6 @@ from kriya.tools.service_runtime import (
     _prepare_required_artifact,
     run_managed_service_verification,
 )
-
-# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
-# names here, imported at runtime so typing.get_type_hints() on this module's
-# dataclasses and functions resolves (PRD-001; none of these modules imports
-# attempt.py, so there is no cycle).
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
 from kriya.workflow.acceptance import (
     CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
@@ -139,7 +142,6 @@ from kriya.workflow.file_resolution import (
     _resolve_run_command,
     build_grounded_java_launch_command,
     correct_exec_main_class_property,
-    discover_response_construction_owners,
     downgrade_ungrounded_goal_explicit_commands,
     ensure_maven_covers_nonconventional_java_files,
     extract_jvm_module_flags,
@@ -231,6 +233,7 @@ from kriya.workflow.static_checks import (
     run_static_checks,
     validate_stack_contract_artifacts,
 )
+from kriya.workflow.test_delta import TEST_EXECUTION_EVIDENCE_INDETERMINATE, judge_test_delta
 from kriya.workflow.toolchain import (
     _check_java_toolchain_mismatch,
     _pin_exec_plugin_executable_to_resolved_jdk,
@@ -243,8 +246,14 @@ from kriya.workflow.verification_contract import ContractVerdictState, classify_
 from kriya.workflow.verification_coordinator import (
     VerificationCoordinator,
     VerificationRequest,
-    _directly_executable_runtime_verifiers,
-    _directly_executable_verifiers,
+    is_verification_only_unit,
+)
+from kriya.workflow.verification_coordinator import (
+    # Re-exported: tests and older callers import these from attempt.
+    _directly_executable_runtime_verifiers as _directly_executable_runtime_verifiers,
+)
+from kriya.workflow.verification_coordinator import (
+    _directly_executable_verifiers as _directly_executable_verifiers,
 )
 from kriya.workflow.verifier_evidence import (
     RetainedRuntimeEvidence,
@@ -254,6 +263,12 @@ from kriya.workflow.verifier_evidence import (
 from kriya.workflow.worktree import clean_untracked_files_since, repository_content_paths, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+# GR-R1B: the attempt-level Goal Spec Compliance gate's model-only outcomes -
+# advisory diagnostic evidence, never an attempt failure, retry or fallback.
+SPEC_MODEL_REPORTED_MISSING = "model_reported_missing"
+SPEC_MODEL_INDETERMINATE = "model_indeterminate"
+SPEC_COMPLIANCE_MODEL_ADVISORY = "SPEC_COMPLIANCE_MODEL_ADVISORY"
 
 
 def _apply_candidate_pom_corrections(
@@ -331,11 +346,54 @@ def _bind_verification_tree(state: GenerationState, ctx: "AttemptContext") -> Ve
     the gates will verify (repository content + candidate). Every validator
     of this attempt checks it after each command it runs."""
     _require_worktree_matches_candidate(state, ctx)
+    _record_candidate_change(state, ctx)
     binding = VerificationTreeBinding(
         ctx.worktree_path, repository_content_paths(ctx.workspace_path), state.candidate_digests,
     )
     state.verification_tree_binding = binding
     return binding
+
+
+def _record_candidate_change(state: GenerationState, ctx: "AttemptContext") -> None:
+    """LR-R1-M1 ``candidate.change`` (STAGED): the candidate exactly as it is
+    frozen for this attempt's gates - per path the base and candidate raw
+    digests (the commit-evidence digests) and, as content, both byte
+    versions and their unified diff. Observational."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    import difflib
+
+    for relpath, after_digest in sorted(state.candidate_digests.items()):
+        try:
+            before = state.all_original_raw.get(relpath)
+            path = os.path.join(ctx.worktree_path, relpath)
+            after = None
+            if after_digest is not None and os.path.isfile(path):
+                with open(path, "rb") as handle:
+                    after = handle.read()
+            try:
+                before_text = before.decode("utf-8") if before is not None else ""
+                after_text = after.decode("utf-8") if after is not None else ""
+            except UnicodeDecodeError:
+                before_text = after_text = None   # bytes are recorded; no lossy text diff
+            diff = None if before_text is None else "".join(
+                line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
+                for line in difflib.unified_diff(
+                    before_text.splitlines(keepends=True), after_text.splitlines(keepends=True),
+                    fromfile="/dev/null" if before is None else f"a/{relpath}",
+                    tofile="/dev/null" if after is None else f"b/{relpath}"))
+            diff_lines = (diff or "").splitlines()
+            added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+            removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
+            payload = {"decision": "STAGED", "path": relpath,
+                       "before_digest": raw_digest(before) if before is not None else None,
+                       "after_digest": after_digest, "created": before is None, "deleted": after_digest is None,
+                       "lines_added": added, "lines_removed": removed, "text_diff": diff is not None}
+        except Exception as error:  # observational: never alters the attempt
+            logger.warning("Attempt evidence: candidate.change for %s not built (%s)", relpath, error)
+            continue
+        attempt_evidence_scope.emit("candidate.change", payload,
+                                    content={"before": before, "after": after, "diff": diff})
 
 
 def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptContext") -> None:
@@ -359,7 +417,7 @@ def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptCon
         authority="deterministic", attempt=state.attempt_number,
         diagnostics={"reason_code": WORKTREE_CONTENT_MISMATCH, "paths": mismatches[:50]},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -403,7 +461,7 @@ def _file_integrity_stop(state: GenerationState, filepath: str, error: Any) -> "
         file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
         diagnostics={"reason_code": getattr(error, "reason_code", None)},
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     return QualityGateFailure(failure)
 
 
@@ -1210,6 +1268,7 @@ def _prepare_retry_context(
             ))
         state.budgets.last_retry_evidence_fingerprint = fingerprint
         state.retry_evidence_seen.setdefault(fingerprint_hash, state.attempt_number)
+        attempt_evidence_scope.note_retry_evidence(fingerprint_hash)
 
     return RetryContextPreparation(
         retry_package=retry_package,
@@ -1500,22 +1559,32 @@ def _preserved_authoritative_locator_files(
     ]
 
 
+def _fallback_routing(state: GenerationState, ctx: "AttemptContext") -> Any:
+    """LR-R1-P1: the shared routing view of the configured fallbacks
+    (model_transition.fallback_routing_for_context) - never ``bool(ctx.chain)``."""
+    from kriya.workflow.model_transition import fallback_routing_for_context
+
+    return fallback_routing_for_context(state, ctx)
+
+
 def _request_fallback_for_rejected_authoritative_target(
     state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
 ) -> None:
     if (
         preserved_files
         and state.last_attempt_mode == "targeted"
-        and ctx.chain
+        and _fallback_routing(state, ctx).available
         and not state.budgets.fallback_targeted_attempted
     ):
         state.budgets.fallback_targeted_requested = True
 
 
 def _reject_explanatory_prose(
-    state: GenerationState, filepath: str, content: str,
+    state: GenerationState, filepath: str, content: str, baseline: Optional[str],
 ) -> None:
-    contamination = find_explanatory_prose_contamination(filepath, content)
+    """``baseline``: the file before this write (None for a new file); only
+    what the candidate added is judged (P3-C)."""
+    contamination = find_explanatory_prose_contamination(filepath, content, baseline)
     if not contamination:
         return
     failure = Failure(
@@ -1530,7 +1599,7 @@ def _reject_explanatory_prose(
         likely_files=[filepath], failed_content={filepath: content},
         attempt=state.attempt_number,
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -1981,7 +2050,7 @@ def _fallback_rejection(profile: Any, reasons: List[str]) -> Dict[str, Any]:
 
 
 def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
-                               rejected: List[Dict[str, Any]]) -> None:
+                               rejected: List[Dict[str, Any]], primary_route: bool = False) -> None:
     """PRD-017: why configured fallbacks were skipped and which one serves
     the attempt (the model.fallback_selection run event)."""
     from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
@@ -1993,10 +2062,12 @@ def _record_fallback_selection(state: GenerationState, *, phase: str, requested:
         authority=EventAuthority.ADVISORY,
         message=(
             f"Fallback {requested} skipped ({', '.join(r['model'] for r in rejected)} incompatible); "
-            + (f"{selected} selected" if selected else "no configured fallback remains")
+            + (f"{selected} selected" if selected
+               else "the full-set attempt stays on the primary" if primary_route
+               else "no configured fallback remains")
         ),
         details={"phase": phase, "requested": requested, "selected": selected, "rejected": rejected,
-                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE},
+                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE, "primary_route": primary_route},
     ))
 
 
@@ -2030,7 +2101,8 @@ def _raise_fallback_incompatible(state: GenerationState, requested: str, rejecte
     ))
 
 
-def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int) -> Any:
+def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int, *,
+                              targets: Iterable[str] = (), allow_primary: bool = False) -> Any:
     """PRD-017: the llm_chain fallback this attempt escalates to, chosen
     before its prompt is built (the prompt is sized for the chosen model's
     window). The configured order is kept (resolve_fallback_model); a
@@ -2038,37 +2110,71 @@ def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", re
     qualification case, the production profile without QUALIFIED, no
     prompt room - is skipped with its reasons (never re-evaluated or sent a
     request), and the next configured one is taken. None for the primary;
-    the typed terminal failure when no configured fallback remains."""
-    from kriya.workflow.model_transition import fallback_incompatibilities
+    the typed terminal failure when no configured fallback remains.
+
+    LR-R1-P1 Option (b): a fallback that cannot serve THIS attempt's
+    ``targets`` because one is patch-only for it (whole-file representation
+    impossible in its request, model_transition.patch_only_files) and it
+    returns whole files only is skipped for this attempt (not a run-wide
+    verdict). When every remaining fallback was skipped for that reason
+    alone and ``allow_primary`` (the full-set route), the attempt stays on
+    the primary (None) instead of ending; a run-wide rejection among them
+    keeps PRD-017's terminal semantics."""
+    from kriya.workflow.model_transition import (
+        existing_target_sizes,
+        fallback_incompatibilities,
+        patch_only_files,
+    )
 
     if retry_count <= 0 or not ctx.chain:
         return None
     start = min(retry_count - 1, len(ctx.chain) - 1)
     requested = ctx.chain[start]
+    sizes = existing_target_sizes(ctx.worktree_path, targets)
     newly_rejected: List[Dict[str, Any]] = []
+    patch_rejected: Dict[str, Dict[str, Any]] = {}
     for binding in ctx.chain[start:]:
         if binding.model in state.incompatible_fallbacks:
             continue
         profile = _developer_request_profile(ctx, binding.model)
         reasons = fallback_incompatibilities(ctx.kernel.config, profile)
-        if not reasons:
+        if reasons:
+            state.incompatible_fallbacks[binding.model] = reasons
+            newly_rejected.append(_fallback_rejection(profile, reasons))
+            continue
+        files = patch_only_files(ctx.kernel.config, binding, sizes)[0] if sizes else ()
+        patch_reasons = fallback_incompatibilities(ctx.kernel.config, profile, patch_required_files=files) \
+            if files else []
+        if not patch_reasons:
             break
-        state.incompatible_fallbacks[binding.model] = reasons
-        newly_rejected.append(_fallback_rejection(profile, reasons))
-    selected = resolve_fallback_model(retry_count, ctx.chain, state.incompatible_fallbacks)
+        patch_rejected[binding.model] = {**_fallback_rejection(profile, patch_reasons),
+                                         "patch_only_files": list(files)}
+    skipped = {*state.incompatible_fallbacks, *patch_rejected}
+    selected = resolve_fallback_model(retry_count, ctx.chain, skipped)
+    attempt_evidence_scope.record_fallback_decision({
+        "phase": "escalation", "retry_count": retry_count, "requested": requested.model,
+        "selected": selected.model if selected is not None else None,
+        "newly_rejected": newly_rejected, "previously_rejected": sorted(
+            model for model in state.incompatible_fallbacks if model not in {r["model"] for r in newly_rejected}),
+        "patch_rejected": list(patch_rejected.values()),
+    })
     if selected is requested:
         return selected
     evaluated_now = {item["model"]: item for item in newly_rejected}
     rejected: Dict[str, Dict[str, Any]] = {}
     for binding in ctx.chain[start:]:
-        if binding.model in state.incompatible_fallbacks and binding.model not in rejected:
+        if binding.model in patch_rejected:
+            rejected[binding.model] = patch_rejected[binding.model]
+        elif binding.model in state.incompatible_fallbacks and binding.model not in rejected:
             rejected[binding.model] = evaluated_now.get(binding.model) or {
                 "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
             }
     rejected = list(rejected.values())
+    stays_on_primary = selected is None and allow_primary and all(r["model"] in patch_rejected for r in rejected)
     _record_fallback_selection(state, phase="escalation", requested=requested.model,
-                               selected=selected.model if selected is not None else None, rejected=rejected)
-    if selected is None:
+                               selected=selected.model if selected is not None else None, rejected=rejected,
+                               primary_route=stays_on_primary)
+    if selected is None and not stays_on_primary:
         _raise_fallback_incompatible(state, requested.model, rejected)
     return selected
 
@@ -2126,8 +2232,21 @@ def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs
     reasons = fallback_incompatibilities(
         ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
     ) if is_fallback else []
-    if reasons:
-        kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    requested_model = profile.model
+    requested_digest = profile.digest
+    try:
+        if reasons:
+            kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    except BaseException:
+        attempt_evidence_scope.record_fallback_decision({
+            "phase": "call", "fallback": is_fallback, "requested": requested_model,
+            "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
+            "selected": None, "profile_digest": None})
+        raise
+    attempt_evidence_scope.record_fallback_decision({
+        "phase": "call", "fallback": is_fallback, "requested": requested_model,
+        "requested_profile_digest": requested_digest, "requested_rejection": list(reasons),
+        "selected": profile.model, "profile_digest": profile.digest})
     previous = state.last_developer_request_profile
     if previous is None or previous.digest != profile.digest:
         changes = profile_changes(previous, profile)
@@ -2361,6 +2480,36 @@ def _only_response_validity_failures(state: GenerationState) -> bool:
     return all(outcome.get("type") in _RESPONSE_VALIDITY_FAILURES for outcome in failed)
 
 
+def _record_authority_snapshot(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
+                               capabilities: Dict[str, Any], requested: Dict[str, Any], model: str) -> None:
+    """LR-R1-M1 ``authority.snapshot``: what this Developer invocation was
+    authorized to change and on what source, recorded before inference
+    (observational; every value is already decided above)."""
+    if attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        allowed = list(getattr(ctx, "allowed_write_relpaths", None) or [])
+        mode = getattr(ctx, "write_scope_mode", None)
+        targets = []
+        for path, capability in capabilities.items():
+            item = state.known_target_context_items.get(path)
+            targets.append({
+                **capability.summary(),
+                "requested_operation": getattr(requested.get(path), "value", requested.get(path)),
+                "whole_file_authority": capability.full_file,
+                "shown_tier": getattr(item, "tier", None), "shown_member_id": getattr(item, "member_id", None),
+                "shown_is_exact": getattr(item, "is_exact", None), "shown_revision": getattr(item, "revision", None),
+                "member_units_shown": len(state.known_target_member_items.get(path, ())),
+                "in_write_scope": (path in allowed) if allowed else None,
+            })
+        payload = {"model": model, "write_scope_mode": getattr(mode, "value", mode), "authorized_write_scope": allowed,
+                   "targets": targets, "known_target_files": list(kwargs.get("known_target_files") or [])}
+    except Exception as error:  # observational: never alters the attempt
+        logger.warning("Attempt evidence: authority.snapshot not built (%s: %s)", type(error).__name__, error)
+        return
+    attempt_evidence_scope.emit("authority.snapshot", payload)
+
+
 def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
     this Developer invocation (kriya/workflow/edit_capability.py), decided
@@ -2425,13 +2574,15 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
                 shown.extend(shown_exact_texts(member.tier, member.content))
         if content.strip() and content in mandatory_context:
             shown = [("shown_full", content)]
+        full_file = _is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state)
         capabilities[path] = build_edit_capability(
             path, content,
-            full_file=_is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state),
+            full_file=full_file,
             loci=_edit_capability_loci(state, ctx, path, content.splitlines()),
             budget_chars=budget_chars,
             level=state.budgets.anchor_failure_counts.get(path, 0),
             shown=shown,
+            insertion=None if full_file else _structural_insertion_locus(state, ctx, path, content),
         )
     if state.edit_capabilities_attempt != state.attempt_number:
         state.edit_capabilities = {}
@@ -2448,6 +2599,7 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         details={"model": model, "budget_chars": budget_chars,
                  "targets": [capability.summary() for capability in capabilities.values()]},
     ))
+    _record_authority_snapshot(state, ctx, kwargs, capabilities, requested, model)
 
     infeasible = [path for path, capability in capabilities.items() if not capability.feasible]
     if infeasible:
@@ -2471,6 +2623,9 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
     for path, capability in capabilities.items():
         previous = state.edit_failure_capability.get(path)
         if previous is not None and previous[1:] == (capability.digest, (model, requested[path])):
+            refusal = (path, capability.digest, (model, requested[path]))
+            repeated = refusal in state.edit_refused_capabilities
+            state.edit_refused_capabilities.add(refusal)
             message = (f"{ANCHOR_CONTEXT_NOT_ESCALATED}: the last {previous[0]} failure in {path} would be "
                        f"retried on {model} with the same authoritative context, the same feasible operations "
                        f"({', '.join(capability.operations)}) and the same requested operation "
@@ -2478,7 +2633,8 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
             raise QualityGateFailure(Failure(
                 type="no_progress_retry", message=message, raw_output=f"edit_capability={capability.digest}",
                 source="orchestrator", attempt=state.attempt_number, mode=state.last_attempt_mode,
-                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED},
+                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED,
+                                                  "refusal_repeated": repeated},
             ))
 
     windows = "".join(render_exact_spans(capability) for capability in capabilities.values())
@@ -2486,6 +2642,25 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         kwargs["existing_code_context"] = (kwargs.get("existing_code_context") or "") + windows
     kwargs["edit_operations"] = {path: capability.operations for path, capability in capabilities.items()}
     return capabilities
+
+
+def _structural_insertion_locus(state: GenerationState, ctx: "AttemptContext", path: str, content: str) -> Any:
+    """P3-D: the zero-width insertion locus for a new member the user's goal
+    names (kriya/workflow/insertion_locus.py), decided from the bytes this
+    invocation read and the members localization grounded - never from the
+    plan or the model. None when there is none (recorded, never a guess)."""
+    from kriya.workflow.insertion_locus import resolve_insertion_locus
+
+    grounded = []
+    for item in [state.known_target_context_items.get(path), *state.known_target_member_items.get(path, ())]:
+        if item is not None:
+            grounded.extend(key for key in (item.type_id, item.member_id) if key)
+    locus, reason = resolve_insertion_locus(
+        path, content, goal=ctx.grounding_goal or ctx.goal, revision=content_revision(content),
+        grounded_keys=grounded)
+    if locus is None and reason:
+        logger.info("Structural insertion locus for %s: none (%s)", path, reason)
+    return locus
 
 
 def _requested_operation(kwargs: Dict[str, Any], path: str) -> Optional[str]:
@@ -2516,7 +2691,7 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
     in the exact source this invocation was authorized to rely on. An anchor
     that is real but was never shown records its lines as loci for the next
     window; one that is not in the file at all is fabricated or stale."""
-    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT
+    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT, INSERTION_ONLY
 
     capability = _current_edit_capability(state, path)
     if capability is None:
@@ -2524,6 +2699,12 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
     for index, edit in enumerate(edits, 1):
         status = capability.anchor_status(edit.get("search", ""), current)
         if status is None:
+            continue
+        if status == INSERTION_ONLY:
+            _authorize_structural_insertion(state, capability, path, index, edit, current)
+            continue
+        if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT and _sent_exact_source_covers(
+                state, capability, path, edit.get("search", ""), current):
             continue
         if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT:
             raise ValueError(
@@ -2535,6 +2716,62 @@ def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, 
             f"{status}: Anchor matching failed for edit #{index}: the search block does not occur in the "
             "current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
         )
+
+
+def _authorize_structural_insertion(
+    state: GenerationState, capability: Any, path: str, index: int, edit: Dict[str, str], current: str,
+) -> None:
+    """P3-D: an edit anchored only on a structural insertion carrier is
+    accepted only when, applied alone to the current bytes, it is a pure
+    insertion at the locus of exactly this revision whose carrier the
+    dispatched request carried (verify_insertion); anything else is refused
+    with its typed reason and the existing source is never touched."""
+    from kriya.workflow.insertion_locus import verify_insertion
+
+    locus = capability.insertion
+    after = apply_anchored_edits(current, [edit], "")
+    problem = verify_insertion(locus, current, after, state.edit_capability_sent.get(path) or ())
+    if problem is not None:
+        raise ValueError(f"{problem} (edit #{index})")
+    state.record_event(RunEvent(
+        kind="context.structural_insertion_authorized", attempt=state.attempt_number,
+        source="attempt._authorize_anchors", authority=EventAuthority.AUTHORITATIVE,
+        message=f"edit #{index} in {path} is a pure insertion at the structural locus of {locus.owner_lookup_key}",
+        details={"path": path, "locus": locus.summary(), "capability": capability.digest},
+    ))
+
+
+def _sent_exact_source_covers(state: GenerationState, capability: Any, path: str, search: str, current: str) -> bool:
+    """P3-A: an anchor outside the capability's spans is still one the model
+    relied on exact source for when the request this invocation actually
+    dispatched (as fitted) carried, verbatim, the whole current file or a
+    current exact member unit containing it - the byte rule
+    _decide_edit_capabilities applies to mandatory text, applied to what was
+    really sent (optional text the fit trimmed stays unseen). Only the
+    capability's own revision qualifies, and it authorizes this anchor only:
+    the operations offered, the write scope and full-file authority (D1's
+    alone) are untouched."""
+    from kriya.workflow.edit_safety import normalize_whitespace
+
+    sent = state.edit_capability_sent.get(path) or ()
+    revision = content_revision(current)
+    if not sent or revision != capability.revision or not current.strip():
+        return False
+    pieces = [current] if any(current in prompt for prompt in sent) else []
+    pieces.extend(
+        member.content for member in state.known_target_member_items.get(path, ())
+        if member.is_exact and member.content and (not member.revision or member.revision == revision)
+        and any(member.content in prompt for prompt in sent))
+    norm_search = normalize_whitespace(search)
+    if not any(norm_search in normalize_whitespace(piece) for piece in pieces):
+        return False
+    state.record_event(RunEvent(
+        kind="context.anchor_authorized_by_sent_request", attempt=state.attempt_number,
+        source="attempt._authorize_anchors", authority=EventAuthority.AUTHORITATIVE,
+        message=f"anchor in {path} lies in exact current source the dispatched request carried verbatim",
+        details={"path": path, "revision": revision, "capability": capability.digest},
+    ))
+    return True
 
 
 async def _run_developer_generation(
@@ -2560,10 +2797,10 @@ async def _run_developer_generation_as_developer(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
-    _decide_edit_capabilities(state, ctx, kwargs)
+    capabilities = _decide_edit_capabilities(state, ctx, kwargs)
     # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
     # the binding it is sent to, its optional sections shrinking first.
-    kwargs["request_fit"] = DeveloperRequestFit(
+    request_fit = kwargs["request_fit"] = DeveloperRequestFit(
         ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
         kwargs.pop("optional_sections", None) or (),
     )
@@ -2583,10 +2820,16 @@ async def _run_developer_generation_as_developer(
             retry_kwargs = _lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
             if retry_kwargs is None:
                 raise
+            attempt_evidence_scope.record_authority_transition(
+                "output_budget_protocol_fallback",
+                {path: getattr(op, "value", op) for path, op in (retry_kwargs.get("operation_by_file") or {}).items()})
             result = await ctx.developer.run_generation(**retry_kwargs)
         succeeded = True
         return result
     finally:
+        # P3-A: what this invocation really sent, for the anchor check.
+        for path in capabilities:
+            state.edit_capability_sent[path] = tuple(request_fit.fitted)
         state.drain_budget_expansions(getattr(ctx.developer, "llm", None))
         duration = time.monotonic() - started
         # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
@@ -3691,7 +3934,7 @@ def _raise_unsafe_process_boundary_test_candidate(
         },
         attempt=state.attempt_number,
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -3758,6 +4001,92 @@ def find_ungrounded_java_child_process_tests(
     return findings
 
 
+def _changed_test_sources(state: GenerationState, ctx: "AttemptContext") -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """FS-1A: every runnable test source the candidate changed, as
+    (baseline text or None for a new file, candidate text or None when not
+    strict UTF-8 - which the decision treats as indeterminate)."""
+    def read(path: str) -> Tuple[bool, Optional[str]]:
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except FileNotFoundError:
+            return False, None
+        try:
+            return True, data.decode("utf-8")
+        except UnicodeDecodeError:
+            return True, None
+
+    changed: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    for path in find_runnable_test_files(state.all_files_written):
+        exists, candidate = read(os.path.join(ctx.worktree_path, path))
+        if not exists:
+            continue
+        _, baseline = read(os.path.join(ctx.workspace_path, path))
+        if candidate is None or candidate != baseline:
+            changed[path] = (baseline, candidate)
+    return changed
+
+
+def _raise_unexecuted_test_delta(
+    state: GenerationState, ctx: "AttemptContext", validator: Any,
+    accepted_result: Optional[Dict[str, Any]], selected_test: Optional[str],
+) -> None:
+    """FS-1A test-execution integrity for a subtask explicitly responsible
+    for tests (kriya/workflow/test_delta.py): its changed test sources must
+    have produced test identities that executed and passed in the accepted
+    gate invocation's own structured report. When that invocation did not
+    run every changed test source (a single targeted file) or carries no
+    structured report (a self-corrected result), one covering run supplies
+    the evidence. TEST_NOT_EXECUTED / TEST_NOT_PASSED is a repairable
+    test-acceptance failure naming the identities; INDETERMINATE evidence is
+    a typed stop, never a pass."""
+    changed = _changed_test_sources(state, ctx)
+    if not changed:
+        return
+    covered = selected_test is None or set(changed) == {selected_test}
+    result = accepted_result
+    if not covered or test_execution.report_from_result(result) is None:
+        result = (validator.run_tests(target_test=sorted(changed)) if validator.stack == "python"
+                  else validator.run_tests())
+        if not result.get("success"):
+            failure = _build_test_quality_gate_failure(
+                "test", f"TEST FAILURE:\n{result.get('output', '')}",
+                result.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+            )
+            state.record_gate_outcome(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+    report = test_execution.report_from_result(result)
+    verdict = judge_test_delta(changed, report)
+    state.record_gate_outcome({
+        "attempt": state.attempt_number, "type": "test_delta", "success": verdict.satisfied,
+        "reason_code": verdict.reason_code, "test_delta": verdict.to_dict(),
+        "test_execution": report.summary() if report is not None else None,
+    })
+    if verdict.satisfied:
+        return
+    if verdict.reason_code == TEST_EXECUTION_EVIDENCE_INDETERMINATE:
+        failure = Failure(
+            type="verification_infrastructure_failure",
+            message=f"{TEST_EXECUTION_EVIDENCE_INDETERMINATE}: {verdict.detail}",
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    else:
+        failure = Failure(
+            type="test_acceptance",
+            message=(
+                f"TEST ACCEPTANCE FAILURE ({verdict.reason_code}): the goal requires tests, and the "
+                f"changed test code must run as tests and pass. {verdict.detail}. A test the runner "
+                "does not execute (for example a method without its test annotation, or a function "
+                "the runner does not collect) verifies nothing."
+            ),
+            raw_output=verdict.detail, likely_files=sorted(changed), attempt=state.attempt_number,
+            diagnostics={"reason_code": verdict.reason_code, "test_delta": verdict.to_dict()},
+        )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _raise_ungrounded_child_process_test_candidate(
     state: GenerationState, ctx: "AttemptContext", test_files: List[str],
 ) -> None:
@@ -3794,7 +4123,7 @@ def _raise_ungrounded_child_process_test_candidate(
             "grounded_classpath": exemplar["classes_dir"],
         },
     )
-    state.gate_outcomes.append(failure.to_gate_outcome())
+    state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
 
 
@@ -3866,7 +4195,7 @@ def _prepare_finite_command_runtime_artifacts(
                 worktree_path=ctx.worktree_path, known_files=known_files,
                 attempt=state.attempt_number, extra_likely_files=["pom.xml"],
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # PREPARATION_FAILED - distinguish "the build command actually ran
@@ -3885,7 +4214,7 @@ def _prepare_finite_command_runtime_artifacts(
                 worktree_path=ctx.worktree_path, known_files=known_files,
                 attempt=state.attempt_number, extra_likely_files=["pom.xml"],
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         message = (
@@ -3896,7 +4225,7 @@ def _prepare_finite_command_runtime_artifacts(
             type="verification_infrastructure_failure", message=message,
             raw_output=outcome.stderr or outcome.reasoning, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
 
@@ -3942,7 +4271,7 @@ def _raise_runtime_verification_infrastructure_failure(
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
-    state.gate_outcomes.append(outcome)
+    state.record_gate_outcome(outcome)
     raise QualityGateFailure(failure)
 
 
@@ -3970,7 +4299,7 @@ def _raise_candidate_runtime_entrypoint_failure(
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
-    state.gate_outcomes.append(outcome)
+    state.record_gate_outcome(outcome)
     raise QualityGateFailure(failure)
 
 
@@ -4611,8 +4940,13 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     execution path) rather than patching the symptom (evidence-matching
     logic) directly."""
     from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.retry_strategy import verification_inputs_digest
 
     state.attempt_number += 1
+    attempt_evidence_scope.attempt_opened({"mode": "verification_only", "operation": None})
+    # LR-R1-P4: what this verification verifies, for the retry admission.
+    state.verification_only_inputs = verification_inputs_digest(state, ctx)
+    state.verification_only_inputs_attempt = state.attempt_number
     state.candidate_gates_succeeded = False
     validator = PolymorphicValidator(
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
@@ -4621,7 +4955,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     )
     # PRD-031: the declared verifiers are sequenced by VerificationCoordinator.
     await VerificationCoordinator(
-        validator, record_gate_outcome=lambda outcome: state.gate_outcomes.append(outcome),
+        validator, record_gate_outcome=lambda outcome: state.record_gate_outcome(outcome),
         run_runtime_verification=lambda: _execute_runtime_verification_directly(state, ctx, validator),
     ).verify(VerificationRequest(
         required_verification=ctx.required_verification,
@@ -4957,7 +5291,7 @@ async def _execute_managed_service_verification(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     logger.info(
@@ -5048,7 +5382,7 @@ async def _execute_managed_service_verification(
                     outcome_dict.update({
                         "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
                     })
-                    state.gate_outcomes.append(outcome_dict)
+                    state.record_gate_outcome(outcome_dict)
                     raise QualityGateFailure(failure)
                 # Neither an environment gap nor a missing-module shape -
                 # classify_environment_failure found nothing conclusive
@@ -5077,7 +5411,7 @@ async def _execute_managed_service_verification(
         outcome_dict.update({
             "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
         })
-        state.gate_outcomes.append(outcome_dict)
+        state.record_gate_outcome(outcome_dict)
         raise QualityGateFailure(failure)
 
     if result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED:
@@ -5093,14 +5427,14 @@ async def _execute_managed_service_verification(
             "graded_by": "managed_service_probe", "commands": [spec.service_command],
             "managed_service_outcome": result.outcome.value,
         })
-        state.gate_outcomes.append(failure_outcome)
+        state.record_gate_outcome(failure_outcome)
         raise QualityGateFailure(failure)
 
     # PROBE_PASSED - successful runtime evidence, deterministic (the probe's
     # own status/body match IS the verdict, no LLM grade() call needed -
     # same "process exit is already the authoritative verdict" precedent
     # deterministic_sequence_kind's test/compile commands already use.
-    state.gate_outcomes.append({
+    state.record_gate_outcome({
         "attempt": state.attempt_number, "type": "run_verification", "success": True,
         "output": output + f"\n\n[Managed service probe]: {result.reasoning}",
         "graded_by": "managed_service_probe", "commands": [spec.service_command],
@@ -5158,7 +5492,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if ctx.runtime_verification_required and state.run_verification_declined:
         message = (
@@ -5169,7 +5503,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if not autonomy_cfg_rv.run_verification_enabled or state.run_verification_declined:
         return
@@ -5220,7 +5554,7 @@ async def _execute_runtime_verification_directly(
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
             raw_judgment, ctx.goal
@@ -5236,7 +5570,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if _runtime_verification_is_advisory_only(ctx, judgment):
         logger.info(
@@ -5255,7 +5589,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     if execution_mode == "managed_service":
         await _execute_managed_service_verification(state, ctx, judgment, known_files, validator)
@@ -5269,7 +5603,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     if judgment.get("run_commands"):
@@ -5410,7 +5744,7 @@ async def _execute_runtime_verification_directly(
             type="verification_infrastructure_failure", message=message,
             raw_output=message, attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
     # FILE-INTEGRITY-CONTRACT-001: pom corrections are candidate mutations,
     # applied before the first gate of this attempt, never between gates.
@@ -5547,10 +5881,10 @@ async def _execute_runtime_verification_directly(
             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
             **runtime_evidence_outcome_fields(grade),
         })
-        state.gate_outcomes.append(failure_outcome)
+        state.record_gate_outcome(failure_outcome)
         raise QualityGateFailure(failure)
 
-    state.gate_outcomes.append({
+    state.record_gate_outcome({
         "attempt": state.attempt_number, "type": gate_type, "success": True,
         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
         "graded_by": verification_authority, "commands": resolved_run_commands,
@@ -6245,16 +6579,52 @@ def _verified_no_change_proposal(
     return paths
 
 
+def _attempt_evidence_boundary(func):
+    """LR-R1-M1: run one attempt inside its attempt-evidence scope
+    (observational). The attempt's number is read from
+    ``state.attempt_number`` at each record - it is incremented first thing
+    inside the attempt, never predicted here."""
+    @functools.wraps(func)
+    async def wrapper(state: GenerationState, ctx: AttemptContext) -> None:
+        with attempt_evidence_scope.attempt_scope(lambda: state.attempt_number) as closing:
+            try:
+                await func(state, ctx)
+                # run_attempt returned: generation and the candidate gates
+                # completed. Whether the attempt as a whole succeeded is the
+                # retry loop's attempt.concluded (later checks run there).
+                closing.update(outcome="RETURNED", candidate_gates_passed=state.candidate_gates_succeeded)
+            finally:
+                _record_obligations_snapshot(ctx)
+    return wrapper
+
+
+def _record_obligations_snapshot(ctx: AttemptContext) -> None:
+    """LR-R1-M1 ``obligations.snapshot`` at attempt close: the ledger's
+    revision and digest and the unresolved terminal obligations by kind."""
+    ledger = getattr(ctx, "obligation_ledger", None)
+    if ledger is None or attempt_evidence_scope.capture_mode() is None:
+        return
+    try:
+        revision, digest = ledger.fingerprint()
+        unresolved: Dict[str, List[str]] = {}
+        for record in ledger.unresolved_terminal_obligations():
+            unresolved.setdefault(getattr(record.kind, "value", str(record.kind)), []).append(record.id)
+        payload = {"ledger_revision": revision, "ledger_digest": digest,
+                   "unresolved_terminal": {kind: sorted(ids) for kind, ids in sorted(unresolved.items())}}
+    except Exception as error:  # observational: never alters the attempt
+        logger.warning("Attempt evidence: obligations.snapshot not built (%s)", error)
+        return
+    attempt_evidence_scope.emit("obligations.snapshot", payload)
+
+
+@_attempt_evidence_boundary
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """Runs one Developer + Quality Gates attempt. Mutates state in place
     (files_written, gate_outcomes, model_hops, run_verification_*, etc.).
     Raises QualityGateFailure or IncompleteGenerationError on any gate
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
-    if ctx.write_scope_mode == WriteScopeMode.DENY_ALL and (
-        _directly_executable_verifiers(ctx.required_verification)
-        or _directly_executable_runtime_verifiers(ctx.required_verification)
-    ):
+    if is_verification_only_unit(ctx.write_scope_mode, ctx.required_verification):
         # Verification-only subtask with at least one directly-executable
         # verifier (compile/test, or - PRV-06, 2026-08-28 - an explicit
         # application_runtime check) - take the whole rest of this function
@@ -6293,7 +6663,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # not fire a second time here with a since-incremented attempt_number.
     retry_decision = decide_attempt_mode(
         state, max_retries=ctx.max_retries, targeted_max_retries=ctx.targeted_max_retries,
-        has_fallback_model=bool(ctx.chain),
+        has_fallback_model=_fallback_routing(state, ctx).available,
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.
@@ -6330,6 +6700,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         operation=attempt_operation.value,
         details={"mode": state.last_attempt_mode},
     ))
+    attempt_evidence_scope.attempt_opened({
+        "mode": state.last_attempt_mode, "operation": attempt_operation.value,
+        "attempts_by_mode_before": dict(state.attempts_by_mode),
+        "reserved_fallback": bool(retry_decision.reserved_fallback),
+    })
     state.attempts_by_mode[state.last_attempt_mode] = state.attempts_by_mode.get(state.last_attempt_mode, 0) + 1
     if retry_decision.reserved_fallback:
         # STATE-RESERVED-FALLBACK-001: only the fallback's own allowance in
@@ -6388,7 +6763,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             for fp, content in (ctx.resume_state.get("final_files") or {}).items()
         ]
         if skipping_candidate_gates:
-            state.gate_outcomes = list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes)
+            state.restore_gate_outcomes(list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes),
+                                        source="resume_checkpoint")
         state.model_hops = list(ctx.resume_state.get("model_hops") or state.model_hops)
         model_override = None
         base_url_override = None
@@ -6628,7 +7004,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
         state.budgets.fallback_targeted_requested = False
-        fallback = _select_developer_fallback(state, ctx, 1)
+        fallback = _select_developer_fallback(state, ctx, 1, targets=state.last_implicated_files or ())
         state.budgets.fallback_attempts_used += 1
         reference_window = allocation_window(ctx.kernel.config, fallback)
         learned_reference = developer_reference(
@@ -6818,7 +7194,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         extra_body_override = None
 
         active_prompt_window = allocation_window(ctx.kernel.config)
-        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count)
+        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count,
+                                              targets=ctx.architect_files, allow_primary=True)
         if fallback is not None:
             state.budgets.fallback_attempts_used += 1
             model_override = fallback.model
@@ -7312,7 +7689,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 },
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # CORR-018-P1 (A3-bound slice, 2026-09-09): a SEPARATE, deterministic
@@ -7366,7 +7743,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 },
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # UNREQUESTED_ARCHITECTURAL_SURFACE: verification strategy must not be
@@ -7427,7 +7804,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE"},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     # Enforce the selected response contract before attribution heuristics or
@@ -7469,7 +7846,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 ),
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         # VAL-001 G1 D1-A (2026-09-18): independent of `mandatory_patch`
         # above (which only ever reflects the REQUESTED operation - see
@@ -7532,7 +7909,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 attempt=state.attempt_number,
             )
             _record_edit_protocol_failure(state, filepath, failure.type)
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if actual_operation in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
             state.edit_failure_capability.pop(filepath, None)  # an authorized whole-file edit was accepted
@@ -7630,7 +8007,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files, state.redirected_test_obligations, state.all_files_written, state.attempt_number,
     )
     if _unpreserved_obligation is not None:
-        state.gate_outcomes.append(_unpreserved_obligation.to_gate_outcome())
+        state.record_gate_outcome(_unpreserved_obligation.to_gate_outcome())
         raise QualityGateFailure(_unpreserved_obligation)
 
     # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
@@ -7699,7 +8076,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
             attempt=state.attempt_number,
         )
-        state.gate_outcomes.append(failure.to_gate_outcome())
+        state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
 
     # Read original file contents before overwriting (crucial for fallback mode diffs)
@@ -7878,7 +8255,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         attempted_edits=edits,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure) from anchor_ex
 
                 state.budgets.anchor_failure_counts[filepath] = (
@@ -7898,7 +8275,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     diagnostics=({"reason_code": anchor_reason} if anchor_reason.isupper() else {}),
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
 
             state.budgets.anchor_failure_counts[filepath] = 0
@@ -7940,7 +8317,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Layer 1 pre-flight check (see find_edits_ignoring_reported_line's
@@ -8017,7 +8394,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     attempted_edits=edits,
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Layer 2 pre-flight check (see find_edits_ignoring_own_diagnosis's own
@@ -8056,7 +8433,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         attempted_edits=edits,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
             else:
                 # This file's edit looked consistent with its own analysis -
@@ -8064,7 +8441,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            _reject_explanatory_prose(state, filepath, new_content)
+            _reject_explanatory_prose(state, filepath, new_content, orig_text)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=new_content,
@@ -8104,7 +8481,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     likely_files=[filepath], diagnostics={"reason_code": integrity_ex.reason_code},
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from integrity_ex
 
             structural_problem = find_structural_corruption(filepath, content)
@@ -8118,7 +8495,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     failed_content={filepath: content},
                     attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
             # Cross-file duplicate-type pre-flight check - only for a
@@ -8164,7 +8541,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         failed_content=conflict_content,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 for name in candidate_type_names:
                     paths = workspace_type_index.setdefault(name, [])
@@ -8201,12 +8578,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             failed_content={filepath: prior_content},
                             attempt=state.attempt_number,
                         )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        state.record_gate_outcome(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            _reject_explanatory_prose(state, filepath, content)
+            # A new file's prior content is empty: all of it is the candidate's.
+            _reject_explanatory_prose(state, filepath, content, prior_content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=content,
@@ -8352,7 +8730,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if redirected:
             failure = Failure(
@@ -8371,7 +8749,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
             state.api_contract_recovery.owner_contract_restored()
@@ -8420,7 +8798,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 failed_content={filepath: failed_pom_content},
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     if not skipping_candidate_gates:
@@ -8527,7 +8905,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 known_files=static_check_known_files,
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # Quality Gates: Polymorphic compile & test checks inside sandbox
@@ -8662,7 +9040,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Self-correction micro-loop resolved the compile failure in "
                     f"{self_correction_result.turns_used} turn(s)."
                 )
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "compile",
                     "success": True,
@@ -8794,10 +9172,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "transcript": self_correction_result.transcript,
                         "final_compile_output": self_correction_result.final_compile_output,
                     }
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
         else:
-            state.gate_outcomes.append({
+            state.record_gate_outcome({
                 "attempt": state.attempt_number,
                 "type": "compile",
                 "success": True,
@@ -8814,6 +9192,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         }
 
         accepted_test_output: Optional[str] = None
+        accepted_test_result: Optional[Dict[str, Any]] = None
         runnable_test_files = find_runnable_test_files(state.all_files_written)
         _raise_unsafe_process_boundary_test_candidate(
             state, ctx, runnable_test_files,
@@ -8836,7 +9215,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Quality Gates: Targeted test selection collected zero tests for "
                     f"{target_test}; retrying the full suite before attributing a code failure."
                 )
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test_selection",
                     "success": False,
@@ -8858,10 +9237,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "test_selection_fallback", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
@@ -8870,6 +9249,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
 
             if target_test and not test_res["success"]:
                 if ctx.kernel.config.autonomy.self_correction_loop_enabled:
@@ -8904,7 +9284,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         ))
                 if test_repair_result and test_repair_result.resolved:
                     _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                    state.gate_outcomes.append({
+                    state.record_gate_outcome({
                         "attempt": state.attempt_number,
                         "type": "targeted_test",
                         "success": True,
@@ -8931,11 +9311,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "targeted_test", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
             if target_test and not (test_repair_result and test_repair_result.resolved):
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "targeted_test",
                     "success": True,
@@ -8944,6 +9324,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 })
             if target_test:
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
         else:
             # The repository's own suite also runs when the plan declares a
             # test verification for this stage: an edit of existing source
@@ -8964,10 +9345,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "full_suite", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
-                state.gate_outcomes.append({
+                state.record_gate_outcome({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
@@ -8975,6 +9356,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
+                accepted_test_result = test_res
 
         # PRV-11 (2026-08-30): obligation/ownership-aware, not a blind scan
         # over ctx.goal - see subtask_owns_test_obligation's own docstring
@@ -8998,7 +9380,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 likely_files=sorted(state.all_files_written),
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
         # The same acceptance rule applies whether extract_target_test() chose
@@ -9022,8 +9404,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 ],
                 attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+
+        if accepted_test_output is not None and this_subtask_owns_tests:
+            _raise_unexecuted_test_delta(state, ctx, validator, accepted_test_result, target_test)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
         # exist only proves the code is valid - it says nothing about whether it does
@@ -9040,7 +9425,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if ctx.runtime_verification_required and state.run_verification_declined:
             message = (
@@ -9051,7 +9436,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
             current_judgment_basis = _run_verification_basis_hash(ctx, state)
@@ -9108,7 +9493,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         raw_output=message,
                         attempt=state.attempt_number,
                     )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    state.record_gate_outcome(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # Independent brutal review finding #2 (2026-08-15): don't trust
                 # command_source="goal_explicit" as self-reported - verify it's
@@ -9156,7 +9541,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
             if execution_mode_error:
@@ -9165,7 +9550,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             if judgment.get("should_run") and execution_mode == "managed_service":
                 await _execute_managed_service_verification(
@@ -9187,7 +9572,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     type="verification_infrastructure_failure", message=message,
                     raw_output=message, attempt=state.attempt_number,
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
+                state.record_gate_outcome(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
             # Deterministic Java entrypoint resolution - applied fresh every
             # attempt (never cached alongside judge()'s own should_run/
@@ -9348,7 +9733,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             type="verification_infrastructure_failure", message=rv_message,
                             raw_output=rv_message, attempt=state.attempt_number,
                         )
-                        state.gate_outcomes.append(rv_failure.to_gate_outcome())
+                        state.record_gate_outcome(rv_failure.to_gate_outcome())
                         raise QualityGateFailure(rv_failure)
                     command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
                     logger.info(
@@ -9750,7 +10135,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
                             **runtime_evidence_outcome_fields(grade),
                         })
-                        state.gate_outcomes.append(failure_outcome)
+                        state.record_gate_outcome(failure_outcome)
                         raise QualityGateFailure(failure)
                     run_verification_outcome = {
                         "attempt": state.attempt_number,
@@ -9784,7 +10169,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         run_verification_outcome["self_corrected"] = True
                         run_verification_outcome["self_correction_turns"] = self_correction_result.turns_used
                         run_verification_outcome["self_correction_transcript"] = self_correction_result.transcript
-                    state.gate_outcomes.append(run_verification_outcome)
+                    state.record_gate_outcome(run_verification_outcome)
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the
                     # skill-verification gap check is looking for - mark every
@@ -9896,7 +10281,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "reason_codes": migration_gap["reason_codes"],
                 "pending_reason_codes": migration_gap.get("pending_reason_codes", []),
             }
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
     # Quality Gates: Goal Spec Compliance. Compiling, passing tests, and (when
@@ -10026,17 +10411,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 }
             else:
-                message = (
-                    "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
-                    "internally contradictory verdict (compliant=false naming no concrete "
-                    f"missing requirement) twice in a row: {spec_result['reasoning']}"
-                )
-                failure = Failure(
-                    type="spec_compliance_indeterminate", message=message, raw_output=message,
-                    attempt=state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+                # GR-R1B: LLM output can authorize nothing, in either
+                # direction. A model verdict contradictory twice in a row is
+                # still only the model's word: advisory diagnostic evidence,
+                # never an attempt failure, a retry or a fallback. Stronger
+                # evidence acts on its own (every deterministic gate above,
+                # and the terminal requirement gate, which leaves anything
+                # without trusted closure UNVERIFIED and blocked).
+                spec_result = {
+                    "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                    "missing_requirements": [], "likely_files": [],
+                    "status": SPEC_MODEL_INDETERMINATE, "reason_code": SPEC_COMPLIANCE_MODEL_ADVISORY,
+                }
         if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
             message = (
                 "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "
@@ -10046,7 +10432,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 type="verification_infrastructure_failure", message=message,
                 raw_output=message, attempt=state.attempt_number,
             )
-            state.gate_outcomes.append(failure.to_gate_outcome())
+            state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
         if not spec_result["compliant"] and settled_goal_spec is not None:
             # Correctness Continuity Part A (PRV-06, 2026-08-29): the SAME
@@ -10133,60 +10519,44 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
         if ctx.requirement_set is not None:
             _close_requirements_by_migration_gate(state, ctx, goal_spec_evidence_fingerprint)
+        model_missing_requirements: List[str] = []
         if not spec_result["compliant"] and kept_requirements:
-            missing_desc = "; ".join(kept_requirements)
-            message = (
-                "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
-                f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
+            # GR-R1B: the verifier reports concrete requirements missing from
+            # a candidate every deterministic gate passed. That is the model's
+            # word alone: recorded as advisory diagnostic evidence (the
+            # requirement verdicts above keep it as MODEL_CLAIMED provenance),
+            # never an attempt failure, a retry or a fallback. The terminal
+            # requirement gate decides from trusted evidence.
+            model_missing_requirements = list(kept_requirements)
+            spec_result = {**spec_result, "status": SPEC_MODEL_REPORTED_MISSING,
+                           "reason_code": SPEC_COMPLIANCE_MODEL_ADVISORY}
+        model_advisory = spec_result.get("status") in (SPEC_MODEL_REPORTED_MISSING, SPEC_MODEL_INDETERMINATE)
+        if model_advisory:
+            logger.warning(
+                "Quality Gates: Goal spec compliance - the model reported %s; advisory only (GR-R1B: a model "
+                "verdict fails no attempt and spends no retry): %s",
+                "; ".join(model_missing_requirements) or "an indeterminate verdict", spec_result.get("reasoning"),
             )
-            # Full synchronous tree-walk + per-file read, re-run on every
-            # failed spec-compliance retry; offload so it doesn't block the
-            # event loop inside this async attempt.
-            grounded_architectural_owners = await asyncio.to_thread(
-                discover_response_construction_owners,
-                ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
-            )
-            failure = _build_quality_gate_failure(
-                "goal_spec_compliance", message, message,
-                ctx.worktree_path, state.all_files_written, state.attempt_number,
-                extra_likely_files=list(dict.fromkeys(
-                    (spec_result.get("likely_files") or [])
-                    + grounded_architectural_owners
-                )),
-            )
-            failure.diagnostics = {
-                **(failure.diagnostics or {}),
-                **({"grounded_architectural_owners": grounded_architectural_owners}
-                   if grounded_architectural_owners else {}),
-                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
-                    "arbitrated_contradictions": arbitrated_contradictions}
-                   if arbitrated_contradictions else {}),
-                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
-                    "planner_only_requirements": planner_only_requirements}
-                   if planner_only_requirements else {}),
-            }
-            if goal_spec_obligation_id and ctx.obligation_ledger is not None:
-                # Correctness Continuity Part A6: this IS new/changed evidence
-                # (settled_goal_spec was None, or content genuinely differed) -
-                # a real violation is always free to (re)invalidate.
-                ctx.obligation_ledger.record(ObligationRecord(
-                    id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
-                    status=ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT,
-                    description="goal_spec_compliance verdict for this subtask's checked files",
-                    source="attempt.run_attempt", revision=state.attempt_number,
-                    evidence={"fingerprint": goal_spec_evidence_fingerprint,
-                              "missing_requirements": kept_requirements},
-                    owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
-                ))
-            state.gate_outcomes.append(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
+            state.record_event(RunEvent(
+                kind="spec_compliance.model_advisory", attempt=state.attempt_number,
+                source="attempt.goal_spec_compliance", authority=EventAuthority.ADVISORY,
+                message="The verifier's verdict on this candidate is advisory diagnostic evidence only.",
+                details={"status": spec_result["status"], "authority": "advisory_only",
+                         "missing_requirements": model_missing_requirements,
+                         "reasoning": spec_result.get("reasoning", ""),
+                         "evidence_fingerprint": goal_spec_evidence_fingerprint},
+            ))
         if goal_spec_obligation_id and ctx.obligation_ledger is not None:
             ctx.obligation_ledger.record(ObligationRecord(
                 id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
-                status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+                # A model verdict never settles this either way (GR-R1B).
+                status=ObligationStatus.INDETERMINATE if model_advisory else ObligationStatus.SATISFIED,
+                authority=ObligationAuthority.JUDGMENT,
                 description="goal_spec_compliance verdict for this subtask's checked files",
                 source="attempt.run_attempt", revision=state.attempt_number,
-                evidence={"fingerprint": goal_spec_evidence_fingerprint},
+                evidence={"fingerprint": goal_spec_evidence_fingerprint,
+                          **({"model_missing_requirements": model_missing_requirements}
+                             if model_missing_requirements else {})},
                 owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
             ))
         # Verifier-availability honesty (2026-09-20): `success: True` here
@@ -10207,7 +10577,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # SUPPRESSED are the only values; a real compliant verdict carries
         # no `status` key at all (unchanged from before this fix).
         _spec_status = spec_result.get("status")
-        state.gate_outcomes.append({
+        state.record_gate_outcome({
             "attempt": state.attempt_number,
             "type": "goal_spec_compliance",
             "success": True,
@@ -10220,12 +10590,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "planner_only_requirements": planner_only_requirements}
                if planner_only_requirements else {}),
             **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
+            **({"model_missing_requirements": model_missing_requirements} if model_missing_requirements else {}),
         })
         if _spec_status == "unknown":
             logger.info(
                 "Quality Gates: Goal spec compliance UNAVAILABLE (the check itself could "
                 f"not run - advisory only, not evaluated as verification evidence): {spec_result['reasoning']}"
             )
+        elif model_advisory:
+            pass  # logged above, with the advisory event
         elif _spec_status == "indeterminate_suppressed":
             logger.info(
                 "Quality Gates: Goal spec compliance SUPPRESSED (contradictory verdict "

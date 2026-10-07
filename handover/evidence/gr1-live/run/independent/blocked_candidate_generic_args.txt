@@ -1,0 +1,118 @@
+FFF..F                                                                   [100%]
+=================================== FAILURES ===================================
+___________________ test_member_call_with_one_type_argument ____________________
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4011/test_member_call_with_one_type0')
+
+    def test_member_call_with_one_type_argument(tmp_path):
+        refs = _refs(tmp_path, {
+            "T.cs": _TYPES,
+            "P.cs": "public class Probe { public void A(Registry r) => r.Do<IThing>(); }\n",
+        })
+>       assert (".A()", "IThing") in refs, (
+            "member call `recv.Do<T>()` must emit a generic_arg reference to T"
+        )
+E       AssertionError: member call `recv.Do<T>()` must emit a generic_arg reference to T
+E       assert ('.A()', 'IThing') in set()
+
+tests/test_csharp_call_site_generic_args.py:86: AssertionError
+----------------------------- Captured stderr call -----------------------------
+  warning: skipped P.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+________________ test_member_call_with_multiple_type_arguments _________________
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4011/test_member_call_with_multiple0')
+
+    def test_member_call_with_multiple_type_arguments(tmp_path):
+        """The Microsoft.Extensions.DependencyInjection shape that the issue calls out."""
+        refs = _refs(tmp_path, {
+            "T.cs": _TYPES,
+            "P.cs": (
+                "public interface IServiceCollection { }\n"
+                "public static class Ext\n"
+                "{\n"
+                "    public static void AddScoped<TService, TImpl>(this IServiceCollection s) { }\n"
+                "}\n"
+                "public class Probe\n"
+                "{\n"
+                "    public void A(IServiceCollection s) => s.AddScoped<IService, IImpl>();\n"
+                "}\n"
+            ),
+        })
+>       assert (".A()", "IService") in refs, (
+            "two-arg call must emit a generic_arg reference to the first type argument"
+        )
+E       AssertionError: two-arg call must emit a generic_arg reference to the first type argument
+E       assert ('.A()', 'IService') in set()
+
+tests/test_csharp_call_site_generic_args.py:107: AssertionError
+----------------------------- Captured stderr call -----------------------------
+  warning: skipped P.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+____________________ test_nested_type_argument_in_call_site ____________________
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4011/test_nested_type_argument_in_c0')
+
+    def test_nested_type_argument_in_call_site(tmp_path):
+        refs = _refs(tmp_path, {
+            "T.cs": _TYPES,
+            "P.cs": "public class Probe { public void A(Registry r) => r.Do<Box<IThing>>(); }\n",
+        })
+>       assert (".A()", "IThing") in refs, (
+            "innermost generic argument in a call site must produce a generic_arg reference"
+        )
+E       AssertionError: innermost generic argument in a call site must produce a generic_arg reference
+E       assert ('.A()', 'IThing') in set()
+
+tests/test_csharp_call_site_generic_args.py:120: AssertionError
+----------------------------- Captured stderr call -----------------------------
+  warning: skipped P.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+______________ test_call_site_generic_args_appear_in_issue_repro _______________
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-4011/test_call_site_generic_args_ap0')
+
+    def test_call_site_generic_args_appear_in_issue_repro(tmp_path):
+        """End-to-end: the exact two-file repro from #2911 produces all six edges."""
+        refs = _refs(tmp_path, {
+            "Types.cs": (
+                "public interface IAlpha { }\n"
+                "public interface IBeta { }\n"
+                "public interface IGamma { }\n"
+                "public interface IDelta { }\n"
+                "public interface IEpsilon { }\n"
+                "public interface IZeta { }\n"
+                "public class Box<T> { }\n"
+                "public class Registry { public void Do<T>() { } }\n"
+                "public interface IServiceCollection { }\n"
+                "public static class Ext\n"
+                "{\n"
+                "    public static void AddScoped<TService, TImpl>(this IServiceCollection s) { }\n"
+                "}\n"
+            ),
+            "Probe.cs": (
+                "public class Probe\n"
+                "{\n"
+                "    private Box<IAlpha> _field = null!;\n"
+                "    public Box<IBeta> Prop { get; set; } = null!;\n"
+                "    public Box<IGamma> Ret() => null!;\n"
+                "    public void Param(Box<IDelta> p) { }\n"
+                "    public void Call(Registry r) => r.Do<IEpsilon>();\n"
+                "    public void Di(IServiceCollection s) => s.AddScoped<IZeta, Box<IZeta>>();\n"
+                "}\n"
+            ),
+        })
+        # Call-site positions (5 and 6) -- the field position is covered by the
+        # parallel PR #2913, so we focus on what THIS fix is responsible for.
+>       assert (".Call()", "IEpsilon") in refs, (
+            "r.Do<IEpsilon>() must link IEpsilon from the Call method"
+        )
+E       AssertionError: r.Do<IEpsilon>() must link IEpsilon from the Call method
+E       assert ('.Call()', 'IEpsilon') in {('.AddScoped()', 'IServiceCollection')}
+
+tests/test_csharp_call_site_generic_args.py:185: AssertionError
+----------------------------- Captured stderr call -----------------------------
+  warning: skipped Probe.cs (AttributeError: 'NoneType' object has no attribute 'start_byte')
+=========================== short test summary info ============================
+FAILED tests/test_csharp_call_site_generic_args.py::test_member_call_with_one_type_argument
+FAILED tests/test_csharp_call_site_generic_args.py::test_member_call_with_multiple_type_arguments
+FAILED tests/test_csharp_call_site_generic_args.py::test_nested_type_argument_in_call_site
+FAILED tests/test_csharp_call_site_generic_args.py::test_call_site_generic_args_appear_in_issue_repro
+4 failed, 2 passed in 0.33s

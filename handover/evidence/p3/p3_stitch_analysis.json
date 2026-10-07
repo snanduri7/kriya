@@ -1,0 +1,328 @@
+[
+ {
+  "run": "R1-T2 moreit",
+  "unit": "s2",
+  "attempt": 2,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 2600,
+    "file_to": 2602,
+    "lines": 3
+   },
+   {
+    "block_from": 4,
+    "file_from": 2602,
+    "file_to": 2605,
+    "lines": 4
+   },
+   {
+    "block_from": 8,
+    "file_from": 2,
+    "file_to": 2,
+    "lines": 1
+   },
+   {
+    "block_from": 10,
+    "file_from": 2606,
+    "file_to": 2606,
+    "lines": 1
+   },
+   {
+    "block_from": 11,
+    "file_from": 2608,
+    "file_to": 2610,
+    "lines": 3
+   },
+   {
+    "block_from": 14,
+    "file_from": 2,
+    "file_to": 2,
+    "lines": 1
+   },
+   {
+    "block_from": 16,
+    "file_from": 2607,
+    "file_to": 2607,
+    "lines": 1
+   }
+  ],
+  "gaps_skipped_lines": [
+   -1,
+   -2604,
+   2603,
+   1,
+   -2609,
+   2604
+  ],
+  "unmatched_lines": [
+   "self.assertEqual(list(mi.groupby_transform([1, 2, 3, 4, 5], key)), expected)",
+   "# Test with duplicates",
+   "# Test empty iterable"
+  ],
+  "verdict": "altered"
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s1",
+  "attempt": 1,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 92,
+    "file_to": 96,
+    "lines": 5
+   },
+   {
+    "block_from": 7,
+    "file_from": 8,
+    "file_to": 8,
+    "lines": 1
+   },
+   {
+    "block_from": 10,
+    "file_from": 129,
+    "file_to": 132,
+    "lines": 4
+   }
+  ],
+  "gaps_skipped_lines": [
+   -89,
+   120
+  ],
+  "unmatched_lines": [
+   "* Returns {@code true} if the character is an ASCII alphabetic character",
+   "* (lowercase).",
+   "* @param ch the character to check",
+   "* @return {@code true} if the character is an ASCII lowercase letter"
+  ],
+  "verdict": "altered"
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 2,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 129,
+    "file_to": 145,
+    "lines": 17
+   },
+   {
+    "block_from": 17,
+    "file_from": 51,
+    "file_to": 58,
+    "lines": 8
+   }
+  ],
+  "gaps_skipped_lines": [
+   -95
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 6,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 134,
+    "file_to": 150,
+    "lines": 17
+   },
+   {
+    "block_from": 17,
+    "file_from": 48,
+    "file_to": 48,
+    "lines": 1
+   }
+  ],
+  "gaps_skipped_lines": [
+   -103
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ },
+ {
+  "run": "R1-T3 lang-ascii",
+  "unit": "s2",
+  "attempt": 7,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 152,
+    "file_to": 168,
+    "lines": 17
+   },
+   {
+    "block_from": 17,
+    "file_from": 48,
+    "file_to": 48,
+    "lines": 1
+   }
+  ],
+  "gaps_skipped_lines": [
+   -121
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s1",
+  "attempt": 1,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 2072,
+    "file_to": 2083,
+    "lines": 12
+   },
+   {
+    "block_from": 12,
+    "file_from": 2311,
+    "file_to": 2312,
+    "lines": 2
+   }
+  ],
+  "gaps_skipped_lines": [
+   227
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ },
+ {
+  "run": "R2-T1 inflect",
+  "unit": "s1",
+  "attempt": 2,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 2457,
+    "file_to": 2460,
+    "lines": 4
+   },
+   {
+    "block_from": 4,
+    "file_from": 2500,
+    "file_to": 2500,
+    "lines": 1
+   },
+   {
+    "block_from": 5,
+    "file_from": 84,
+    "file_to": 85,
+    "lines": 2
+   },
+   {
+    "block_from": 7,
+    "file_from": 2477,
+    "file_to": 2479,
+    "lines": 3
+   },
+   {
+    "block_from": 10,
+    "file_from": 2500,
+    "file_to": 2500,
+    "lines": 1
+   }
+  ],
+  "gaps_skipped_lines": [
+   39,
+   -2417,
+   2391,
+   20
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 1,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 100,
+    "file_to": 103,
+    "lines": 4
+   },
+   {
+    "block_from": 5,
+    "file_from": 105,
+    "file_to": 111,
+    "lines": 7
+   }
+  ],
+  "gaps_skipped_lines": [
+   1
+  ],
+  "unmatched_lines": [
+   "Tuple of existing :class:`ElementWrapper` objects for this element's"
+  ],
+  "verdict": "altered"
+ },
+ {
+  "run": "R2-T2 cssselect2",
+  "unit": "s1",
+  "attempt": 4,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 100,
+    "file_to": 103,
+    "lines": 4
+   },
+   {
+    "block_from": 5,
+    "file_from": 105,
+    "file_to": 111,
+    "lines": 7
+   }
+  ],
+  "gaps_skipped_lines": [
+   1
+  ],
+  "unmatched_lines": [
+   "Tuple of existing :class:`ElementWrapper` objects for this element's"
+  ],
+  "verdict": "altered"
+ },
+ {
+  "run": "R2-T4 lang-b",
+  "unit": "s1",
+  "attempt": 1,
+  "model": "qwen3-coder:30b-kriya-e52213655394",
+  "runs": [
+   {
+    "block_from": 0,
+    "file_from": 190,
+    "file_to": 196,
+    "lines": 7
+   },
+   {
+    "block_from": 7,
+    "file_from": 205,
+    "file_to": 210,
+    "lines": 6
+   }
+  ],
+  "gaps_skipped_lines": [
+   8
+  ],
+  "unmatched_lines": [],
+  "verdict": "stitched"
+ }
+]

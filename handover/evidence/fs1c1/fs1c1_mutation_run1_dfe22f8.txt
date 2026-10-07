@@ -1,0 +1,11 @@
+baseline 259 passed in 25.35s
+c0-closes-entire-compound-requirement KILLED 2 failed, 96 passed in 21.07s
+textual-test-mention-closes-behavioral-claim KILLED 3 failed, 71 passed in 26.89s
+regression-pass-copied-to-behavior-obligation KILLED 2 failed, 96 passed in 22.17s
+model-claim-fills-missing-behavior-evidence-write KILLED 3 failed, 88 passed in 8.87s
+model-claim-fills-missing-behavior-evidence-read KILLED 1 failed, 258 passed in 22.91s
+candidate-or-regression-evidence-closes-behavior KILLED 1 failed, 104 passed in 20.84s
+resume-restores-old-broad-c0-closure KILLED 1 failed, 108 passed in 21.18s
+preservation-vocabulary-ignored KILLED 5 failed, 69 passed in 6.87s
+claim-not-bound-to-candidate KILLED 1 failed, 103 passed in 21.04s
+TOTAL 9 {'KILLED': 9}
