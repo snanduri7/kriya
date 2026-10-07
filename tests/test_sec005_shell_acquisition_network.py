@@ -7,7 +7,8 @@ Three layers of evidence, in order:
 1. Deterministic classification (`kriya.policy.execution.
    classify_shell_acquisition_command`) - pure function, no I/O.
 2. Deterministic profile-construction (`ShellTool._run`'s own
-   ContainmentProfile selection) via a capturing DummyContainmentBackend -
+   ContainmentProfile selection) via a ProfileCapturingBackend (records the
+   profile, executes nothing - tests/_strict_doubles.py) -
    proves ShellTool passes the CORRECT network/network_destinations for a
    given command + config, independent of whether a real backend is
    configured.
@@ -28,14 +29,11 @@ import subprocess
 
 import pytest
 from _plugin_test_support import load_core_tools_module
+from _strict_doubles import ProfileCapturingBackend
 
 from kriya.config import AppConfig
 from kriya.policy.execution import classify_shell_acquisition_command
-from kriya.tools.containment import (
-    BackendUnavailableError,
-    DummyContainmentBackend,
-    NetworkAuthority,
-)
+from kriya.tools.containment import BackendUnavailableError, NetworkAuthority
 from kriya.tools.tool import ToolExecutionError
 
 _core_tools = load_core_tools_module()
@@ -97,7 +95,7 @@ def _capturing_tool(monkeypatch, **autonomy_overrides):
     cfg = AppConfig()
     for key, value in autonomy_overrides.items():
         setattr(cfg.autonomy, key, value)
-    backend = DummyContainmentBackend()
+    backend = ProfileCapturingBackend()
     monkeypatch.setattr(_core_tools, "resolve_containment_backend", lambda name: backend)
     tool = ShellTool(autonomy_cfg=cfg.autonomy)
     return tool, backend
@@ -218,7 +216,7 @@ async def test_execution_policy_mode_does_not_influence_network_authority(monkey
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
     cfg.autonomy.acquisition_registry_hosts = ["repo.maven.apache.org"]
-    backend = DummyContainmentBackend()
+    backend = ProfileCapturingBackend()
     monkeypatch.setattr(_core_tools, "resolve_containment_backend", lambda name: backend)
 
     audit_tool = ShellTool(autonomy_cfg=cfg.autonomy, execution_policy_cfg=ExecutionPolicyConfig(mode="audit"))

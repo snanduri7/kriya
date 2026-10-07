@@ -482,14 +482,16 @@ async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained
 
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
-    from kriya.tools.containment import DummyContainmentBackend, NetworkAuthority
+    from _strict_doubles import ProfileCapturingBackend
+
+    from kriya.tools.containment import NetworkAuthority
     core_tools_module = load_core_tools_module()
     ShellTool = core_tools_module.ShellTool
 
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
     cfg.autonomy.acquisition_registry_hosts = ["repo.maven.apache.org"]
-    backend = DummyContainmentBackend()
+    backend = ProfileCapturingBackend()
     orig = core_tools_module.resolve_containment_backend
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
@@ -510,13 +512,15 @@ async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
 
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
-    from kriya.tools.containment import DummyContainmentBackend, NetworkAuthority
+    from _strict_doubles import ProfileCapturingBackend
+
+    from kriya.tools.containment import NetworkAuthority
     core_tools_module = load_core_tools_module()
     ShellTool = core_tools_module.ShellTool
 
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
-    backend = DummyContainmentBackend()
+    backend = ProfileCapturingBackend()
     orig = core_tools_module.resolve_containment_backend
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
@@ -527,7 +531,7 @@ async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
         result = await subtask_executor.execute(
             subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel,
         )
-        assert result.status == SubtaskStatus.COMPLETED  # `npm` (missing) command itself just fails/echoes fine
+        assert result.status == SubtaskStatus.COMPLETED  # the no-exec backend: npm never runs on the host
         profile = backend.prepared_profiles[-1]
         assert profile.network == NetworkAuthority.DENIED
     finally:

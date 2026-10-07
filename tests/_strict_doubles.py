@@ -19,6 +19,7 @@ from kriya.config.config import AppConfig
 from kriya.core.events import EventSystem
 from kriya.core.kernel import Kernel
 from kriya.core.registry import ComponentRegistry
+from kriya.tools.containment import ContainmentProfile, PreparedContainment
 
 _DEFAULT_ROOTS: Dict[str, str] = {}
 
@@ -111,3 +112,34 @@ def developer_double() -> AsyncMock:
     developer = AsyncMock()
     developer.llm.last_call_metrics = None
     return developer
+
+
+# TEST-WORKTREE-POLLUTION-001: a test of WHICH containment profile a caller
+# builds must never run the caller's command. ``DummyContainmentBackend``
+# contains nothing (env only, PATH always kept), so a profile test's
+# ``npm install left-pad`` ran the real npm in the pytest cwd - the repository
+# root gained package.json, package-lock.json and node_modules/ - and
+# ``pip install requests`` installed into the suite's own venv (the venv's
+# bin is first on PATH, tests/conftest.py). /usr/bin/true exists on macOS and
+# Linux and ignores every argument after argv[0].
+NO_EXEC_COMMAND_PREFIX = ["/usr/bin/true"]
+
+
+class ProfileCapturingBackend:
+    """A containment backend for tests of profile SELECTION (ShellTool's
+    network authority, PRD-012 egress evidence): records every prepared
+    profile and, through the backend contract's own ``command_prefix``
+    mechanism (the OCI backend prepends ``docker run ...`` the same way),
+    makes ``ProcessController`` spawn a no-op in place of the command. The
+    caller sees exit code 0 and empty output; nothing it asked for executes
+    on the host."""
+
+    name = "test-no-exec"
+
+    def __init__(self) -> None:
+        self.prepared_profiles: list = []
+
+    def prepare(self, profile: ContainmentProfile, command: list) -> PreparedContainment:
+        self.prepared_profiles.append(profile)
+        return PreparedContainment(env=None, preexec_fn=None, backend_name=self.name,
+                                   command_prefix=list(NO_EXEC_COMMAND_PREFIX))

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from _plugin_test_support import load_core_tools_module
+from _strict_doubles import ProfileCapturingBackend
 
 from kriya.config import AppConfig
 from kriya.config.authority import FieldClassification, classify_field
@@ -174,7 +175,7 @@ def test_every_embedding_client_in_kriya_is_governed():
 # --- 4. ShellTool: no shell/network workaround under production ---
 
 def _capturing_shell(monkeypatch, cfg):
-    backend = DummyContainmentBackend()
+    backend = ProfileCapturingBackend()  # records the profile, executes nothing
     monkeypatch.setattr(_core_tools, "resolve_containment_backend", lambda name: backend)
     return ShellTool(autonomy_cfg=cfg.autonomy), backend
 

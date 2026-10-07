@@ -43,6 +43,29 @@ def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
                         lambda: str(state_dir / "no-historical-install" / "logs" / "traces.db"))
 
 
+@pytest.fixture(autouse=True)
+def _no_repository_root_package_pollution(request):
+    """TEST-WORKTREE-POLLUTION-001: no test may create package.json,
+    package-lock.json or node_modules in the repository root. Four
+    ShellTool profile tests used to run the real `npm install left-pad` in
+    the pytest cwd through a backend that contained nothing. The check
+    names the test that did it (nothing is deleted: the artifacts are the
+    evidence); under xdist a concurrent worker's test can be the real
+    writer, which the message says."""
+    from _worktree_pollution import new_package_artifacts, present_package_artifacts
+
+    root = str(request.config.rootpath)
+    before = present_package_artifacts(root)
+    yield
+    created = new_package_artifacts(root, before)
+    if created:
+        pytest.fail(
+            f"TEST-WORKTREE-POLLUTION-001: {', '.join(created)} appeared in the repository root {root} "
+            "during this test (or a test running concurrently on another xdist worker): a package-manager "
+            "command ran in the process cwd; use tmp_path or tests/_strict_doubles.py::ProfileCapturingBackend"
+        )
+
+
 _TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 << 30), "cpu_model": None,
               "gpus": [], "gpu_backend": None}
 
