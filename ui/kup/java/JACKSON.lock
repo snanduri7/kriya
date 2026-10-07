@@ -1,0 +1,6 @@
+# Jackson jars for the Java round-trip check (gate A-2 P-R4). Fetched by scripts/java_check.mjs from Maven Central
+# into java/lib/ (git-ignored) when missing, and verified against these SHA-256 digests before use.
+# No Maven/Gradle build is involved (D-9 forbids those); plain `javac`/`java` only.
+jackson-core-2.17.2.jar 721a189241dab0525d9e858e5cb604d3ecc0ede081e2de77d6f34fa5779a5b46
+jackson-databind-2.17.2.jar c04993f33c0f845342653784f14f38373d005280e6359db5f808701cfae73c0c
+jackson-annotations-2.17.2.jar 873a606e23507969f9bbbea939d5e19274a88775ea5a169ba7e2d795aa5156e1

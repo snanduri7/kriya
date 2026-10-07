@@ -1,0 +1,62 @@
+{
+ "attribution_section": {
+  "availability": "not_recorded",
+  "data": null,
+  "provenance": "not_persisted",
+  "reason": "the baseline persists failure categories, not causal attribution"
+ },
+ "evidence_records": [
+  {
+   "attempt": 0,
+   "created_at": 1791097190.0,
+   "kind": "active_skills",
+   "payload": {
+    "skills": [
+     {
+      "digest": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "name": "audit-log",
+      "source_path": "skills/audit-log/skill.yaml",
+      "version": "1.0.0"
+     }
+    ]
+   },
+   "sensitivity": "local_only",
+   "source": "skill_engine"
+  },
+  {
+   "attempt": 1,
+   "created_at": 1791097202.5,
+   "kind": "failure",
+   "payload": {
+    "attempted_edits": [],
+    "failed_content_revisions": {
+     "src/mod1/a.py": "ad58cf4f211c64c42dbff0b810a1162cdfffc9f088f51ea7f969f7739e7ea7fc"
+    },
+    "likely_files": [
+     "src/mod1/a.py"
+    ],
+    "message": "COMPILATION FAILURE:\nsrc/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n",
+    "raw_output": "src/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n",
+    "type": "compile"
+   },
+   "sensitivity": "local_only",
+   "source": "quality_gate"
+  }
+ ],
+ "generated_by": "ui/fixtures/serializer_evidence.py: kriya/workflow/evidence.py::EvidenceRecord.to_dict (payloads as state.py::record_failure and workflow.py build them) -> TraceLogger.log_run -> kriya.kup.acquire.acquire_snapshot -> kriya.kup.inspect.history_detail",
+ "identifier_field": null,
+ "note": "EvidenceRecord carries no identifier; nothing in a trace row can reference an evidence record. AttributionRecord.evidence_ids (KUP schema) has no defined namespace and no production writer; this Kriya version persists no attribution record.",
+ "section": {
+  "availability": "recorded",
+  "provenance": "runs.evidence_records",
+  "reason": null
+ },
+ "serializer_keys": [
+  "kind",
+  "source",
+  "attempt",
+  "payload",
+  "sensitivity",
+  "created_at"
+ ]
+}

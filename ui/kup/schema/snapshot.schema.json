@@ -1,0 +1,229 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/snapshot.schema.json",
+  "title": "Snapshot operations",
+  "description": "snapshot.acquire / snapshot.list / snapshot.prune payloads (gate C-1, C-2, C-4). Acquisition is explicit and returns the id the host pins its browsing session to.",
+  "$defs": {
+    "SnapshotId": {
+      "type": "string",
+      "pattern": "^\\d{8}T\\d{12}Z-[0-9a-f]{8}$"
+    },
+    "SnapshotSummary": {
+      "type": "object",
+      "required": [
+        "snapshot_id",
+        "acquisition_started_at",
+        "acquisition_completed_at",
+        "source",
+        "source_metadata_at_acquisition",
+        "source_metadata_now",
+        "source_metadata_changed",
+        "rows",
+        "size",
+        "sqlite_version"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/SnapshotId"
+        },
+        "acquisition_started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "acquisition_completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_metadata_at_acquisition": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/SourceMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_metadata_now": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/SourceMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_metadata_changed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rows": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sqlite_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "digest_verified": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "SnapshotAcquireResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/SnapshotSummary"
+        },
+        {
+          "type": "object",
+          "required": [
+            "orphans_removed",
+            "pruned",
+            "backup_steps",
+            "duration_ms"
+          ],
+          "properties": {
+            "orphans_removed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pruned": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "backup_steps": {
+              "type": "integer"
+            },
+            "duration_ms": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "SnapshotList": {
+      "type": "object",
+      "required": [
+        "snapshot_directory",
+        "snapshots",
+        "retain"
+      ],
+      "properties": {
+        "snapshot_directory": {
+          "type": "string"
+        },
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotSummary"
+          }
+        },
+        "retain": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "SnapshotPrune": {
+      "type": "object",
+      "required": [
+        "removed",
+        "orphans_removed",
+        "kept"
+      ],
+      "properties": {
+        "removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "orphans_removed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "SnapshotVerify": {
+      "description": "snapshot.verify: the SHA-256 of EXACTLY the requested snapshot, verified now (the host requests it when it pins a snapshot for a browsing session). Guarantee, stated precisely: digest verified at pin; metadata (size, mtime) checked per query. A mismatch is the typed SNAPSHOT_CORRUPT error carrying the id, never data; an unpublished id is SNAPSHOT_UNAVAILABLE.",
+      "type": "object",
+      "required": [
+        "snapshot_id",
+        "digest_verified",
+        "sha256",
+        "size",
+        "verified_at",
+        "duration_ms"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/SnapshotId"
+        },
+        "digest_verified": {
+          "type": "boolean",
+          "const": true
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "verified_at": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "guarantee": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

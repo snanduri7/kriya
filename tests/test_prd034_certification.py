@@ -4,6 +4,7 @@ owned and dated, and an expired entry allows nothing.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date
@@ -14,6 +15,28 @@ from _certification import AllowedSkip, AllowlistError, load_allowlist, match_sk
 
 TESTS = Path(__file__).resolve().parent
 SAMPLE = TESTS / "certification" / "sample_skips.py"
+
+
+# The final pytest summary line, e.g. "1 failed, 1 passed, 1 warning, 1 error in 0.11s" (or "= 1 failed ... =" with
+# padding on a wide terminal). Counts are read by outcome name, so warnings, duration and terminal formatting never
+# decide the assertion; only the asserted outcome counts do.
+_SUMMARY_COUNT = re.compile(r"(\d+) (failed|passed|errors?|skipped|xfailed|xpassed|warnings?|deselected)\b")
+
+
+def summary_counts(stdout):
+    """Outcome counts of the LAST summary line in ``stdout`` (``{'failed': 1, 'passed': 1, 'error': 1, ...}``);
+    plural names are normalized (``errors`` -> ``error``, ``warnings`` -> ``warning``)."""
+    lines = [line for line in stdout.splitlines() if _SUMMARY_COUNT.search(line) and " in " in line]
+    if not lines:
+        return {}
+    return {name.rstrip("s"): int(count) for count, name in _SUMMARY_COUNT.findall(lines[-1])}
+
+
+def assert_outcome_counts(stdout, **expected):
+    """Assert exactly the given outcome counts (absent = 0) and ignore every other summary field (warnings, time)."""
+    counts = summary_counts(stdout)
+    actual = {name: counts.get(name, 0) for name in expected}
+    assert actual == expected, f"summary counts {counts} (expected {expected}) in: {stdout[-2000:]}"
 
 
 def _run(tmp_path, *args, env=None):
@@ -43,8 +66,25 @@ def test_certification_fails_every_unexpected_skip_and_xfail(tmp_path):
     assert skips["certification_mode"] is True and skips["unexpected"] == 2
     assert {s["kind"] for s in skips["skips"]} == {"skip", "xfail"}
     assert "UNEXPECTED SKIP in certification mode" in completed.stdout
-    # A setup-phase skip becomes a setup error; either way the run fails.
-    assert "1 failed, 1 passed, 1 error" in completed.stdout
+    # A setup-phase skip becomes a setup error; either way the run fails. Counts only: an intervening "1 warning"
+    # (e.g. an unregistered marker in a run without pytest-xdist) or the duration never decides this assertion.
+    assert_outcome_counts(completed.stdout, failed=1, passed=1, error=1)
+
+
+def test_outcome_counts_ignore_warnings_and_formatting_but_not_the_counts():
+    with_warning = "...\n1 failed, 1 passed, 1 warning, 1 error in 0.11s\n"
+    assert summary_counts(with_warning) == {"failed": 1, "passed": 1, "warning": 1, "error": 1}
+    assert_outcome_counts(with_warning, failed=1, passed=1, error=1)  # the warning is accepted
+    assert_outcome_counts("=========== 1 failed, 1 passed, 3 warnings, 2 errors in 12.50s (0:00:12) ===========\n", failed=1, passed=1, error=2)
+    assert_outcome_counts("1 passed, 1 skipped, 1 xfailed in 0.10s\n", passed=1, skipped=1, xfailed=1, failed=0, error=0)
+    for wrong in ("2 failed, 1 passed, 1 warning, 1 error in 0.11s\n",   # wrong count
+                  "1 failed, 1 passed, 1 warning in 0.11s\n",            # missing outcome
+                  "1 failed, 1 passed, 1 error\n",                       # no summary line (no duration)
+                  ""):
+        with pytest.raises(AssertionError):
+            assert_outcome_counts(wrong, failed=1, passed=1, error=1)
+    # the earlier substring assertion is what broke on the owner's run: it is NOT accepted by the fragile form
+    assert "1 failed, 1 passed, 1 error" not in with_warning
 
 
 def _allowlist(tmp_path, expires):

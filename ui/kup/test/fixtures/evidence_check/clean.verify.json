@@ -1,0 +1,26 @@
+{
+ "schema_version": 1,
+ "operation": "snapshot.verify",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "live_observation",
+  "live_stream": false
+ },
+ "data": {
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "digest_verified": true,
+  "sha256": "f1c70001f1c70001f1c70001f1c70001f1c70001f1c70001f1c70001f1c70001",
+  "size": 2969600,
+  "verified_at": "2026-10-04T09:31:00.000000Z",
+  "duration_ms": 3.1,
+  "guarantee": "digest verified at this request; size and mtime are checked on every later query"
+ },
+ "error": null
+}

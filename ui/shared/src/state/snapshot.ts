@@ -1,0 +1,73 @@
+/**
+ * Pinned-snapshot session state (gate C-1, C-2, C-3). Lives ONLY here so every host shares one rule set:
+ * - every history request carries the pinned snapshot id; the newest snapshot is never selected implicitly;
+ * - "Acquire new snapshot" is an explicit action distinct from "Refresh displayed snapshot" (a refresh never acquires);
+ * - switching the pinned snapshot invalidates prior responses and cursors (the caller bumps request generations and
+ *   clears the list/detail/prompt slots);
+ * - labels: "snapshot acquired at …" and "source metadata differs since acquisition (stat only: ...)"; metadata equality is
+ *   never shown as unchanged/current/latest, a metadata difference is never shown as a content change or a new run (an
+ *   acquisition's own read connection creates the -wal/-shm sidecars, which alone changes the stat), and the snapshot never
+ *   implies live run status;
+ * - digest verified at pin (08 review F-4): a pin carries the verification Kriya performed on exactly that id before
+ *   anything of it was displayed; later queries check size/mtime only (the guarantee is stated in those words).
+ */
+import type { Consistency, SnapshotSummary } from '../model/kup';
+
+/** What Kriya verified when the snapshot was pinned (snapshot.verify on exactly the pinned id). */
+export interface PinVerification { verified_at: string; sha256: string | null }
+
+export interface SnapshotSession {
+  pinnedId: string | null;
+  /** How the pin was established: acquired by this session, or chosen from the published list. */
+  pinnedBy: 'acquired' | 'chosen' | null;
+  /** Digest verification performed at pin time for pinnedId; null when nothing is pinned. */
+  verification: PinVerification | null;
+  available: SnapshotSummary[];
+}
+
+export const initialSnapshotSession: SnapshotSession = { pinnedId: null, pinnedBy: null, verification: null, available: [] };
+
+export type SnapshotAction =
+  | { type: 'acquired'; summary: SnapshotSummary; verification: PinVerification }
+  | { type: 'choose'; snapshotId: string; verification: PinVerification }
+  | { type: 'listed'; snapshots: SnapshotSummary[] }
+  | { type: 'unavailable' };
+
+/** Returns the next state and whether the pin CHANGED (callers invalidate responses and cursors on true). */
+export function snapshotReducer(state: SnapshotSession, action: SnapshotAction): { state: SnapshotSession; pinChanged: boolean } {
+  switch (action.type) {
+    case 'acquired': {
+      const available = [action.summary, ...state.available.filter((s) => s.snapshot_id !== action.summary.snapshot_id)];
+      return { state: { pinnedId: action.summary.snapshot_id, pinnedBy: 'acquired', verification: action.verification, available }, pinChanged: action.summary.snapshot_id !== state.pinnedId };
+    }
+    case 'choose':
+      if (!state.available.some((s) => s.snapshot_id === action.snapshotId)) return { state, pinChanged: false };
+      return { state: { ...state, pinnedId: action.snapshotId, pinnedBy: 'chosen', verification: action.verification }, pinChanged: action.snapshotId !== state.pinnedId };
+    case 'listed':
+      // Listing never moves the pin (gate C-2): it only updates what the user may choose from.
+      return { state: { ...state, available: action.snapshots }, pinChanged: false };
+    case 'unavailable':
+      return { state: { ...state, pinnedId: null, pinnedBy: null, verification: null }, pinChanged: state.pinnedId !== null };
+    default:
+      return { state, pinChanged: false };
+  }
+}
+
+export interface FreshnessLabel {
+  headline: string; // "snapshot acquired at …" or "no snapshot"
+  metadata: 'change_detected' | 'no_change_detected' | 'unknown';
+  metadataText: string;
+  /** The stat-level explanation behind metadataText (what was compared and why it can differ without a content change). */
+  metadataDetail: string;
+}
+
+/** Honest labels (gate C-3). */
+export function freshnessLabel(consistency: Consistency | null | undefined, summary?: SnapshotSummary | null): FreshnessLabel {
+  const acquiredAt = consistency?.acquisition_completed_at ?? summary?.acquisition_completed_at ?? null;
+  const changed = consistency?.source_metadata_changed ?? summary?.source_metadata_changed ?? null;
+  const headline = acquiredAt ? `snapshot acquired at ${acquiredAt}` : 'no snapshot displayed';
+  const detail = 'Compared by stat only: size, mtime, inode and the -wal/-shm/-journal sidecar sizes. An acquisition\'s own read connection can create the sidecars, so the first acquisition of a quiet store already differs.';
+  if (changed === true) return { headline, metadata: 'change_detected', metadataText: 'Source metadata differs since acquisition. Metadata alone does not establish a content change or a new run.', metadataDetail: detail };
+  if (changed === false) return { headline, metadata: 'no_change_detected', metadataText: 'no source metadata change detected (not a freshness guarantee)', metadataDetail: detail };
+  return { headline, metadata: 'unknown', metadataText: 'source metadata not observed', metadataDetail: detail };
+}

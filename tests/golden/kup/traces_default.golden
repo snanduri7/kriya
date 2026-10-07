@@ -1,0 +1,24 @@
+[1mTIMESTAMP            | STATUS     | CATEGORY               | KIND                   | ATTEMPTS | DURATION   | GOAL                                    [0m
+-------------------------------------------------------------------------------------------------------------------------------------------------
+2026-09-25 10:00:00  | [32msuccess   [0m |                        |                        | 1        | 25.23s     | Goal number 24                          
+2026-09-24 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 3        | 24.23s     | Goal number 23                          
+2026-09-23 10:00:00  | [32msuccess   [0m |                        |                        | 2        | 23.23s     | Goal number 22                          
+2026-09-22 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 1        | 22.23s     | Goal number 21                          
+2026-09-21 10:00:00  | [32msuccess   [0m |                        |                        | 3        | 21.23s     | Goal number 20                          
+2026-09-20 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 2        | 20.23s     | Goal number 19                          
+2026-09-19 10:00:00  | [32msuccess   [0m |                        |                        | 1        | 19.23s     | Goal number 18                          
+2026-09-18 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 3        | 18.23s     | Goal number 17                          
+2026-09-17 10:00:00  | [32msuccess   [0m |                        |                        | 2        | 17.23s     | Goal number 16                          
+2026-09-16 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 1        | 16.23s     | Goal number 15                          
+2026-09-15 10:00:00  | [32msuccess   [0m |                        |                        | 3        | 15.23s     | Goal number 14                          
+2026-09-14 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 2        | 14.23s     | Goal number 13                          
+2026-09-13 10:00:00  | [32msuccess   [0m |                        |                        | 1        | 13.23s     | Goal number 12                          
+2026-09-12 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 3        | 12.23s     | Goal number 11                          
+2026-09-11 10:00:00  | [32msuccess   [0m |                        |                        | 2        | 11.23s     | Goal number 10                          
+2026-09-10 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 1        | 10.23s     | Goal number 9                           
+2026-09-09 10:00:00  | [32msuccess   [0m |                        |                        | 3        | 9.23s      | Goal number 8                           
+2026-09-08 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 2        | 8.23s      | Goal number 7                           
+2026-09-07 10:00:00  | [32msuccess   [0m |                        |                        | 1        | 7.23s      | Goal number 6                           
+2026-09-06 10:00:00  | [31mfailure   [0m | quality_gate_failed    | quality_gate_failed    | 3        | 6.23s      | Goal number 5                           
+
+Showing 20 of 25 recorded runs. Use -n/--limit or --all to see more.

@@ -1,0 +1,290 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:30:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261004T093000000000Z-f1c70001",
+  "snapshot_id": "20261004T093000000000Z-f1c70001"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261004T093000000000Z-f1c70001",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_now": {
+   "size": 2969600,
+   "mtime_ns": 1759561200002969600,
+   "inode": 7781234,
+   "wal_size": null,
+   "shm_size": null,
+   "journal_size": null
+  },
+  "source_metadata_changed": false
+ },
+ "data": {
+  "run": {
+   "run_id": "run-left",
+   "timestamp": "2026-09-30 10:00:00",
+   "goal": "add an audit log",
+   "duration_sec": 40.5,
+   "attempts": 2,
+   "status": "FAILED",
+   "failure_category": "quality_gate_failed",
+   "files_modified": "src/a.py,src/b.py"
+  },
+  "fields": {
+   "files_modified": {
+    "availability": "recorded",
+    "provenance": "runs.files_modified (comma-joined, raw)",
+    "reason": null,
+    "data": "src/a.py,src/b.py"
+   }
+  },
+  "run_events": {
+   "availability": "recorded",
+   "provenance": "runs.run_events",
+   "reason": null,
+   "data": [
+    {
+     "kind": "context.known_target_package",
+     "attempt": 1,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture context.known_target_package",
+     "failure_type": null,
+     "operation": null,
+     "details": {
+      "known_target_files": [
+       "src/a.py",
+       "src/b.py"
+      ],
+      "unit_count": 2,
+      "tiers": [
+       {
+        "path": "src/a.py",
+        "member_id": "A.run",
+        "tier": "member_exact"
+       },
+       {
+        "path": "src/b.py",
+        "member_id": null,
+        "tier": "skeleton"
+       }
+      ],
+      "omitted": [
+       {
+        "path": "src/big.py",
+        "reason": "budget_exhausted"
+       }
+      ],
+      "package_hash": "sha256:abababababababababababababababababababababababababababababababab",
+      "member_hint_paths": []
+     },
+     "created_at": 1791097201
+    },
+    {
+     "kind": "developer.prompt_composition",
+     "attempt": 1,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture developer.prompt_composition",
+     "failure_type": null,
+     "operation": null,
+     "details": {
+      "t0_member_tokens": 100,
+      "t0_header_tokens": 20,
+      "sibling_signatures_tokens": 10,
+      "t1_tokens": 30,
+      "t2_tokens": 0,
+      "t3_tokens": 0,
+      "skills_tokens": 12,
+      "code_context_tokens": 160,
+      "prefix_shared_tokens": 40,
+      "prompt_tokens_reported": 4190,
+      "prefill_seconds": 1.83,
+      "load_seconds": 0.012,
+      "prefix_break": "goal",
+      "token_counts": "estimated (len/4) per section; total as reported by the provider"
+     },
+     "created_at": 1791097201
+    },
+    {
+     "kind": "candidate_gates.passed",
+     "attempt": 2,
+     "source": "fixture.source",
+     "authority": "advisory",
+     "message": "fixture candidate_gates.passed",
+     "failure_type": "compile_error",
+     "operation": null,
+     "details": {
+      "gate": "compile"
+     },
+     "created_at": 1791097202
+    }
+   ]
+  },
+  "evidence_records": {
+   "availability": "recorded",
+   "provenance": "runs.evidence_records",
+   "reason": null,
+   "data": []
+  },
+  "gate_outcomes": {
+   "availability": "recorded",
+   "provenance": "runs.gate_outcomes",
+   "reason": null,
+   "data": [
+    {
+     "attempt": 1,
+     "attempted_edits": [],
+     "attribution_confidence": null,
+     "attribution_kind": "SOURCE_DEFECT",
+     "attribution_reasoning": null,
+     "attribution_tier": null,
+     "authoritative_files": [],
+     "failed_content": {},
+     "file_locations": [
+      {
+       "col": 5,
+       "filepath": "src/mod1/a.py",
+       "line": 12
+      }
+     ],
+     "likely_files": [
+      "src/mod1/a.py"
+     ],
+     "milestone_id": null,
+     "mode": null,
+     "output": "src/mod1/a.py:12:5: error: name 'audit' is not defined\n1 error\n",
+     "plan_id": null,
+     "planned_files": [],
+     "self_correction_attempt": null,
+     "subtask_id": null,
+     "success": false,
+     "type": "compile",
+     "verification_target": null
+    },
+    {
+     "attempt": 2,
+     "egress": {
+      "allowed": false,
+      "authority_source": "autonomy.shell_network",
+      "capability": "denied",
+      "channel": "compile",
+      "destinations": [],
+      "reason": "contained compile gate runs without network"
+     },
+     "output": "",
+     "success": true,
+     "type": "compile"
+    },
+    {
+     "attempt": 2,
+     "egress": {
+      "allowed": false,
+      "authority_source": "autonomy.shell_network",
+      "capability": "denied",
+      "channel": "compile",
+      "destinations": [],
+      "reason": "contained compile gate runs without network"
+     },
+     "output": "FAILED tests/test_mod1.py::test_run - AssertionError: expected 1\n1 failed, 2 passed in 0.52s\n",
+     "success": false,
+     "type": "test"
+    }
+   ]
+  },
+  "model_hops": {
+   "availability": "recorded",
+   "provenance": "runs.model_hops",
+   "reason": null,
+   "data": []
+  },
+  "generation_metrics": {
+   "availability": "recorded",
+   "provenance": "runs.generation_metrics",
+   "reason": null,
+   "data": {
+    "wall_ms": 40500
+   }
+  },
+  "failure_report": {
+   "availability": "recorded",
+   "provenance": "runs.failure_report",
+   "reason": null,
+   "data": [
+    {
+     "failure_type": "compile_error",
+     "category": "quality_gate_failed"
+    }
+   ]
+  },
+  "context": {
+   "availability": "recorded",
+   "provenance": "run_events:context.known_target_package",
+   "reason": null,
+   "data": {
+    "items": [
+     {
+      "path": "src/a.py",
+      "tier": "member_exact",
+      "member_ids": [
+       "A.run"
+      ]
+     },
+     {
+      "path": "src/big.py",
+      "tier": null,
+      "omitted": true,
+      "omission_reason": "budget_exhausted"
+     }
+    ],
+    "tokens": {
+     "estimated": {
+      "total": 372
+     },
+     "provider_reported": {
+      "prompt": 4190
+     }
+    }
+   }
+  },
+  "attribution": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the baseline persists failure categories, not causal attribution",
+   "data": null
+  },
+  "diagnostics": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "no diagnostics record is persisted",
+   "data": null
+  },
+  "comparisons": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row stores modified paths, not before/after text",
+   "data": null
+  },
+  "output": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "Developer output is not persisted",
+   "data": null
+  }
+ },
+ "error": null
+}

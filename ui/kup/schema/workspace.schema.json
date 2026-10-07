@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/workspace.schema.json",
+  "title": "WorkspaceStatus",
+  "description": "data of `kriya runs status --workspace PATH --json --kup-version 1`: an envelope around the existing recovery assessment; status and semantic exit codes preserved (P-25, P-27). Belongs to the selected workspace at observation time, never to a selected trace row (P-22).",
+  "type": "object",
+  "required": ["workspace", "run_active", "status", "exit_code", "assessment"],
+  "properties": {
+    "workspace": { "type": "string" },
+    "run_active": { "type": ["boolean", "null"], "description": "RUN_ACTIVE observation; null = unknown." },
+    "status": { "type": ["string", "null"], "description": "The existing recovery assessment status, verbatim." },
+    "exit_code": { "type": ["integer", "null"], "description": "The semantic exit code the non-KUP command would have returned." },
+    "assessment": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "RecoveryAssessment.to_dict() verbatim (kriya/control/recovery.py)." }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,155 @@
+{
+ "environment_keys": [
+  "HOME",
+  "KRIYA_STATE_DIR",
+  "PATH",
+  "PYTHONDONTWRITEBYTECODE"
+ ],
+ "runs": [
+  {
+   "phase": "acquire",
+   "pid": 82198,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshot"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"kind\":\"snapshot_copy\",\"live_stream\":false,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0}},\"data\":{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"backup_steps\":1,\"duration_ms\":4.0,\"orphans_removed\":[],\"pruned\":[],\"rows\":60,\"size\":57344,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0},\"sqlite_version\":\"3.53.4\"},\"error\":null,\"observed_at\":\"2026-10-04T08:31:43.796190Z\",\"operation\":\"snapshot.acquire\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots/20261004T083143792977Z-9d9673d5\",\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82199,
+   "args": [
+    "traces",
+    "--json",
+    "--capabilities"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"kind\":\"not_applicable\",\"live_stream\":false},\"data\":{\"features\":{\"attribution\":false,\"comparisons\":false,\"consistency_kinds\":[\"snapshot_copy\",\"live_observation\",\"not_applicable\"],\"database_states\":[\"missing\",\"hot_journal\",\"locked\",\"readonly_directory\",\"unreadable\",\"not_a_database\"],\"diagnostics\":false,\"error_codes\":[\"UNSUPPORTED_SCHEMA_VERSION\",\"INVALID_RESPONSE\",\"INVALID_REQUEST\",\"STORE_BUSY\",\"READ_ONLY_UNAVAILABLE\",\"RESPONSE_TOO_LARGE\",\"CONFIG_AUTHORITY_REFUSED\",\"CONFIG_LOAD_FAILED\",\"SNAPSHOT_MISSING\",\"SNAPSHOT_UNAVAILABLE\",\"SNAPSHOT_FAILED\",\"SNAPSHOT_TOO_LARGE\",\"SNAPSHOT_CORRUPT\",\"ACQUISITION_IN_PROGRESS\",\"ACQUISITION_REFUSED_RUN_ACTIVE\"],\"output\":false,\"prompt\":true,\"snapshot\":true},\"identity\":{\"build_provenance\":\"unavailable\",\"commit\":\"UNKNOWN\",\"implementation\":\"kriya-kup/1\",\"kriya_version\":\"0.1.0\",\"sqlite_version\":\"3.53.4\"},\"kup_versions\":[1],\"limits\":{\"acquisition_deadline_seconds\":45.0,\"busy_timeout_seconds\":2.0,\"cursor_max_chars\":1024,\"directory_ceiling_bytes\":2147483648,\"list_default\":50,\"list_max\":200,\"max_response_bytes\":8388608,\"max_snapshot_bytes\":536870912,\"retain_snapshots\":3,\"retained_bytes_ceiling\":1610612736,\"run_id_max_chars\":256},\"operations\":[\"capabilities\",\"history.list\",\"history.detail\",\"history.prompt\",\"workspace.status\",\"snapshot.acquire\",\"snapshot.list\",\"snapshot.prune\",\"snapshot.verify\"]},\"error\":null,\"observed_at\":\"2026-10-04T08:31:45.066905Z\",\"operation\":\"capabilities\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82209,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshots"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"kind\":\"live_observation\",\"live_stream\":false},\"data\":{\"retain\":3,\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots\",\"snapshots\":[{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"rows\":60,\"size\":57344,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0},\"sqlite_version\":\"3.53.4\"}]},\"error\":null,\"observed_at\":\"2026-10-04T08:31:46.280331Z\",\"operation\":\"snapshot.list\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82211,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshot-verify",
+    "20261004T083143792977Z-9d9673d5"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"kind\":\"live_observation\",\"live_stream\":false},\"data\":{\"digest_verified\":true,\"duration_ms\":0.321,\"guarantee\":\"digest verified at this request; size and mtime are checked on every later query\",\"sha256\":\"2d290db778f987778c4526972b0c3818a936b12843f02084d6e1c385c424854e\",\"size\":57344,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"verified_at\":\"2026-10-04T08:31:47.557760Z\"},\"error\":null,\"observed_at\":\"2026-10-04T08:31:47.558039Z\",\"operation\":\"snapshot.verify\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots/20261004T083143792977Z-9d9673d5\",\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82221,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshot-id",
+    "20261004T083143792977Z-9d9673d5",
+    "-n",
+    "5"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"kind\":\"snapshot_copy\",\"live_stream\":false,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0}},\"data\":{\"next_cursor\":\"WyIyMDI2MTAwNFQwODMxNDM3OTI5NzdaLTlkOTY3M2Q1IiwiMjAyNi0wOS0yNiAxMTowMDowMCIsInJ1bi0wMDUzIl0\",\"runs\":[{\"attempts\":2,\"duration_sec\":56.23,\"failure_category\":\"quality_gate_failed\",\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 55\",\"milestone_group_id\":\"group-11\",\"milestone_index\":0,\"milestone_total\":5,\"run_id\":\"run-0055\",\"status\":\"failure\",\"timestamp\":\"2026-09-28 11:00:00\"},{\"attempts\":1,\"duration_sec\":28.23,\"failure_category\":\"quality_gate_failed\",\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 27\",\"milestone_group_id\":\"group-5\",\"milestone_index\":2,\"milestone_total\":5,\"run_id\":\"run-0027\",\"status\":\"failure\",\"timestamp\":\"2026-09-28 10:00:00\"},{\"attempts\":1,\"duration_sec\":55.23,\"failure_category\":null,\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 54\",\"milestone_group_id\":null,\"milestone_index\":null,\"milestone_total\":null,\"run_id\":\"run-0054\",\"status\":\"success\",\"timestamp\":\"2026-09-27 11:00:00\"},{\"attempts\":3,\"duration_sec\":27.23,\"failure_category\":null,\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 26\",\"milestone_group_id\":null,\"milestone_index\":null,\"milestone_total\":null,\"run_id\":\"run-0026\",\"status\":\"success\",\"timestamp\":\"2026-09-27 10:00:00\"},{\"attempts\":3,\"duration_sec\":54.23,\"failure_category\":\"quality_gate_failed\",\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 53\",\"milestone_group_id\":\"group-10\",\"milestone_index\":3,\"milestone_total\":5,\"run_id\":\"run-0053\",\"status\":\"failure\",\"timestamp\":\"2026-09-26 11:00:00\"}]},\"error\":null,\"observed_at\":\"2026-10-04T08:31:48.814083Z\",\"operation\":\"history.list\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots/20261004T083143792977Z-9d9673d5\",\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82234,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshot-id",
+    "20261004T083143792977Z-9d9673d5",
+    "--run-id",
+    "run-0003"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"kind\":\"snapshot_copy\",\"live_stream\":false,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0}},\"data\":{\"attribution\":{\"availability\":\"not_recorded\",\"data\":null,\"provenance\":\"not_persisted\",\"reason\":\"the baseline persists failure categories, not causal attribution\"},\"comparisons\":{\"availability\":\"not_recorded\",\"data\":null,\"provenance\":\"not_persisted\",\"reason\":\"the trace row stores modified paths, not before/after text\"},\"context\":{\"availability\":\"not_recorded\",\"data\":null,\"provenance\":\"not_persisted\",\"reason\":\"the trace row persists context only inside run_events (context.* events); no context record is stored\"},\"diagnostics\":{\"availability\":\"not_recorded\",\"data\":null,\"provenance\":\"not_persisted\",\"reason\":\"no diagnostics record is persisted\"},\"evidence_records\":{\"availability\":\"recorded\",\"data\":[{\"evidence_id\":\"ev-3\"}],\"provenance\":\"runs.evidence_records\",\"reason\":null},\"failure_report\":{\"availability\":\"recorded\",\"data\":[{\"attribution_tier\":\"locator\",\"category\":\"quality_gate_failed\",\"failure_type\":\"compile\"}],\"provenance\":\"runs.failure_report\",\"reason\":null},\"fields\":{\"active_skills\":{\"availability\":\"recorded\",\"data\":\"skill-a\",\"provenance\":\"runs.active_skills\",\"reason\":null},\"evidence_records\":{\"availability\":\"recorded\",\"data\":\"[{\\\"evidence_id\\\": \\\"ev-3\\\"}]\",\"provenance\":\"runs.evidence_records\",\"reason\":null},\"failure_report\":{\"availability\":\"recorded\",\"data\":\"[{\\\"failure_type\\\": \\\"compile\\\", \\\"category\\\": \\\"quality_gate_failed\\\", \\\"attribution_tier\\\": \\\"locator\\\"}]\",\"provenance\":\"runs.failure_report\",\"reason\":null},\"gate_outcomes\":{\"availability\":\"recorded\",\"data\":\"[{\\\"attempt\\\": 1, \\\"gate\\\": \\\"compile\\\", \\\"passed\\\": false}]\",\"provenance\":\"runs.gate_outcomes\",\"reason\":null},\"generation_metrics\":{\"availability\":\"recorded\",\"data\":\"{\\\"prompt_tokens_estimated\\\": 103}\",\"provenance\":\"runs.generation_metrics\",\"reason\":null},\"model_hops\":{\"availability\":\"recorded\",\"data\":\"[]\",\"provenance\":\"runs.model_hops\",\"reason\":null},\"retrieved_chunks\":{\"availability\":\"recorded\",\"data\":\"[{\\\"file\\\": \\\"a.py\\\", \\\"score\\\": 0.9}]\",\"provenance\":\"runs.retrieved_chunks\",\"reason\":null},\"run_events\":{\"availability\":\"recorded\",\"data\":\"[{\\\"kind\\\": \\\"gate.compile\\\", \\\"attempt\\\": 1, \\\"source\\\": \\\"workflow\\\", \\\"authority\\\": \\\"authoritative\\\", \\\"message\\\": \\\"compile gate of run 3\\\", \\\"failure_type\\\": null, \\\"operation\\\": null, \\\"details\\\": {\\\"k\\\": 3}, \\\"created_at\\\": 1758369603.0, \\\"novel_field\\\": \\\"kept\\\"}]\",\"provenance\":\"runs.run_events\",\"reason\":null}},\"gate_outcomes\":{\"availability\":\"recorded\",\"data\":[{\"attempt\":1,\"gate\":\"compile\",\"passed\":false}],\"provenance\":\"runs.gate_outcomes\",\"reason\":null},\"generation_metrics\":{\"availability\":\"recorded\",\"data\":{\"prompt_tokens_estimated\":103},\"provenance\":\"runs.generation_metrics\",\"reason\":null},\"model_hops\":{\"availability\":\"recorded\",\"data\":[],\"provenance\":\"runs.model_hops\",\"reason\":null},\"output\":{\"availability\":\"not_recorded\",\"data\":null,\"provenance\":\"not_persisted\",\"reason\":\"Developer output is not persisted\"},\"retrieved_chunks\":{\"availability\":\"recorded\",\"data\":[{\"file\":\"a.py\",\"score\":0.9}],\"provenance\":\"runs.retrieved_chunks\",\"reason\":null},\"run\":{\"attempts\":1,\"duration_sec\":4.23,\"failure_category\":\"quality_gate_failed\",\"files_modified\":\"a.py,b.py\",\"goal\":\"Goal number 3\",\"milestone_group_id\":\"group-0\",\"milestone_index\":3,\"milestone_total\":5,\"run_id\":\"run-0003\",\"status\":\"failure\",\"timestamp\":\"2026-09-04 10:00:00\"},\"run_events\":{\"availability\":\"recorded\",\"data\":[{\"attempt\":1,\"authority\":\"authoritative\",\"created_at\":1758369603.0,\"details\":{\"k\":3},\"failure_type\":null,\"kind\":\"gate.compile\",\"message\":\"compile gate of run 3\",\"novel_field\":\"kept\",\"operation\":null,\"source\":\"workflow\"}],\"provenance\":\"runs.run_events\",\"reason\":null}},\"error\":null,\"observed_at\":\"2026-10-04T08:31:50.104148Z\",\"operation\":\"history.detail\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots/20261004T083143792977Z-9d9673d5\",\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  },
+  {
+   "phase": "inspect",
+   "pid": 82236,
+   "args": [
+    "traces",
+    "--json",
+    "--snapshot-id",
+    "20261004T083143792977Z-9d9673d5",
+    "--run-id",
+    "run-0003",
+    "--include-prompt"
+   ],
+   "returncode": 0,
+   "stdout": "{\"consistency\":{\"acquisition_completed_at\":\"2026-10-04T08:31:43.795466Z\",\"acquisition_started_at\":\"2026-10-04T08:31:43.791237Z\",\"kind\":\"snapshot_copy\",\"live_stream\":false,\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"source_metadata_at_acquisition\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":null,\"size\":57344,\"wal_size\":null},\"source_metadata_changed\":true,\"source_metadata_now\":{\"inode\":263890409,\"journal_size\":null,\"mtime_ns\":1791102702583817302,\"shm_size\":32768,\"size\":57344,\"wal_size\":0}},\"data\":{\"prompt_rendered\":\"PLANNING PROMPT 3\",\"role\":\"planner\",\"scope\":\"plan_prompt (one stored prompt per run; not every Developer request)\"},\"error\":null,\"observed_at\":\"2026-10-04T08:31:51.386781Z\",\"operation\":\"history.prompt\",\"request_id\":\"cli\",\"schema_version\":1,\"source\":{\"snapshot_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/kup-snapshots/20261004T083143792977Z-9d9673d5\",\"snapshot_id\":\"20261004T083143792977Z-9d9673d5\",\"state_directory\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state\",\"trace_database\":\"/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2368/test_acquisition_writes_only_s0/state/traces.db\"}}\n",
+   "stderr": ""
+  }
+ ],
+ "denials": [
+  {
+   "proc": "python3.14",
+   "pid": "82221",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:47.701 E  kernel[0:28a47d5] (Sandbox) Sandbox: python3.14(82221) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82221",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:47.707 E  kernel[0:28a47d6] (Sandbox) Sandbox: Python(82221) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "python3.14",
+   "pid": "82234",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:48.970 E  kernel[0:28a4820] (Sandbox) Sandbox: python3.14(82234) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82234",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:48.978 E  kernel[0:28a4824] (Sandbox) Sandbox: Python(82234) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "python3.14",
+   "pid": "82236",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:50.258 E  kernel[0:28a4836] (Sandbox) Sandbox: python3.14(82236) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  },
+  {
+   "proc": "Python",
+   "pid": "82236",
+   "op": "file-write-data",
+   "path": "/dev/dtracehelper",
+   "raw": "2026-10-04 14:01:50.264 E  kernel[0:28a4837] (Sandbox) Sandbox: Python(82236) deny(1) file-write-data /dev/dtracehelper",
+   "class": "DEVICE"
+  }
+ ]
+}

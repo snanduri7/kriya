@@ -1,0 +1,18 @@
+{
+  "name": "@kriya-ui/shared",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Host-independent Kriya inspector panels, selection reducers, normalization and availability rules (P-R1). Must never depend on electron or any Node-only package; see ../scripts/check-shared-deps.mjs.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kriya-ui/kup": "0.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

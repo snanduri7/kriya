@@ -96,6 +96,7 @@ markers = [
     "developer_answers_verbatim: FILE-INTEGRITY-CONTRACT-001 - the scripted per-file Developer answers reach the parser exactly as written (no translation into the protocol the prompt asks for; see tests/conftest.py::_scripted_developer_answers_speak_the_requested_protocol)",
     "real_embedding_identity: EMBEDDING-CONTRACT-001 - the test exercises OllamaEmbeddingClient.fingerprint() itself (through an injected transport); every other test gets a fixed fake identity (tests/conftest.py::_no_embedding_identity_probe)",
     "live_static_analysis: requires the exact pinned static-analysis scanner (Semgrep 1.178.0; Docker + the pinned image for OCI cases) - excluded by default, run explicitly with `pytest -m live_static_analysis`",
+    "xdist_group(name): pytest-xdist scheduling group; tests/conftest.py pins every real-Docker test to the `docker` group so `--dist loadgroup` runs them on one worker. pytest-xdist registers this marker itself when installed; it is registered here too so a sequential run without pytest-xdist raises no PytestUnknownMarkWarning (the marker is then inert)",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for
 # lacking a local Ollama instance - CI's live-model job opts back in with

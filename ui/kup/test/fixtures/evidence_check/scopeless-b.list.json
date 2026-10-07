@@ -1,0 +1,33 @@
+{
+ "schema_version": 1,
+ "operation": "history.list",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false
+ },
+ "data": {
+  "runs": [
+   {
+    "run_id": "r-x",
+    "timestamp": "2026-09-25 09:00:00",
+    "goal": "goal of r-x",
+    "duration_sec": 53,
+    "attempts": 2,
+    "status": "SUCCESS",
+    "failure_category": null,
+    "files_modified": "src/mod1/a.py,src/mod1/b.py",
+    "milestone_group_id": null,
+    "milestone_index": null,
+    "milestone_total": null
+   }
+  ],
+  "next_cursor": null
+ },
+ "error": null
+}

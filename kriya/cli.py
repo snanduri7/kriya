@@ -154,15 +154,19 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
     try:
         ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
-        if ctx.invoked_subcommand == 'doctor':
+        if ctx.invoked_subcommand in ('doctor', 'traces'):
             # PRD-010: `doctor --production --json` must still emit a parseable
             # (failing) report; the doctor itself decides how to render this.
+            # GUI M1 Phase C: `traces --json` answers with a typed KUP error
+            # envelope (CONFIG_AUTHORITY_REFUSED, D-7); text mode prints the
+            # same message main() always printed.
             ctx.obj['config_error'] = e
             return
         click.secho(f"Error loading configuration: {_user_error_text(e)}", fg="red", err=True)
         sys.exit(1)
-    if ctx.invoked_subcommand != 'doctor':
+    if ctx.invoked_subcommand not in ('doctor', 'traces'):
         # doctor configures its own logging: --production writes no log file.
+        # traces configures its own too: its KUP (--json) read path never bootstraps logging (GUI M1 Phase C).
         _bootstrap_logging(ctx.obj['config'])
 
     # No subcommand given: drop into the interactive session, same as bare
@@ -4069,13 +4073,32 @@ def _runs_workspace_option(function):
 @runs_group.command(name="status")
 @_runs_workspace_option
 @click.option("--json", "as_json", is_flag=True, help="Print the assessment as JSON.")
-def runs_status(workspace: str, as_json: bool) -> None:
+@click.option("--kup-version", "kup_version", type=int, default=None,
+              help="With --json: wrap the assessment in a KUP envelope of this schema version (1). GUI M1 Phase C.")
+def runs_status(workspace: str, as_json: bool, kup_version: Optional[int]) -> None:
     """Read-only: classify crashed runs and interrupted commits from their
     durable evidence and the files on disk, and say what `recover` would do.
     Never takes the lock or writes anything; reports RUN_ACTIVE while a live
     run holds the workspace."""
     from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
 
+    if kup_version is not None:
+        if not as_json:
+            raise click.UsageError("--kup-version requires --json")
+        sys.dont_write_bytecode = True
+        from kriya.kup.cli_ops import run_kup_operation
+        from kriya.kup.inspect import encode_response, error_envelope
+        from kriya.kup.policy import KUP_SCHEMA_VERSION, UNSUPPORTED_SCHEMA_VERSION
+        if kup_version != KUP_SCHEMA_VERSION:
+            click.echo(encode_response(error_envelope("workspace.status", "cli", UNSUPPORTED_SCHEMA_VERSION,
+                                                      f"KUP schema version {kup_version} is not supported (supported: {KUP_SCHEMA_VERSION})")))
+            return
+        env = run_kup_operation(None, {"operation": "workspace.status", "workspace": os.path.abspath(workspace)})
+        click.echo(encode_response(env))
+        data = env.get("data") or {}
+        if data.get("exit_code"):
+            sys.exit(int(data["exit_code"]))
+        return
     assessment = assess_recovery(workspace)
     if as_json:
         click.echo(json.dumps(assessment.to_dict(), indent=2, sort_keys=True))
@@ -4797,7 +4820,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         sys.exit(1)
 
 @main.command(name="traces")
-@click.option("-n", "--limit", type=int, default=20, show_default=True, help="Maximum number of most-recent runs to show. Use --all to show every run.")
+@click.option("-n", "--limit", type=int, default=None, show_default="20",
+              help="Maximum number of most-recent runs to show. Use --all to show every run. (KUP --json: default 50, maximum 200.)")
 @click.option("--all", "show_all", is_flag=True, help="Show all recorded runs, ignoring --limit.")
 @click.option("--migrate-legacy", is_flag=True,
               help="Copy a pre-state-directory traces.db to the canonical state location. Refused if the "
@@ -4805,9 +4829,37 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 @click.option("--legacy-path", type=click.Path(), default=None,
               help="With --migrate-legacy: the exact traces.db to copy (absolute). Without it, only the "
               "historical default <install dir>/logs/traces.db is considered.")
+@click.option("--json", "as_json", is_flag=True,
+              help="KUP v1 (Kriya UI Protocol): one JSON envelope on stdout. Read-only inspection of a PUBLISHED "
+                   "SNAPSHOT (never the live store), plus the explicit snapshot operations below.")
+@click.option("--capabilities", is_flag=True, help="KUP: protocol versions, operations, identity and limits.")
+@click.option("--snapshot", "acquire", is_flag=True,
+              help="KUP: ACQUIRE a new consistent snapshot of the history store (SQLite online backup inside one read "
+                   "transaction) into <state dir>/kup-snapshots and publish it. The only KUP operation that writes.")
+@click.option("--workspace", "workspace", type=click.Path(), default=None,
+              help="With --snapshot: refuse acquisition while a run is active for this workspace (policy).")
+@click.option("--snapshots", "list_snaps", is_flag=True, help="KUP: list the published snapshots.")
+@click.option("--verify", is_flag=True, help="With --snapshots: also verify every snapshot's digest.")
+@click.option("--snapshot-verify", "verify_id", default=None,
+              help="KUP: verify the SHA-256 of exactly this published snapshot (the host does this when it pins a snapshot; "
+                   "per-query checks stay size/mtime only).")
+@click.option("--snapshot-prune", "prune", is_flag=True, help="KUP: remove published snapshots beyond --keep and orphaned staging.")
+@click.option("--keep", type=int, default=None, help="With --snapshot-prune: how many newest snapshots to keep (default 3; 0 removes all).")
+@click.option("--snapshot-id", "snapshot_id", default=None,
+              help="KUP: the published snapshot to read (REQUIRED for history reads; browsing is pinned to one id).")
+@click.option("--cursor", default=None, help="KUP: opaque pagination cursor from a previous page of the SAME snapshot.")
+@click.option("--run-id", "run_id", default=None, help="KUP: one run's stored row in recorded form.")
+@click.option("--include-prompt", "include_prompt", is_flag=True, help="KUP: with --run-id, return the stored prompt_rendered instead (sensitive; explicit request only).")
 @click.pass_context
-def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool, legacy_path: Optional[str]) -> None:
-    """Show persistent run trace logs and metrics of past runs."""
+def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_legacy: bool, legacy_path: Optional[str],
+           as_json: bool, capabilities: bool, acquire: bool, workspace: Optional[str], list_snaps: bool, verify: bool,
+           verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str], cursor: Optional[str],
+           run_id: Optional[str], include_prompt: bool) -> None:
+    """Show persistent run trace logs and metrics of past runs.
+
+    With --json this is the KUP v1 read path (GUI M1 Phase C, handover/GUI-D4-READ-STRATEGY/03_GATE.md): it never
+    bootstraps logging, never migrates or creates a schema, never opens the live store except for the explicit
+    --snapshot acquisition, and reads history only from a published snapshot named by --snapshot-id."""
     from kriya.core.state_paths import (
         LegacyTraceMigrationError,
         StateDirectoryError,
@@ -4815,7 +4867,27 @@ def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool,
         migrate_legacy_trace_db,
     )
 
+    config_error = ctx.obj.get('config_error')
+    if config_error is not None and not as_json:
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
+        sys.exit(1)
+    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace])
+    if as_json:
+        if migrate_legacy or legacy_path is not None or show_all:
+            raise click.UsageError("--json (KUP) cannot be combined with --migrate-legacy, --legacy-path or --all")
+        if config_error is not None:
+            _traces_kup_config_error(config_error)
+            return
+        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt)
+        return
     cfg: AppConfig = ctx.obj['config']
+    if kup_flags:
+        raise click.UsageError("the KUP options (--capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, --snapshot-id, "
+                               "--cursor, --run-id, --include-prompt, --workspace, --verify, --keep) require --json")
+    # Text mode: byte-identical to the pre-KUP command. Logging is configured here (main() leaves it to traces).
+    _bootstrap_logging(cfg)
+    if limit is None:
+        limit = 20
     if legacy_path is not None and not migrate_legacy:
         raise click.UsageError("--legacy-path is only used with --migrate-legacy")
     try:
@@ -4898,6 +4970,64 @@ def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool,
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")
+
+
+
+def _traces_kup_config_error(error: Exception) -> None:
+    """D-7: a SEC-009 refusal is the typed CONFIG_AUTHORITY_REFUSED; any other load failure is CONFIG_LOAD_FAILED.
+    Never a trust-file injection, never a retry with broader permission."""
+    sys.dont_write_bytecode = True
+    from kriya.config.authority import ConfigAuthorityError
+    from kriya.kup.inspect import encode_response, error_envelope
+    from kriya.kup.policy import CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED
+
+    code = CONFIG_AUTHORITY_REFUSED if isinstance(error, ConfigAuthorityError) else CONFIG_LOAD_FAILED
+    click.echo(encode_response(error_envelope("unknown", "cli", code, _user_error_text(error))))
+
+
+def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquire: bool, workspace: Optional[str],
+                list_snaps: bool, verify: bool, verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str],
+                cursor: Optional[str], run_id: Optional[str], include_prompt: bool) -> None:
+    """Translate the KUP flag grammar into one operation request and print its envelope (exit 0; typed errors are
+    envelopes, so the host can tell a protocol refusal from a crash)."""
+    sys.dont_write_bytecode = True  # nothing the KUP path imports from here on writes bytecode
+    from kriya.kup.cli_ops import run_kup_operation
+    from kriya.kup.inspect import encode_response, error_envelope
+    from kriya.kup.policy import INVALID_REQUEST
+
+    modes = [name for name, flag in (("capabilities", capabilities), ("snapshot.acquire", acquire), ("snapshot.list", list_snaps),
+                                     ("snapshot.prune", prune), ("snapshot.verify", bool(verify_id)),
+                                     ("history", bool(snapshot_id or run_id or cursor or include_prompt))) if flag]
+    if not modes:
+        modes = ["history"]  # plain `--json [-n N]`: a history read, which requires --snapshot-id (typed below)
+    if len(modes) != 1:
+        click.echo(encode_response(error_envelope("unknown", "cli", INVALID_REQUEST,
+                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, or a history read (--snapshot-id ...)")))
+        return
+    mode = modes[0]
+    request: Dict[str, Any]
+    if mode == "capabilities":
+        request = {"operation": "capabilities"}
+    elif mode == "snapshot.acquire":
+        request = {"operation": "snapshot.acquire", "workspace": os.path.abspath(workspace) if workspace else None}
+    elif mode == "snapshot.list":
+        request = {"operation": "snapshot.list", "verify": verify}
+    elif mode == "snapshot.prune":
+        request = {"operation": "snapshot.prune", "keep": keep}
+    elif mode == "snapshot.verify":
+        request = {"operation": "snapshot.verify", "snapshot_id": verify_id}
+    else:
+        if run_id is not None:
+            if cursor is not None or limit is not None:
+                click.echo(encode_response(error_envelope("history.detail", "cli", INVALID_REQUEST, "--run-id cannot be combined with -n/--cursor")))
+                return
+            request = {"operation": "history.prompt" if include_prompt else "history.detail", "snapshot_id": snapshot_id, "run_id": run_id}
+        else:
+            if include_prompt:
+                click.echo(encode_response(error_envelope("history.prompt", "cli", INVALID_REQUEST, "--include-prompt requires --run-id")))
+                return
+            request = {"operation": "history.list", "snapshot_id": snapshot_id, "limit": limit, "cursor": cursor}
+    click.echo(encode_response(run_kup_operation(cfg, request)))
 
 if __name__ == '__main__':
     main()

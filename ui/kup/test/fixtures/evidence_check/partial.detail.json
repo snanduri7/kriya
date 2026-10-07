@@ -1,0 +1,112 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db",
+  "snapshot_directory": "/fixture/.kriya/state/kup-snapshots/20261003T000000000000Z-f1c70009",
+  "snapshot_id": "20261003T000000000000Z-f1c70009"
+ },
+ "consistency": {
+  "kind": "snapshot_copy",
+  "live_stream": false,
+  "snapshot_id": "20261003T000000000000Z-f1c70009",
+  "acquisition_started_at": "2026-10-04T09:30:00.000000Z",
+  "acquisition_completed_at": "2026-10-04T09:30:00.014000Z",
+  "source_metadata_at_acquisition": null,
+  "source_metadata_now": null,
+  "source_metadata_changed": null
+ },
+ "data": {
+  "run": {
+   "run_id": "r-partial",
+   "timestamp": "2026-09-23 10:00:00",
+   "goal": "goal of r-partial",
+   "duration_sec": 53,
+   "attempts": 2,
+   "status": "FAILED",
+   "failure_category": "quality_gate_failed",
+   "files_modified": "src/mod1/a.py,src/mod1/b.py",
+   "milestone_group_id": null,
+   "milestone_index": null,
+   "milestone_total": null
+  },
+  "fields": {},
+  "run_events": {
+   "availability": "unreadable",
+   "provenance": "runs.run_events",
+   "reason": "stored text is not JSON",
+   "data": null
+  },
+  "evidence_records": {
+   "availability": "not_recorded",
+   "provenance": "runs.evidence_records",
+   "reason": "column is NULL in the stored row",
+   "data": null
+  },
+  "gate_outcomes": {
+   "availability": "not_recorded",
+   "provenance": "runs.gate_outcomes",
+   "reason": "column is NULL in the stored row",
+   "data": null
+  },
+  "model_hops": {
+   "availability": "recorded",
+   "provenance": "runs.model_hops",
+   "reason": null,
+   "data": []
+  },
+  "generation_metrics": {
+   "availability": "unsupported",
+   "provenance": "runs.generation_metrics",
+   "reason": "fixture",
+   "data": null
+  },
+  "failure_report": {
+   "availability": "excluded",
+   "provenance": "runs.failure_report",
+   "reason": "fixture",
+   "data": null
+  },
+  "context": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row persists context only inside run_events (context.* events); no context record is stored",
+   "data": null
+  },
+  "attribution": {
+   "availability": "recorded",
+   "provenance": "fixture:attribution",
+   "reason": null,
+   "data": {
+    "first_incorrect_state": null,
+    "cause": null,
+    "category": "CONTEXT",
+    "evidence_ids": [
+     "ev-9"
+    ]
+   }
+  },
+  "diagnostics": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "no diagnostics record is persisted",
+   "data": null
+  },
+  "comparisons": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "the trace row stores modified paths, not before/after text",
+   "data": null
+  },
+  "output": {
+   "availability": "not_recorded",
+   "provenance": "not_persisted",
+   "reason": "Developer output is not persisted",
+   "data": null
+  }
+ },
+ "error": null
+}

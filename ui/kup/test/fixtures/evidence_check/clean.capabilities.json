@@ -1,0 +1,47 @@
+{
+ "schema_version": 1,
+ "operation": "capabilities",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": {
+  "state_directory": "/fixture/.kriya/state",
+  "trace_database": "/fixture/.kriya/state/traces.db"
+ },
+ "consistency": {
+  "kind": "not_applicable",
+  "live_stream": false
+ },
+ "data": {
+  "kup_versions": [
+   1
+  ],
+  "operations": [
+   "capabilities",
+   "history.list",
+   "history.detail",
+   "history.prompt",
+   "workspace.status",
+   "snapshot.acquire",
+   "snapshot.list",
+   "snapshot.prune",
+   "snapshot.verify"
+  ],
+  "identity": {
+   "kriya_version": "0.1.0",
+   "commit": null,
+   "build_provenance": "unavailable",
+   "implementation": "kriya-kup/1",
+   "sqlite_version": "3.53.4"
+  },
+  "limits": {
+   "list_default": 50,
+   "list_max": 200,
+   "max_response_bytes": 8388608
+  },
+  "features": {
+   "snapshot": true,
+   "prompt": true
+  }
+ },
+ "error": null
+}

@@ -1,0 +1,16 @@
+{
+ "schema_version": 1,
+ "operation": "history.detail",
+ "request_id": "fixture",
+ "observed_at": "2026-10-04T09:31:00Z",
+ "source": null,
+ "consistency": null,
+ "data": null,
+ "error": {
+  "code": "SNAPSHOT_UNAVAILABLE",
+  "message": "snapshot 20261003T000000000000Z-f1c70009 is not published (pruned or never existed)",
+  "database_state": null,
+  "snapshot_id": "20261003T000000000000Z-f1c70009",
+  "reason": null
+ }
+}
