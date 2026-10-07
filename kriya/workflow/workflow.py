@@ -252,7 +252,6 @@ from kriya.workflow.planner_repair import (
 from kriya.workflow.pytest_stability import (
     classify_with_baseline_stability,
     record_regression_decision,
-    replay_on_untouched_baseline,
 )
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
@@ -3935,15 +3934,19 @@ class WorkflowEngine:
             baseline_runner = PolymorphicValidator(
                 workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
             ).test_runner()
+        # The baseline's verification call. REG-R1: the same call replays the
+        # untouched baseline for stability, so it runs in the same context.
+        def baseline_suite_run(target_test):
+            return PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_baseline_cfg,
+            ).run_tests(target_test=target_test)
+
         baseline_capture = capture_brownfield_baselines(
             run_id=run_id,
             target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
             full_regression_policy=full_regression_policy,
             environment_identity=baseline_environment,
-            run_validator=lambda target_test: PolymorphicValidator(
-                workspace_path, original_workspace_path=workspace_path,
-                autonomy_cfg=autonomy_baseline_cfg,
-            ).run_tests(target_test=target_test),
+            run_validator=baseline_suite_run,
             compute_revision=lambda: compute_workspace_content_hash(workspace_path),
             resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
             resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
@@ -4963,13 +4966,14 @@ class WorkflowEngine:
                         except Exception as exc:
                             logger.warning(f"POST environment identity unavailable: {exc}")
                     # REG-R1: per-test pytest authority; a disputed message/body is
-                    # measured on the untouched baseline before anyone is blamed.
+                    # measured on the untouched baseline, in the baseline's own
+                    # verification context, before anyone is blamed.
                     _baseline_delta_result, _stability = classify_with_baseline_stability(
                         baseline=state.validation_baseline_full_regression, post=_post_regression_outcome,
                         post_environment=_post_environment, cache=state.pytest_stability_cache,
-                        replay=functools.partial(replay_on_untouched_baseline, workspace_path=workspace_path,
-                                                 autonomy_cfg=self.kernel.config.autonomy),
+                        replay=baseline_suite_run,
                         current_revision=lambda: compute_workspace_content_hash(workspace_path),
+                        working_directory=os.path.realpath(workspace_path),
                     )
                     record_regression_decision("full_regression", state.validation_baseline_full_regression,
                                                _post_regression_outcome, _baseline_delta_result, _stability)
@@ -5040,9 +5044,9 @@ class WorkflowEngine:
                     _targeted_baseline_delta_result, _targeted_stability = classify_with_baseline_stability(
                         baseline=state.validation_baseline_targeted, post=_post_targeted_outcome,
                         post_environment=None, cache=state.pytest_stability_cache,
-                        replay=functools.partial(replay_on_untouched_baseline, workspace_path=workspace_path,
-                                                 autonomy_cfg=self.kernel.config.autonomy),
+                        replay=baseline_suite_run,
                         current_revision=lambda: compute_workspace_content_hash(workspace_path),
+                        working_directory=os.path.realpath(workspace_path),
                     )
                     record_regression_decision("targeted", state.validation_baseline_targeted,
                                                _post_targeted_outcome, _targeted_baseline_delta_result,

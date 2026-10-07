@@ -881,7 +881,6 @@ _AUDITED_WRITE_SITES = {
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,
     "kriya/workflow/regression_attribution.py": 1, "kriya/workflow/resume_fingerprints.py": 2,
-    "kriya/workflow/pytest_stability.py": 2,
     "kriya/workflow/skill_extraction.py": 3, "kriya/workflow/workflow.py": 2, "kriya/workflow/workflow_controller.py": 1,
     "kriya/workflow/worktree.py": 0, "plugins/core_tools/__init__.py": 1,
 }

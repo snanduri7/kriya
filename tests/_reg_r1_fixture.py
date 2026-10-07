@@ -8,6 +8,8 @@ whole-output fingerprint called that a candidate regression. This fixture reprod
 - ``test_message_varies_each_run``: the assertion MESSAGE (and so the body) differs on every run;
 - ``test_traceback_arguments_vary_each_run``: the message is stable, the traceback BODY differs (a frame argument);
 - ``test_stable_failure``: an already-failing test whose failure text never changes;
+- ``test_z_fails_only_under_the_full_suite``: fails in a full-suite run (state an earlier test leaves behind) with a
+  message that differs every run, and PASSES when run alone - its outcome depends on the verification context;
 - passing tests.
 
 Nothing here is specific to any repository; the run-varying values come from ``os.urandom``.
@@ -42,12 +44,24 @@ def test_message_varies_each_run():
 
 def test_traceback_arguments_vary_each_run():
     _run_tool({"RUN_ID": os.urandom(6).hex()})
+
+
+_SUITE_STATE = {}
+
+
+def test_y_records_suite_state():
+    _SUITE_STATE["load"] = os.urandom(4).hex()
+
+
+def test_z_fails_only_under_the_full_suite():
+    assert "load" not in _SUITE_STATE, f"suite state {_SUITE_STATE.get('load')} leaked into this test"
 '''
 
 TEST_FILE = "tests/test_suite.py"
 STABLE = "tests/test_suite.py::test_stable_failure"
 VARYING_MESSAGE = "tests/test_suite.py::test_message_varies_each_run"
 VARYING_BODY = "tests/test_suite.py::test_traceback_arguments_vary_each_run"
+SUITE_DEPENDENT = "tests/test_suite.py::test_z_fails_only_under_the_full_suite"
 
 
 def write_project(root, suite=SUITE):

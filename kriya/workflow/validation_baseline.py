@@ -150,6 +150,11 @@ PYTEST_FAILING_OUTCOMES = frozenset({"failed", "error"})
 # identity, outcome and exception type are always authoritative.
 STABILITY_FIELDS = ("message", "body")
 _PYTEST_VERSION_RE = re.compile(r"\bpytest-(\d[\w.]*)")
+# The session facts pytest prints before collecting that define where and how
+# the suite ran (interpreter/runner versions, root, config, test paths,
+# plugin set). Only these keyed lines: other header lines can carry values
+# that change every run (a random seed) and are never part of a context.
+_PYTEST_SESSION_FACT_RE = re.compile(r"^(platform|rootdir|configfile|testpaths|plugins):? (.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -196,6 +201,9 @@ class PytestSuiteEvidence:
     report_digest: Optional[str]
     runner_version: Optional[str]
     cases: Tuple[PytestCaseSignature, ...]
+    # The pytest session's own context facts (``_PYTEST_SESSION_FACT_RE``),
+    # sorted; part of the verification context a stability measurement binds.
+    session: Tuple[Tuple[str, str], ...] = ()
 
     def by_key(self) -> Dict[str, PytestCaseSignature]:
         return {case.key: case for case in self.cases}
@@ -204,7 +212,7 @@ class PytestSuiteEvidence:
         return {
             "version": self.version, "runner": "pytest", "runner_version": self.runner_version,
             "complete": self.complete, "reason": self.reason, "collected": self.collected,
-            "report_digest": self.report_digest,
+            "report_digest": self.report_digest, "session": [list(fact) for fact in self.session],
             "passed": [c.key for c in self.cases if c.outcome == "passed"],
             "skipped": [c.key for c in self.cases if c.outcome == "skipped"],
             "failing": [{"key": c.key, "outcome": c.outcome, "failure_type": c.failure_type,
@@ -229,6 +237,7 @@ class PytestSuiteEvidence:
             reason=data.get("reason") if supported else "PYTEST_EVIDENCE_VERSION_UNSUPPORTED",
             collected=int(data.get("collected") or 0), report_digest=data.get("report_digest"),
             runner_version=data.get("runner_version"), cases=tuple(sorted(cases, key=lambda c: c.key)),
+            session=tuple((str(k), str(v)) for k, v in data.get("session") or ()),
         )
 
 
@@ -295,6 +304,7 @@ def pytest_suite_evidence(raw_result: Dict[str, Any]) -> Optional[PytestSuiteEvi
         version=PYTEST_EVIDENCE_VERSION, complete=reason is None, reason=reason, collected=len(cases),
         report_digest=report_files[0].get("sha256") if report_files and isinstance(report_files[0], dict) else None,
         runner_version=version.group(1) if version else None, cases=tuple(sorted(cases, key=lambda c: c.key)),
+        session=tuple(sorted({(name, value.strip()) for name, value in _PYTEST_SESSION_FACT_RE.findall(output)})),
     )
 
 
@@ -879,7 +889,7 @@ WHOLE_OUTPUT_AUTHORITY = "whole_output"
 PYTEST_PER_TEST_AUTHORITY = "pytest_per_test"
 FIELD_STABLE = "STABLE"
 FIELD_VOLATILE = "VOLATILE"
-FIELD_INDETERMINATE = "INDETERMINATE"
+FIELD_UNRESOLVED = "UNRESOLVED"
 
 
 @dataclass(frozen=True)
@@ -905,7 +915,7 @@ def classify_pytest_per_test_delta(
     baseline alone) says the baseline reproduces it: a STABLE field that
     changed is CHANGED_FAILURE; VOLATILE fields lose authority for that test
     (it is PRE_EXISTING_FAILURE when nothing stable changed); a field not
-    yet measured, or INDETERMINATE, is STABILITY_UNRESOLVED (blocking, never
+    yet measured, or UNRESOLVED, is STABILITY_UNRESOLVED (blocking, never
     candidate-attributed). Unchanged passing/skipped tests are not listed.
     Keys of ``level2`` are console node ids where known, else JUnit keys."""
     stability = stability or {}
