@@ -1,0 +1,12 @@
+{
+ "killed": 1,
+ "total": 1,
+ "results": [
+  {
+   "mutant": "skip the untouched-baseline revision check",
+   "file": "kriya/workflow/pytest_stability.py",
+   "status": "KILLED",
+   "tests": "1 failed, 44 passed in 5.56s"
+  }
+ ]
+}

@@ -1,0 +1,72 @@
+{
+ "authority": "pytest_per_test",
+ "diagnostic_level1": "CHANGED_FAILURE",
+ "level2": {
+  "tests/test_suite.py::test_message_varies_each_run": "PRE_EXISTING_FAILURE",
+  "tests/test_suite.py::test_stable_failure": "PRE_EXISTING_FAILURE",
+  "tests/test_suite.py::test_traceback_arguments_vary_each_run": "PRE_EXISTING_FAILURE"
+ },
+ "blocking": false,
+ "blocking_reasons": [],
+ "volatile_fields_ignored": {
+  "tests/test_suite.py::test_message_varies_each_run": [
+   "message",
+   "body"
+  ],
+  "tests/test_suite.py::test_traceback_arguments_vary_each_run": [
+   "body"
+  ]
+ },
+ "replays": [
+  [
+   "tests/test_suite.py::test_message_varies_each_run",
+   "tests/test_suite.py::test_traceback_arguments_vary_each_run"
+  ],
+  [
+   "tests/test_suite.py::test_message_varies_each_run",
+   "tests/test_suite.py::test_traceback_arguments_vary_each_run"
+  ]
+ ],
+ "stability": [
+  {
+   "test": "tests.test_suite::test_message_varies_each_run",
+   "node_id": "tests/test_suite.py::test_message_varies_each_run",
+   "source": "replay",
+   "binding": "826b748f97fe5c5b7d6c479ce6f78da2a05bb454867afb367410eee17358c99b",
+   "reason": null,
+   "fields": {
+    "message": "VOLATILE",
+    "body": "VOLATILE"
+   },
+   "baseline_observation": "0979052d9836f49628cf7424ca380968ff34b473f10c2e9ee586f05c6fe7f0e4",
+   "replay_observations": [
+    "39700b923d3cefb4b19f72d8dbf6906b526a3df2e660926ea0044bc6c4be0202",
+    "7503b133b43d6a828e26766c3c3dd475ef59b7c0fd2b66d78c89925a345cc3b9"
+   ],
+   "replay_reports": [
+    "a5ddcb97fe158215f7278094682407ddcfb7899b4ffe1120e879edd014c8cd8a",
+    "a795e0b8fe9277f955b5b5e7e62beb3416aa732f1d4c22c219d289921e25c61b"
+   ]
+  },
+  {
+   "test": "tests.test_suite::test_traceback_arguments_vary_each_run",
+   "node_id": "tests/test_suite.py::test_traceback_arguments_vary_each_run",
+   "source": "replay",
+   "binding": "c879faa3cba06f04b2bea152c83cfdc524a6fd24000a23416bf4be7eb3cbceac",
+   "reason": null,
+   "fields": {
+    "message": "STABLE",
+    "body": "VOLATILE"
+   },
+   "baseline_observation": "fc8da63e798c88d50ec28b2a78d98b6482c33f6350940b91c561ecfc52c714b4",
+   "replay_observations": [
+    "ddc97adef0e00d20fb54d013aa1ff9351eb10072a494134b88e284083f85190b",
+    "3c775e14478bfa2645e3829347a00b8eefb2abbe4adecaca1f56e1198e85ff01"
+   ],
+   "replay_reports": [
+    "a5ddcb97fe158215f7278094682407ddcfb7899b4ffe1120e879edd014c8cd8a",
+    "a795e0b8fe9277f955b5b5e7e62beb3416aa732f1d4c22c219d289921e25c61b"
+   ]
+  }
+ ]
+}
