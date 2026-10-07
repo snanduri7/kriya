@@ -382,7 +382,9 @@ def test_the_pytest_gate_passes_each_target_as_its_own_argument(tmp_path):
     assert result["success"] is True  # pytest exit 5 (no tests) passes, as before
     cmd = seen[0]
     assert cmd[0] == "py-under-test" and cmd[-3:] == ["--", "tests/test_a.py", "tests/test b.py"]
-    assert repr([str(tmp_path), os.path.join(str(tmp_path), "src")]) in cmd[2]
+    # CONTAINED-PYTHON-TEST-GATE-001: roots are cwd-relative and resolved in the child.
+    assert "sys.path.extend([os.path.abspath(r) for r in ['.', 'src']])" in cmd[2]
+    assert str(tmp_path) not in cmd[2]
     with patch.object(PolymorphicValidator, "_resolve_python_interpreter", return_value=("x", "pip install failed")):
         failed = v.run_tests(None)
     # FS-1A: no test process ran, so its structured evidence is INDETERMINATE.

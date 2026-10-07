@@ -672,13 +672,23 @@ class PolymorphicValidator:
         # SEC-001-P6 Stage 3: the "no project-local venv" fallback must
         # also be execution-environment aware - Kriya's own `sys.executable`
         # (host mode) versus a generic "python3" token resolved by the
-        # container image's own PATH (contained mode). This is the one
-        # path a project with literally no requirements.txt/pyproject.toml
-        # dependency declaration falls back to - it will not have `pytest`
-        # preinstalled under containment the way Kriya's own host
-        # environment happens to (a real, smaller, documented residual
-        # limitation distinct from the venv case above, which always
-        # installs pytest explicitly regardless of mode).
+        # container image's own PATH (contained mode).
+        #
+        # CONTAINED-PYTHON-TEST-GATE-001 (2026-10-07, blind cohort T1/T4/T5):
+        # a project with no requirements.txt/pyproject.toml dependency
+        # declaration used to fall back to that bare container "python3",
+        # which has no pytest - so under the production profile the tests
+        # gate ran ZERO tests on both the baseline and every candidate
+        # (`ModuleNotFoundError: No module named 'pytest'`), every run
+        # stopped REGRESSION_UNATTRIBUTED, and a correct candidate was
+        # rejected (T1). Under containment such a project now gets the same
+        # project-local venv the manifest branches build (`python3 -m venv`
+        # + `pip install -q pytest` under DEPENDENCY_REGISTRY_ONLY, memoized
+        # per run); a venv-creation failure keeps the bare token (fail
+        # closed as before: no report, never a false pass). Host mode is
+        # unchanged: sys.executable has pytest. The resolver is shared with
+        # run_app_sequence()/run_app(), so runtime verification gets the
+        # same venv.
         contained = self.autonomy_cfg.contained_execution_required
         default_interpreter = "python3" if contained else sys.executable
         requirements_path = os.path.join(self.workspace_path, "requirements.txt")
@@ -707,6 +717,15 @@ class PolymorphicValidator:
                     return default_interpreter, install_error
                 if venv_python:
                     return venv_python, None
+                return default_interpreter, None
+        if contained:
+            # No dependency declaration at all (CONTAINED-PYTHON-TEST-GATE-001):
+            # a venv with pytest only, through the same acquisition path.
+            venv_python, install_error = self._ensure_project_venv([])
+            if install_error:
+                return default_interpreter, install_error
+            if venv_python:
+                return venv_python, None
         return default_interpreter, None
 
     def _detect_stack(self) -> str:

@@ -65,16 +65,31 @@ def test_contained_python_validation_uses_container_interpreter_never_host_execu
     assert interpreter == ".kriya/venv/bin/python" or interpreter.replace("\\", "/") == ".kriya/venv/bin/python"
 
 
-def test_contained_python_validation_without_manifest_uses_generic_container_token(tmp_path):
-    """No requirements.txt/pyproject.toml at all - falls back to a bare
-    "python3" token (resolved by the container image's own PATH), never
-    Kriya's sys.executable, which would not exist inside the container."""
+def test_contained_python_validation_without_manifest_runs_tests_from_a_pytest_venv(tmp_path):
+    """CONTAINED-PYTHON-TEST-GATE-001 (cohort T1): no requirements.txt and no
+    pyproject dependencies, a src-layout package and a test under tests/ -
+    through the REAL run_tests() under OCI containment. Before the fix the
+    gate ran the image's bare `python3` (no pytest -> STRUCTURED_REPORT_MISSING,
+    zero tests on baseline and candidate); now the project venv provides
+    pytest and the in-child resolved roots make `import pkg` work at the
+    container mount."""
     import sys
 
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("def answer():\n    return 42\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "__init__.py").write_text("")
+    (tmp_path / "tests" / "test_pkg.py").write_text(
+        "from pkg import answer\n\ndef test_answer():\n    assert answer() == 42\n")
+
     validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    assert validator.stack == "python"
+    result = validator.run_tests()
+    assert result["success"] is True, result["output"]
+    assert result["test_execution"]["completeness"] == "COMPLETE"
+    assert result["test_execution"]["status_counts"] == {"passed": 1}
     interpreter, install_error = validator._resolve_python_interpreter()
-    assert install_error is None
-    assert interpreter == "python3"
+    assert (interpreter, install_error) == (".kriya/venv/bin/python", None)
     assert interpreter != sys.executable
 
 

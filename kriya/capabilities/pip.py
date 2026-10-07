@@ -113,10 +113,20 @@ class PipBuildAdapter(BuildAdapter):
         # prepending) both known-good roots makes either import convention resolve
         # deterministically without reopening the shadowing risk: stdlib/installed
         # packages earlier in sys.path still win, so this only kicks in as a fallback.
-        extra_roots = [v.workspace_path]
+        # CONTAINED-PYTHON-TEST-GATE-001 (2026-10-07, blind cohort T5): the
+        # roots are passed as names RELATIVE to the child's cwd and resolved
+        # inside the child. The child's cwd is the workspace in both modes
+        # (host: cwd=workspace_path; OCI: `-w /kriya/workspace`), so host
+        # mode resolves to the same roots as before (realpath-equal), while
+        # a contained run no longer embeds HOST absolute paths that do not
+        # exist at the container mount - which made `extra/` test modules
+        # unable to import the package (session aborted at collection, zero
+        # tests on baseline and candidate). The existence checks stay on the
+        # host side: the mount is the same tree.
+        extra_roots = ["."]
         src_dir = os.path.join(v.workspace_path, "src")
         if os.path.isdir(src_dir):
-            extra_roots.append(src_dir)
+            extra_roots.append("src")
         # The Developer Agent keeps inventing a Maven/Gradle-style
         # src/main/<lang> (and src/test/<lang>) nesting for pure-Python
         # goals despite an explicit, correctly-worded prompt instruction
@@ -140,7 +150,7 @@ class PipBuildAdapter(BuildAdapter):
         for maven_style_root in ("src/main/python", "src/main", "src/test/python", "src/test"):
             candidate = os.path.join(v.workspace_path, *maven_style_root.split("/"))
             if os.path.isdir(candidate):
-                extra_roots.append(candidate)
+                extra_roots.append(maven_style_root)
 
         # A goal needing a real third-party package (e.g. Django) can only
         # ever pass this gate if that package happens to already be
@@ -161,7 +171,7 @@ class PipBuildAdapter(BuildAdapter):
             "-c",
             "import sys, os; "
             "sys.path = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath('.')]; "
-            f"sys.path.extend({extra_roots!r}); "
+            f"sys.path.extend([os.path.abspath(r) for r in {extra_roots!r}]); "
             + (_SILENT_REPORT_SUMMARY if report_argument else "")
             + "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
         ]
