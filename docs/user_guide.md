@@ -703,6 +703,20 @@ A violated requirement always blocks success. `autonomy.requirement_unknown_poli
 that unit before its changes are applied, with `[REQUIREMENTS UNRESOLVED]`, and is not retried (the Developer
 cannot supply a verdict). The production profile seals both to `block`. Both fields are SECURITY_AUTHORITY.
 
+Under `requirement_unverified_policy: block` a requirement that nothing deterministic can ever close could only
+ever fail, so Kriya decides that before the first model call (REQUIREMENT-CLOSURE-PLAIN-GOAL-001): every
+requirement of the goal must have a deterministic closer, else the run is refused with
+`[GOAL INSUFFICIENT FOR VERIFICATION]` (`failure_category: goal_insufficient_for_verification`,
+`requirements_admission` lists each residual requirement, why, and the accepted forms). The closers a plain goal can
+have, besides the acceptance file and the approval below: a statement naming existing test files (those tests are
+run); a whole-suite preservation statement such as `Every existing test must keep passing unchanged.` (the
+candidate's own full suite must run to completion, green, with complete structured evidence); a test-immutability
+constraint such as `Do not change any existing test.` (decided from what the run changed); `Do not modify any other
+file.` when the goal names the file(s) to change; a statement of a dependency migration the repository resolves.
+Anything else - a behaviour described in prose, a general rule, an API-preservation ask - is residual: model judgment
+never closes it (`MODEL_CLAIMED` is advisory evidence only), so give it an acceptance case or restate it. Under the
+default `record` policy nothing is refused and such requirements are reported as before.
+
 In a milestone plan the check runs in the final integration unit, so earlier milestones are already committed
 when it runs. If it fails, the plan is not successful, and the result's `committed_work_units` (with
 `committed_changes_retained`), the RunRecord's commit cycles and the CLI all name the units whose changes are

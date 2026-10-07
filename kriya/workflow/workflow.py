@@ -256,7 +256,9 @@ from kriya.workflow.pytest_stability import (
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
+    GOAL_INSUFFICIENT_FOR_VERIFICATION,
     REQUIREMENTS_UNRESOLVED,
+    admission_gap,
     blocking_requirements,
     cited_requirement_ids,
     requirement_evidence,
@@ -1002,6 +1004,93 @@ def close_requirements_with_acceptance_tests(
         test_files=None if reference is None else sorted(set(test_files) | set(reference)),
         execute=execute, source="requirement_closure.acceptance", revision=revision,
         approval=approval, base_revision=base_revision,
+    )
+
+
+def _requirement_policy_blocks(autonomy: Any) -> bool:
+    """Whether a requirement without accepted evidence blocks success under this
+    configuration (the production preset seals both policies to ``block``). Only
+    then is a requirement with no deterministic closer unverifiable in effect,
+    so only then is a goal refused at admission."""
+    return getattr(autonomy, "requirement_unverified_policy", "record") == "block"
+
+
+def _migration_identities(goal: str, workspace_path: str) -> List[Tuple[str, str]]:
+    """(source, target) of the dependency migration the goal states, when the
+    repository resolves it (the migration gate's closer binds to it); empty
+    otherwise or when resolution fails."""
+    try:
+        resolution = resolve_migration_resolution(goal, workspace_path)
+    except Exception:
+        return []
+    obligation = getattr(resolution, "obligation", None)
+    if obligation is None:
+        return []
+    return [(obligation.source_identity, obligation.target_identity)]
+
+
+def _acceptance_requirement_ids(acceptance: Any) -> List[str]:
+    """The requirement ids an operator acceptance artifact covers (none without one)."""
+    return sorted(getattr(acceptance, "requirement_ids", ()) or ()) if acceptance is not None else []
+
+
+def _tracked_workspace_paths(workspace_path: str) -> List[str]:
+    """The paths git tracks in the workspace (the referent set of a mutation-scope
+    statement at admission); empty when git cannot answer."""
+    from kriya.workflow.worktree import git_read_lines
+
+    try:
+        return [path for path in git_read_lines(workspace_path, "ls-files") if path]
+    except Exception:
+        return []
+
+
+def close_requirements_by_test_immutability(
+    ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    candidate_paths: Iterable[str], revision: Any,
+) -> List[Dict[str, Any]]:
+    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: decides every "do not change any
+    existing test" requirement from the run's own mutation record
+    (mutation_scope_evidence) against the tests that existed before the run
+    (_reference_test_files). Shared by the pre-apply boundary and enforce's
+    terminal gate; a goal without such a requirement costs nothing."""
+    from kriya.workflow.requirements import close_test_immutability_requirements, is_test_immutability_requirement
+
+    if not any(is_test_immutability_requirement(r.text) for r in requirement_set.requirements):
+        return []
+    _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
+    return close_test_immutability_requirements(
+        ledger, requirement_set, reference_test_files=_reference_test_files(candidate_root, workspace_path),
+        present_test_files=_candidate_test_files(candidate_root), scope_evidence=evidence,
+        source="requirement_closure.test_immutability", revision=revision,
+    )
+
+
+def close_requirements_by_suite_preservation(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    revision: Any, toolchain_declaration_mutable: bool, java_home_override: Optional[str] = None,
+    tree_binding: Any = None,
+) -> List[Dict[str, Any]]:
+    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
+    preservation requirement ("every existing test must keep passing") from
+    the candidate's own full test run under the production test gate, with
+    the run's toolchain authority (as the named-test closer): COMPLETE
+    structured evidence, the gate passed, tests executed, no executed case
+    failed. The suite runs once, only when such a requirement is open."""
+    from kriya.workflow.requirements import close_suite_preservation_requirements
+
+    def run_suite() -> Dict[str, Any]:
+        validator = PolymorphicValidator(
+            candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+            toolchain_declaration_mutable=toolchain_declaration_mutable,
+        )
+        validator.tree_binding = tree_binding
+        validator.java_home_override = java_home_override
+        return validator.run_tests()
+
+    return close_suite_preservation_requirements(
+        ledger, requirement_set, test_files=_candidate_test_files(candidate_root), run_suite=run_suite,
+        source="requirement_closure.suite_preservation", revision=revision,
     )
 
 
@@ -2261,6 +2350,43 @@ class WorkflowEngine:
         # MODEL-EVIDENCE-HARDENING-001: what the exception guard needs to
         # attribute this run's calls if it raises (_record_run_exception).
         note_run_trace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id)
+
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: before any model call, every
+        # mandatory requirement must have a deterministic closer; a goal that
+        # cannot be verified is refused here, naming what and why.
+        if requirement_set is not None and _requirement_policy_blocks(self.kernel.config.autonomy):
+            from kriya.core.trace import TraceLogger
+
+            admission = admission_gap(
+                requirement_set, test_files=_candidate_test_files(workspace_path),
+                acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self)),
+                tracked_paths=_tracked_workspace_paths(workspace_path),
+                migration_identities=_migration_identities(goal, workspace_path),
+            )
+            if admission is not None:
+                logger.error(admission.message)
+                state.record_event(RunEvent(
+                    kind="requirement.admission_refused", attempt=0, source="workflow.run_generation_workflow",
+                    authority=EventAuthority.AUTHORITATIVE, message=admission.message[:600],
+                    details=admission.to_dict(),
+                ))
+                try:
+                    TraceLogger(trace_db_path(self.kernel.config)).log_run(
+                        run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                        attempts=0, status="failure", files_modified=[],
+                        failure_category=GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                        milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                        milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                    )
+                except Exception as trace_ex:
+                    logger.warning(f"Failed to write run trace: {trace_ex}")
+                return {
+                    "status": "failure", "failure_category": GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                    "reason_codes": [admission.reason_code], "error": admission.message,
+                    "environment_failure": admission.message, "goal": goal, "workspace_path": workspace_path,
+                    "run_id": trace_id, "files": [], "quality_gates_passed": False,
+                    "requirements_admission": admission.to_dict(),
+                }
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
 
@@ -4338,7 +4464,33 @@ class WorkflowEngine:
                     except Exception as exc:
                         closures = []
                         logger.warning(f"Requirement closure by named tests unavailable: {exc}")
-                    closures = scope_closures + acceptance_closures + closures
+                    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the run's mutation
+                    # record decides "do not change any existing test"; the
+                    # candidate's own complete, green full suite closes
+                    # "every existing test must keep passing".
+                    try:
+                        immutability_closures = await asyncio.to_thread(
+                            close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
+                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                            revision=state.attempt_number,
+                        )
+                    except Exception as exc:
+                        immutability_closures = []
+                        logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
+                    try:
+                        suite_closures = await asyncio.to_thread(
+                            close_requirements_by_suite_preservation, self.kernel.config.autonomy,
+                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                            revision=state.attempt_number,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan,
+                            ),
+                            java_home_override=state.java_home_override,
+                        )
+                    except Exception as exc:
+                        suite_closures = []
+                        logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
+                    closures = scope_closures + acceptance_closures + closures + immutability_closures + suite_closures
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,

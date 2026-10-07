@@ -158,8 +158,14 @@ def _assert_unexecuted_test_never_succeeds(observed):
 
 
 def test_the_specimen_never_succeeds_under_the_production_policy(tmp_path, monkeypatch):
-    """The live T3 configuration (FS-1A and FS-1B both active)."""
-    _assert_unexecuted_test_never_succeeds(_run(tmp_path, monkeypatch, PRODUCTION))
+    """The live T3 configuration (FS-1A and FS-1B both active). REQUIREMENT-CLOSURE-PLAIN-GOAL-001: under the
+    production policy the specimen's goal is refused before any model call (no requirement has a deterministic
+    closer), so the false success can no longer even be attempted; the FS-1A path stays covered under RECORD."""
+    observed = _run(tmp_path, monkeypatch, PRODUCTION)
+    legacy = observed.result.legacy_result
+    assert legacy["status"] != "success" and legacy["failure_category"] == "goal_insufficient_for_verification"
+    assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
+    assert _test_delta_outcomes(observed) == [] and not observed.of("candidate.change")
 
 
 def test_test_execution_integrity_alone_stops_the_specimen(tmp_path, monkeypatch):
@@ -189,8 +195,8 @@ def test_a_correct_candidate_with_only_model_judged_requirements_is_blocked_in_p
     legacy = observed.result.legacy_result
     assert legacy["status"] != "success"
     assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
-    assert any(d["success"] for d in _test_delta_outcomes(observed))
-    outcomes = legacy["requirements"]["outcomes"]
-    assert outcomes and set(outcomes.values()) == {"unverified"}
-    assert {v["model_outcome"] for v in legacy["requirements"]["verdicts"].values()} == {"satisfied"}
-    assert "REQUIREMENTS_UNRESOLVED" in json.dumps(legacy, default=str)
+    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the specimen's requirements have no deterministic closer, so under the
+    # production policy the run is refused before the first model call - no candidate, no verdict, no test delta.
+    assert legacy["failure_category"] == "goal_insufficient_for_verification"
+    assert legacy["requirements_admission"]["residual"] and _test_delta_outcomes(observed) == []
+    assert "GOAL_INSUFFICIENT_FOR_VERIFICATION" in json.dumps(legacy, default=str)

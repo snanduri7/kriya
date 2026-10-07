@@ -64,11 +64,15 @@ async def test_1_a_model_missing_alone_spends_no_retry_and_reaches_the_terminal_
 
 @pytest.mark.asyncio
 async def test_3_no_closure_and_model_satisfied_is_unverified_and_blocks_under_production(tmp_path):
-    cfg, engine, _ = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt),
-                             requirement_unknown_policy="block", requirement_unverified_policy="block")
+    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: under production a goal whose requirements have no deterministic closer
+    is refused before the verifier (or any model) runs - the model's "satisfied" can never be heard, let alone
+    authorize anything."""
+    cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt),
+                                 requirement_unknown_policy="block", requirement_unverified_policy="block")
     res = await _run(engine, _workspace(tmp_path))
-    assert set(res["requirements"]["outcomes"].values()) == {"unverified"}
-    assert res["quality_gates_passed"] is False and res["failure_category"] == "requirements_unresolved"
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "goal_insufficient_for_verification"
+    assert res["requirements_admission"]["residual"] and calls["spec"] == []
+    assert engine.developer.run_generation.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -76,9 +80,8 @@ async def test_4_no_closure_and_model_missing_is_unverified_and_blocks_under_pro
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt, missing=("REQ-3",)),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
     res = await _run(engine, _workspace(tmp_path))
-    assert set(res["requirements"]["outcomes"].values()) == {"unverified"}
-    assert res["quality_gates_passed"] is False and res["failure_category"] == "requirements_unresolved"
-    assert engine.developer.run_generation.await_count == 1 and len(calls["spec"]) == 1
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "goal_insufficient_for_verification"
+    assert engine.developer.run_generation.await_count == 0 and calls["spec"] == []  # refused before any model call
 
 
 @pytest.mark.asyncio

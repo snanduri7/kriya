@@ -8,7 +8,6 @@ BEHAVIOR has no producer today (B2/B3), so such a requirement stays
 UNVERIFIED and production blocks it. Controls 1-9 of the owner's brief, the
 live A1 false success (tests/_fs1c1_a1_specimen.py), and the direct workflow
 end to end with a real C0 oracle."""
-import json
 from unittest.mock import patch
 
 import pytest
@@ -207,11 +206,15 @@ async def test_end_to_end_a_passing_regression_oracle_never_carries_new_behaviou
          patch("kriya.tools.validate.PolymorphicValidator.run_tests",
                new=_real_named_test_runs(runs, {"success": True, "output": "3 passed"})):
         res = await engine.run_generation_workflow(goal=goal, workspace_path=str(workspace))
-    [closure] = [c for event in _events(cfg, "requirement.closure") for c in event["closures"] if c.get("tests")][:1]
-    assert closure["reason_code"] == ("ORACLE_PASSED" if succeeds else REQUIREMENT_BEHAVIOR_UNVERIFIED)
     assert res["quality_gates_passed"] is succeeds
     assert (workspace / "greeting.py").exists() is succeeds            # never applied without success
-    if not succeeds:
-        assert closure["regression_preserved"] is True
-        assert res["requirements"]["outcomes"]["REQ-1"] == "unverified"
-        assert "REQUIREMENTS_UNRESOLVED" in json.dumps(res, default=str)
+    if succeeds:
+        [closure] = [c for event in _events(cfg, "requirement.closure") for c in event["closures"] if c.get("tests")][:1]
+        assert closure["reason_code"] == "ORACLE_PASSED"
+    else:
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the new-behaviour claim has no closer (the named test proves only
+        # preservation), so under the production policy the run is refused before any model call - the C0 oracle
+        # can never be read as carrying the behaviour because it never has the chance to.
+        assert res["failure_category"] == "goal_insufficient_for_verification"
+        assert "without an acceptance case" in res["requirements_admission"]["residual"][0]["why"]
+        assert runs == [] and _events(cfg, "requirement.closure") == []

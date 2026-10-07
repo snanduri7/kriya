@@ -461,7 +461,11 @@ BEHAVIOR = "BEHAVIOR"
 # kriya/workflow/acceptance_oracle.py, ``acceptance_oracle``) or human-bound acceptance
 # authority over an exact approved suite (B3, ``human_bound_acceptance``,
 # kriya/workflow/acceptance_approval.py).
-NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle"})
+# REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the candidate's own complete, green full
+# test suite closes a pure suite-preservation statement ("every existing test
+# must keep passing"); it proves regression preservation only, like a named test.
+FULL_REGRESSION_METHOD = "full_regression_oracle"
+NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle", FULL_REGRESSION_METHOD})
 BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance"})
 REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
 
@@ -484,10 +488,14 @@ _PRESERVATION_WORDS = frozenset({
 def requirement_claims(text: str, named_tests: Iterable[str]) -> Tuple[str, ...]:
     """The claims a requirement statement makes, decided deterministically
     from its own words: REGRESSION_PRESERVATION when it names existing tests
-    (``named_tests``), and BEHAVIOR when anything remains once the test
-    references and the closed preservation vocabulary are removed (or when it
-    names no test at all)."""
+    (``named_tests``), or when it is, in its entirety, a suite-preservation
+    statement naming no test (REQUIREMENT-CLOSURE-PLAIN-GOAL-001,
+    ``is_suite_preservation_requirement``), and BEHAVIOR when anything remains
+    once the test references and the closed preservation vocabulary are removed
+    (or when it names no test at all)."""
     references = set()
+    if not any(named_tests) and is_suite_preservation_requirement(text):
+        return (REGRESSION_PRESERVATION,)
     for path in named_tests:
         base = path.rsplit("/", 1)[-1]
         references.update({path.lower(), base.lower(), base.rsplit(".", 1)[0].lower()})
@@ -905,6 +913,14 @@ def mutation_path_roles(requirements: RequirementSet, tracked_paths: Iterable[st
     tracked = set(tracked_paths)
     roles: Dict[str, set] = {}
     for requirement in requirements.requirements:
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: a path a pure preservation
+        # statement names ("tests/test_a.py must keep passing") is read, never
+        # written - a reference, whatever precedes it.
+        named = named_existing_tests(requirement.text, tracked)
+        if named and requirement_claims(requirement.text, named) == (REGRESSION_PRESERVATION,):
+            for path in named:
+                roles.setdefault(path, set()).add("reference")
+            continue
         tokens = [(m.group("code"), m.group("word"), m.group("boundary"))
                   for m in _ROLE_TOKEN.finditer(requirement.text)]
         for index, (code, word, _) in enumerate(tokens):
@@ -1033,6 +1049,293 @@ def named_existing_tests(text: str, test_files: Iterable[str]) -> List[str]:
         if path in names or base in names or (len(stem) > 3 and stem in names):
             named.append(path)
     return named
+
+
+# ------------------------------------------------------------ REQUIREMENT-CLOSURE-PLAIN-GOAL-001
+#
+# A plain-language goal is valid requirement authority, but every mandatory
+# requirement needs a deterministic closer; MODEL_CLAIMED closes nothing. The
+# closers the repository and the run can give a plain goal, besides the
+# operator's acceptance file (BEHAVIOR) and the named-test oracle:
+# - SUITE_PRESERVATION: "every existing test must keep passing (unchanged)",
+#   closed by the candidate's own complete, green full suite;
+# - TEST_IMMUTABILITY: "do not change any existing test", closed by the run's
+#   own mutation record (no existing test file changed or deleted);
+# - MUTATION_SCOPE: "do not modify any other file" (close_mutation_scope_requirements).
+# A requirement with no closer is RESIDUAL: the goal is refused before any
+# model call (GOAL_INSUFFICIENT_FOR_VERIFICATION), naming it and the accepted
+# forms. Recognizers are closed vocabularies with full matches - an unknown
+# phrasing is residual, never guessed.
+GOAL_INSUFFICIENT_FOR_VERIFICATION = "GOAL_INSUFFICIENT_FOR_VERIFICATION"
+SUITE_PRESERVATION = "suite_preservation"
+TEST_IMMUTABILITY = "test_immutability"
+TEST_IMMUTABILITY_METHOD = "test_immutability"
+CLOSER_NAMED_TESTS = "named_tests"
+CLOSER_ACCEPTANCE = "acceptance"
+CLOSER_MUTATION_SCOPE = "mutation_scope"
+CLOSER_MIGRATION_GATE = "migration_gate"
+
+ACCEPTED_GOAL_FORMS = (
+    "a statement naming existing test files by path or name (closed by running exactly those tests)",
+    "a whole-suite preservation statement, e.g. 'Every existing test must keep passing unchanged.' (closed by the "
+    "candidate's own complete, green full test suite)",
+    "a test-immutability constraint, e.g. 'Do not change any existing test.' (closed by the run's mutation record)",
+    "the file-boundary constraint 'Do not modify any other file.' when the goal names the file(s) to change",
+    "a behaviour statement covered by an operator acceptance file (--acceptance) or approval (--acceptance-approval)",
+)
+
+_SUITE_NOUNS = frozenset({"test", "tests", "suite", "testsuite"})
+_SUITE_PRESERVATION_CUES = frozenset({"pass", "passes", "passing", "green", "unchanged", "intact", "working", "works",
+                                      "succeed", "succeeds", "successful"})
+# Everything a pure whole-suite statement may be made of (besides a command or
+# path in parentheses or code spans, which are stripped first).
+_SUITE_PRESERVATION_WORDS = _PRESERVATION_WORDS | frozenset({
+    "every", "each", "any", "current", "whole", "entire", "full", "complete", "unit", "integration", "automated",
+    "as", "before", "after", "same", "run", "runs", "running", "command", "via", "using", "through", "also", "this",
+    "these", "those", "project", "projects", "repository", "repo", "codebase", "module", "modules", "package",
+    "packages", "work", "working", "works", "succeed", "succeeds", "successful", "successfully", "exactly", "fully",
+    "always", "at", "on", "for", "by", "under", "including", "included", "when", "once", "done", "afterwards",
+    "cases", "case", "scenario", "scenarios", "coverage", "please", "already", "present", "previously", "prior",
+})
+_STRIP_CODE_AND_PARENS = re.compile(r"`[^`]*`|\([^()]*\)|\"[^\"]*\"|'[^']*'")
+_TEST_IMMUTABILITY_REQUIREMENT = re.compile(
+    r"(?:please\s+)?(?:do not|don't|must not|mustn't|should not|shouldn't|shall not|never|without)\s+"
+    r"(?:modify|modifying|change|changing|edit|editing|touch|touching|alter|altering|remove|removing|delete|"
+    r"deleting|rewrite|rewriting)\s+(?:any\s+of\s+the\s+|any\s+|the\s+|all\s+)?(?:existing\s+|current\s+|pre-existing\s+)?"
+    r"(?:unit\s+|integration\s+)?tests?(?:\s+files?|\s+cases?|\s+suite)?"
+    r"(?:\s+(?:in|under)\s+\S+)?\s*[.!]?",
+    re.IGNORECASE,
+)
+
+
+def is_suite_preservation_requirement(text: str) -> bool:
+    """Whether a requirement is, in its entirety, a whole-suite preservation
+    statement: it names the test suite, carries a preservation cue, and
+    consists of nothing but the closed suite-preservation vocabulary once
+    code spans, quotes and parentheses (a command, a path) are removed. A
+    statement naming specific tests is the named-test closer's, not this."""
+    stripped = _STRIP_CODE_AND_PARENS.sub(" ", _clean(text or ""))
+    tokens = re.findall(r"[a-z]+", stripped.lower())
+    if not tokens:
+        return False
+    words = set(tokens)
+    if not (words & _SUITE_NOUNS) or not (words & _SUITE_PRESERVATION_CUES):
+        return False
+    return all(token in _SUITE_PRESERVATION_WORDS for token in tokens)
+
+
+def is_test_immutability_requirement(text: str) -> bool:
+    """Whether a requirement is, in its entirety, "do not change (any) existing
+    test(s)" - closed by the run's own mutation record."""
+    return bool(_TEST_IMMUTABILITY_REQUIREMENT.fullmatch(_clean(text or "")))
+
+
+class GoalAdmissionError(Exception):
+    """GOAL_INSUFFICIENT_FOR_VERIFICATION: a mandatory requirement of the goal
+    has no deterministic closer; raised before any model call."""
+
+    def __init__(self, residual: Sequence[Mapping[str, Any]], closers: Mapping[str, Sequence[str]]) -> None:
+        self.reason_code = GOAL_INSUFFICIENT_FOR_VERIFICATION
+        self.residual = [dict(entry) for entry in residual]
+        self.closers = {key: list(value) for key, value in closers.items()}
+        super().__init__(self.message)
+
+    @property
+    def message(self) -> str:
+        listed = "; ".join(f"{entry['id']}: {entry['text']!r} ({entry['why']})" for entry in self.residual)
+        return (f"{GOAL_INSUFFICIENT_FOR_VERIFICATION}: {len(self.residual)} mandatory requirement(s) of the goal have "
+                f"no deterministic closer, so success could never be verified - {listed}. Accepted forms: "
+                + "; ".join(ACCEPTED_GOAL_FORMS))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"reason_code": self.reason_code, "residual": list(self.residual), "closers": dict(self.closers),
+                "accepted_forms": list(ACCEPTED_GOAL_FORMS)}
+
+
+def _migration_terms(identity: str) -> set:
+    return {token for token in re.split(r"[-_]", str(identity).lower()) if len(token) >= 3}
+
+
+def names_migration(text: str, migration_identities: Iterable[Tuple[str, str]]) -> bool:
+    """Whether a statement names both the source and the target of one of the
+    run's resolved dependency migrations (the deterministic migration gate's
+    own binding rule, kriya/workflow/attempt.py _close_requirements_by_migration_gate)."""
+    lowered = (text or "").lower()
+
+    def _names(terms: set) -> bool:
+        return any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in terms)
+
+    return any(_names(_migration_terms(source)) and _names(_migration_terms(target))
+               for source, target in migration_identities if source and target)
+
+
+def deterministic_closers(
+    requirements: RequirementSet, *, test_files: Iterable[str], acceptance_ids: Iterable[str] = (),
+    tracked_paths: Iterable[str] = (), migration_identities: Iterable[Tuple[str, str]] = (),
+) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
+    """(closers per requirement id, residual requirements): which deterministic
+    closer each requirement has, decided from its own words, the repository's
+    test files, the operator acceptance file's covered ids and the tracked
+    paths - never from a model. A requirement is residual when one of its
+    claims has no closer."""
+    files = sorted(set(test_files))
+    covered = set(acceptance_ids)
+    tracked = list(tracked_paths)
+    migrations = [tuple(pair) for pair in migration_identities]
+    closers: Dict[str, List[str]] = {}
+    residual: List[Dict[str, Any]] = []
+    roles = mutation_path_roles(requirements, tracked) if any(
+        is_mutation_scope_requirement(r.text) for r in requirements.requirements) else None
+    for requirement in requirements.requirements:
+        found: List[str] = []
+        why: Optional[str] = None
+        if is_mutation_scope_requirement(requirement.text):
+            if roles and roles["ambiguous"]:
+                why = "the goal names paths whose role (change target or reference) cannot be determined"
+            elif roles and roles["authorized"]:
+                found.append(CLOSER_MUTATION_SCOPE)
+            else:
+                why = "the goal names no tracked file to change, so 'other' has no referent"
+        elif is_test_immutability_requirement(requirement.text):
+            found.append(TEST_IMMUTABILITY)
+        elif migrations and names_migration(requirement.text, migrations):
+            found.append(CLOSER_MIGRATION_GATE)
+        else:
+            named = named_existing_tests(requirement.text, files)
+            if not named and is_suite_preservation_requirement(requirement.text):
+                found.append(SUITE_PRESERVATION)
+            else:
+                claims = requirement_claims(requirement.text, named)
+                if named and REGRESSION_PRESERVATION in claims:
+                    found.append(CLOSER_NAMED_TESTS)
+                if BEHAVIOR in claims:
+                    if requirement.id in covered:
+                        found.append(CLOSER_ACCEPTANCE)
+                    else:
+                        why = ("a behaviour statement without an acceptance case; model judgment never closes it"
+                               if named else "no existing test named, no acceptance case, not a preservation or "
+                                             "scope statement; model judgment never closes it")
+        closers[requirement.id] = found
+        if why is not None or not found:
+            residual.append({"id": requirement.id, "text": requirement.text,
+                             "why": why or "no deterministic closer recognized"})
+    return closers, residual
+
+
+def admission_gap(
+    requirements: RequirementSet, *, test_files: Iterable[str], acceptance_ids: Iterable[str] = (),
+    tracked_paths: Iterable[str] = (), migration_identities: Iterable[Tuple[str, str]] = (),
+) -> Optional[GoalAdmissionError]:
+    """The typed refusal when a mandatory requirement has no deterministic
+    closer, else None. Decided from the authoritative set before any model
+    call; a run without a requirement set (``kriya fix``) is never refused."""
+    closers, residual = deterministic_closers(requirements, test_files=test_files, acceptance_ids=acceptance_ids,
+                                              tracked_paths=tracked_paths, migration_identities=migration_identities)
+    return GoalAdmissionError(residual, closers) if residual else None
+
+
+def close_test_immutability_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, *, reference_test_files: Optional[Sequence[str]],
+    present_test_files: Iterable[str], scope_evidence: Optional[Mapping[str, Any]], source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Decide every test-immutability requirement from the run's own mutation
+    record: an existing test file (``reference_test_files``: the files that
+    existed before the run) the candidate changed, or that is no longer
+    present (``present_test_files``), is deterministic VIOLATED evidence;
+    none changed and nothing foreign closes it. Unavailable evidence or an
+    unknown reference set leaves the verdict as it is (fail closed)."""
+    attempts: List[Dict[str, Any]] = []
+    present = set(present_test_files)
+    for requirement in requirements.requirements:
+        if not is_test_immutability_requirement(requirement.text):
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        verdict = (record.evidence or {}) if record is not None else {}
+        evidence_id = verdict.get("evidence_id")
+        closable = verdict.get("outcome") in (RequirementOutcome.SATISFIED.value, RequirementOutcome.UNVERIFIED.value)
+        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": TEST_IMMUTABILITY, "closed": False}
+        if not evidence_id:
+            entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
+        elif reference_test_files is None:
+            entry["reason"] = "the tests that existed before the run cannot be established"
+        elif not scope_evidence or scope_evidence.get("unavailable"):
+            entry["reason"] = "mutation evidence unavailable: " + str((scope_evidence or {}).get("unavailable") or "not collected")
+        else:
+            reference = sorted(set(reference_test_files))
+            changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
+            touched = sorted(path for path in reference if path in changed)
+            missing = sorted(path for path in reference if path not in present)
+            detail = {"kind": TEST_IMMUTABILITY, "requirement": requirement.id, "reference_test_files": reference,
+                      "changed_test_files": touched, "missing_test_files": missing,
+                      **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
+            entry.update(detail)
+            if touched or missing:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                           revision=revision, violated=True)
+                entry["reason"] = ("existing test file(s) changed: " + ", ".join(touched) if touched else
+                                   "existing test file(s) missing: " + ", ".join(missing))
+                entry["violated"] = True
+            elif not closable:
+                entry["reason"] = f"the verifier's verdict is {verdict.get('outcome')}, which evidence never closes"
+            else:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                           revision=revision)
+                entry["closed"] = True
+        attempts.append(entry)
+    return attempts
+
+
+def close_suite_preservation_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, *, test_files: Iterable[str],
+    run_suite: Any, source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Close every UNVERIFIED whole-suite preservation requirement from the
+    candidate's own full test run (``run_suite()``: the production test gate
+    result, run once, lazily). Closes only when the structured evidence of
+    that run is COMPLETE, the gate passed, at least one test executed and no
+    executed case failed; anything else leaves it as it is, with why."""
+    from kriya.tools import test_execution
+
+    files = list(test_files)
+    outcomes = requirement_outcomes(ledger, requirements)
+    pending = [r for r in requirements.requirements
+               if outcomes.get(r.id) is RequirementOutcome.UNVERIFIED and is_suite_preservation_requirement(r.text)
+               and not named_existing_tests(r.text, files)]
+    if not pending:
+        return []
+    result = run_suite()
+    report = test_execution.report_from_result(result)
+    summary = report.summary() if report is not None else None
+    failing = sorted(case.identity for case in report.cases if case.status not in (test_execution.PASSED, test_execution.SKIPPED))         if report is not None else []
+    attempts: List[Dict[str, Any]] = []
+    for requirement in pending:
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
+        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": SUITE_PRESERVATION, "closed": False,
+                                 "success": bool(result.get("success")) if isinstance(result, dict) else None,
+                                 "test_execution": summary}
+        if not evidence_id:
+            entry["reason"] = "the verdict has no evidence id to bind to"
+        elif report is None or not report.complete:
+            entry["reason"] = "the suite's structured evidence is not COMPLETE: " + str(
+                report.reason if report is not None else "no test execution report")
+        elif not result.get("success"):
+            entry["reason"] = "the full suite did not pass on this candidate"
+        elif not report.cases:
+            entry["reason"] = "the full suite executed zero tests"
+        elif failing:
+            entry["reason"] = "executed case(s) did not pass: " + ", ".join(failing[:5])
+        else:
+            detail = {"kind": SUITE_PRESERVATION, "claim": REGRESSION_PRESERVATION, "cases": len(report.cases),
+                      "status_counts": summary["status_counts"], "report_files": list(report.report_files),
+                      "gate_id": report.gate_id, "runner": report.runner}
+            record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                       method=FULL_REGRESSION_METHOD, detail=detail, source=source, revision=revision)
+            entry["closed"] = True
+        attempts.append(entry)
+    return attempts
 
 
 def blocking_requirements(

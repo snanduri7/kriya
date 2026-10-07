@@ -756,6 +756,9 @@ async def test_production_run_closes_cannot_confirm_only_by_running_the_named_te
 
 @pytest.mark.asyncio
 async def test_production_run_blocks_cannot_confirm_with_no_other_evidence(tmp_path):
+    """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: under the production policy a behaviour statement with no deterministic
+    closer could never be verified, so the run is refused before the first model call (it used to spend one
+    Developer attempt and block at the terminal with the same requirement UNVERIFIED)."""
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdicts_json(prompt, unverifiable=("REQ-2",)),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
     workspace = tmp_path / "ws"
@@ -765,9 +768,10 @@ async def test_production_run_blocks_cannot_confirm_with_no_other_evidence(tmp_p
         res = await engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace))
 
     assert res["quality_gates_passed"] is False
-    assert "REQ-2 (unverified)" in json.dumps(res, default=str)
-    assert _events(cfg, "requirement.closure") == []
-    assert engine.developer.run_generation.await_count == 1  # an unfixable block is not retried
+    assert res["failure_category"] == "goal_insufficient_for_verification"
+    assert {r["id"] for r in res["requirements_admission"]["residual"]} >= {"REQ-2"}
+    assert _events(cfg, "requirement.closure") == [] and _events(cfg, "requirement.verdicts") == []
+    assert engine.developer.run_generation.await_count == 0 and calls["spec"] == []  # nothing was ever generated
 
 
 def test_the_migration_gate_closes_only_the_requirement_stating_the_migration():
@@ -910,9 +914,12 @@ async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(
 
     we.run_generation_workflow = fake_run
     we.planner.run = AsyncMock(return_value="fake plan text")
+    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the migration this test scripts is the requirement's deterministic
+    # closer, so admission (production policy) sees the resolved identities the scripted gate would carry.
     with patch.object(wc, "parse_planner_structured_output", return_value=(MagicMock(), None)), \
          patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
-         patch.object(wc, "validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))):
+         patch.object(wc, "validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))), \
+         patch("kriya.workflow.workflow._migration_identities", return_value=[("gson", "jackson-databind")]):
         result = await wc.WorkflowController(we).execute(goal, str(tmp_path), migration_mode="enforce")
 
     outcomes = result.legacy_result["requirements"]["outcomes"]

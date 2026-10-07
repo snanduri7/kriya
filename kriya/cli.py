@@ -3161,7 +3161,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                     "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                     "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
-                    "requirements_unresolved", "contract_registry_blocked",
+                    "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                     "workspace_commit_failed",
                 ):
@@ -3254,6 +3254,15 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         "Nothing was applied. See the static-analysis evidence file for every finding; "
                         "only an operator waiver (`kriya static-analysis waive`) can accept a blocking "
                         "finding, and coverage gaps or scanner failures are never waivable.",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "goal_insufficient_for_verification":
+                    click.secho(
+                        f"\n[GOAL INSUFFICIENT FOR VERIFICATION] {res['environment_failure']}\n"
+                        "Nothing was generated and no model was called: a requirement of your goal has no "
+                        "deterministic way to be verified, so success could never be reached. Restate it in an "
+                        "accepted form (name the tests, state that every existing test must keep passing, or "
+                        "give an acceptance file with --acceptance).",
                         fg="yellow", bold=True
                     )
                 if res.get("failure_category") == "requirements_unresolved":
@@ -4708,7 +4717,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                 "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                 "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
-                "requirements_unresolved", "contract_registry_blocked",
+                "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                 "workspace_commit_failed",
             ):

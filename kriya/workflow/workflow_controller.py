@@ -232,6 +232,9 @@ from kriya.workflow.recovery_plan import (
 )
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
+    GOAL_INSUFFICIENT_FOR_VERIFICATION,
+    GoalAdmissionError,
+    admission_gap,
     blocking_requirements,
     requirement_evidence,
     requirement_outcomes,
@@ -3488,6 +3491,20 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+            except GoalAdmissionError as e:
+                logger.error(f"WorkflowController enforce run {run_id!r}: goal refused before any model call: {e}")
+                legacy_result = {
+                    "status": "failure",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "failure_type": "GOAL_ADMISSION",
+                    "failure_category": GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                    "reason_codes": [e.reason_code],
+                    "error": str(e),
+                    "environment_failure": e.message,
+                    "requirements_admission": e.to_dict(),
+                    "run_id": run_id,
+                }
             except WorktreeSyncError as e:
                 logger.error(f"WorkflowController enforce run {run_id!r}: worktree sync refused: {e}")
                 legacy_result = {
@@ -4339,6 +4356,24 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # GR-R1A: the operator's explicit, closed requirement contract when one
         # is bound; else the requirements derived from the goal.
         requirement_set = requirement_set_for(goal, bound_requirement_contract(self.workflow_engine))
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: refused before the first model
+        # call when a mandatory requirement has no deterministic closer.
+        from kriya.workflow.workflow import (
+            _acceptance_requirement_ids,
+            _candidate_test_files,
+            _migration_identities,
+            _requirement_policy_blocks,
+            _tracked_workspace_paths,
+        )
+        admission = admission_gap(
+            requirement_set, test_files=_candidate_test_files(workspace_path),
+            acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self.workflow_engine)),
+            tracked_paths=_tracked_workspace_paths(workspace_path),
+            migration_identities=_migration_identities(goal, workspace_path),
+        ) if _requirement_policy_blocks(getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None),
+                                                "autonomy", None)) else None
+        if admission is not None:
+            raise admission
         authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
             "Never drop, merge or reword a requirement: one no subtask serves stays open."

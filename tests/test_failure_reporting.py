@@ -54,6 +54,7 @@ _REAL_FAILURE_TYPES = {
     "retry_identity_not_qualified": FailureCategory.RESOURCE,
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
+    "goal_insufficient_for_verification": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
     # PRD-031A: static-analysis gate stops.
     "static_analysis_blocked": FailureCategory.VERIFICATION,

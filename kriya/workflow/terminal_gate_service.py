@@ -465,6 +465,8 @@ class TerminalGateService:
                 from kriya.workflow.toolchain import toolchain_declaration_mutable
                 from kriya.workflow.workflow import (
                     close_requirements_by_mutation_scope,
+                    close_requirements_by_suite_preservation,
+                    close_requirements_by_test_immutability,
                     close_requirements_with_acceptance_tests,
                     close_requirements_with_named_tests,
                 )
@@ -517,7 +519,27 @@ class TerminalGateService:
                 )
                 if closures:
                     logger.info("Original requirement closure by named tests: %s", closures)
-                closure_attempts = scope_closures + acceptance_closures + closures
+                # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the final candidate's
+                # mutation record and its own complete, green full suite.
+                immutability_closures = await asyncio.to_thread(
+                    close_requirements_by_test_immutability, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
+                )
+                if immutability_closures:
+                    logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
+                suite_closures = await asyncio.to_thread(
+                    close_requirements_by_suite_preservation, autonomy, ledger,
+                    requirement_set, request.candidate_root, request.workspace_path,
+                    revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        WriteScopeMode.DENY_ALL, (), request.plan,
+                    ),
+                    tree_binding=tree_binding,
+                )
+                if suite_closures:
+                    logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
+                closure_attempts = scope_closures + acceptance_closures + closures + immutability_closures + suite_closures
                 # The terminal migration gate just judged this same final
                 # candidate; a requirement stating the migration itself
                 # is closed by it (attempt._close_requirements_by_migration_gate).
