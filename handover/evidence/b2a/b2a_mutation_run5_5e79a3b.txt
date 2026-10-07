@@ -1,0 +1,27 @@
+baseline 154 passed in 18.60s
+candidate-config-used-during-acceptance KILLED 2 failed, 47 passed in 5.00s
+candidate-conftest-trusted SURVIVED 154 passed in 16.34s
+acceptance-file-writable-by-candidate KILLED 4 failed, 38 passed in 4.16s
+staged-artifact-change-ignored KILLED 1 failed, 47 passed in 3.91s
+model-claim-closes-behavior KILLED 1 failed, 145 passed in 13.57s
+candidate-tests-close-behavior KILLED 1 failed, 78 passed in 9.09s
+failed-acceptance-treated-as-pass KILLED 3 failed, 45 passed in 4.38s
+failed-acceptance-left-closed KILLED 1 failed, 51 passed in 4.52s
+missing-execution-treated-as-pass KILLED 2 failed, 72 passed in 9.25s
+stale-or-incomplete-report-accepted KILLED 2 failed, 51 passed in 4.29s
+missing-observations-accepted KILLED 1 failed, 77 passed in 7.43s
+wrong-candidate-digest-accepted KILLED 1 failed, 80 passed in 9.22s
+candidate-changed-during-run-accepted KILLED 1 failed, 49 passed in 3.97s
+wrong-acceptance-digest-accepted KILLED 1 failed, 124 passed in 9.44s
+other-requirement-set-accepted KILLED 1 failed, 81 passed in 9.16s
+unknown-requirement-accepted KILLED 2 failed, 36 passed in 3.82s
+unsupported-layout-falls-back-to-normal-tests KILLED 1 failed, 48 passed in 4.36s
+plugin-autoload-left-on KILLED 8 failed, 19 passed in 3.92s
+foreign-plugin-ignored KILLED 1 failed, 73 passed in 9.02s
+bytecode-written-into-candidate KILLED 2 failed, 46 passed in 4.06s
+assertion-violates-without-candidate-code KILLED 1 failed, 77 passed in 8.90s
+environment-error-in-candidate-violates KILLED 1 failed, 81 passed in 9.02s
+claims-typed-on-candidate-files-only KILLED 1 failed, 152 passed in 16.10s
+required-claims-ignored KILLED 1 failed, 50 passed in 4.47s
+raising-run-leaves-earlier-pass KILLED 1 failed, 119 passed in 9.49s
+TOTAL 25 {'KILLED': 24, 'SURVIVED': 1}
