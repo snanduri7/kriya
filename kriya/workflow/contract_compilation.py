@@ -59,6 +59,8 @@ from kriya.workflow.requirements import (
     CLOSER_NAMED_TESTS,
     DISPOSITION_EVIDENCE_ID,
     DOCUMENTATION_CLAIM,
+    FILE_IMMUTABILITY,
+    FILE_IMMUTABILITY_CLAIM,
     MUTATION_SCOPE,
     ORIGIN_SENTENCE,
     REGRESSION_PRESERVATION,
@@ -82,7 +84,9 @@ from kriya.workflow.requirements import (
 CONTRACT_FORMAT = "kriya.verification_contract/1"
 # BACKEND-READINESS-004: /2 - one claim may carry several bindings (the repository closer beside the sealed
 # operator oracle); an authority's coverage is declared per (requirement, claim). Every contract sealed by /1 is STALE.
-CONTRACT_COMPILER_VERSION = 2
+# 3 (BACKEND-FINAL-CLOSURE-005, OD-3): the FILE_IMMUTABILITY claim - a pure freeze of named tracked files is
+# closable from the mutation record instead of a BEHAVIOR claim needing authority; every /2 contract is stale by design.
+CONTRACT_COMPILER_VERSION = 3
 CONTRACT_STORE_DIR = "verification-contracts"
 
 # Entry statuses.
@@ -139,6 +143,10 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "claim": TEST_IMMUTABILITY_CLAIM, "authority": AUTHORITY_REPOSITORY,
         "pass": "no test file that existed before the run changed or vanished (mutation record)",
         "fail": "an existing test file changed or vanished", "unknown": "mutation record unavailable"},
+    FILE_IMMUTABILITY: {  # OD-3 (BACKEND-FINAL-CLOSURE-005)
+        "claim": FILE_IMMUTABILITY_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "every file the goal froze is byte-identical to the base and present at its path (mutation record)",
+        "fail": "a frozen file changed, was deleted or was renamed", "unknown": "mutation record unavailable"},
     CLOSER_MUTATION_SCOPE: {
         "claim": MUTATION_SCOPE, "authority": AUTHORITY_REPOSITORY,
         "pass": "every changed path is one the goal names as a change target, nothing foreign",
@@ -661,7 +669,8 @@ def compile_verification_contract(
     approval_digest = getattr(approval, "digest", None) if approval is not None else None
     origins = dict(origins or {})
     roles = None
-    if any(statement_scope(r.id, r.text, origin=origins.get(r.id, ORIGIN_SENTENCE), test_files=files).scopes == (MUTATION_SCOPE,)
+    if any(statement_scope(r.id, r.text, origin=origins.get(r.id, ORIGIN_SENTENCE), test_files=files,
+                           tracked_paths=tracked).scopes == (MUTATION_SCOPE,)
            for r in requirement_set.requirements):
         roles = mutation_path_roles(requirement_set, tracked)
 
@@ -669,7 +678,7 @@ def compile_verification_contract(
     for requirement in requirement_set.requirements:
         origin = origins.get(requirement.id, ORIGIN_SENTENCE)
         scope = statement_scope(requirement.id, requirement.text, origin=origin, test_files=files,
-                                migration_identities=migrations)
+                                migration_identities=migrations, tracked_paths=tracked)
         bindings: List[ClaimBinding] = []
         residual: List[ResidualClaim] = []
         ambiguity: Optional[str] = None
@@ -724,6 +733,11 @@ def compile_verification_contract(
                                                       _acceptable(claim, None)))
                 elif claim == TEST_IMMUTABILITY_CLAIM:
                     bindings.append(ClaimBinding(claim, TEST_IMMUTABILITY, AUTHORITY_REPOSITORY))
+                elif claim == FILE_IMMUTABILITY_CLAIM:
+                    # OD-3: the frozen paths are sealed in the binding - the planner's rule and the terminal closer
+                    # read them from here, never from the candidate or a model.
+                    bindings.append(ClaimBinding(claim, FILE_IMMUTABILITY, AUTHORITY_REPOSITORY,
+                                                 detail={"frozen_paths": list(scope.detail.get("frozen_paths") or ())}))
                 elif claim == TEST_ADDITION_CLAIM:
                     bindings.append(ClaimBinding(claim, CLOSER_TEST_ADDITION, AUTHORITY_REPOSITORY))
                 elif claim == API_PRESERVATION:

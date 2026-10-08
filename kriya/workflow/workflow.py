@@ -606,9 +606,12 @@ def _settle_no_change_proposal(
     """ENFORCE-VERIFIED-NO-CHANGE-001: decide a unit's NO CHANGE proposal
     from the final attempt's deterministic evidence, after every normal gate
     and the terminal regression ran on the current candidate. Accepted: the
-    unit completes as VERIFIED_NO_CHANGE (nothing written, nothing
-    authorized). Refused: a typed deterministic gate failure through the
-    ordinary repair path - never success."""
+    unit completes as VERIFIED_NO_CHANGE when it wrote nothing (nothing
+    authorized), or - ENFORCE-PARTIAL-NO-CHANGE-001, owner decision OD-3 - as
+    an ordinary mutation of the files it did write with the proposed files
+    verified unchanged (``partial``). Refused: a typed deterministic gate
+    failure through the ordinary repair path - never success, and the
+    attempt's own writes are not applied either."""
     from kriya.workflow.milestone_completion import workspace_evidence_hash
     from kriya.workflow.verified_no_change import (
         VERIFIED_NO_CHANGE,
@@ -628,8 +631,8 @@ def _settle_no_change_proposal(
             type="verified_no_change_refused",
             message=(f"{VERIFIED_NO_CHANGE_REFUSED}: the Developer proposed NO CHANGE for "
                      f"{', '.join(state.no_change_proposal)}, but {refusal['detail']} ({refusal['code']}). "
-                     "A unit completes without a change only when every acceptance criterion is "
-                     "verified by deterministic evidence; otherwise make the change the unit requires."),
+                     "A planned file completes without a change only when every acceptance criterion of the "
+                     "unit is verified by deterministic evidence; otherwise make the change the unit requires."),
             raw_output=str(refusal), source="verified_no_change", authority="deterministic",
             file_locations=[FileLocation(filepath=path) for path in state.no_change_proposal],
             likely_files=list(state.no_change_proposal),
@@ -643,11 +646,14 @@ def _settle_no_change_proposal(
             details={"subtask": subtask_id, "paths": list(state.no_change_proposal), "refusal": refusal},
         ))
         raise QualityGateFailure(failure)
-    state.completion_kind = VERIFIED_NO_CHANGE
+    written = sorted(state.all_files_written)
+    if not written:
+        state.completion_kind = VERIFIED_NO_CHANGE
     state.record_event(RunEvent(
         kind="unit.verified_no_change", attempt=attempt, source="workflow",
         authority=EventAuthority.AUTHORITATIVE,
         details={**binding, "subtask": subtask_id, "paths": list(state.no_change_proposal),
+                 "partial": bool(written), "written_paths": written,
                  "workspace_content_hash": workspace_evidence_hash(worktree_path)},
     ))
 
@@ -1233,6 +1239,42 @@ def seal_run_contract(config: Any, contract: Any) -> Optional[str]:
     except Exception as exc:  # the contract still governs the run; the store is evidence
         logger.warning(f"Verification contract could not be stored: {type(exc).__name__}: {exc}")
         return None
+
+
+def frozen_file_paths(contract: Any) -> Dict[str, List[str]]:
+    """OD-3 (BACKEND-FINAL-CLOSURE-005): requirement id -> the tracked files its
+    FILE_IMMUTABILITY claim freezes, read from the sealed contract's binding
+    (the compiler decided them from the goal's words and the base tree). A
+    planning constraint and the terminal closer's referent; never a model input."""
+    from kriya.workflow.requirements import FILE_IMMUTABILITY
+
+    if contract is None:
+        return {}
+    return {rid: list(binding.detail.get("frozen_paths") or ())
+            for rid, binding in contract.binding_closers(FILE_IMMUTABILITY)}
+
+
+def close_requirements_by_file_immutability(
+    ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    candidate_paths: Iterable[str], revision: Any, contract: Any = None,
+) -> List[Dict[str, Any]]:
+    """OD-3: decides every "do not modify <named file>" requirement from the
+    run's own mutation record (mutation_scope_evidence) - a frozen file the
+    candidate changed, deleted or renamed is VIOLATED, every frozen file
+    byte-identical and present closes it. Shared by the pre-apply boundary
+    and enforce's terminal gate; a goal without such a requirement costs
+    nothing."""
+    from kriya.workflow.requirements import close_file_immutability_requirements
+
+    frozen = frozen_file_paths(contract)
+    if not frozen:
+        return []
+    _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
+    present = [path for paths in frozen.values() for path in paths if os.path.isfile(os.path.join(candidate_root, path))]
+    return close_file_immutability_requirements(
+        ledger, requirement_set, frozen_paths_by_requirement=frozen, present_paths=present, scope_evidence=evidence,
+        source="requirement_closure.file_immutability", revision=revision,
+    )
 
 
 def close_requirements_by_test_immutability(
@@ -5130,6 +5172,16 @@ class WorkflowEngine:
                     except Exception as exc:
                         immutability_closures = []
                         logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
+                    # OD-3: the files the goal froze by name, judged from the same mutation record.
+                    try:
+                        frozen_closures = await asyncio.to_thread(
+                            close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
+                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                            revision=state.attempt_number, contract=verification_contract,
+                        )
+                    except Exception as exc:
+                        frozen_closures = []
+                        logger.warning(f"Requirement file-immutability evidence unavailable: {exc}")
                     try:
                         suite_closures = await asyncio.to_thread(
                             close_requirements_by_suite_preservation, self.kernel.config.autonomy,
@@ -5144,7 +5196,7 @@ class WorkflowEngine:
                         suite_closures = []
                         logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
                     closures = (scope_closures + acceptance_closures + contract_closures + closures
-                                + immutability_closures + suite_closures)
+                                + immutability_closures + frozen_closures + suite_closures)
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,

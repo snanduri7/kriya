@@ -129,6 +129,7 @@ PLANNER_POLICY_REJECTION_CODES = frozenset({
     "PLANNED_FILE_ACTION_MISMATCH", "VERIFICATION_PREREQUISITE_MANIFEST_MISSING", "EXTENSION_POINT_REQUIRED",
     "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
     "PLAN_EDITS_IMMUTABLE_TEST",
+    "PLAN_EDITS_FROZEN_FILE",  # OD-3 (BACKEND-FINAL-CLOSURE-005)
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH", "PLAN_TARGET_UNKNOWN",
     # Milestone plans (kriya/workflow/milestone_validation.py): judged
@@ -637,6 +638,12 @@ def build_structured_plan_repair_prompt(
             "them out of every subtask's planned_files (or list them with action 'read' only if your schema allows "
             "it), and put any new tests the goal asks for in a NEW test file (action 'create') next to the "
             "existing ones.\n"
+        )
+    if "PLAN_EDITS_FROZEN_FILE" in reason_codes:
+        targeted_correction += (
+            "- The errors name file(s) the goal explicitly requires to remain unchanged, but a subtask plans an "
+            "action on them. Those files are frozen in this run: remove them from every subtask's planned_files "
+            "and make the change the goal asks for in the files it names as change targets.\n"
         )
     if "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK" in reason_codes:
         targeted_correction += (

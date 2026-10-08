@@ -550,8 +550,12 @@ API_PRESERVATION = "API_PRESERVATION"
 TEST_IMMUTABILITY_CLAIM = "TEST_IMMUTABILITY"
 TEST_ADDITION_CLAIM = "TEST_ADDITION"  # "add a test for it": the candidate's own test inventory versus the base
 DOCUMENTATION_CLAIM = "DOCUMENTATION"  # "document it in the README (if there is one)"
+# ENFORCE-PARTIAL-NO-CHANGE-001 / owner decision OD-3 (BACKEND-FINAL-CLOSURE-005): "Do not modify README.md." -
+# named tracked files the goal freezes while the rest of the run mutates; closed only by the run's mutation record
+# (the file is byte-identical to the base and still present), exactly like TEST_IMMUTABILITY for existing tests.
+FILE_IMMUTABILITY_CLAIM = "FILE_IMMUTABILITY"
 CLAIM_KINDS = (BEHAVIOR, REGRESSION_PRESERVATION, API_PRESERVATION, TEST_IMMUTABILITY_CLAIM, TEST_ADDITION_CLAIM,
-               DOCUMENTATION_CLAIM)
+               DOCUMENTATION_CLAIM, FILE_IMMUTABILITY_CLAIM)
 # Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
 # ever proves regression preservation. BEHAVIOR needs independent acceptance
 # evidence: the operator's executable acceptance file (FS-1C2 B2-a,
@@ -749,6 +753,7 @@ def record_requirement_claim(
     allowed = {REGRESSION_PRESERVATION: REGRESSION_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
                BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS, API_PRESERVATION: API_PRESERVATION_CLOSURE_METHODS,
                TEST_IMMUTABILITY_CLAIM: frozenset({TEST_IMMUTABILITY_METHOD}),
+               FILE_IMMUTABILITY_CLAIM: frozenset({FILE_IMMUTABILITY_METHOD}),
                TEST_ADDITION_CLAIM: TEST_ADDITION_CLOSURE_METHODS, DOCUMENTATION_CLAIM: DOCUMENTATION_CLOSURE_METHODS}
     if method not in allowed.get(claim, frozenset()):
         raise ValueError(f"method {method!r} cannot close a {claim} claim")
@@ -1365,6 +1370,9 @@ VERIFICATION_AUTHORITY_REQUIRED = "VERIFICATION_AUTHORITY_REQUIRED"
 SUITE_PRESERVATION = "suite_preservation"
 TEST_IMMUTABILITY = "test_immutability"
 TEST_IMMUTABILITY_METHOD = "test_immutability"
+# OD-3: the named-file analogue (closer id, method and evidence kind share the one name, like test immutability).
+FILE_IMMUTABILITY = "file_immutability"
+FILE_IMMUTABILITY_METHOD = "file_immutability"
 CLOSER_NAMED_TESTS = "named_tests"
 CLOSER_ACCEPTANCE = "acceptance"
 CLOSER_MUTATION_SCOPE = "mutation_scope"
@@ -1375,6 +1383,8 @@ ACCEPTED_GOAL_FORMS = (
     "a whole-suite preservation statement, e.g. 'Every existing test must keep passing unchanged.' (closed by the "
     "candidate's own complete, green full test suite)",
     "a test-immutability constraint, e.g. 'Do not change any existing test.' (closed by the run's mutation record)",
+    "a named-file immutability constraint, e.g. 'Do not modify README.md.' or 'docs/index.md must remain unchanged.' "
+    "naming tracked files by their exact path (closed by the run's mutation record)",
     "the file-boundary constraint 'Do not modify any other file.' when the goal names the file(s) to change",
     "a behaviour statement covered by an operator acceptance file (--acceptance) or approval (--acceptance-approval)",
     "an exact behaviour statement whose own example lines Kriya compiles deterministically (doctest '>>>', "
@@ -1712,6 +1722,129 @@ def close_test_immutability_requirements(
                 entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] in (
                     RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED)
                 entry["claim_recorded"] = TEST_IMMUTABILITY_CLAIM
+        attempts.append(entry)
+    return attempts
+
+
+# ------------------------------------------------------------ named-file immutability (OD-3, BACKEND-FINAL-CLOSURE-005)
+#
+# "Do not modify README.md." / "Keep docs/index.md and CHANGELOG.md unchanged." / "src/config.py must remain
+# unchanged.": a statement made ONLY of a freeze (a negated change verb, or a kept/unchanged state) and the exact paths
+# of tracked files. A closed vocabulary decides it - one word outside it ("unless", "instead", "except", "during the
+# migration") keeps the statement a BEHAVIOR claim (authority required): closing never gets easier by accident.
+_FROZEN_FILE_VERB = re.compile(rf"^{_IMMUTABILITY_VERB}$", re.IGNORECASE)
+_FROZEN_FILE_STATES = frozenset({"unchanged", "untouched", "intact", "unmodified", "identical", "byte-identical"})
+_FROZEN_FILE_FILLER = frozenset({
+    "please", "do", "the", "this", "that", "these", "those", "any", "of", "file", "files", "or", "and", "nor",
+    "either", "both", "must", "should", "shall", "may", "remain", "remains", "stay", "stays", "be", "kept", "keep",
+    "leave", "left", "as", "is", "are", "they", "it", "exactly", "byte", "completely", "entirely", "in", "run",
+})
+
+
+def frozen_file_statement(text: str, tracked_paths: Iterable[str]) -> Tuple[str, ...]:
+    """The tracked files a pure freeze statement names (sorted), else ().
+    A path counts only by its exact tracked path (a bare word or a code
+    span), never by basename or stem; every other word of the statement
+    must be a negation, a change verb, a kept/unchanged state or closed
+    connective filler, and the statement must carry a negated verb or a
+    state word. Decided from the goal's words and the base tree only."""
+    tracked = set(tracked_paths)
+    if not tracked:
+        return ()
+    paths: List[str] = []
+    words: List[str] = []
+    for match in _ROLE_TOKEN.finditer(text or ""):
+        raw = match.group("code") if match.group("code") is not None else match.group("word")
+        if raw is None:
+            continue
+        path = _path_token(raw)
+        if path in tracked:
+            if path not in paths:
+                paths.append(path)
+            continue
+        if match.group("code") is not None:
+            return ()  # a code span that is not a tracked path: a command or an identifier, never pure
+        words.append(raw.lower().strip(".,:!?;"))
+    words = [w for w in words if w]
+    if not paths or not words:
+        return ()
+    negated = any(w in _NEGATIONS for w in words)
+    verb = any(_FROZEN_FILE_VERB.match(w) for w in words)
+    state = any(w in _FROZEN_FILE_STATES for w in words)
+    if not ((negated and verb) or state):
+        return ()
+    if not all(w in _FROZEN_FILE_FILLER or w in _NEGATIONS or w in _FROZEN_FILE_STATES or _FROZEN_FILE_VERB.match(w)
+               for w in words):
+        return ()
+    return tuple(sorted(paths))
+
+
+def file_immutability_evidence(
+    frozen_paths: Iterable[str], present_paths: Iterable[str], scope_evidence: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """What the run's mutation record says about the frozen files: ``available``
+    (the record exists and the candidate is at the run's base), the frozen
+    files the candidate changed and those no longer present at their path
+    (deleted or renamed)."""
+    if not scope_evidence or scope_evidence.get("unavailable"):
+        return {"available": False, "reason": "mutation evidence unavailable: " + str(
+            (scope_evidence or {}).get("unavailable") or "not collected")}
+    frozen = sorted(set(frozen_paths))
+    present = set(present_paths)
+    changed = set(scope_evidence.get("actual_paths") or ()) | set(scope_evidence.get("foreign_paths") or ())
+    return {"available": True, "frozen_paths": frozen,
+            "changed_frozen_paths": [path for path in frozen if path in changed],
+            "missing_frozen_paths": [path for path in frozen if path not in present],
+            **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision")}}
+
+
+def close_file_immutability_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, *, frozen_paths_by_requirement: Mapping[str, Sequence[str]],
+    present_paths: Iterable[str], scope_evidence: Optional[Mapping[str, Any]], source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Decide every named-file immutability requirement (OD-3) from the run's
+    own mutation record: a frozen file the candidate changed, deleted or
+    renamed is deterministic VIOLATED evidence; every frozen file byte-
+    identical and present closes it. No verdict to bind to, or evidence
+    unavailable (a candidate not at the run's base, an unreadable record),
+    leaves the verdict as it is (fail closed). The frozen paths come from
+    the sealed contract's binding, never from the candidate or a model."""
+    attempts: List[Dict[str, Any]] = []
+    outcomes = requirement_outcomes(ledger, requirements)
+    present = set(present_paths)
+    for requirement in requirements.requirements:
+        frozen = list(frozen_paths_by_requirement.get(requirement.id) or ())
+        if not frozen:
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
+        closable = outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED  # the mapped outcome (GR-R0)
+        immutability = file_immutability_evidence(frozen, present, scope_evidence)
+        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": FILE_IMMUTABILITY, "closed": False}
+        if not evidence_id:
+            entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
+        elif not immutability["available"]:
+            entry["reason"] = immutability["reason"]
+        else:
+            touched, missing = immutability["changed_frozen_paths"], immutability["missing_frozen_paths"]
+            detail = {"kind": FILE_IMMUTABILITY, "requirement": requirement.id, **immutability,
+                      "required_claims": [FILE_IMMUTABILITY_CLAIM]}
+            entry.update(detail)
+            if touched or missing:
+                # a deleted or renamed file is also "changed" in the diff: name the stronger fact first
+                entry["reason"] = ("frozen file(s) missing (deleted or renamed): " + ", ".join(missing) if missing else
+                                   "frozen file(s) changed: " + ", ".join(touched))
+                entry["violated"] = True
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method=FILE_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                           revision=revision, violated=True)
+            elif not closable:
+                entry["reason"] = f"the requirement's outcome is {outcomes.get(requirement.id)}, which evidence never closes"
+            else:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method=FILE_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                           revision=revision)
+                entry["closed"] = True
         attempts.append(entry)
     return attempts
 

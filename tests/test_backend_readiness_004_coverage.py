@@ -242,7 +242,7 @@ def test_09_coverage_added_after_sealing_changes_the_contract_and_the_compiler_i
     first, again = _compile(reqs, COMPOUND, one), _compile(reqs, COMPOUND, one)
     assert first.digest == again.digest and first.to_dict() == again.to_dict()  # retry/fallback: same bindings
     assert first.digest != _compile(reqs2, COMPOUND, two).digest  # a bundle with more coverage is another contract
-    assert first.identity_payload()["compiler_version"] == 2
+    assert first.identity_payload()["compiler_version"] == 3  # BACKEND-FINAL-CLOSURE-005: FILE_IMMUTABILITY
 
 
 # ---------------------------------------------------------------- baseline with several bindings on one claim

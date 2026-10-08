@@ -472,6 +472,7 @@ class TerminalGateService:
                 from kriya.workflow.workflow import (
                     close_requirements_by_api_preservation,
                     close_requirements_by_documentation,
+                    close_requirements_by_file_immutability,
                     close_requirements_by_mutation_scope,
                     close_requirements_by_suite_preservation,
                     close_requirements_by_test_addition,
@@ -571,6 +572,14 @@ class TerminalGateService:
                 )
                 if immutability_closures:
                     logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
+                # OD-3: the files the goal froze by name, from the final candidate's mutation record.
+                frozen_closures = await asyncio.to_thread(
+                    close_requirements_by_file_immutability, ledger, requirement_set,
+                    request.candidate_root, request.workspace_path,
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
+                )
+                if frozen_closures:
+                    logger.info("Original requirement file-immutability evidence: %s", frozen_closures)
                 suite_closures = await asyncio.to_thread(
                     close_requirements_by_suite_preservation, autonomy, ledger,
                     requirement_set, request.candidate_root, request.workspace_path,
@@ -583,7 +592,7 @@ class TerminalGateService:
                 if suite_closures:
                     logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
                 closure_attempts = (scope_closures + acceptance_closures + contract_closures + closures
-                                    + immutability_closures + suite_closures)
+                                    + immutability_closures + frozen_closures + suite_closures)
                 # The terminal migration gate just judged this same final
                 # candidate; a requirement stating the migration itself
                 # is closed by it (attempt._close_requirements_by_migration_gate).

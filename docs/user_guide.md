@@ -731,7 +731,10 @@ Under `requirement_unverified_policy: block` the contract refuses, before any mo
 Both leave the workspace untouched, call no model and write a sealed trace. The closers a plain goal can have: a
 statement naming existing test files (those tests are run); a whole-suite preservation statement such as `Every
 existing test must keep passing unchanged.` (the candidate's own full suite must run to completion, green, with
-complete structured evidence); a test-immutability constraint such as `Do not change any existing test.`; `Do not
+complete structured evidence); a test-immutability constraint such as `Do not change any existing test.`; a
+named-file immutability constraint such as `Do not modify README.md.` or `docs/index.md must remain unchanged.`
+(exact tracked paths; the run's mutation record proves each frozen file byte-identical and still present, a plan
+that schedules one is refused before any unit runs); `Do not
 modify any other file.` when the goal names the file(s) to change; a dependency migration the repository resolves;
 a public-API preservation constraint on a Python project (the public-signature predicate, base versus candidate);
 a conditional documentation request whose referent the repository does not have (`... if there is one`); `add a

@@ -57,6 +57,7 @@ from kriya.workflow.requirements import (
     BEHAVIOR_EXACT,
     BEHAVIOR_GENERAL,
     DOCUMENTATION_CLAIM,
+    FILE_IMMUTABILITY_CLAIM,
     MUTATION_SCOPE,
     ORIGIN_CODE_BLOCK,
     REGRESSION_PRESERVATION,
@@ -64,6 +65,7 @@ from kriya.workflow.requirements import (
     TEST_IMMUTABILITY_CLAIM,
     _spans_are_commands,
     behavior_strength,
+    frozen_file_statement,
     is_mutation_scope_requirement,
     is_suite_preservation_requirement,
     is_test_immutability_requirement,
@@ -415,7 +417,7 @@ def has_test_addition_clause(text: str) -> bool:
 
 def statement_scope(
     requirement_id: str, text: str, *, origin: str, test_files: Iterable[str],
-    migration_identities: Iterable[Tuple[str, str]] = (),
+    migration_identities: Iterable[Tuple[str, str]] = (), tracked_paths: Iterable[str] = (),
 ) -> StatementScope:
     """Every claim ``text`` makes, decided from its own words and origin.
 
@@ -438,6 +440,12 @@ def statement_scope(
     if is_test_immutability_requirement(text):
         return StatementScope(requirement_id, text, origin, claims=(TEST_IMMUTABILITY_CLAIM,),
                               scopes=(TEST_IMMUTABILITY_CLAIM,))
+    # OD-3 (BACKEND-FINAL-CLOSURE-005): a pure freeze of named tracked files ("Do not modify README.md.") - decided
+    # before the named-test and clause recognizers, so a frozen test file is a freeze, not a regression statement.
+    frozen = frozen_file_statement(text, tracked_paths)
+    if frozen:
+        return StatementScope(requirement_id, text, origin, claims=(FILE_IMMUTABILITY_CLAIM,),
+                              scopes=(FILE_IMMUTABILITY_CLAIM,), detail={"frozen_paths": list(frozen)})
     named = tuple(named_existing_tests(text, files))
     if not named and is_suite_preservation_requirement(text):
         scopes: List[str] = [SUITE_PRESERVATION_SCOPE]

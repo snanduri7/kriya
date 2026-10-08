@@ -180,6 +180,7 @@ from kriya.workflow.obligations import (
 from kriya.workflow.operations import (
     CodeOperation,
     all_results_are_no_change,
+    classify_result_operation,
     operation_for_attempt,
     operation_for_file,
     validate_operation_result,
@@ -6737,20 +6738,33 @@ def _restore_api_contract_owners_deterministically(
 def _verified_no_change_proposal(
     state: GenerationState, ctx: "AttemptContext", files: List[Dict[str, Any]], missing_files: List[str],
 ) -> List[str]:
-    """ENFORCE-VERIFIED-NO-CHANGE-001: the planned paths of an enforce unit
-    whose Developer answered NO CHANGE for every result, when those are
-    exactly the expected files never written - else []. Only an existing
-    file can be a no-change (a planned file still missing is a missing
-    artifact), and only a unit that has written nothing in any attempt."""
-    if (not missing_files or ctx.structured_plan is None or not ctx.current_subtask_id
-            or state.all_files_written or not all_results_are_no_change(files)):
+    """ENFORCE-VERIFIED-NO-CHANGE-001 and ENFORCE-PARTIAL-NO-CHANGE-001 (owner
+    decision OD-3, BACKEND-FINAL-CLOSURE-005): the planned paths of an enforce
+    unit the Developer answered NO CHANGE for, when they explain exactly the
+    expected files never written - else []. The unit may have written nothing
+    (the whole-unit case) or its other planned files, in this attempt or an
+    earlier one (the partial case: A rewritten, NO CHANGE for B). Only an
+    existing file this unit never wrote can be a no-change (a planned file
+    still missing is a missing artifact; a file the unit wrote and now calls
+    unchanged is not an assessment of the base); a protocol-error entry is a
+    rejected response, never an assessment. The answer is never success by
+    itself: kriya/workflow/verified_no_change.py decides it from the final
+    attempt's deterministic gate evidence."""
+    if not missing_files or ctx.structured_plan is None or not ctx.current_subtask_id:
         return []
-    paths = sorted({f.get("filepath", "") for f in files if f.get("filepath")})
-    if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in paths):
+    no_change = sorted({
+        f["filepath"] for f in files
+        if f.get("filepath") and not f.get("protocol_error")
+        and classify_result_operation(f) is CodeOperation.NO_CHANGE_ASSESSMENT
+    })
+    if not no_change or any(path in state.all_files_written for path in no_change):
         return []
-    if not set(missing_files) <= {os.path.basename(path) for path in paths}:
+    if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in no_change):
         return []
-    return paths
+    explained = {path for path in no_change if os.path.basename(path) in set(missing_files)}
+    if not set(missing_files) <= {os.path.basename(path) for path in explained}:
+        return []
+    return sorted(explained)
 
 
 def _attempt_evidence_boundary(func):

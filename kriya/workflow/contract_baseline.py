@@ -45,6 +45,7 @@ from kriya.workflow.requirements import (
     API_PRESERVATION,
     BEHAVIOR,
     DOCUMENTATION_CLAIM,
+    FILE_IMMUTABILITY_CLAIM,
     REGRESSION_PRESERVATION,
     TEST_ADDITION_CLAIM,
     TEST_IMMUTABILITY_CLAIM,
@@ -63,7 +64,8 @@ BASELINE_INDETERMINATE = "INDETERMINATE"
 BASELINE_IDENTITY = "IDENTITY"  # holds for a zero mutation by definition
 BASELINE_MUTATION_REQUIRED = "MUTATION_REQUIRED"  # the claim asks for a change the baseline cannot carry
 BASELINE_UNBOUND = "UNBOUND"  # no authority bound to the claim
-_IDENTITY_CLAIMS = frozenset({TEST_IMMUTABILITY_CLAIM, API_PRESERVATION})
+# OD-3: a frozen named file holds at the untouched baseline by definition, like an existing test's immutability.
+_IDENTITY_CLAIMS = frozenset({TEST_IMMUTABILITY_CLAIM, API_PRESERVATION, FILE_IMMUTABILITY_CLAIM})
 _AUTHORITY_CLOSERS = frozenset({CLOSER_EXTERNAL_ACCEPTANCE, CLOSER_ACCEPTANCE, CLOSER_ACCEPTANCE_APPROVAL,
                                 CLOSER_DERIVED_EXAMPLES})
 

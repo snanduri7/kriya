@@ -419,6 +419,7 @@ async def validate_plan(
     runtime_verification_required: bool = False,
     stack_contract: Optional[StackContract] = None,
     immutable_test_files: Optional[Iterable[str]] = None,
+    frozen_files: Optional[Iterable[str]] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
     known_requirement_ids: Optional[Iterable[str]] = None,
@@ -546,6 +547,24 @@ async def validate_plan(
                 "immutable in this run - add new tests in a new test file, never by editing or deleting an existing one"
             )
             reason_codes.append("PLAN_EDITS_IMMUTABLE_TEST")
+
+    # ENFORCE-PARTIAL-NO-CHANGE-001 / OD-3 (BACKEND-FINAL-CLOSURE-005): the
+    # goal froze named files (FILE_IMMUTABILITY, "Do not modify README.md.").
+    # A plan that schedules ANY action on one - modify, delete, or a create
+    # that would overwrite it - can only end at the terminal closer's
+    # VIOLATED; refused here, before any unit runs, with repair guidance.
+    frozen = set(frozen_files or ())
+    if frozen:
+        frozen_edits = sorted({
+            f"{st.id}:{pf.path}" for st in plan.subtasks for pf in st.planned_files if pf.path in frozen
+        })
+        if frozen_edits:
+            errors.append(
+                "the goal requires the named file(s) to remain unchanged (FILE_IMMUTABILITY), but the plan schedules "
+                f"a change of frozen file(s) {frozen_edits!r}; those files are frozen in this run - make the change "
+                "in the files the goal asks to change and keep every frozen file out of planned_files"
+            )
+            reason_codes.append("PLAN_EDITS_FROZEN_FILE")
 
     # Repair Guidance audit (2026-09-07, before P7): these three structural
     # checks had NO reason code at all - not merely unwired, genuinely
