@@ -115,3 +115,54 @@ def test_a_search_line_outside_an_edit_block_names_the_missing_opening_line():
         assert 'begins with <<<KRIYA:EDIT path="a/B.java">>>' in parsed.error and "outside an EDIT block" in parsed.error
     other = parse_structured("x\n<<<KRIYA:BOGUS path=\"a/B.java\">>>\n", "a/B.java")
     assert other.kind == INVALID and "unexpected protocol line" in other.error
+
+
+def test_the_documentation_referent_paths_are_the_files_the_sealed_predicate_judges(tmp_path):
+    """Review of the repair, finding 1: a docs-directory referent's binding lists every file under docs/ (code
+    included); only the files whose named list section the predicate judges (its headings) are planning inputs."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.contract_compilation import compile_verification_contract
+    from kriya.workflow.requirements import derive_requirements, statement_origins
+    from kriya.workflow.workflow import documentation_referent_paths
+
+    assert documentation_referent_paths(None) == []
+    # a real compiled README contract: the README is the judged file
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "README.rst").write_text("Functions\n=========\n\n- ``one``\n")
+    (root / "pkg").mkdir()
+    (root / "pkg" / "f.py").write_text("x = 1\n")
+    goal = "Add two built-in functions: lower and upper.\n\nDocument them in the README's function list.\n"
+    reqs = derive_requirements(goal)
+    tracked = ["README.rst", "pkg/f.py"]
+    contract = compile_verification_contract(
+        reqs, origins=statement_origins(goal), test_files=[], tracked_paths=tracked, project_language="python",
+        tracked_file_reader=lambda rel: (root / rel).read_bytes() if (root / rel).exists() else None)
+    assert documentation_referent_paths(contract) == ["README.rst"]
+    # the docs-directory shape, as the sealed binding records it: judged headings name docs/index.rst only
+    class _Binding(SimpleNamespace):
+        pass
+    fake = SimpleNamespace(binding_closers=lambda closer: [("REQ-2", _Binding(detail={
+        "paths": ["docs/conf.py", "docs/examples/run.py", "docs/index.rst"], "list_noun": "functions",
+        "headings": ["docs/index.rst: Functions"]}))])
+    assert documentation_referent_paths(fake) == ["docs/index.rst"]  # never docs/conf.py
+    no_binding = SimpleNamespace(binding_closers=lambda closer: [])
+    assert documentation_referent_paths(no_binding) == []
+
+
+def test_a_code_file_under_a_docs_directory_is_never_a_documentation_only_unit(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "docs").mkdir(parents=True)
+    (ws / "docs" / "conf.py").write_text("x = 1\n")
+    (ws / "docs" / "index.rst").write_text("Functions\n=========\n")
+    (ws / "pkg").mkdir()
+    (ws / "pkg" / "functions.py").write_text("x = 1\n")
+    plan = _plan([])
+    plan.subtasks[1].planned_files[0] = type(plan.subtasks[1].planned_files[0])(path="docs/conf.py", action="modify")
+    refused = _validate(plan, ws, documentation_paths=["docs/index.rst"])
+    assert "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING" in refused.reason_codes
+    # a one-shot iterable of documentation paths still exempts every documentation unit, not just the first
+    plan_docs = _plan([])
+    plan_docs.subtasks[1].planned_files[0] = type(plan_docs.subtasks[1].planned_files[0])(path="docs/index.rst", action="modify")
+    assert _validate(plan_docs, ws, documentation_paths=iter(["docs/index.rst"])).valid is True

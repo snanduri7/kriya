@@ -179,3 +179,26 @@ Registry after certification: 0 OPEN, 10 DEFERRED classified non-defects. One au
 the records commit on top of 1e2d0ed. Primary cohort (`primary/run_all.sh`, from the certified main) and cohort 2:
 `~/kriya-m1-live/backend-final-closure-005/FINAL_REPORT.md` sections I-L (records after the runs stay local until
 the owner authorizes a further push).
+
+## 9. Phase 14 systemic repair cycle (after the primary cohort from 41c5b10)
+
+Primary cohort (`~/kriya-m1-live/backend-final-closure-005/primary/P5-*`): T1, T4, T6 GENUINE; T2 SAFE_FAILURE; T5
+SAFE_FAILURE; T3 FALSE_NEGATIVE (the sealed oracle closed REQ-1 on Kriya's candidate and the exported candidate passes
+the frozen external oracle 2/2 + COMPAT + 489, yet the suite-preservation requirement could not close). Gate missed by
+one genuine success. One systemic failure analysis found three Kriya mechanisms, none benchmark-specific:
+- GRADLE-SUBPROJECT-BUILD-FILE-001 (T3): `validate.gradle_project_dirs` recognises `<dir>.gradle[.kts]` (a settings-
+  renamed subproject build file); report roots and Gradle output roots use it. A name predicate, not a settings parse.
+- PLAN-DOCUMENTATION-UNIT-VERIFICATION-001 (T5, and P4-T5-r2 identically): a unit editing only the documentation the
+  sealed contract judges (the files the documentation-entries predicate's headings name - never a code file under a
+  docs directory, review finding 1) declares no verification; the evidence-path error and the repair guidance name
+  that shape; `documentation_paths` flows to every `validate_plan` of the enforce run including the scope-revision
+  revalidation (review finding 2). The earlier verifier-shape guidance was corrected to the schema's canonical
+  runtime form (judgment + verifier_kind application_runtime + requires_runtime_execution, no tool_name).
+- PROTOCOL-FEEDBACK-EDIT-OPENING-001 (T2): the structured parser's diagnostic names the missing EDIT opening line;
+  parse outcome and wire protocol unchanged.
+Independent review of the repair diff (`reviews/INDEPENDENT_REVIEW_REPAIR.md`): APPROVE WITH CHANGES - the two MAJORs
+above fixed (judged-files keying; the fourth revalidation site), the one-shot-iterable hazard and the missing producer
+tests fixed, docstrings reworded; no widening of model-output authority. Mutants m123-m127. Re-certification: the
+clean full run at the fix-up commit; then reruns of T3, T5, T2 and the T1 control from local main (a further push needs
+the owner's authorization).
+

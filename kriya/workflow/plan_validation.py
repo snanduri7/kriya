@@ -554,6 +554,10 @@ async def validate_plan(
     # A plan that schedules ANY action on one - modify, delete, or a create
     # that would overwrite it - can only end at the terminal closer's
     # VIOLATED; refused here, before any unit runs, with repair guidance.
+    # PLAN-DOCUMENTATION-UNIT-VERIFICATION-001: the documentation files the sealed contract's predicate judges
+    # (never a code file under a docs directory), materialised once - a one-shot iterable must not void the
+    # exemption after the first subtask.
+    judged_documentation = frozenset(documentation_paths or ())
     frozen = set(frozen_files or ())
     if frozen:
         frozen_edits = sorted({
@@ -1061,8 +1065,8 @@ async def validate_plan(
         # the Planner circled through every rejection. Its evidence producer
         # IS the sealed predicate: such a unit declares no verification.
         documentation_only = bool(
-            documentation_paths and st.planned_files
-            and all(pf.path in set(documentation_paths) for pf in st.planned_files)
+            judged_documentation and st.planned_files
+            and all(pf.path in judged_documentation for pf in st.planned_files)
         )
         if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL:
             for vm in st.verification:

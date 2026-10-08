@@ -1266,8 +1266,12 @@ def documentation_referent_paths(contract: Any) -> List[str]:
         return []
     paths: List[str] = []
     for _rid, binding in contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES):
-        for path in binding.detail.get("paths") or ():
-            if path not in paths:
+        # Only the files whose named list section the sealed predicate actually judges (its ``headings`` are
+        # "<path>: <heading>"): a docs-directory referent's ``paths`` lists every file under docs/, code included
+        # (docs/conf.py) - independent review of the repair (finding 1) - and those are never exempt.
+        for entry in binding.detail.get("headings") or ():
+            path = str(entry).split(": ", 1)[0]
+            if path and path not in paths:
                 paths.append(path)
     return paths
 

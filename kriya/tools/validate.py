@@ -299,10 +299,11 @@ _GRADLE_BUILD_SCRIPTS = ("build.gradle", "build.gradle.kts")
 
 def gradle_project_dirs(cwd: str) -> List[str]:
     """Every Gradle project directory under ``cwd`` (inclusive): one holding
-    ``build.gradle[.kts]``, or - Gradle's own convention for a build whose
-    settings rename each subproject's build file after its directory
-    (``childProject.buildFileName = "${childProject.name}.gradle"``) -
-    ``<directory name>.gradle[.kts]``. GRADLE-SUBPROJECT-BUILD-FILE-001
+    ``build.gradle[.kts]``, or ``<directory name>.gradle[.kts]`` - the
+    widely used settings convention (``ProjectDescriptor.setBuildFileName``,
+    ``childProject.buildFileName = "${childProject.name}.gradle"``; Gradle's
+    own build uses it). A name predicate, not a parse of settings.gradle:
+    it recognises that convention only. GRADLE-SUBPROJECT-BUILD-FILE-001
     (BACKEND-FINAL-CLOSURE-005, MEASURED on JavaHamcrest: ``hamcrest/
     hamcrest.gradle``): a subproject the old predicate missed had its
     ``build/test-results`` never cleared nor read, so the suite's structured
@@ -322,8 +323,8 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     writes its own build output, by that tool's documented default layout -
     the only new files a verification gate running ``cmd`` may create:
     Maven: ``target/`` of every module (a directory holding ``pom.xml``);
-    Gradle: ``build/`` of every project (``build.gradle[.kts]``) plus the
-    root ``.gradle/`` cache; ``javac -d X``: exactly ``X``; Python (any
+    Gradle: ``build/`` of every project (``build.gradle[.kts]`` or the
+    ``<directory>.gradle[.kts]`` convention) plus the root ``.gradle/`` cache; ``javac -d X``: exactly ``X``; Python (any
     interpreter, ``py_compile`` or pytest run): ``__pycache__/`` of every
     directory holding ``.py`` sources (PEP 3147) plus pytest's
     ``.pytest_cache/``. Anything else is repository content."""

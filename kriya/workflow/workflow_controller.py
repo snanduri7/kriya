@@ -6164,6 +6164,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     require_semantic_contracts=True,
                     runtime_verification_required=goal_requires_runtime_behavior(goal),
                     stack_contract=derive_stack_contract(goal),
+                    # The same sealed planning inputs every other validation of this run uses (independent
+                    # review of the repair, finding 2): a revision must not refuse what admission accepted.
+                    immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
                 )
                 if revision_validation.valid:
                     prior_hash = current_plan_hash
