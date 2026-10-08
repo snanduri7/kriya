@@ -4372,6 +4372,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     admission.authority_requests_path = seal_requests_for_refusal(kernel_config, verification_contract, admission)
                 raise admission
         sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
+        # PLAN-TEST-IMMUTABILITY-SCOPE-001: existing test files the contract's
+        # TEST_IMMUTABILITY claim freezes - a planning constraint, never a model input.
+        from kriya.workflow.workflow import immutable_test_files
+
+        immutable_tests = immutable_test_files(verification_contract, workspace_path)
         baseline_report = None
         if verification_contract.authorities and verification_contract.refusal() is None and kernel_config is not None:
             from kriya.workflow.contract_baseline import BaselineAuthorityReport
@@ -4753,6 +4758,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stack_contract=derive_stack_contract(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                         known_requirement_ids=requirement_set.ids,
+                        immutable_test_files=immutable_tests,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -5734,6 +5740,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
                         stack_contract=derive_stack_contract(goal),
                         known_requirement_ids=requirement_set.ids,
+                        immutable_test_files=immutable_tests,
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -5872,6 +5879,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             require_semantic_contracts=True,
                             runtime_verification_required=goal_requires_runtime_behavior(goal),
                             stack_contract=derive_stack_contract(goal),
+                            immutable_test_files=immutable_tests,
                         )
                         if obligation_ledger:
                             obligation_ledger.record(ObligationRecord(

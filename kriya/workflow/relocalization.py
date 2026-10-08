@@ -40,14 +40,24 @@ class Definition:
                 "path": self.path, "line": self.line}
 
 
+def goal_qualified_names(goal: str) -> List[str]:
+    """The goal's ``Type.member`` names (a lower-case member after a dot; never
+    a hostname or a file name), in goal order, unique."""
+    names: List[str] = []
+    for qualified in extract_signals(goal).qualified:
+        if qualified.rsplit(".", 1)[-1][:1].islower() and "." in qualified:
+            if qualified not in names:
+                names.append(qualified)
+    return names
+
+
 def _definition_names(goal: str) -> List[str]:
     """The goal's qualified names (``Element.absUrl``), each followed by its member part when it has one."""
     names: List[str] = []
-    for qualified in extract_signals(goal).qualified:
-        if qualified.rsplit(".", 1)[-1][:1].islower() and "." in qualified:  # Type.member, not a hostname or a file
-            for name in (qualified, qualified.rsplit(".", 1)[-1]):
-                if name not in names:
-                    names.append(name)
+    for qualified in goal_qualified_names(goal):
+        for name in (qualified, qualified.rsplit(".", 1)[-1]):
+            if name not in names:
+                names.append(name)
     return names
 
 

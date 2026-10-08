@@ -418,6 +418,7 @@ async def validate_plan(
     require_semantic_contracts: bool = False,
     runtime_verification_required: bool = False,
     stack_contract: Optional[StackContract] = None,
+    immutable_test_files: Optional[Iterable[str]] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
     known_requirement_ids: Optional[Iterable[str]] = None,
@@ -524,6 +525,27 @@ async def validate_plan(
     if stack_violation:
         errors.append(stack_violation)
         reason_codes.append("AUTHORITATIVE_STACK_SUBSTITUTION")
+
+    # PLAN-TEST-IMMUTABILITY-SCOPE-001 (BACKEND-READINESS-004 cohort, T5): when
+    # the goal's own verification contract carries a TEST_IMMUTABILITY claim
+    # ("every existing test must keep passing unchanged"), a plan that
+    # schedules a MODIFY/DELETE of an existing test file can only end at the
+    # terminal gate's test-immutability refusal, after every model call was
+    # spent. Refused here, before any unit runs, with the repair guidance
+    # "new tests go in a new file". A CREATE of a new path is never affected.
+    immutable = set(immutable_test_files or ())
+    if immutable:
+        immutable_edits = sorted({
+            f"{st.id}:{pf.path}" for st in plan.subtasks for pf in st.planned_files
+            if pf.path in immutable and pf.action != FileAction.CREATE
+        })
+        if immutable_edits:
+            errors.append(
+                "the goal requires every existing test to keep passing unchanged (TEST_IMMUTABILITY), but the plan "
+                f"schedules an edit or deletion of existing test file(s) {immutable_edits!r}; existing tests are "
+                "immutable in this run - add new tests in a new test file, never by editing or deleting an existing one"
+            )
+            reason_codes.append("PLAN_EDITS_IMMUTABLE_TEST")
 
     # Repair Guidance audit (2026-09-07, before P7): these three structural
     # checks had NO reason code at all - not merely unwired, genuinely

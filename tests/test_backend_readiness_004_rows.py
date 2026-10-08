@@ -654,3 +654,83 @@ def test_f8_a_sealing_failure_is_recorded_on_the_refusal_never_silent(caplog):
     with patch.object(ar, "seal_authority_requests", return_value="/outside/requests.json"):
         assert ar.seal_requests_for_refusal(cfg, contract, fresh) == "/outside/requests.json"
     assert fresh.to_dict()["authority_requests_sealing_error"] is None
+
+
+# ------------------------------------------------- primary cohort findings (BACKEND-READINESS-004 live runs)
+
+def _plan_with(files):
+    from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, PlannedFile, Subtask
+    from kriya.workflow.triage import ChangeKind
+
+    return EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="add lower/upper/trim and their tests", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path=path, action=action) for path, action in files],
+    )])
+
+
+def test_t5_a_plan_editing_an_existing_test_under_a_test_immutability_claim_is_refused_before_any_unit(tmp_path):
+    """P4-T5 (jmespath): the plan's s2 edited tests/test_functions.py although the goal required every existing test
+    to keep passing unchanged; the correct functions were refused at the terminal gate (test immutability + the
+    bundle's tamper gate) after 18 model calls. The constraint is now a planning-time refusal with repair guidance."""
+    from kriya.workflow.contract_compilation import compile_verification_contract
+    from kriya.workflow.plan_schema import FileAction
+    from kriya.workflow.plan_validation import validate_plan
+    from kriya.workflow.planner_repair import PLANNER_POLICY_REJECTION_CODES
+    from kriya.workflow.requirements import statement_origins
+    from kriya.workflow.workflow import immutable_test_files
+
+    ws = _repo(tmp_path / "ws", {"jmespath/functions.py": "x = 1\n", "tests/test_functions.py": "def test_a():\n    assert True\n",
+                                  "tests/test_lexer.py": "def test_b():\n    assert True\n"})
+    goal = ("Add three built-in string functions: lower, upper and trim.\n\n"
+            "Every existing public API and every existing test must keep passing unchanged.\n")
+    reqs = derive_requirements(goal)
+    contract = compile_verification_contract(reqs, origins=statement_origins(goal),
+                                             test_files=["tests/test_functions.py", "tests/test_lexer.py"], project_language="python")
+    immutable = immutable_test_files(contract, str(ws))
+    assert immutable == ["tests/test_functions.py", "tests/test_lexer.py"]
+    # the measured plan shape: an existing test file edited -> refused, typed, with repair guidance registered
+    edited = _plan_with([("jmespath/functions.py", FileAction.MODIFY), ("tests/test_functions.py", FileAction.MODIFY)])
+    result = asyncio.run(validate_plan(edited, workspace_path=str(ws), immutable_test_files=immutable))
+    assert result.valid is False and "PLAN_EDITS_IMMUTABLE_TEST" in result.reason_codes
+    assert "s1:tests/test_functions.py" in "".join(result.errors) and "new test file" in "".join(result.errors)
+    assert "PLAN_EDITS_IMMUTABLE_TEST" in PLANNER_POLICY_REJECTION_CODES
+    # a deletion is an edit too; a NEW test file is the allowed shape; no claim -> no constraint
+    deleted = _plan_with([("tests/test_lexer.py", FileAction.DELETE)])
+    assert asyncio.run(validate_plan(deleted, workspace_path=str(ws), immutable_test_files=immutable)).valid is False
+    created = _plan_with([("jmespath/functions.py", FileAction.MODIFY), ("tests/test_string_functions.py", FileAction.CREATE)])
+    assert asyncio.run(validate_plan(created, workspace_path=str(ws), immutable_test_files=immutable)).valid is True
+    assert asyncio.run(validate_plan(edited, workspace_path=str(ws))).valid is True  # the pre-existing contract, unchanged
+    free_goal = "Add three built-in string functions: lower, upper and trim.\n"
+    free = compile_verification_contract(derive_requirements(free_goal), origins=statement_origins(free_goal),
+                                         test_files=["tests/test_functions.py"], project_language="python")
+    assert immutable_test_files(free, str(ws)) is None
+
+
+def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint(tmp_path):
+    """P4-T2 (jsoup): the subtask's only target, Element.java (21,042 tokens), had no member hint although the goal
+    names Element.absUrl(...), so the whole file was the minimum unit, did not fit the 4,176-token protected room and
+    the attempt stopped typed before any model call. The goal's own qualified names of the planned owner are now a
+    second grounded hint source, validated against the current member boundaries like a retrieval hint."""
+    from test_dev_inv_001_investigation import _minimal_attempt_ctx
+
+    from kriya.workflow.attempt import _goal_named_members_of, _resolve_known_target_member_hints
+
+    element = ("package org.jsoup.nodes;\n\npublic class Element extends Node {\n"
+               "    public String attr(String attributeKey) {\n        return super.attr(attributeKey);\n    }\n\n"
+               "    public String absUrl(String attributeKey) {\n        return StringUtil.resolve(baseUri(), attr(attributeKey));\n    }\n}\n")
+    (tmp_path / "Element.java").write_text(element)
+    (tmp_path / "Node.java").write_text("package org.jsoup.nodes;\n\npublic class Node {\n    public String attr(String k) {\n        return \"\";\n    }\n}\n")
+    goal = ("Element.absUrl(...) / attr(\"abs:href\") resolves relative links incorrectly in two situations.\n\n"
+            "Node.attr(\"abs:href\") must keep working; see Jsoup.parse(...).\n")
+    assert _goal_named_members_of(goal, "Element") == ["absUrl"]
+    assert _goal_named_members_of(goal, "Node") == ["attr"] and _goal_named_members_of(goal, "StringUtil") == []
+    ctx = _minimal_attempt_ctx(tmp_path, goal=goal, retrieval_member_hints={})
+    hints = _resolve_known_target_member_hints(ctx, ["Element.java", "Node.java"])
+    assert [h.split(".")[-1].split("(")[0] for h in hints["Element.java"]] == ["absUrl"]  # never Node.attr into Element.java
+    assert [h.split(".")[-1].split("(")[0] for h in hints["Node.java"]] == ["attr"]
+    # a goal-named member no boundary carries is dropped, never fabricated; retrieval hints still merge
+    assert _resolve_known_target_member_hints(_minimal_attempt_ctx(tmp_path, goal="Element.vanish(...) is broken.",
+                                                                   retrieval_member_hints={}), ["Element.java"]) == {}
+    merged = _resolve_known_target_member_hints(_minimal_attempt_ctx(tmp_path, goal=goal, retrieval_member_hints={"Element.java": ["attr"]}),
+                                                ["Element.java"])
+    assert sorted(h.split(".")[-1].split("(")[0] for h in merged["Element.java"]) == ["absUrl", "attr"]

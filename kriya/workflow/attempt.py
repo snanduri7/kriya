@@ -545,6 +545,19 @@ def _filtered_candidates(paths: Any, exclude: set) -> List[str]:
     return [p for p in (paths or []) if p not in exclude]
 
 
+def _goal_named_members_of(goal: str, owner: str) -> List[str]:
+    """The member names the goal qualifies with ``owner`` (``Owner.member``
+    forms, KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001), in goal order, unique."""
+    from kriya.workflow.relocalization import goal_qualified_names
+
+    members: List[str] = []
+    for qualified in goal_qualified_names(goal):
+        head, _dot, member = qualified.rpartition(".")
+        if head == owner and member and member not in members:
+            members.append(member)
+    return members
+
+
 def _resolve_known_target_member_hints(
     ctx: "AttemptContext", known_target_files: List[str],
 ) -> Dict[str, List[str]]:
@@ -564,9 +577,22 @@ def _resolve_known_target_member_hints(
     dropped here, never fabricated. Reuses CurrentSourceResolver as-is;
     this function makes no root-selection decision of its own."""
     candidates_by_path = {
-        path: names for path, names in ctx.retrieval_member_hints.items()
+        path: list(names) for path, names in ctx.retrieval_member_hints.items()
         if path in known_target_files and names
     }
+    # KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001 (BACKEND-READINESS-004 cohort,
+    # T2): the goal's own qualified names ("Element.absUrl(...)") are a second
+    # grounded source - the USER named that member of that owner. A name is a
+    # candidate only for a known target whose file is the owner it qualifies
+    # (Element.java for Element.absUrl; never Node.attr into Element.java), and
+    # it is validated against the current member boundaries exactly like a
+    # retrieval hint below: nothing is invented for a name no boundary carries.
+    for path in known_target_files:
+        owner = os.path.splitext(os.path.basename(path))[0]
+        for member in _goal_named_members_of(ctx.goal, owner):
+            if member not in candidates_by_path.setdefault(path, []):
+                candidates_by_path[path].append(member)
+    candidates_by_path = {path: names for path, names in candidates_by_path.items() if names}
     if not candidates_by_path:
         return {}
     resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)

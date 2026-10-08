@@ -963,6 +963,29 @@ def _candidate_test_files(candidate_root: str) -> List[str]:
     return test_files
 
 
+def immutable_test_files(contract: Any, workspace_path: str) -> Optional[List[str]]:
+    """PLAN-TEST-IMMUTABILITY-SCOPE-001: the tracked runnable test files of the
+    workspace's HEAD when the sealed verification contract carries a
+    TEST_IMMUTABILITY claim (the goal says existing tests must stay as they
+    are), else None. A planning-time input only: the terminal gate still
+    judges the candidate's test tree against the same base."""
+    from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.named_test_oracle import BaseTree
+    from kriya.workflow.requirements import TEST_IMMUTABILITY_CLAIM
+
+    entries = getattr(contract, "entries", None) or ()
+    if not any(TEST_IMMUTABILITY_CLAIM in getattr(entry, "required_claims", ()) for entry in entries):
+        return None
+    head = _workspace_head(workspace_path)
+    if not head:
+        return None
+    try:
+        return sorted(path for path in BaseTree(workspace_path, head).paths if is_runnable_test_file(path))
+    except Exception as exc:  # unreadable base: no planning constraint (the terminal gate still refuses)
+        logger.info(f"Immutable test files unavailable for planning: {type(exc).__name__}: {exc}")
+        return None
+
+
 def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[List[str]]:
     """The test files that existed before this run: the real workspace's
     (untouched until apply) and the run base's. A statement naming one of

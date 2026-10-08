@@ -128,6 +128,7 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
 PLANNER_POLICY_REJECTION_CODES = frozenset({
     "PLANNED_FILE_ACTION_MISMATCH", "VERIFICATION_PREREQUISITE_MANIFEST_MISSING", "EXTENSION_POINT_REQUIRED",
     "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
+    "PLAN_EDITS_IMMUTABLE_TEST",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH", "PLAN_TARGET_UNKNOWN",
     # Milestone plans (kriya/workflow/milestone_validation.py): judged
@@ -628,6 +629,14 @@ def build_structured_plan_repair_prompt(
             "if it is not genuinely required, or replace it with the equivalent artifact in the "
             "authoritative stack the error names - never introduce a second language/ecosystem "
             "alongside the one the goal actually requires.\n"
+        )
+    if "PLAN_EDITS_IMMUTABLE_TEST" in reason_codes:
+        targeted_correction += (
+            "- The errors name existing test file(s) a subtask plans to edit or delete, but the goal requires "
+            "every existing test to keep passing unchanged. Existing test files are immutable in this run: keep "
+            "them out of every subtask's planned_files (or list them with action 'read' only if your schema allows "
+            "it), and put any new tests the goal asks for in a NEW test file (action 'create') next to the "
+            "existing ones.\n"
         )
     if "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK" in reason_codes:
         targeted_correction += (
