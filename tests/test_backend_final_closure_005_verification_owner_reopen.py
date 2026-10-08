@@ -63,7 +63,7 @@ def _git(repo, *args):
                    capture_output=True)
 
 
-def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False):
+def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False, owner_escapes: bool = False):
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -113,7 +113,11 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = Fal
 
     async def run_unit(self, *args, **kwargs):
         active["id"] = kwargs.get("current_subtask_id")
-        return await real_workflow(self, *args, **kwargs)
+        result = await real_workflow(self, *args, **kwargs)
+        if owner_escapes and "role=verification_owner_recovery" in str(kwargs.get("execution_scope", "")):
+            # the reopened owner reports a file outside its declared scope (the MA6 invariant-4 shape)
+            result = {**result, "files": list(result.get("files") or []) + ["unexpected.py"]}
+        return result
 
     def run_compile_check(self, *_args, **_kwargs):
         import os
@@ -193,6 +197,17 @@ def test_an_owner_candidate_that_changed_but_failed_its_own_gates_is_not_folded(
     assert status == {"s1": "completed", "s2": "failed"}
     assert test_gate_runs.count("s2") == 1 and result.legacy_result["status"] == "failed"
     assert any("VERIFICATION FAILURE RECOVERY" in p for p in prompts[1:])
+    assert (workspace / SERVICE).read_text() == BASE_SOURCE
+
+
+def test_an_owner_candidate_outside_its_declared_scope_is_not_folded(tmp_path):
+    """Negative control (mutant m118b): the reopened owner's result names a file outside its planned_files; even
+    though its planned file changed and its gates passed, nothing is folded and the verification is not re-run."""
+    workspace, _events, result, _model_calls, _prompts, test_gate_runs = _enforce(
+        tmp_path, owner_fixes=True, owner_escapes=True)
+    status = {r.subtask_id: r.status.value for r in result.subtask_results}
+    assert status == {"s1": "completed", "s2": "failed"}
+    assert test_gate_runs.count("s2") == 1 and result.legacy_result["status"] == "failed"
     assert (workspace / SERVICE).read_text() == BASE_SOURCE
 
 
