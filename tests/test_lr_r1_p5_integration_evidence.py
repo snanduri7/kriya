@@ -221,10 +221,11 @@ def test_every_production_call_passes_the_runs_provenance():
                   encoding="utf-8").read()
     calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)
              and getattr(node.func, "id", None) == "_evaluate_integration_obligations"]
-    assert len(calls) == 2
+    # completion, owner recovery, verification-owner recovery (BACKEND-FINAL-CLOSURE-005)
+    assert len(calls) == 3
     assert all(any(k.arg == "provenance" and getattr(k.value, "id", None) == "established_provenance"
                    for k in call.keywords) for call in calls)
-    assert source.count("established_provenance.record(") == 3   # completion, resume, owner recovery
+    assert source.count("established_provenance.record(") == 4   # completion, resume, owner recovery, verification-owner recovery
 
 
 # -- M1: Q9 names the decision and its evidence --------------------------------------------------------

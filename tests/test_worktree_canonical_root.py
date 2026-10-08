@@ -409,5 +409,8 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and node.value in ("worktree", "worktrees", "scoped-worktree"):
                 offenders.append(f"{relative}:{node.lineno}:{node.value}")
-    assert offenders == ["kriya/production_doctor.py:697:worktree", "kriya/static_analysis/operator_scan.py:70:worktree",
+    # kriya/tools/git_metadata.py names "worktrees" as a git-directory ENTRY the sanitized export must not carry
+    # (OD-1, BACKEND-FINAL-CLOSURE-005) - an export boundary, never a managed worktree location.
+    assert offenders == ["kriya/production_doctor.py:697:worktree", "kriya/tools/git_metadata.py:73:worktrees",
+                         "kriya/static_analysis/operator_scan.py:70:worktree",
                          "kriya/static_analysis/operator_scan.py:77:worktree"], offenders

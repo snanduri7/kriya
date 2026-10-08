@@ -894,6 +894,10 @@ _AUDITED_WRITE_SITES = {
     # VERIFICATION-CONTRACT-003: Kriya state-directory writes only (sealed contract store, derived example module,
     # verification-authority store, scratch exports) - never the workspace.
     "kriya/workflow/authority_bundle.py": 5,
+    # OD-1 (BACKEND-FINAL-CLOSURE-005): the sanitized Git metadata export under the Kriya state root
+    # (<state>/git-metadata/<workspace key>/<base>/: refs, HEAD, config, gitfile, manifest) - never the workspace,
+    # never the candidate; mounted read-only into the container.
+    "kriya/tools/git_metadata.py": 8,
     "kriya/workflow/contract_compilation.py": 2,
     "kriya/workflow/example_oracle.py": 2,
     "kriya/workflow/example_oracle_java.py": 2,  # JAVA-EXAMPLE-COMPILER-001: the acceptance store, never the workspace
