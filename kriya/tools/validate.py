@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from kriya.capabilities import BUILD_ADAPTERS, JAVA, JAVAC, PIP, PYTHON, build_adapter_for_tool
 from kriya.config.config import AutonomyConfig
@@ -184,6 +184,30 @@ def _pyproject_dependencies(pyproject_path: str) -> List[str]:
     if not isinstance(dependencies, list):
         return []
     return [dep for dep in dependencies if isinstance(dep, str) and dep.strip()]
+
+
+def acquisition_evidence(argv: Sequence[str], result: Optional[Mapping[str, Any]], *,
+                         reason: Optional[str] = None) -> Dict[str, Any]:
+    """GRADLE-ACQUISITION-EVIDENCE-001 (BACKEND-READINESS-004): a bounded record
+    of a dependency-acquisition phase - what ran, its exit/timeout, output
+    tails and the egress record it ran under. Preparation evidence only: it
+    is attached to the offline result under its own key (``acquisition_
+    evidence``) and never merged into the verdict's output, so a
+    ``*_ACQUISITION_INCOMPLETE`` stop can say WHICH artifact and host failed."""
+    if result is None:
+        return {"argv": list(argv), "invoked": False, "reason": reason}
+    return {"argv": list(argv), "invoked": True, "returncode": result.get("returncode"),
+            "timeout": bool(result.get("timeout")), "stdout_tail": str(result.get("stdout") or "")[-4000:],
+            "stderr_tail": str(result.get("stderr") or "")[-4000:], "egress": result.get("egress"),
+            "toolchain_identity": result.get("toolchain_identity")}
+
+
+def with_acquisition_evidence(result: Dict[str, Any], evidence: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if evidence is None:
+        return result
+    marked = dict(result)
+    marked["acquisition_evidence"] = evidence
+    return marked
 
 
 _EXECUTION_EVIDENCE_KEYS = (
@@ -1185,10 +1209,11 @@ class PolymorphicValidator:
             result["gradle_user_home"] = GRADLE_CACHE_MOUNT
             return result
 
-        def _acquire() -> None:
+        def _acquire() -> Dict[str, Any]:
+            argv = [gradle_cmd, *common, *tasks]
             try:
                 result = self._run_cmd_with_timeout(
-                    [gradle_cmd, *common, *tasks], cwd=cwd, timeout=_bounded(timeout),
+                    argv, cwd=cwd, timeout=_bounded(timeout),
                     network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True,
                 )
@@ -1196,8 +1221,10 @@ class PolymorphicValidator:
                 raise  # SEC-006: a containment-setup failure is never an ordinary acquisition outcome
             except Exception as error:
                 logger.warning(f"Gradle acquisition ({desc!r}) failed to invoke: {error}")
-                return
+                return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(error).__name__}: {error}")
             log_acquisition_outcome("gradle", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+            # GRADLE-ACQUISITION-EVIDENCE-001: the phase's record travels with the offline result, never as its verdict.
+            return acquisition_evidence(argv, result)
 
         def _environment(result: Dict[str, Any], code: str, why: str) -> Dict[str, Any]:
             marked = dict(result)
@@ -1219,14 +1246,16 @@ class PolymorphicValidator:
             return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline left no time to acquire it")
         logger.info("%s failed offline with a missing-dependency/distribution signature - running ONE bounded "
                     "registry-scoped acquisition, then one more offline attempt.", desc)
-        _acquire()
+        acquired = _acquire()
         if _deadline_exhausted():
             if gradle_wrapper_start_failed(first_output):
-                return _environment(first, GRADLE_DISTRIBUTION_UNAVAILABLE,
-                                    "the Gradle wrapper could not obtain its distribution and the run's generation "
-                                    "deadline ran out during acquisition - the verification tool never started")
-            return self._gradle_acquisition_incomplete(first, tasks, "the run's generation deadline ran out during acquisition")
-        second = _offline_attempt()
+                return with_acquisition_evidence(_environment(
+                    first, GRADLE_DISTRIBUTION_UNAVAILABLE,
+                    "the Gradle wrapper could not obtain its distribution and the run's generation "
+                    "deadline ran out during acquisition - the verification tool never started"), acquired)
+            return with_acquisition_evidence(self._gradle_acquisition_incomplete(
+                first, tasks, "the run's generation deadline ran out during acquisition"), acquired)
+        second = with_acquisition_evidence(_offline_attempt(), acquired)
         if second["returncode"] == 0:
             logger.info(f"Acquisition (gradle, {desc!r}): authoritative offline retry followed and succeeded.")
             return second
@@ -1333,10 +1362,10 @@ class PolymorphicValidator:
 
         goal_desc = f"mvn {' '.join(goals)}"
 
-        def _acquire_for_this_goal() -> None:
+        def _acquire_for_this_goal() -> Dict[str, Any]:
             if tooling_only:
-                self._acquire_maven_tooling(goals, cache_dir, _bounded(timeout))
-                return
+                return self._acquire_maven_tooling(goals, cache_dir, _bounded(timeout))
+            argv = ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals
             # PREPARATION/ACQUISITION ONLY - network=DEPENDENCY_REGISTRY_ONLY
             # (SEC-006: registry-scoped, not unrestricted), same goals as
             # the authoritative offline run, result discarded. Never
@@ -1347,7 +1376,7 @@ class PolymorphicValidator:
             # content).
             try:
                 result = self._run_cmd_with_timeout(
-                    ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
+                    argv,
                     cwd=cwd, timeout=_bounded(timeout), network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True,
                 )
@@ -1363,8 +1392,10 @@ class PolymorphicValidator:
                 raise
             except Exception as e:
                 logger.warning(f"Maven acquisition (goal={goal_desc!r}) failed to invoke: {e}")
-                return
+                return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
             log_acquisition_outcome("maven", goal_desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+            # GRADLE-ACQUISITION-EVIDENCE-001: the phase's record travels with the offline result, never as its verdict.
+            return acquisition_evidence(argv, result)
 
         first = _offline_attempt()
         if first["returncode"] == 0:
@@ -1384,11 +1415,12 @@ class PolymorphicValidator:
             "acquisition (network-enabled, preparation only, goals=%s) then one more offline "
             "attempt.", " ".join(goals), goals,
         )
-        _acquire_for_this_goal()
+        acquired = _acquire_for_this_goal()
         if _deadline_exhausted():
             # Never a retry once the deadline is gone (it would be cut anyway).
-            return self._acquisition_incomplete(first, goals, "the run's generation deadline ran out during acquisition")
-        second = _offline_attempt()
+            return with_acquisition_evidence(self._acquisition_incomplete(
+                first, goals, "the run's generation deadline ran out during acquisition"), acquired)
+        second = with_acquisition_evidence(_offline_attempt(), acquired)
         if second["returncode"] == 0:
             logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed and succeeded.")
             return second
@@ -1447,7 +1479,7 @@ class PolymorphicValidator:
             return f"{group}:{fields['artifactId']}" + (f":{version}" if version and "$" not in version else "")
         return None
 
-    def _acquire_maven_tooling(self, goals: List[str], cache_dir: str, timeout: int) -> None:
+    def _acquire_maven_tooling(self, goals: List[str], cache_dir: str, timeout: int) -> Dict[str, Any]:
         """D2B: resolve exactly the plugins ``goals`` invoke - nothing of the
         candidate runs. One registry-scoped process in an empty Kriya-owned
         directory: ``mvn <coordinate>:help`` per plugin (a prefix the POM does
@@ -1460,20 +1492,21 @@ class PolymorphicValidator:
             if coordinate not in coordinates:
                 coordinates.append(coordinate)
         desc = f"mvn {' '.join(c + ':help' for c in coordinates)} (tooling only)"
+        argv = ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", *(c + ":help" for c in coordinates)]
         with tempfile.TemporaryDirectory(prefix="kriya-maven-tooling-") as empty:
             empty = os.path.realpath(empty)
             try:
                 result = self._run_cmd_with_timeout(
-                    ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", *(c + ":help" for c in coordinates)],
-                    cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                    argv, cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True, workspace_path=empty,
                 )
             except ContainmentSetupError:
                 raise  # SEC-006: a setup failure is never an ordinary acquisition outcome
             except Exception as e:
                 logger.warning(f"Maven tooling acquisition ({desc}) failed to invoke: {e}")
-                return
+                return acquisition_evidence(argv, None, reason=f"failed to invoke: {type(e).__name__}: {e}")
         log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+        return acquisition_evidence(argv, result)
 
     def _acquisition_incomplete(self, result: Dict[str, Any], goals: List[str], why: str) -> Dict[str, Any]:
         """``result`` marked as a dependency-acquisition gap (the

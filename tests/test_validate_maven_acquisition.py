@@ -149,6 +149,10 @@ def test_run_maven_cmd_repeated_identical_missing_artifact_terminates_determinis
     assert result["returncode"] == 1
     assert mock_run.call_count == 3  # no third acquisition, no loop
     assert "MAVEN_ACQUISITION_INCOMPLETE:" in result["stderr"]
+    # GRADLE-ACQUISITION-EVIDENCE-001 (Maven too): the acquisition's own record, under its own key, never as output
+    evidence = result["acquisition_evidence"]
+    assert evidence["invoked"] is True and evidence["returncode"] == 0 and evidence["stdout_tail"] == "BUILD SUCCESS (acquisition)"
+    assert evidence["argv"][:2] == ["mvn", "-B"] and "-o" not in evidence["argv"] and "acquisition" not in result["stdout"]
 
 
 def test_run_maven_cmd_different_missing_artifact_after_reacquisition_not_flagged_incomplete(tmp_path):

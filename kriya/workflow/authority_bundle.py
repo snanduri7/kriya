@@ -372,7 +372,9 @@ class AuthorityRun:
             return {"returncode": result.get("returncode"), "timeout": result.get("timeout"),
                     "stdout_tail": str(result.get("stdout") or "")[-2000:],
                     "stderr_tail": str(result.get("stderr") or "")[-2000:], "egress": result.get("egress"),
-                    "toolchain_identity": result.get("toolchain_identity")}
+                    "toolchain_identity": result.get("toolchain_identity"),
+                    # GRADLE-ACQUISITION-EVIDENCE-001: what the acquisition phase ran and where it reached
+                    "acquisition_evidence": result.get("acquisition_evidence")}
         return {"verdict": self.verdict, "reason_code": self.reason_code, "reason": self.reason,
                 "prepare": summary(self.prepare_result), "verify": summary(self.verify_result),
                 "verdict_file": self.verdict_file, "candidate_digest": self.candidate_digest}

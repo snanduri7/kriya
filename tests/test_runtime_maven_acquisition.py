@@ -118,6 +118,8 @@ def test_a_missing_plugin_gets_exactly_one_tooling_only_acquisition_then_the_exa
     assert offline[0]["cmd"] == offline[1]["cmd"] and offline[0]["cmd"][-len(RUNTIME) + 1:] == RUNTIME[1:]
     assert {c["network"] for c in offline} == {NetworkAuthority.DENIED}  # the candidate only ever runs offline
     assert (tmp_path / "pom.xml").read_bytes() == pom_before  # never edited to make Kriya tooling available
+    # GRADLE-ACQUISITION-EVIDENCE-001: the tooling acquisition's record travels with the offline result
+    assert result["acquisition_evidence"]["invoked"] is True and result["acquisition_evidence"]["argv"][-1] == "exec:help"
 
 
 def test_a_plugin_the_pom_declares_is_acquired_at_exactly_that_coordinate(tmp_path):

@@ -216,6 +216,11 @@ def test_08_a_missing_distribution_gets_one_registry_scoped_acquisition_then_the
     assert offline2.kwargs["network"] is NetworkAuthority.DENIED and offline2.args[0][1] == "--offline"
     assert logged.call_args.args[:2] == ("gradle", "./gradlew compileJava")
     assert "environment_reason_code" not in result
+    # GRADLE-ACQUISITION-EVIDENCE-001: the acquisition phase's record travels with the offline result, as evidence only
+    evidence = result["acquisition_evidence"]
+    assert evidence["invoked"] is True and evidence["returncode"] == 0 and evidence["stdout_tail"] == "acquired"
+    assert evidence["argv"] == ["./gradlew", "--no-daemon", "--console=plain", "compileJava"] and "egress" in evidence
+    assert result["stdout"] == "BUILD SUCCESSFUL"  # the verdict output is the offline run's, never the acquisition's
 
 
 def test_09_a_wrapper_that_still_cannot_start_is_an_environment_outcome_never_a_compile_failure(tmp_path, monkeypatch):
@@ -244,6 +249,10 @@ def test_10_a_dependency_still_missing_after_acquisition_is_the_marker_a_code_fa
         result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path))
     assert run.call_count == 3 and result["stderr"].startswith("GRADLE_ACQUISITION_INCOMPLETE: ")
     assert "environment_reason_code" not in result  # repair-eligible, like Maven's marker
+    # GRADLE-ACQUISITION-EVIDENCE-001: the stop says what the acquisition tried and how it ended
+    assert result["acquisition_evidence"]["returncode"] == 1 and result["acquisition_evidence"]["stdout_tail"] == "denied"
+    assert result["acquisition_evidence"]["argv"][0] == "./gradlew" and "--offline" not in result["acquisition_evidence"]["argv"]
+    assert "denied" not in result["stdout"]  # never merged into the verdict output
     with patch.object(dep, "seed_gradle_distribution_from_host", return_value={"status": "no_wrapper"}), \
             _runs((1, ORDINARY_FAILURE)) as run:
         result = validator._run_gradle_cmd("./gradlew", ["compileJava"], cwd=str(tmp_path))
