@@ -2673,14 +2673,29 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
                if capabilities[path].uncovered_loci else "any located edit region")
             for path in infeasible
         )
+        # PLAN-TARGET-LOCALIZATION-MISMATCH-001: before stopping on an editing error, ask the structural index where
+        # the goal's named symbols are defined; a definition outside the approved write scope is a plan-scope
+        # conflict with grounded locations (the existing plan revision + re-invocation mechanism takes it from here).
+        from kriya.workflow.relocalization import relocalization_conflict
+
+        conflict = relocalization_conflict(
+            _code_intelligence_for(ctx), ctx.goal, infeasible_paths=infeasible, allowed_paths=ctx.allowed_write_relpaths,
+            read_revision=lambda rel: read_file_revision(os.path.join(ctx.workspace_path, rel))
+            if os.path.isfile(os.path.join(ctx.workspace_path, rel)) else None)
+        if conflict is not None:
+            state.plan_scope_conflict = conflict
+            detail += "; " + conflict["reason"]
         message = (f"{CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE}: no mutation operation is feasible under the "
                    f"authoritative context of this Developer invocation - {detail}. Nothing was sent to the model.")
         logger.error(message)
         raise QualityGateFailure(Failure(
             type="context_edit_protocol_unsatisfiable", message=message, raw_output=message,
             source="orchestrator", attempt=state.attempt_number, likely_files=infeasible,
+            file_locations=[FileLocation(filepath=loc["filepath"], line=loc["line"])
+                            for loc in (conflict or {}).get("grounded_locations", ())],
             diagnostics={"reason_code": CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE,
-                         "capabilities": [capabilities[path].summary() for path in infeasible]},
+                         "capabilities": [capabilities[path].summary() for path in infeasible],
+                         "relocalization": (conflict or {}).get("relocalization")},
         ))
 
     model = kwargs.get("model_override") or ctx.kernel.config.llm.model
