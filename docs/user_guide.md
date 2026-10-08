@@ -257,6 +257,16 @@ falls back to the host's tools.
 | Python | `pyproject.toml` `requires-python`, else `.python-version` (minor version) | `python:<3.10-3.14>-slim` |
 
 - **Defaults.** With no declared version: JDK 21 for Java and Python 3.12.
+- **Repository metadata inside the container (`autonomy.git_metadata_export`, default on).** A candidate tree is a
+  git worktree whose `.git` pointer the container cannot follow; Kriya used to present every contained tree as "no
+  repository", so a build that runs `git describe` or `git rev-parse` while configuring (JavaHamcrest's
+  `versioning.gradle`) failed before any task. The container now sees a sanitized, read-only export of the exact
+  baseline revision as `.git`: the commit graph reachable from the base, the tags reachable from it and their refs,
+  nothing else - no file trees or blobs (historical source is not exported; `git show HEAD:file`, `git diff` and
+  `git describe --dirty` fail closed), no remotes, credentials, hooks, reflogs, stash, alternates or index. The export
+  is content-addressed under the state directory, bound to the workspace and base revision (a stale or wrong
+  export is a typed `GIT_METADATA_*` refusal, never a silent fallback) and the host's own `.git` is never mounted.
+  `false` restores the no-repository masking. A repository configuration can never set this field (SEC-009).
 - **Python dependencies.** The contained test gate installs a project's dependencies from `requirements.txt` or `pyproject.toml` (PEP 621) into an isolated virtualenv that is rebuilt whenever the declared set shrinks. Poetry (`[tool.poetry]`) and Pipenv (`Pipfile`) dependency declarations are not installed: such a project is outside the supported boundary and a missing third-party import fails its test gate as a typed failure, never a pass.
 - **Baseline and target toolchains.**
   - The repository's declaration is the *baseline*.

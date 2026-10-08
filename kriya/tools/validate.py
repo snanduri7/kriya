@@ -1106,9 +1106,33 @@ class PolymorphicValidator:
             dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
             dependency_cache_writable=dependency_cache_writable,
             toolchain_identity=self.toolchain_identity,
+            git_metadata=self._bound_git_metadata(workspace_path or self.workspace_path),
         )
         backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
         return profile, backend
+
+    def _bound_git_metadata(self, mounted_workspace: str) -> Optional[Any]:
+        """OD-1 (BACKEND-FINAL-CLOSURE-005): the sanitized Git metadata export
+        the container sees as the workspace's ``.git`` (kriya/tools/
+        git_metadata.py), bound to this validator's original workspace and
+        the checkout's exact HEAD; None when ``autonomy.git_metadata_export``
+        is off or the tree is not a git checkout (a non-git project, D2B's
+        tooling-only directory). Resolved once per mounted tree; a stale or
+        wrong-workspace export raises its typed GitMetadataError (a
+        ContainmentSetupError: the gate refuses, never runs unverified)."""
+        if not getattr(self.autonomy_cfg, "git_metadata_export", False):
+            return None
+        from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
+        from kriya.tools.git_metadata import bound_git_metadata
+
+        cache = self.__dict__.setdefault("_git_metadata_mounts", {})
+        key = os.path.realpath(mounted_workspace)
+        if key not in cache:
+            state_root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))
+            cache[key] = bound_git_metadata(mounted_workspace=mounted_workspace,
+                                            original_workspace=self.original_workspace_path,
+                                            state_root=state_root, enabled=True)
+        return cache[key]
 
     def _run_cmd_with_timeout(
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,

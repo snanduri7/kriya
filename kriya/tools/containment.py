@@ -48,6 +48,19 @@ class NetworkAuthority(Enum):
     UNRESTRICTED = "unrestricted"
 
 
+@dataclass(frozen=True)
+class GitMetadataMount:
+    """OD-1 (BACKEND-FINAL-CLOSURE-005): the host paths of a verified Git
+    metadata export (kriya/tools/git_metadata.py) and the identity it binds -
+    the backend mounts ``repo_dir`` read-only and, for a worktree, the
+    Kriya-owned ``gitfile_path`` over the workspace's dangling gitfile."""
+
+    repo_dir: str
+    gitfile_path: str
+    base_revision: str
+    digest: str
+
+
 class ContainmentSetupError(RuntimeError):
     """Containment or resource-limit setup could not be established for a
     command that required it. `ProcessController` raises this INSTEAD of
@@ -228,6 +241,12 @@ class ContainmentProfile:
     # selection. Mutually exclusive with toolchain_identity; a tag without a
     # digest is refused by the OCI backend, never resolved.
     image_reference: Optional[str] = None
+    # OD-1 (BACKEND-FINAL-CLOSURE-005): a sanitized, read-only Git metadata
+    # export (kriya/tools/git_metadata.py) the backend presents as the
+    # workspace's ``.git`` - commits, reachable tags and refs of the exact
+    # baseline, nothing else. None (default) keeps the no-Git masking every
+    # existing caller gets today.
+    git_metadata: Optional["GitMetadataMount"] = None
 
     @property
     def backend_required(self) -> bool:

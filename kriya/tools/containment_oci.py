@@ -81,6 +81,7 @@ from kriya.tools.containment import (
     build_restricted_env,
     host_writer_identity,
 )
+from kriya.tools.git_metadata import CONTAINER_GIT_METADATA
 from kriya.tools.process import ProcessResult
 from kriya.tools.toolchain_identity import ToolchainIdentity, ToolchainMismatchError
 
@@ -207,6 +208,45 @@ def dangling_gitfile_mask(workspace_host: str) -> List[str]:
     if path_relation(workspace_host, resolved) is PathRelation.WITHIN:
         return []
     return bind_mount_args("/dev/null", f"{_CONTAINER_WORKSPACE}/.git", writable=False)
+
+
+def git_metadata_mount_args(profile: ContainmentProfile, workspace_host: str) -> List[str]:
+    """OD-1 (BACKEND-FINAL-CLOSURE-005): what the container sees at the
+    workspace's ``.git``. With a verified sanitized export bound to the
+    profile (kriya/tools/git_metadata.py): read-only, and only that export -
+    a worktree's dangling gitfile is masked by the Kriya-owned gitfile that
+    points at the export mounted beside the workspace; a real ``.git``
+    directory is hidden entirely under the export; a Kriya-owned copy without
+    ``.git`` (an authority run) gets the export as its ``.git``. Without an
+    export: exactly the pre-existing dangling-gitfile mask. The host's own
+    ``.git`` is never mounted."""
+    mount = profile.git_metadata
+    if mount is None:
+        return dangling_gitfile_mask(workspace_host)
+    for host_path in (mount.repo_dir, mount.gitfile_path):
+        if not os.path.exists(host_path):
+            raise BackendUnavailableError(
+                f"GIT_METADATA_EXPORT_MISSING: the bound Git metadata export {host_path!r} does not exist; "
+                "refusing to start a container with an unverifiable .git"
+            )
+    host_git = os.path.join(workspace_host, ".git")
+    if os.path.isfile(host_git) and not os.path.islink(host_git):
+        return (bind_mount_args(mount.gitfile_path, f"{_CONTAINER_WORKSPACE}/.git", writable=False)
+                + bind_mount_args(mount.repo_dir, CONTAINER_GIT_METADATA, writable=False))
+    return bind_mount_args(mount.repo_dir, f"{_CONTAINER_WORKSPACE}/.git", writable=False)
+
+
+def _git_metadata_env(profile: ContainmentProfile) -> Dict[str, str]:
+    """OD-1: git >= 2.35.2 refuses a repository owned by another uid
+    ("dubious ownership") - the bind-mounted export is owned by the host
+    user, the build runs as the image's user. The two Kriya paths are marked
+    safe through git's own environment-config mechanism (GIT_CONFIG_COUNT),
+    never a wildcard, never written into the export."""
+    if profile.git_metadata is None:
+        return {}
+    return {"GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": _CONTAINER_WORKSPACE,
+            "GIT_CONFIG_KEY_1": "safe.directory", "GIT_CONFIG_VALUE_1": CONTAINER_GIT_METADATA}
 
 
 def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str]]:
@@ -1128,7 +1168,7 @@ class OCIContainmentBackend:
                 )
             args += bind_mount_args(workspace_host, _CONTAINER_WORKSPACE, writable=profile.workspace_write)
             args += ["-w", _CONTAINER_WORKSPACE]
-            args += dangling_gitfile_mask(workspace_host)
+            args += git_metadata_mount_args(profile, workspace_host)
         else:
             args += ["-w", _CONTAINER_TEMP]
 
@@ -1221,6 +1261,7 @@ class OCIContainmentBackend:
             if writer_identity is not None:
                 container_env.update(_non_root_home_env(container_env))
             container_env.update(_gradle_home_env(profile, cache_mount_point))
+            container_env.update(_git_metadata_env(profile))
             for key, value in container_env.items():
                 args += ["-e", f"{key}={value}"]
 
@@ -1470,7 +1511,7 @@ class OCIContainmentBackend:
             "--tmpfs", f"{_CONTAINER_TEMP}:rw,size={_TMPFS_SIZE}",
             *bind_mount_args(workspace_host, _CONTAINER_WORKSPACE, writable=True),
             "-w", _CONTAINER_WORKSPACE,
-            *dangling_gitfile_mask(workspace_host),
+            *git_metadata_mount_args(profile, workspace_host),
         ]
 
         for i, cache_path in enumerate(profile.dependency_cache_paths):
@@ -1492,6 +1533,8 @@ class OCIContainmentBackend:
                 continue
             args += ["-e", f"{key}={value}"]
         for key, value in _gradle_home_env(profile, cache_mount_point).items():
+            args += ["-e", f"{key}={value}"]
+        for key, value in _git_metadata_env(profile).items():
             args += ["-e", f"{key}={value}"]
 
         if profile.memory_mb is not None:

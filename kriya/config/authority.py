@@ -184,6 +184,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # Security boundary
     ("execution_policy", "enabled"),
     ("autonomy", "containment_backend"), ("autonomy", "contained_execution_required"),
+    # OD-1 (BACKEND-FINAL-CLOSURE-005): what a contained build sees as .git is
+    # a security boundary; a repository can neither widen nor silently disable it.
+    ("autonomy", "git_metadata_export"),
     # TOOL-003 P2 (2026-09-13): the MCP analogue immediately above - a
     # repository must never be able to disable MCP containment (nor
     # silently enable it in a way the operator did not choose) without

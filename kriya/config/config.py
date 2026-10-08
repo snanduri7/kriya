@@ -498,6 +498,15 @@ class AutonomyConfig(BaseModel):
     # an unrecognized value fails closed (BackendUnavailableError), never
     # silently falls back to uncontained execution.
     containment_backend: str = Field(default="none")
+    # OD-1 (BACKEND-FINAL-CLOSURE-005, owner decision 2026-10-08): a contained
+    # build that deterministically needs repository metadata (JavaHamcrest's
+    # `git describe` at Gradle configuration time) sees a sanitized, read-only
+    # export of the exact baseline - commits, reachable tags and refs only,
+    # no trees/blobs, remotes, credentials, hooks, reflogs, stash, alternates
+    # or index (kriya/tools/git_metadata.py). The kill switch: False keeps the
+    # pre-existing no-Git masking for every contained run. SECURITY_AUTHORITY
+    # under SEC-009: a repository can never turn it on or off.
+    git_metadata_export: bool = Field(default=True)
     # SEC-001-P6 (2026-09-11): opt-in gate for routing PolymorphicValidator's
     # compile/test commands and service_runtime's application-under-test
     # process through a real ContainmentProfile (network=DENIED, real
