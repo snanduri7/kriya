@@ -236,6 +236,30 @@ def test_an_owner_candidate_whose_final_review_was_refused_is_not_folded(tmp_pat
     assert (workspace / SERVICE).read_text() == BASE_SOURCE
 
 
+def test_an_owner_whose_declared_verification_is_not_completed_is_not_folded(tmp_path, monkeypatch):
+    """Negative control (mutant m118c): the acceptance consults the same declared-verification evaluation the planned
+    path applies; an owner result that does not evaluate COMPLETED is never folded, whatever else it did."""
+    from kriya.workflow import workflow_controller as wc
+    from kriya.workflow.workflow_types import SubtaskStatus
+
+    real = wc._evaluate_subtask_verification
+    seen = []
+
+    def evaluate(subtask, call_result):
+        status, error, codes = real(subtask, call_result)
+        if subtask.id == "s1" and seen:  # the reopened owner's result (the planned s1 evaluated first)
+            return SubtaskStatus.NEEDS_REVIEW, "declared verification not evidenced", ("VERIFICATION_EVIDENCE_MISSING",)
+        seen.append(subtask.id)
+        return status, error, codes
+
+    monkeypatch.setattr(wc, "_evaluate_subtask_verification", evaluate)
+    workspace, _events, result, _model_calls, prompts, test_gate_runs = _enforce(tmp_path, owner_fixes=True)
+    status = {r.subtask_id: r.status.value for r in result.subtask_results}
+    assert status == {"s1": "completed", "s2": "failed"}
+    assert test_gate_runs.count("s2") == 1 and any("VERIFICATION FAILURE RECOVERY" in p for p in prompts[1:])
+    assert (workspace / SERVICE).read_text() == BASE_SOURCE
+
+
 def test_the_owner_resolver_walks_declared_dependencies_only():
     plan = EngineeringPlan.model_validate({
         "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}], "acceptance_criteria": [],

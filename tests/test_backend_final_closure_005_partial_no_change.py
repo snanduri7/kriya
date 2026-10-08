@@ -470,3 +470,20 @@ def test_n6_the_partial_proposal_covers_only_planned_files_the_unit_never_wrote(
     # a direct (unstructured) run: unchanged behaviour
     assert _verified_no_change_proposal(fresh, SimpleNamespace(structured_plan=None, current_subtask_id=None,
                                                                worktree_path=str(tmp_path)), [no_change_b], ["controller.py"]) == []
+
+
+def test_n7_a_regression_deferred_to_a_future_owner_is_never_no_change_evidence():
+    """Review F3 (mutant m121): a PRV-11 FUTURE_OWNER deferral records the regression gate as success for this unit
+    although its tests failed; such an outcome covers no criterion of a no-change proposal."""
+    from kriya.workflow.verified_no_change import unit_coverage_items, verify_no_change_unit
+    from kriya.workflow.workflow import deterministic_gate_evidence
+
+    plan = _plan(TOOL_CRITERION)
+    passed = [{"type": "compile", "success": True, "output": "ok", "attempt": 2},
+              {"type": "regression_test", "success": True, "output": "=== 5 passed in 0.1s ===", "attempt": 2}]
+    deferred = [passed[0], {**passed[1], "deferred_to_future_owner": "s3"}]
+    for outcomes, expected in ((passed, None), (deferred, {"ac1": "UNCOVERED"})):
+        result = {"deterministic_gate_evidence": deterministic_gate_evidence(outcomes, 2),
+                  "acceptance_coverage": unit_coverage_items(plan, "s1", outcomes, 2)}
+        _binding, refusal = verify_no_change_unit(plan, "s1", result)
+        assert (refusal["criteria"] if refusal else None) == expected
