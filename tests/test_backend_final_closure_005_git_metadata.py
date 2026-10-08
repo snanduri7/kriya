@@ -19,7 +19,13 @@ import pytest
 
 from kriya.config.config import AutonomyConfig
 from kriya.tools import git_metadata as gm
-from kriya.tools.containment import ContainmentProfile, GitMetadataMount, NetworkAuthority, TrustClass
+from kriya.tools.containment import (
+    BackendUnavailableError,
+    ContainmentProfile,
+    GitMetadataMount,
+    NetworkAuthority,
+    TrustClass,
+)
 from kriya.tools.containment_oci import (
     _CONTAINER_WORKSPACE,
     OCIContainmentBackend,
@@ -51,6 +57,7 @@ def _source_repo(tmp_path):
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "c1")
     _git(repo, "tag", "-a", "v1.0", "-m", "release 1.0")
+    _git(repo, "tag", "-a", "v1.0-signed", "-m", "a tag of a tag", "v1.0")  # nested tag object (review F9)
     (repo / "README.md").write_text("two\n")
     _git(repo, "commit", "-qam", "c2")
     _git(repo, "tag", "snapshot")  # lightweight, reachable
@@ -91,7 +98,8 @@ def test_h1_the_export_is_the_baseline_commit_graph_and_reachable_tags_and_nothi
     assert _types(r) == ["commit", "tag"]  # no tree, no blob: historical source content is not exported
     unreachable = _out(repo, "rev-parse", "other")
     assert _git(r, "cat-file", "-e", unreachable, check=False).returncode != 0
-    assert sorted(export.refs) == ["refs/heads/kriya-base", "refs/tags/snapshot", "refs/tags/v1.0"]
+    assert sorted(export.refs) == ["refs/heads/kriya-base", "refs/tags/snapshot", "refs/tags/v1.0", "refs/tags/v1.0-signed"]
+    assert _out(r, "rev-parse", "v1.0-signed^{commit}") == _out(repo, "rev-parse", "v1.0^{commit}")  # the chain peels
     assert _git(r, "rev-parse", "--verify", "refs/tags/v9.9", check=False).returncode != 0
     assert _git(r, "rev-parse", "--verify", "refs/stash", check=False).returncode != 0
     config = _out(r, "config", "--list", "--file", os.path.join(r, "config"))
@@ -101,7 +109,7 @@ def test_h1_the_export_is_the_baseline_commit_graph_and_reachable_tags_and_nothi
     assert not os.path.exists(os.path.join(r, "objects", "info", "alternates"))
     assert open(export.gitfile_path).read() == f"gitdir: {gm.CONTAINER_GIT_METADATA}\n"
     manifest = json.load(open(os.path.join(export.root, "manifest.json")))
-    assert manifest["policy"] == "commits-and-tags-only" and manifest["object_count"] == 4  # 3 commits + 1 tag object
+    assert manifest["policy"] == "commits-and-tags-only" and manifest["object_count"] == 5  # 3 commits + 2 tag objects
     assert manifest["digest"] == export.digest == gm._export_digest(r)  # pylint: disable=protected-access
     # pure: the same baseline reuses the same verified export, same digest
     again = gm.export_git_metadata(str(repo), str(state), identity_path=str(repo))
@@ -143,6 +151,8 @@ def test_h3_a_stale_wrong_workspace_or_altered_export_is_a_typed_refusal(tmp_pat
         gm.verify_git_metadata(export.root, identity_path=str(repo), base_revision=head)
     fresh = gm.export_git_metadata(str(repo), str(state), identity_path=str(repo))
     assert fresh.base_revision == head and fresh.root != export.root
+    assert not os.path.isdir(export.root)  # the earlier base's export is pruned (review F7)
+    assert [e for e in os.listdir(os.path.join(fresh.repo_dir, "objects", "pack")) if e.endswith(".pack")]  # one pack, no loose history
     # alterations of the stored export: an added hook, a remote, a changed gitfile, a changed digest
     for alter in ("hook", "remote", "gitfile", "digest"):
         altered = gm.export_git_metadata(str(repo), str(tmp_path / f"state-{alter}"), identity_path=str(repo))
@@ -173,6 +183,12 @@ def test_h4_the_binding_resolves_the_checkout_the_identity_and_the_switch(tmp_pa
     plain.mkdir()
     (plain / "a.txt").write_text("a\n")
     assert gm.bound_git_metadata(mounted_workspace=str(plain), original_workspace=None, state_root=state, enabled=True) is None
+    # a plain sub-directory INSIDE a repository is not a checkout root: never bound to the enclosing repository (review F4)
+    nested = repo / "nested-scratch"
+    nested.mkdir()
+    (nested / "x.txt").write_text("x\n")
+    assert gm.workspace_head(str(nested)) is None
+    assert gm.bound_git_metadata(mounted_workspace=str(nested), original_workspace=None, state_root=state, enabled=True) is None
     # a worktree (the gates' candidate tree): bound to its own HEAD
     worktree = tmp_path / "wt"
     _git(repo, "worktree", "add", "-q", "--detach", str(worktree), base)
@@ -217,9 +233,16 @@ def test_h5_the_oci_arguments_mount_only_the_export_read_only_in_every_workspace
     assert _git_metadata_env(unbound) == {}
     env = _git_metadata_env(bound)
     assert env["GIT_CONFIG_COUNT"] == "2" and set(env.values()) >= {"safe.directory", _CONTAINER_WORKSPACE, gm.CONTAINER_GIT_METADATA}
+    # a symlinked .git is refused, never mounted over (review F6)
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    os.symlink(repo / ".git", linked / ".git")
+    with pytest.raises(BackendUnavailableError, match="GIT_METADATA_WORKSPACE_GIT_SYMLINK"):
+        git_metadata_mount_args(ContainmentProfile(trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(linked),
+                                                   network=NetworkAuthority.DENIED, git_metadata=mount), str(linked))
     # an export that vanished from the host is a refusal, never a silent mask
     shutil.rmtree(export.root)
-    with pytest.raises(Exception, match="GIT_METADATA_EXPORT_MISSING"):
+    with pytest.raises(BackendUnavailableError, match="GIT_METADATA_EXPORT_MISSING"):
         git_metadata_mount_args(bound, str(worktree))
 
 

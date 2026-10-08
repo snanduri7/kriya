@@ -61,11 +61,16 @@ def executed_test_count(output: str) -> Optional[int]:
 
 
 def _latest(outcomes: Sequence[Dict[str, Any]], gate_types: Sequence[str], attempt: int) -> Optional[Dict[str, Any]]:
+    """The attempt's latest outcome of one of ``gate_types``. A regression
+    outcome recorded as a FUTURE_OWNER deferral (PRV-11: the failing tests
+    are owned by a later unit, so the gate "passed" for this one) proves
+    nothing about the current candidate and is never evidence here
+    (independent review F3, BACKEND-FINAL-CLOSURE-005)."""
     for gate_type in gate_types:
         found = next((o for o in reversed(outcomes) if o.get("type") == gate_type and o.get("attempt") == attempt),
                      None)
         if found is not None:
-            return found
+            return None if found.get("deferred_to_future_owner") else found
     return None
 
 

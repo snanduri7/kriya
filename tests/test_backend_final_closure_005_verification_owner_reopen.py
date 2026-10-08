@@ -63,7 +63,8 @@ def _git(repo, *args):
                    capture_output=True)
 
 
-def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False, owner_escapes: bool = False):
+def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False, owner_escapes: bool = False,
+             owner_review_refused: bool = False):
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -142,6 +143,17 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = Fal
 
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     engine.planner.run = AsyncMock(return_value="structured plan")
+    real_review = engine.reviewer.run
+
+    async def review(*args, **kwargs):
+        # the reopened owner's final review is stopped by the run deadline after its gates passed: the candidate
+        # is applied with quality_gates_passed False (workflow.py's review-refusal path) - review F1's shape
+        if owner_review_refused and active.get("id") == "s1" and any("VERIFICATION FAILURE RECOVERY" in p for p in developer_prompts):
+            from kriya.core.llm import INFERENCE_DEADLINE_EXCEEDED, InferenceDeadlineError
+            raise InferenceDeadlineError(INFERENCE_DEADLINE_EXCEEDED, {"deadline_source": "run_budget", "remaining_budget_at_dispatch_ms": 0})
+        return await real_review(*args, **kwargs)
+
+    engine.reviewer.run = review
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
          patch.object(WorkflowEngine, "run_generation_workflow", new=run_unit), \
@@ -211,6 +223,19 @@ def test_an_owner_candidate_outside_its_declared_scope_is_not_folded(tmp_path):
     assert (workspace / SERVICE).read_text() == BASE_SOURCE
 
 
+def test_an_owner_candidate_whose_final_review_was_refused_is_not_folded(tmp_path):
+    """Negative control (review F1 / mutant m118): the owner's fix passed its gates but its final review was stopped
+    by the run deadline - the candidate IS applied to the plan worktree with quality_gates_passed False. The reopen
+    must not fold it: no second verification, the original failure stands."""
+    workspace, _events, result, _model_calls, prompts, test_gate_runs = _enforce(
+        tmp_path, owner_fixes=True, owner_review_refused=True)
+    status = {r.subtask_id: r.status.value for r in result.subtask_results}
+    assert status == {"s1": "completed", "s2": "failed"}
+    assert test_gate_runs.count("s2") == 1 and result.legacy_result["status"] == "failed"
+    assert any("VERIFICATION FAILURE RECOVERY" in p for p in prompts[1:])
+    assert (workspace / SERVICE).read_text() == BASE_SOURCE
+
+
 def test_the_owner_resolver_walks_declared_dependencies_only():
     plan = EngineeringPlan.model_validate({
         "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}], "acceptance_criteria": [],
@@ -233,5 +258,9 @@ def test_the_owner_resolver_walks_declared_dependencies_only():
     evidence = verification_failure_evidence({"last_failure": {"type": "test", "message": "m", "raw_output": "E assert 5 == 10"}})
     assert evidence == "E assert 5 == 10"
     assert verification_failure_evidence({"environment_failure": None}) == ""
+    # review F2: a stop that is not a gate's own output (a sealed authority's verdict) is never handed to the model
+    sealed = verification_failure_evidence({"last_failure": {"type": "requirements_unresolved", "message": "REQ-3 (violated)",
+                                                             "raw_output": "REQ-3 (VIOLATED): hidden oracle says no"}})
+    assert "VIOLATED" not in sealed and "hidden" not in sealed and "requirements_unresolved" in sealed
     text = verification_owner_recovery_context(verification_subtask_id="v2", owner_id="a", owner_files=["a.py"], evidence=evidence)
     assert "Reopened owner: a" in text and '["a.py"]' in text and "assert 5 == 10" in text

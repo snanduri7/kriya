@@ -109,11 +109,19 @@ def _git_text(cwd: str, *args: str) -> str:
 
 
 def workspace_head(path: str) -> Optional[str]:
-    """The commit a checkout (a repository or a worktree) is at, None when
-    ``path`` is not inside a git checkout or has no commit."""
+    """The commit the checkout rooted exactly at ``path`` (a repository or a
+    worktree) is at; None when ``path`` is not itself a checkout root (a
+    plain directory, a sub-directory of some enclosing repository, a tree
+    without a commit). Git's discovery would otherwise bind a nested
+    directory to whatever repository encloses it (independent review F4,
+    BACKEND-FINAL-CLOSURE-005): a sub-directory workspace, a state root or
+    a scratch directory inside a repository must never inherit its metadata."""
     if not os.path.isdir(path):
         return None
     try:
+        toplevel = _git_text(path, "rev-parse", "--show-toplevel").strip()
+        if os.path.realpath(toplevel) != os.path.realpath(path):
+            return None
         head = _git_text(path, "rev-parse", "--verify", "HEAD^{commit}").strip()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return None
@@ -144,10 +152,34 @@ def _reachable_tags(repo_path: str, base: str) -> List[Tuple[str, str, str]]:
     return tags
 
 
+def _tag_objects(repo_path: str, tags: List[Tuple[str, str, str]]) -> List[str]:
+    """Every TAG object a reachable annotated tag needs, including a tag that
+    points at another tag (independent review F9): the chain is followed
+    until it reaches a non-tag object, so ``git describe`` can peel it."""
+    objects: List[str] = []
+    for _refname, sha, kind in tags:
+        current, current_kind = sha, kind
+        while current_kind == "tag" and current not in objects:
+            objects.append(current)
+            target, target_kind = None, None
+            for line in _git_text(repo_path, "cat-file", "-p", current).splitlines():
+                if line.startswith("object "):
+                    target = line.split()[1]
+                elif line.startswith("type "):
+                    target_kind = line.split()[1]
+                elif not line.strip():
+                    break
+            if target is None or target_kind is None:
+                break
+            current, current_kind = target, target_kind
+    return objects
+
+
 def _export_digest(repo_dir: str) -> str:
     """Content address of the export: HEAD, every ref and every object (sha
     and type) - computed from the repository, never trusted from a file."""
-    head = open(os.path.join(repo_dir, "HEAD"), "r", encoding="utf-8").read()
+    with open(os.path.join(repo_dir, "HEAD"), "r", encoding="utf-8") as handle:
+        head = handle.read()
     refs = sorted(_git_text(repo_dir, "for-each-ref", "--format=%(refname) %(objectname)").splitlines())
     objects = sorted(_git_text(repo_dir, "cat-file", "--batch-all-objects",
                                "--batch-check=%(objectname) %(objecttype)").splitlines())
@@ -272,9 +304,11 @@ def export_git_metadata(repo_path: str, state_root: str, *, identity_path: str) 
                 os.remove(stray)
         commits = _git_text(repo_path, "rev-list", base).split()
         tags = _reachable_tags(repo_path, base)
-        objects = commits + [sha for _ref, sha, kind in tags if kind == "tag"]
+        objects = commits + _tag_objects(repo_path, tags)
         pack = _git(repo_path, "pack-objects", "--stdout", "-q", input_bytes=("\n".join(objects) + "\n").encode("utf-8"))
-        _git(repo_dir, "unpack-objects", "-q", input_bytes=pack)
+        # One pack with its index (never one loose file per commit: a long history stays a handful of files -
+        # independent review F7); pack-objects over an explicit list produces a complete, non-thin pack.
+        _git(repo_dir, "index-pack", "--stdin", input_bytes=pack)
         with open(os.path.join(repo_dir, "config"), "w", encoding="utf-8") as handle:
             handle.write(_CONFIG)
         refs: Dict[str, str] = {BASE_REF: base}
@@ -311,6 +345,13 @@ def export_git_metadata(repo_path: str, state_root: str, *, identity_path: str) 
             if not os.path.isdir(root):  # not a concurrent writer: a real failure
                 raise
             shutil.rmtree(build, ignore_errors=True)
+        # The export of a workspace's earlier base is dead once the workspace moved on (a run binds exactly one
+        # base; runs on one workspace are serialized by its lock): prune it so the store never grows with the
+        # workspace's history (independent review F7).
+        for entry in os.listdir(parent):
+            sibling = os.path.join(parent, entry)
+            if entry != base and _SHA.match(entry) and os.path.isdir(sibling):
+                shutil.rmtree(sibling, ignore_errors=True)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
         shutil.rmtree(build, ignore_errors=True)
         detail = error.stderr.decode(errors="replace").strip() if isinstance(error, subprocess.CalledProcessError) else str(error)

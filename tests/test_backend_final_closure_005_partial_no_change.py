@@ -120,7 +120,7 @@ async def test_r1_a_goal_frozen_file_the_candidate_changed_is_violated_and_nothi
         {"filepath": "calc.py", "content": CALC_OK}, {"filepath": "README.md", "content": README + "\nEdited.\n"}])
     assert res["quality_gates_passed"] is False
     assert _engine_.developer.run_generation.await_count >= 1  # attempted and refused, not "not admitted"
-    assert "README.md" in json.dumps(res.get("requirements")) or "README.md" in str(res.get("environment_failure"))
+    assert res["requirements"]["outcomes"]["REQ-2"] == "violated"  # the frozen file's requirement, counter-evidence
     assert _bytes(workspace, "calc.py", "README.md") == {"calc.py": CALC_WRONG.encode(), "README.md": README.encode()}
 
 
@@ -319,10 +319,12 @@ def _contract(goal, tracked=TRACKED, authorities=()):
 def test_n1_the_recognizer_is_a_closed_vocabulary_over_exact_tracked_paths():
     """Pure freezes of tracked files are recognized in their stated forms; anything else stays a behaviour claim."""
     for text in ("Do not modify README.md.", "README.md must remain unchanged.", "Keep `README.md` unchanged.",
-                 "Never touch or delete README.md", "Leave tests/test_calc.py untouched."):
+                 "Never touch README.md", "Leave tests/test_calc.py untouched."):
         assert frozen_file_statement(text, TRACKED) == (("tests/test_calc.py",) if "tests/" in text else ("README.md",)), text
     assert frozen_file_statement("Do not modify README.md or `calc.py`.", TRACKED) == ("README.md", "calc.py")
     for text in ("Do not modify README.md unless necessary.",  # a condition: not pure
+                 "Do not delete README.md.",  # permits an edit: not a byte-identical freeze (review F5)
+                 "Never touch or delete README.md",  # a verb outside the freeze vocabulary
                  "Do not modify any other file.",  # the mutation-scope statement, another closer
                  "Do not modify docs/README.md.",  # not a tracked path (exact, never by basename)
                  "Do not modify README.md; instead change calc.py.",  # a second clause

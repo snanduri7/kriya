@@ -230,7 +230,14 @@ def git_metadata_mount_args(profile: ContainmentProfile, workspace_host: str) ->
                 "refusing to start a container with an unverifiable .git"
             )
     host_git = os.path.join(workspace_host, ".git")
-    if os.path.isfile(host_git) and not os.path.islink(host_git):
+    if os.path.islink(host_git):
+        # A symlinked .git is neither a gitfile nor a directory Kriya can reason about (where does it point, what
+        # would a mount over the link path do on this Docker?): refused, never guessed (independent review F6).
+        raise BackendUnavailableError(
+            f"GIT_METADATA_WORKSPACE_GIT_SYMLINK: {host_git!r} is a symbolic link; a workspace whose .git is a "
+            "symlink cannot be given the sanitized metadata export - refusing to start the container"
+        )
+    if os.path.isfile(host_git):
         return (bind_mount_args(mount.gitfile_path, f"{_CONTAINER_WORKSPACE}/.git", writable=False)
                 + bind_mount_args(mount.repo_dir, CONTAINER_GIT_METADATA, writable=False))
     return bind_mount_args(mount.repo_dir, f"{_CONTAINER_WORKSPACE}/.git", writable=False)

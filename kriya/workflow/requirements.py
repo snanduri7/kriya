@@ -1732,7 +1732,12 @@ def close_test_immutability_requirements(
 # unchanged.": a statement made ONLY of a freeze (a negated change verb, or a kept/unchanged state) and the exact paths
 # of tracked files. A closed vocabulary decides it - one word outside it ("unless", "instead", "except", "during the
 # migration") keeps the statement a BEHAVIOR claim (authority required): closing never gets easier by accident.
-_FROZEN_FILE_VERB = re.compile(rf"^{_IMMUTABILITY_VERB}$", re.IGNORECASE)
+# The freeze verbs: a change to the file's bytes. "delete", "remove" and "rename" are deliberately NOT freeze verbs
+# (independent review F5): "Do not delete README.md" permits an edit, so it is not a byte-identical freeze and stays a
+# BEHAVIOR claim (authority required) rather than silently refusing a legitimate modification.
+_FROZEN_FILE_VERB = re.compile(
+    r"^(?:modify|modifying|modified|change|changing|changed|edit|editing|edited|touch|touching|touched|"
+    r"alter|altering|altered|rewrite|rewriting|rewritten)$", re.IGNORECASE)
 _FROZEN_FILE_STATES = frozenset({"unchanged", "untouched", "intact", "unmodified", "identical", "byte-identical"})
 _FROZEN_FILE_FILLER = frozenset({
     "please", "do", "the", "this", "that", "these", "those", "any", "of", "file", "files", "or", "and", "nor",

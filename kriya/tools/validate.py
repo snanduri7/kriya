@@ -428,6 +428,8 @@ class PolymorphicValidator:
         # running (run_tests); the adapters pass it to the runner and record
         # the runner process on it.
         self.test_report_binding: Optional[test_execution.ReportBinding] = None
+        # OD-1: the sanitized Git metadata mount resolved once per mounted tree (_bound_git_metadata).
+        self._git_metadata_mounts: Dict[str, Any] = {}
         self._gate = "command"
         # Whether this run may change the repository's toolchain declaration
         # (the caller's structured write scope - see
@@ -1125,7 +1127,7 @@ class PolymorphicValidator:
         from kriya.core.state_paths import ENV_STATE_DIR, default_state_directory
         from kriya.tools.git_metadata import bound_git_metadata
 
-        cache = self.__dict__.setdefault("_git_metadata_mounts", {})
+        cache = self._git_metadata_mounts
         key = os.path.realpath(mounted_workspace)
         if key not in cache:
             state_root = os.path.realpath(os.path.expanduser(os.environ.get(ENV_STATE_DIR) or default_state_directory()))

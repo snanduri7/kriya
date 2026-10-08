@@ -1552,11 +1552,26 @@ def nearest_mutating_upstream_owner(
     return None
 
 
+# The failure types whose raw output is a Kriya-run gate's own text (compiler, test runner, runtime verifier, static
+# analyser) - public to the run. Anything else (a requirements_unresolved stop carrying a sealed external authority's
+# "REQ-n (VIOLATED)" verdict, a contract or integrity stop) is NOT handed to the model: independent review F2 -
+# even the verdict bit of a hidden oracle is authority the Developer never receives.
+_GATE_FAILURE_TYPES = frozenset({
+    "compile", "test", "targeted_test", "regression_test", "run_verification", "static_analysis",
+    "pom_semantic_validation",
+})
+
+
 def verification_failure_evidence(call_result: Mapping[str, Any]) -> str:
     """The verification-only unit's own deterministic failure text - its
-    gate's output, run by Kriya, public to the run (never a hidden oracle's
-    content, never model text) - bounded for the reopened owner's context."""
+    gate's output, run by Kriya, public to the run - bounded for the
+    reopened owner's context. A failure that is not a gate's output names
+    only its type: no hidden-oracle content or verdict, no model text."""
     failure = call_result.get("last_failure") or {}
+    failure_type = str(failure.get("type") or "")
+    if failure_type and failure_type not in _GATE_FAILURE_TYPES:
+        return (f"the verification unit stopped with failure type {failure_type!r}; its detail is not a gate "
+                "output and is not shared")
     text = str(failure.get("raw_output") or failure.get("message") or call_result.get("environment_failure") or "")
     return text[-2000:]
 
@@ -6831,13 +6846,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     after = tuple(read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
                     owner_undeclared = sorted(
                         set(owner_result.get("files") or []) - {pf.path for pf in owner.planned_files})
-                    # Acceptance is the byte change in the plan worktree: a unit's candidate lands there only
-                    # after its own gates passed (a failed attempt never applies), so the result's
-                    # quality_gates_passed flag added nothing a test could distinguish (mutant m118 survived
-                    # with it removed - MEASURED: after a reopened owner's failed attempt the worktree still
-                    # held the prior bytes). The flag is recorded below, never relied on; the declared-scope
-                    # check mirrors the owner-recovery path's own (MA6 invariant 4).
-                    owner_accepted = after != before and not owner_undeclared
+                    # Acceptance needs ALL of: the owner's gates passed, its final review was performed (a
+                    # candidate whose review is refused or deadline-stopped after the gates IS applied with
+                    # quality_gates_passed False - independent review F1, workflow.py's review refusal path),
+                    # its declared verification COMPLETED (the same evaluation the planned path applies), a
+                    # byte change in the plan worktree, and no file outside its declared scope (MA6 invariant 4).
+                    owner_status, _owner_error, _owner_codes = _evaluate_subtask_verification(owner, owner_result)
+                    owner_accepted = (
+                        owner_result.get("quality_gates_passed") is True
+                        and not owner_result.get("final_review_refusal")
+                        and owner_status == SubtaskStatus.COMPLETED
+                        and after != before
+                        and not owner_undeclared
+                    )
                     logger.warning(
                         "VERIFICATION_OWNER_RECOVERY_%s verification=%s owner=%s changed=%s gates=%s undeclared=%s",
                         "ACCEPTED" if owner_accepted else "REJECTED", subtask.id, owner.id, after != before,
@@ -6889,6 +6910,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             owner.id: sorted(set(control_state.subtask_written_files.get(owner.id, ()))
                                              | set(owner_result.get("files") or [])),
                         })
+                        # Persisted before the rerun: a crash between the fold and the verification leaves the
+                        # owner's real written set behind (independent review F8). The reopen bound itself is
+                        # per process: a resumed run that re-verifies and fails may reopen once more.
+                        control_state = _persist_control_state(control_state)
                         call_result = await _invoke_bounded_subtask(
                             subtask, position, execution_role="verification_rerun",
                             recovery_context=(
