@@ -179,21 +179,34 @@ def test_acquisition_writes_only_source_sidecars_and_the_snapshot_directory_and_
 
 
 def test_negative_control_without_the_fixed_bytecode_suppression_a_fresh_install_attempts_pyc_writes(isolated):
-    """Proves the detector: the SAME fresh tree, the SAME sandbox, the production environment minus
-    PYTHONDONTWRITEBYTECODE -> the interpreter tries to create __pycache__ inside the install tree (denied, so nothing is
-    written, but the attempts are logged). This is what a GUI launch without the fixed variable would do on a fresh
-    install (08 review F-1), and what the first test proves the production policy prevents."""
+    """Proves the policy, two ways: the SAME fresh tree and the production environment minus PYTHONDONTWRITEBYTECODE
+    (1) OUTSIDE the sandbox, in a scratch copy, makes the interpreter write __pycache__ into the install tree - the
+    writes the production policy suppresses and the first test proves absent; (2) UNDER the same deny-all sandbox the
+    command still succeeds and the fresh tree stays free of bytecode (refused, not fatal). The unified-log denials are
+    collected and recorded as before; they are not the assertion: MEASURED 2026-10-08 (Python 3.14.6, macOS 27.0.1)
+    the sandboxed interpreter's refused bytecode writes surface as NO "Sandbox: ... deny" line while an ordinary
+    refused file create (touch) does, so the log cannot be the proof of this negative control. This is what a GUI
+    launch without the fixed variable would do on a fresh install (08 review F-1)."""
     st = isolated
     env = {k: v for k, v in st["env"].items() if k != "PYTHONDONTWRITEBYTECODE"}
+    # (1) the observable write, outside the sandbox, in a scratch copy of the fresh tree (never the fixture's tree).
+    scratch = fresh_package_tree(os.path.join(st["root"], "scratch"))
+    unsandboxed = subprocess.run(cli_subprocess_argv(scratch) + ["traces", "--json", "--capabilities"], env=env, cwd=st["cwd"],
+                                 capture_output=True, text=True, check=False, timeout=120)
+    assert unsandboxed.returncode == 0 and json.loads(unsandboxed.stdout)["error"] is None, unsandboxed
+    written = [os.path.join(r_, d) for r_, dirs, _f in os.walk(scratch) for d in dirs if d == "__pycache__"]
+    assert written, "without PYTHONDONTWRITEBYTECODE a fresh tree must gain __pycache__ on first import; none appeared"
+    # (2) the same child under full write denial: refused, not fatal, nothing written.
     deny_profile = os.path.join(st["root"], "deny.sb")
     with open(deny_profile, "w", encoding="utf-8") as f:
         f.write(DENY_ALL)
     start = datetime.now()
     r = _run_cli(deny_profile, env, ["traces", "--json", "--capabilities"], st["cwd"], st["fresh"])
     assert r["returncode"] == 0 and json.loads(r["stdout"])["error"] is None, r  # a denied cache write is not fatal to Python
-    time.sleep(4)
-    counted = _evidence(st, "negative_control_evidence", [{"phase": "negative_control", **r}], _collect_denials(start, {r["pid"]}))
-    bytecode = [d for d in counted if d["class"] == "BYTECODE"]
-    assert bytecode, "without PYTHONDONTWRITEBYTECODE a fresh tree must show __pycache__ write attempts; the detector saw none:\n" + json.dumps(counted, indent=1)
-    assert all(d["class"] in ("BYTECODE", "DEVICE") for d in counted), json.dumps([d for d in counted if d["class"] != "BYTECODE"], indent=1)
     assert not any("__pycache__" in dirs for _r, dirs, _f in os.walk(st["fresh"])), "the sandbox must have refused the writes"
+    time.sleep(4)
+    counted = _evidence(st, "negative_control_evidence", [{"phase": "negative_control", **r},
+                                                          {"phase": "unsandboxed_control", "returncode": unsandboxed.returncode,
+                                                           "pycache_dirs": len(written)}], _collect_denials(start, {r["pid"]}))
+    # Whatever the log did attribute to the sandboxed child is bytecode (or device) only - never a write elsewhere.
+    assert all(d["class"] in ("BYTECODE", "DEVICE") for d in counted), json.dumps([d for d in counted if d["class"] != "BYTECODE"], indent=1)
