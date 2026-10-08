@@ -74,3 +74,17 @@ def test_02_a_case_variant_of_the_workspace_is_the_same_workspace_and_legacy_ids
     assert wi.workspace_identities(str(workspace)) >= {wi.workspace_identity(str(workspace)), wi.legacy_workspace_identity(str(workspace))}
     # a component that does not exist keeps its spelling; symlinks resolve
     assert canonical_spelling(str(workspace / "NoSuch" / "Child")).endswith(os.path.join("NoSuch", "Child"))
+
+
+def test_03_a_legacy_id_written_under_another_spelling_still_validates(tmp_path, monkeypatch):
+    """m71: on any filesystem - the legacy id was computed from the normcase real path; the current id from the
+    canonical spelling. When they differ (a case variant, or here: the canonical form is made to differ) a legacy
+    record must still be accepted for the same workspace."""
+    workspace = tmp_path / "Ws"
+    workspace.mkdir()
+    legacy = {"_workspace": {"workspace_id": wi.legacy_workspace_identity(str(workspace)), "version": "1"}}
+    monkeypatch.setattr(wi, "canonical_workspace", lambda path: str(workspace) + "-as-the-filesystem-spells-it")
+    assert wi.workspace_identity(str(workspace)) != wi.legacy_workspace_identity(str(workspace))
+    wi.validate_ownership(str(workspace), legacy, "state.json")  # legacy readable
+    with pytest.raises(wi.WorkspaceOwnershipError):
+        wi.validate_ownership(str(workspace), {"_workspace": {"workspace_id": "0" * 64, "version": "2"}}, "state.json")
