@@ -113,3 +113,13 @@ owner as a capability choice (a sanitized, read-only repository-metadata export 
   substitution), fix, regression, mutation, adjacent suites.
 - Batch end: one full suite (`scripts/run_full_suite.py`), one independent same-class review, then the live
   cohorts under the production profile. Nothing here changes model profiles, qualification records or oracles.
+
+## 11. Live cohort outcome and release candidates (2026-10-08, records)
+
+Primary cohort from the certified push ea68e9b: GENUINE_SUCCESS 2/6 (T1, T6 no-change), SAFE_FAILURE 3 (T2, T4, T5),
+ENVIRONMENT_FAILURE 1 (T3, git-at-configuration); 0 false success, 0 false negative, 0 authority violation, 0 leakage.
+Two Kriya defects measured live and fixed (not pushed, awaiting the owner): PLAN-TEST-IMMUTABILITY-SCOPE-001 (ff7d782) and
+KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001 (ff7d782 -> ee1219f capacity-only fallback -> 0659f1e any goal-named member the unfit
+target defines). Reruns: T5-r2 planner non-convergence (model), T2-r2 second shape (fixed), T2-r3 context fixed, anchored-edit
+protocol failures (model). Gate failed (2/6); cohort 2 prepared (`~/kriya-m1-live/backend-readiness-004/cohort-002/`), not run.
+Full report: `~/kriya-m1-live/backend-readiness-004/FINAL_REPORT.md` (sections A-Q); certification in `certification/`.
