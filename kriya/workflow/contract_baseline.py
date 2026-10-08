@@ -61,7 +61,7 @@ BASELINE_INDETERMINATE = "INDETERMINATE"
 BASELINE_IDENTITY = "IDENTITY"  # holds for a zero mutation by definition
 BASELINE_MUTATION_REQUIRED = "MUTATION_REQUIRED"  # the claim asks for a change the baseline cannot carry
 BASELINE_UNBOUND = "UNBOUND"  # no authority bound to the claim
-_IDENTITY_CLAIMS = frozenset({REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM, API_PRESERVATION})
+_IDENTITY_CLAIMS = frozenset({TEST_IMMUTABILITY_CLAIM, API_PRESERVATION})
 _AUTHORITY_CLOSERS = frozenset({CLOSER_EXTERNAL_ACCEPTANCE, CLOSER_ACCEPTANCE, CLOSER_ACCEPTANCE_APPROVAL,
                                 CLOSER_DERIVED_EXAMPLES})
 
@@ -158,6 +158,7 @@ def run_baseline_authorities(
     run_bundle: Optional[Callable[[], Any]] = None, bundle_digest: Optional[str] = None,
     judge_acceptance: Optional[Callable[[], Mapping[str, Any]]] = None, acceptance_digest: Optional[str] = None,
     judge_examples: Optional[Callable[[], Mapping[str, Any]]] = None, examples_digest: Optional[str] = None,
+    judge_suite: Optional[Callable[[], str]] = None,
 ) -> BaselineAuthorityReport:
     """Run every bound behaviour authority against the baseline (each callable
     executes its authority on the untouched tree and returns the judgment)
@@ -182,6 +183,14 @@ def run_baseline_authorities(
         judgments = judge()
         verdicts[digest] = {rid: _verdict_from_judgment(j) for rid, j in judgments.items()}
         report.authorities_run.append({"kind": kind, "digest": digest, "verdicts": dict(verdicts[digest])})
+    # Review VC3-R9: a regression-preservation claim is not assumed by identity -
+    # the baseline suite must execute and pass (``judge_suite`` -> PASS/FAIL/
+    # INDETERMINATE, run once, only when such a claim is bound).
+    suite_verdict: Optional[str] = None
+    suite_bound = any(REGRESSION_PRESERVATION in entry.required_claims for entry in contract.mandatory_entries())
+    if suite_bound and judge_suite is not None:
+        suite_verdict = judge_suite()
+        report.authorities_run.append({"kind": "baseline_suite", "digest": None, "verdict": suite_verdict})
     all_satisfied = True
     for entry in contract.entries:
         rid = entry.requirement_id
@@ -197,6 +206,18 @@ def run_baseline_authorities(
                                  "why": "the claim asks for a change the baseline cannot carry"}
                 report.mutation_required.setdefault(rid, []).append(claim)
                 all_satisfied = False
+            elif claim == REGRESSION_PRESERVATION:
+                if suite_verdict is None:
+                    claims[claim] = {"state": BASELINE_UNBOUND, "authority": None,
+                                     "why": "the baseline suite was not executed"}
+                    all_satisfied = False
+                    report.unsatisfied.setdefault(rid, []).append(claim)
+                else:
+                    claims[claim] = {"state": suite_verdict, "authority": "repository",
+                                     "why": f"the baseline suite ran: {suite_verdict}"}
+                    if suite_verdict != BASELINE_PASS:
+                        all_satisfied = False
+                        report.unsatisfied.setdefault(rid, []).append(claim)
             elif claim in _IDENTITY_CLAIMS:
                 claims[claim] = {"state": BASELINE_IDENTITY, "authority": "repository",
                                  "why": "a zero mutation preserves it by definition"}

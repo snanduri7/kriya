@@ -292,8 +292,9 @@ def test_11_test_addition_closes_on_an_added_test_file_or_a_new_identity_never_o
     reqs = derive_requirements(text)
     contract = compile_verification_contract(reqs, origins=statement_origins(text), test_files=["tests/test_a.py"])
     assert CLOSER_TEST_ADDITION in contract.entry("REQ-1").closers
+    body = {"tests/test_new.py": b"import calc\n\n\ndef test_lower():\n    assert calc.lower('A') == 'a'\n"}
     for added, base_ids, cand_ids, closed in [
-        (["tests/test_a.py", "tests/test_new.py"], None, None, True),
+        (["tests/test_a.py", "tests/test_new.py"], None, None, True),   # a new file that contains a test (VC3-R7)
         (["tests/test_a.py"], {"t::a"}, {"t::a", "t::b"}, True),
         (["tests/test_a.py"], {"t::a"}, {"t::a"}, False),
         (["tests/test_a.py"], None, None, False),
@@ -301,7 +302,8 @@ def test_11_test_addition_closes_on_an_added_test_file_or_a_new_identity_never_o
         ledger = _ledger(reqs)
         [entry] = cc.close_test_addition_requirements(ledger, reqs, contract, reference_test_files=["tests/test_a.py"],
                                                       candidate_test_files=added, base_test_identities=base_ids,
-                                                      candidate_test_identities=cand_ids, source="t", revision=1)
+                                                      candidate_test_identities=cand_ids, source="t", revision=1,
+                                                      read_candidate=lambda p: body.get(p))
         assert entry["closed"] is closed, entry
     # with an unknown reference set nothing closes (fail closed)
     ledger = _ledger(reqs)

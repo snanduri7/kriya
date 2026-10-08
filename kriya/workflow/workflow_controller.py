@@ -4312,6 +4312,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
         baseline_report = None
         if verification_contract.authorities and verification_contract.refusal() is None and kernel_config is not None:
+            from kriya.workflow.contract_baseline import BaselineAuthorityReport
             from kriya.workflow.workflow import run_contract_baseline
 
             try:
@@ -4319,9 +4320,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     self.workflow_engine, verification_contract,
                     requirement_set_for(goal, bound_requirement_contract(self.workflow_engine)), workspace_path,
                     autonomy_cfg=autonomy, config=kernel_config)
-            except Exception as exc:  # the authority could not run: recorded, the run proceeds
+            except Exception as exc:
+                # Review VC3-R8 / D2: a baseline that could not run is an environment outcome - typed stop.
                 logger.warning(f"WorkflowController enforce run {run_id!r}: baseline authority run unavailable: "
                                f"{type(exc).__name__}: {exc}")
+                baseline_report = BaselineAuthorityReport(base_revision=None)
+                baseline_report.authorities_run.append({
+                    "kind": "baseline_run", "digest": None, "reason_code": "AUTHORITY_EXECUTION_UNAVAILABLE",
+                    "reason": f"the baseline authority run raised {type(exc).__name__}: {exc}"})
             if baseline_report is not None and baseline_report.unavailable_authorities():
                 raise VerificationAuthorityUnavailable(verification_contract, baseline_report)
             if baseline_report is not None and baseline_report.no_mutation_required:

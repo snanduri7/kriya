@@ -103,12 +103,14 @@ def test_02_labels_are_non_claims(text):
 
 
 def test_03_a_bare_code_block_without_an_expected_value_is_a_non_claim_but_one_with_a_marker_is_not():
-    bare = _scope("cache = TTLCache(maxsize=2, ttl=2, timer=Timer()) cache[1] = 1 # t=0", origin=ORIGIN_CODE_BLOCK)
+    bare = _scope("cache = TTLCache(maxsize=2, ttl=2, timer=Timer()) cache[1] = 1 cache.timer.tick()", origin=ORIGIN_CODE_BLOCK)
     assert bare.is_non_claim and bare.non_claim_kind == rs.NON_CLAIM_CODE_BLOCK
     marked = _scope("cache.expire(3) # returns [] expected: [(1, 1)]", origin=ORIGIN_CODE_BLOCK)
     assert not marked.is_non_claim and BEHAVIOR in marked.claims
+    # review VC3-R3: any comment is an expectation marker (an author states values in comments)
+    assert not _scope("cache[1] = 1 # t=0", origin=ORIGIN_CODE_BLOCK).is_non_claim
     # the same bytes as a prose sentence (origin) are never a code-block non-claim
-    assert not _scope("cache = TTLCache(maxsize=2, ttl=2, timer=Timer()) cache[1] = 1 # t=0").is_non_claim
+    assert not _scope("cache = TTLCache(maxsize=2, ttl=2, timer=Timer()) cache[1] = 1 cache.timer.tick()").is_non_claim
     assert _scope('python -c "from slugify import slugify; print(slugify(\'x\'))"', origin=ORIGIN_CODE_BLOCK).is_non_claim
 
 
@@ -190,8 +192,9 @@ def _compile(goal, **kw):
 def test_08_t1_like_goal_compiles_with_non_claims_authority_required_and_reports_counts():
     reqs, contract = _compile(T1_GOAL, tracked_paths=["src/cache.py", "tests/test_a.py"], project_language="python")
     report = contract.report()
-    assert report["totals"] == {"requirements": 7, "non_claim": 2, "closable": 0, "authority_required": 5,
-                                "ambiguous": 0, "residual_claims": 5}
+    # REQ-4 "Reproducer 2:" is the one non-claim; both reproducer blocks carry comments (review VC3-R3) and are claims
+    assert report["totals"] == {"requirements": 7, "non_claim": 1, "closable": 0, "authority_required": 6,
+                                "ambiguous": 0, "residual_claims": 6}
     assert report["admission"] == "VERIFICATION_AUTHORITY_REQUIRED"
     entry = contract.entry("REQ-7")
     assert entry.status == STATUS_AUTHORITY_REQUIRED and entry.closers == [CLOSER_API_PRESERVATION, TEST_IMMUTABILITY]
@@ -200,9 +203,9 @@ def test_08_t1_like_goal_compiles_with_non_claims_authority_required_and_reports
     refusal = contract.refusal()
     assert isinstance(refusal, VerificationAuthorityRequired) and refusal.reason_code == VERIFICATION_AUTHORITY_REQUIRED
     assert refusal.failure_category == "verification_authority_required"
-    assert refusal.message.startswith("VERIFICATION_AUTHORITY_REQUIRED: 5 mandatory requirement(s)")
+    assert refusal.message.startswith("VERIFICATION_AUTHORITY_REQUIRED: 6 mandatory requirement(s)")
     rows = refusal.to_dict()["residual"]
-    assert {row["id"] for row in rows} == {"REQ-1", "REQ-2", "REQ-3", "REQ-6", "REQ-7"}
+    assert {row["id"] for row in rows} == {"REQ-1", "REQ-2", "REQ-3", "REQ-5", "REQ-6", "REQ-7"}
     assert all(row["acceptable_authorities"] for row in rows) and refusal.to_dict()["verification_contract"]["totals"]
     json.dumps(contract.to_dict(), default=str)  # serializable
 

@@ -21,8 +21,9 @@ TEST_IMMUTABILITY, SUITE_PRESERVATION (closers) stay; new scopes API_PRESERVATIO
 TEST_ADDITION, MIGRATION, NON_CLAIM.
 NON_CLAIM (D1, conservative): (a) a label - the statement ends with ":" and has at most eight words, no request or
 constraint cue, no example call, no "=" and no quantifier; (b) a code block - every raw line of the statement's
-paragraph was indented code outside any list item and the block carries no expected-value marker (`->`, `expected`,
-`returns`, `should`, `#`-comment with a value, `Expected:`/`Actual:`). Origin is established by the SAME segmenter
+paragraph was indented code outside any list item and the block carries no expected-value marker (`->`, `=>`, `==`,
+any `#` comment, `expected`, `returns`, `should`, `actual`, `assert`, `fails`, `passes`, `raises`, `throws`, `correct`,
+`wrong`, `got`, `but`; review VC3-R3). A `print(...)` call is code, not a marker. Origin is established by the SAME segmenter
 that derives the requirements (`statement_origins`), so ids, texts and the set digest are unchanged
 (REQUIREMENT_DERIVATION_VERSION stays 1). A NON_CLAIM statement stays in the set, in lineage, in the prompt block and in
 the report with status NOT_A_CLAIM, reason code STRUCTURAL_NON_CLAIM and its origin; it needs no closure and never
@@ -99,3 +100,9 @@ registry rows (P3); a prose parenthetical beside a clause-only constraint keeps 
 the baseline authority run executes the bound authorities once per run on the untouched tree (cost accepted).
 GUI/KUP: every new fact is a run event in the trace row (`verification_contract.*`, `requirement.authority_required`)
 - BACKEND_EVENT_ADDED; no new store. Mutation campaign: `~/kriya-m1-live/verification-contract-003/mutations/run_mutations.py`.
+
+## 11. Independent review reconciliation (2026-10-08)
+`~/kriya-m1-live/verification-contract-003/reviews/ARCHITECTURE_REVIEW.md`: APPROVE WITH CHANGES, ten findings (R1
+BLOCKING: the clause-only filler allow-list dropped an unrecognized test clause), all reconciled in the commit after
+88840b6 and pinned by `tests/test_verification_contract_003_review.py`; mutants m21-m29 added. Also: the bundle's
+base revision is re-checked at closure; a Gradle/Maven `prepare` runs through the validator's two-phase runners.

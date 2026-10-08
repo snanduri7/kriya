@@ -180,6 +180,14 @@ def _text_sha256(text: str) -> str:
     return _sha256((text or "").encode("utf-8"))
 
 
+# The project's own build launchers: a ``prepare`` starting with one of them
+# runs through the validator's two-phase Maven/Gradle path (offline first,
+# one registry-scoped acquisition with the JVM proxy plumbing and the
+# identity-verified Gradle distribution seed, offline again) - the supported
+# containment mechanism, never a raw launcher with its own network.
+_PROJECT_LAUNCHERS = frozenset({"./gradlew", "gradlew", "mvn", "./mvnw", "mvnw"})
+
+
 def _argv(value: Any, name: str, assets: Mapping[str, str]) -> Tuple[str, ...]:
     if not isinstance(value, list) or not value or not all(isinstance(t, str) and t for t in value):
         raise _refuse(AUTHORITY_INVALID, f"{name} must be a non-empty list of strings (argv)")
@@ -187,9 +195,24 @@ def _argv(value: Any, name: str, assets: Mapping[str, str]) -> Tuple[str, ...]:
         if token.startswith("/") or token.startswith("~") or ".." in token.split("/"):
             raise _refuse(AUTHORITY_INVALID, f"{name}: {token!r} is an absolute, home or parent path; only program "
                                              "names and bundle-relative asset paths are allowed")
-    if "/" in value[0] and value[0] not in assets:
-        raise _refuse(AUTHORITY_INVALID, f"{name}: {value[0]!r} is not a declared asset")
+    if "/" in value[0] and value[0] not in assets and value[0] not in _PROJECT_LAUNCHERS:
+        raise _refuse(AUTHORITY_INVALID, f"{name}: {value[0]!r} is not a declared asset or project launcher")
     return tuple(value)
+
+
+def _run_prepare(validator: Any, bundle: AuthorityBundle, export: str, cache: Optional[str]) -> Dict[str, Any]:
+    """The acquisition phase: a Gradle or Maven launcher goes through the
+    validator's own two-phase runner (the gates' mechanism); anything else
+    is one registry-scoped contained command."""
+    argv = _rewrite_argv(bundle.prepare or (), bundle.assets)
+    if bundle.build_tool == "gradle" and argv and argv[0] in ("./gradlew", "gradlew"):
+        return validator._run_gradle_cmd(argv[0], argv[1:], cwd=export, timeout=bundle.timeout_seconds)  # pylint: disable=protected-access
+    if bundle.build_tool == "maven" and argv and argv[0] in ("mvn", "./mvnw", "mvnw"):
+        return validator._run_maven_cmd(argv[1:], cwd=export, timeout=bundle.timeout_seconds)  # pylint: disable=protected-access
+    return validator._run_cmd_with_timeout(  # pylint: disable=protected-access
+        argv, cwd=export, timeout=bundle.timeout_seconds, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY,
+        acquisition=True, dependency_cache_path=cache, dependency_cache_writable=cache is not None, workspace_path=export,
+    )
 
 
 def load_authority_bundle(
@@ -430,11 +453,7 @@ def run_authority_bundle(
         cache = _cache_for(validator, bundle.build_tool)
         try:
             if bundle.prepare is not None:
-                run.prepare_result = validator._run_cmd_with_timeout(  # pylint: disable=protected-access
-                    _rewrite_argv(bundle.prepare, bundle.assets), cwd=export, timeout=bundle.timeout_seconds,
-                    network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
-                    dependency_cache_path=cache, dependency_cache_writable=cache is not None, workspace_path=export,
-                )
+                run.prepare_result = _run_prepare(validator, bundle, export, cache)
                 if run.prepare_result.get("timeout") or run.prepare_result.get("returncode") != 0:
                     run.reason_code = AUTHORITY_PREPARE_FAILED
                     run.reason = "the acquisition phase did not complete (environment outcome, never a verdict)"
@@ -486,7 +505,7 @@ def run_authority_bundle(
 
 def close_requirements_with_authority_bundle(
     ledger: ObligationLedger, requirements: RequirementSet, bundle: AuthorityBundle, contract: VerificationContract, *,
-    execute: Callable[[], AuthorityRun], source: str, revision: Any,
+    execute: Callable[[], AuthorityRun], source: str, revision: Any, base_revision: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Judge every requirement the contract bound to this bundle, from one
     run (``execute()``, lazily, only when a bound requirement is open):
@@ -503,6 +522,13 @@ def close_requirements_with_authority_bundle(
                if outcomes.get(rid) in (RequirementOutcome.UNVERIFIED, RequirementOutcome.PENDING)]
     if not pending:
         return []
+    if base_revision is not None and base_revision != bundle.base_revision:
+        # The bundle binds the workspace revision it was made for (review: a
+        # milestone's later units move HEAD); another base never consumes it.
+        return [{"requirement": rid, "kind": EXTERNAL_ACCEPTANCE_METHOD, "closed": False,
+                 "authority_digest": bundle.digest, "reason_code": AUTHORITY_BASE_MISMATCH,
+                 "reason": f"the authority binds base {bundle.base_revision[:12]}, the run's base is {base_revision[:12]}"}
+                for rid, _binding in pending]
     run = execute()
     claims_map = contract.required_claims_by_requirement()
     attempts: List[Dict[str, Any]] = []

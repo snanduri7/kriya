@@ -1215,43 +1215,79 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     same producers the pre-apply boundary uses, before the first model call.
     Returns the BaselineAuthorityReport; never raises for an authority that
     cannot run (its verdict is INDETERMINATE there)."""
+    import shutil
+    import uuid
+
     from kriya.core.state_paths import resolve_state_directory
+    from kriya.tools import test_execution
     from kriya.workflow.acceptance_jvm import run_java_acceptance
     from kriya.workflow.acceptance_oracle import judge_acceptance, run_acceptance
-    from kriya.workflow.authority_bundle import bound_authority_bundle, run_authority_bundle
-    from kriya.workflow.contract_baseline import run_baseline_authorities
+    from kriya.workflow.authority_bundle import AUTHORITY_RUNS_DIR, bound_authority_bundle, run_authority_bundle
+    from kriya.workflow.contract_baseline import (
+        BASELINE_FAIL,
+        BASELINE_INDETERMINATE,
+        BASELINE_PASS,
+        run_baseline_authorities,
+    )
     from kriya.workflow.example_oracle import bound_derived_examples
 
     base_revision = _workspace_head(workspace_path)
     state_root = resolve_state_directory(config)[0] if config is not None else None
+    if state_root is None:
+        raise RuntimeError("no state directory: the baseline authority run needs a Kriya-owned scratch")
+    # Review VC3-R8: every baseline producer runs on a Kriya-owned export of the
+    # untouched tree under the state root, never inside the real workspace.
+    scratch = os.path.join(state_root, AUTHORITY_RUNS_DIR, "baseline-" + uuid.uuid4().hex)
+    export = os.path.join(scratch, "workspace")
 
     def validator_for(root: str) -> PolymorphicValidator:
         return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
 
+    def exported() -> str:
+        if not os.path.isdir(export):
+            os.makedirs(scratch, exist_ok=True)
+            shutil.copytree(workspace_path, export, symlinks=True,
+                            ignore=shutil.ignore_patterns(".kriya", "target", "build", ".gradle", "node_modules",
+                                                          "__pycache__", ".pytest_cache"))
+        return export
+
     def judge(artifact: Any) -> Callable[[], Mapping[str, Any]]:
         def run() -> Mapping[str, Any]:
+            root = exported()
             if artifact.language == "java":
-                executed = run_java_acceptance(artifact, workspace_path, candidate_paths=(), base_revision=base_revision,
+                executed = run_java_acceptance(artifact, root, candidate_paths=(), base_revision=base_revision,
                                                validator_factory=validator_for)
             else:
-                executed = run_acceptance(artifact, workspace_path, candidate_paths=(),
-                                          validator_factory=lambda: validator_for(workspace_path))
+                executed = run_acceptance(artifact, root, candidate_paths=(), validator_factory=lambda: validator_for(root))
             return judge_acceptance(artifact, executed)
         return run
+
+    def judge_suite() -> str:
+        result = validator_for(exported()).run_tests()
+        report = test_execution.report_from_result(result)
+        if report is None or not report.complete:
+            return BASELINE_INDETERMINATE
+        if not result.get("success") or not report.cases:
+            return BASELINE_FAIL if report.cases else BASELINE_INDETERMINATE
+        return BASELINE_PASS if all(c.status in (test_execution.PASSED, test_execution.SKIPPED) for c in report.cases) else BASELINE_FAIL
 
     bundle = bound_authority_bundle(engine)
     acceptance = bound_acceptance(engine)
     examples = bound_derived_examples(engine)
-    return run_baseline_authorities(
-        contract, requirement_set, base_revision=base_revision,
-        run_bundle=(lambda: run_authority_bundle(bundle, workspace_path, state_root=state_root, validator_factory=validator_for))
-        if bundle is not None and state_root else None,
-        bundle_digest=bundle.digest if bundle is not None else None,
-        judge_acceptance=judge(acceptance) if acceptance is not None else None,
-        acceptance_digest=acceptance.digest if acceptance is not None else None,
-        judge_examples=judge(examples) if examples is not None else None,
-        examples_digest=examples.digest if examples is not None else None,
-    )
+    try:
+        return run_baseline_authorities(
+            contract, requirement_set, base_revision=base_revision,
+            run_bundle=(lambda: run_authority_bundle(bundle, workspace_path, state_root=state_root, validator_factory=validator_for))
+            if bundle is not None else None,
+            bundle_digest=bundle.digest if bundle is not None else None,
+            judge_acceptance=judge(acceptance) if acceptance is not None else None,
+            acceptance_digest=acceptance.digest if acceptance is not None else None,
+            judge_examples=judge(examples) if examples is not None else None,
+            examples_digest=examples.digest if examples is not None else None,
+            judge_suite=judge_suite,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def close_requirements_with_authority_bundle_evidence(
@@ -1288,6 +1324,7 @@ def close_requirements_with_authority_bundle_evidence(
         ledger, requirement_set, bundle, contract,
         execute=lambda: run_authority_bundle(bundle, candidate_root, state_root=state_root, validator_factory=validator_for),
         source="requirement_closure.external_acceptance_command", revision=revision,
+        base_revision=_oracle_base_revision(candidate_root, workspace_path),
     )
 
 
@@ -1330,7 +1367,7 @@ def close_requirements_by_test_addition(
         ledger, requirement_set, contract, reference_test_files=_reference_test_files(candidate_root, workspace_path),
         candidate_test_files=_candidate_test_files(candidate_root), base_test_identities=base_test_identities,
         candidate_test_identities=candidate_test_identities, source="requirement_closure.test_addition",
-        revision=revision,
+        revision=revision, read_candidate=_workspace_file_reader(candidate_root),
     )
 
 
@@ -2731,15 +2768,20 @@ class WorkflowEngine:
             # claim is NO_MUTATION_REQUIRED (a success without a model).
             if verification_contract.authorities and verification_contract.refusal() is None:
                 from kriya.core.trace import TraceLogger
-                from kriya.workflow.contract_baseline import NoMutationRequired
+                from kriya.workflow.contract_baseline import BaselineAuthorityReport, NoMutationRequired
 
                 try:
                     baseline_report = run_contract_baseline(
                         self, verification_contract, requirement_set, workspace_path,
                         autonomy_cfg=self.kernel.config.autonomy, config=self.kernel.config)
-                except Exception as exc:  # the authority could not run: recorded, the run proceeds
+                except Exception as exc:
+                    # Review VC3-R8 / D2: a baseline that could not run is an
+                    # environment outcome - typed stop, never a silent proceed.
                     logger.warning(f"Baseline authority run unavailable: {type(exc).__name__}: {exc}")
-                    baseline_report = None
+                    baseline_report = BaselineAuthorityReport(base_revision=_workspace_head(workspace_path))
+                    baseline_report.authorities_run.append({
+                        "kind": "baseline_run", "digest": None, "reason_code": "AUTHORITY_EXECUTION_UNAVAILABLE",
+                        "reason": f"the baseline authority run raised {type(exc).__name__}: {exc}"})
                 if baseline_report is not None:
                     state.record_event(RunEvent(
                         kind="verification_contract.baseline", attempt=0, source="workflow.run_generation_workflow",

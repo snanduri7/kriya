@@ -638,10 +638,12 @@ _EMPTY_CALL_EXAMPLE = re.compile(r"`[A-Za-z_][\w.]*\(\s*\)`")
 _SIGNATURE = re.compile(r"\b[A-Za-z_]\w*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)")
 _PLACEHOLDER = re.compile(r"<[^<>\s]+>")
 _CLAUSE_SPLIT = re.compile(r"[,;:()]|\bwhile\b")
-# VERIFICATION-CONTRACT-003: a doctest session ("``>>> expr`` then its expected
-# output") states concrete cases; everything from the first prompt on is
-# content, never prose - its ``None``/``def`` tokens are code, not quantifiers.
-_DOCTEST_SESSION = re.compile(r">>>\s.*$")
+# VERIFICATION-CONTRACT-003: a statement that IS a doctest session (it starts
+# with the ``>>> `` prompt: a session paragraph is its own statement) states
+# concrete cases; its tokens are code, never prose quantifiers. Review VC3-R2:
+# a prompt mentioned inside prose, or prose after a session, never triggers
+# the rule - such a statement is scanned as prose and stays GENERAL.
+_DOCTEST_SESSION = re.compile(r"^\s*>>>\s.*$")
 _DOCTEST_PROMPT = re.compile(r">>>\s+([^>]+?)(?=\s+>>>\s|\s*$)")
 
 

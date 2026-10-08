@@ -19,6 +19,8 @@ compound statement closes only when every claim it makes is closed.
 """
 from __future__ import annotations
 
+import ast
+import re
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.workflow.contract_compilation import (
@@ -44,6 +46,33 @@ DOCUMENTATION_NOT_APPLICABLE = "DOCUMENTATION_NOT_APPLICABLE"
 DOCUMENTATION_REFERENT_PRESENT = "DOCUMENTATION_REFERENT_PRESENT"
 
 
+_JVM_TEST_ANNOTATION = re.compile(r"@(?:org\.junit\.(?:jupiter\.api\.)?)?(?:Test|ParameterizedTest|RepeatedTest)\b")
+
+
+def file_contains_a_test(path: str, data: Optional[bytes]) -> bool:
+    """Review VC3-R7: a file whose NAME follows a test convention is not a
+    test until it CONTAINS one - a Python ``test*`` function (module level or
+    in a ``Test*`` class) or a JVM ``@Test`` annotation. Unreadable or
+    unparseable: no."""
+    if data is None:
+        return False
+    if path.endswith(".py"):
+        try:
+            tree = ast.parse(data.decode("utf-8"))
+        except (SyntaxError, UnicodeDecodeError, ValueError):
+            return False
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                return True
+            if isinstance(node, ast.ClassDef) and node.name.startswith("Test") and any(
+                    isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name.startswith("test") for m in node.body):
+                return True
+        return False
+    if path.endswith((".java", ".kt")):
+        return bool(_JVM_TEST_ANNOTATION.search(data.decode("utf-8", errors="replace")))
+    return False
+
+
 def _evidence_id(ledger: ObligationLedger, requirement_id: str) -> Optional[str]:
     record = ledger.current(requirement_obligation_id(requirement_id))
     return (record.evidence or {}).get("evidence_id") if record is not None else None
@@ -53,16 +82,20 @@ def close_test_addition_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, contract: VerificationContract, *,
     reference_test_files: Optional[Sequence[str]], candidate_test_files: Iterable[str],
     base_test_identities: Optional[Iterable[str]], candidate_test_identities: Optional[Iterable[str]],
-    source: str, revision: Any,
+    source: str, revision: Any, read_candidate: Optional[Callable[[str], Optional[bytes]]] = None,
 ) -> List[Dict[str, Any]]:
     """Record the TEST_ADDITION claim of every requirement the contract binds
-    to ``test_addition``: SATISFIED when a runnable test file exists in the
-    candidate that the reference (pre-run) set lacks, or when the
-    candidate's complete suite report carries a test identity the base's
-    does not; otherwise the claim stays open (nothing recorded)."""
+    to ``test_addition``: SATISFIED when a test file exists in the candidate
+    that the reference (pre-run) set lacks AND contains a test
+    (``file_contains_a_test``; review VC3-R7: an empty file named like a test
+    is not one), or when the candidate's complete suite report carries a test
+    identity the base's does not; otherwise the claim stays open."""
     attempts: List[Dict[str, Any]] = []
     present = sorted(set(candidate_test_files))
     added_files = (sorted(set(present) - set(reference_test_files)) if reference_test_files is not None else None)
+    if added_files:
+        added_files = [path for path in added_files
+                       if read_candidate is not None and file_contains_a_test(path, read_candidate(path))]
     new_identities = (sorted(set(candidate_test_identities) - set(base_test_identities))
                       if base_test_identities is not None and candidate_test_identities is not None else None)
     for requirement_id, binding in contract.binding_closers(CLOSER_TEST_ADDITION):

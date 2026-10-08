@@ -226,6 +226,13 @@ class ExternalAuthority:
                 "coverage": {rid: dict(entry) for rid, entry in sorted(self.coverage.items())},
                 "provenance": dict(self.provenance)}
 
+    def identity(self) -> Dict[str, Any]:
+        """The authority as the contract digest sees it: review VC3-R10 - where
+        the state directory lives (``stored_path``/``stored_dir``) is not an
+        input of the contract, the content digest is."""
+        provenance = {k: v for k, v in self.provenance.items() if k not in ("stored_path", "stored_dir")}
+        return {**self.to_dict(), "provenance": provenance}
+
 
 @dataclass(frozen=True)
 class ClaimBinding:
@@ -311,7 +318,7 @@ class VerificationContract:
                 "requirement_contract_digest": self.requirement_contract_digest, "base_revision": self.base_revision,
                 "project_language": self.project_language,
                 "entries": [entry.to_dict() for entry in self.entries],
-                "authorities": [authority.to_dict() for authority in self.authorities]}
+                "authorities": [authority.identity() for authority in self.authorities]}
 
     @property
     def digest(self) -> str:

@@ -63,16 +63,16 @@ def test_01_no_mutation_required_only_when_every_mandatory_claim_holds_at_baseli
     passing = SimpleNamespace(passed=True, violated=False)
     failing = SimpleNamespace(passed=False, violated=True)
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", judge_examples=lambda: {"REQ-1": passing},
-                                         examples_digest="e" * 64)
+                                         examples_digest="e" * 64, judge_suite=lambda: cb.BASELINE_PASS)
     assert report.no_mutation_required is True and report.discriminating is False
     # "Examples:" followed by indented example lines is ONE statement (REQ-1, EXACT); REQ-2 is the suite statement
     assert report.claims["REQ-1"][BEHAVIOR]["state"] == "PASS"
-    assert report.claims["REQ-2"]["REGRESSION_PRESERVATION"]["state"] == "IDENTITY"
+    assert report.claims["REQ-2"]["REGRESSION_PRESERVATION"]["state"] == "PASS"  # the baseline suite ran (VC3-R9)
     assert report.claims["REQ-2"]["TEST_IMMUTABILITY"]["state"] == "IDENTITY"
     assert report.outcomes() == {"REQ-1": "closed_by_evidence", "REQ-2": "closed_by_evidence"}
     # a failing baseline: discriminating, mutation ahead
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", judge_examples=lambda: {"REQ-1": failing},
-                                         examples_digest="e" * 64)
+                                         examples_digest="e" * 64, judge_suite=lambda: cb.BASELINE_PASS)
     assert report.no_mutation_required is False and report.discriminating is True and report.unsatisfied == {"REQ-1": [BEHAVIOR]}
     # an indeterminate judgment is never a pass
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc",
@@ -99,7 +99,8 @@ def test_03_an_external_authority_pass_at_baseline_is_operator_sufficiency():
     bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
     reqs, contract = _contract(EXACT_GOAL, [bundle])
     run = SimpleNamespace(verdict="PASS", evidence=lambda: {"verdict": "PASS"})
-    report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", run_bundle=lambda: run, bundle_digest="b" * 64)
+    report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", run_bundle=lambda: run, bundle_digest="b" * 64,
+                                         judge_suite=lambda: cb.BASELINE_PASS)
     assert report.no_mutation_required is True and report.outcomes()["REQ-1"] == "human_accepted"
     assert report.authorities_run[0]["kind"] == "external_acceptance_command"
     decision = cb.NoMutationRequired(contract, report)
@@ -114,10 +115,11 @@ async def test_04_direct_path_succeeds_without_a_model_when_the_baseline_already
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdicts_json(prompt),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
     workspace = _workspace(tmp_path, CALC_OK)
-    p1, p2 = _gates_pass()
-    with p1, p2:
+    # the baseline suite runs for real on an exported copy (VC3-R9: a regression claim is never assumed)
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}):
         res = await engine.run_generation_workflow(goal=EXACT_GOAL, workspace_path=str(workspace))
     assert res["status"] == "success" and res["no_mutation_required"] is True and res["quality_gates_passed"] is True
+    assert res["baseline_authority"]["claims"]["REQ-2"]["REGRESSION_PRESERVATION"]["state"] == "PASS"
     assert res["files"] == [] and engine.developer.run_generation.await_count == 0 and calls["planner"] == []
     assert res["requirements"]["outcomes"] == {"REQ-1": "closed_by_evidence", "REQ-2": "closed_by_evidence"}
     assert res["baseline_authority"]["no_mutation_required"] is True

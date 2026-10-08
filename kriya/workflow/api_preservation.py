@@ -5,8 +5,10 @@ repository predicate decided from the base revision and the candidate, never
 from a model. For every public Python module of the project (no path
 component starting with ``_`` except ``__init__``, no test-side file), the
 public surface is every module-level function, class, class method (plus
-``__init__``) and ``__all__`` entry whose name does not start with ``_``,
-rendered as a signature string (parameters with their kinds, default
+``__init__``), every public name bound by a module-level import (a
+re-export), every public module-level assignment (a constant: its literal
+value when it is one) and ``__all__`` entry whose name does not start with
+``_``, rendered as a signature string (parameters with their kinds, default
 presence and values, annotations). Compared base versus candidate:
 
 - a public symbol absent from the candidate, or present with another
@@ -111,6 +113,24 @@ def public_signatures(source: bytes, module: str) -> Dict[str, str]:
                 names = None
             if isinstance(names, (list, tuple)):
                 surface[f"{module}.__all__"] = "[" + ", ".join(sorted(str(name) for name in names)) + "]"
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            # Review VC3-R5: a public module-level name (a constant, a default) is API surface.
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and not target.id.startswith("_"):
+                    try:
+                        value = "value=" + repr(ast.literal_eval(node.value)) if node.value is not None else "unbound"
+                    except ValueError:
+                        value = "non-literal"
+                    surface[f"{module}.{target.id}"] = f"name({value})"
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # Review VC3-R5: a public name bound by a module-level import is a re-export.
+            for alias in node.names:
+                bound = (alias.asname or alias.name).split(".")[0]
+                if bound != "*" and not bound.startswith("_"):
+                    origin = (f"from {'.' * node.level}{node.module or ''} import {alias.name}"
+                              if isinstance(node, ast.ImportFrom) else f"import {alias.name}")
+                    surface[f"{module}.{bound}"] = f"reexport({origin})"
     return surface
 
 

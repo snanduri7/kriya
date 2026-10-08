@@ -50,10 +50,8 @@ from kriya.workflow.requirements import (
     _EXAMPLE_CALL,
     _IMMUTABILITY_VERBS,
     _NEGATIONS,
-    _PRESERVATION_WORDS,
     _STRIP_CODE_AND_PARENS,
     _SUITE_PRESERVATION_CUES,
-    _SUITE_PRESERVATION_WORDS,
     API_PRESERVATION,
     BEHAVIOR,
     BEHAVIOR_EXACT,
@@ -117,15 +115,22 @@ _LABEL_FORBIDDEN_WORDS = frozenset({
     "correct", "correctly", "incorrect", "incorrectly", "is", "are", "was", "were", "be", "has", "have", "does",
     "create", "run", "install", "open", "use", "set", "call", "start", "then", "delete", "write", "edit",
     "modify", "verify", "check", "test", "restore", "handle", "resolve", "skip", "produce", "produces",
+    # review VC3-R6: constraint adjectives written as headings are claims ("Zero regressions:", "Thread safety:")
+    "zero", "same", "identical", "compatible", "compatibility", "only", "safe", "safety", "idempotent", "constant",
+    "thread", "regressions", "regression", "backward", "backwards", "deterministic", "stable", "immutable",
 })
 _LABEL_FORBIDDEN_MARKS = ("=", "->", "=>", "?", "!")
 # Inside a code block, any of these says the author stated an expected value
 # or result: the block is then a claim, not scaffolding.
 # A print/output call inside a snippet is code, not an expectation; the
-# expectation words are the ones an author writes beside a value.
+# expectation words are the ones an author writes beside a value. Review
+# VC3-R3: any ``#`` comment, an ``==`` comparison and the result words
+# (correct/wrong/got/but) are expectation markers too - a reproducer whose
+# only stated expectation is a comment is a claim, never scaffolding. A
+# ``print(...)`` CALL is code (the comment word "prints" is covered by ``#``).
 _EXPECTED_VALUE_MARKER = re.compile(
-    r"->|=>|\bexpected\b|\bexpect\b|\bexpects\b|\bshould\b|\breturns?\b|\bactual\b|"
-    r"\bassert\w*\b|\bfails?\b|\bpasses\b|\braises?\b|\bthrows?\b",
+    r"->|=>|==|#\s*\S|\bexpected\b|\bexpect\b|\bexpects\b|\bshould\b|\breturns?\b|\bactual\b|"
+    r"\bassert\w*\b|\bfails?\b|\bpasses\b|\braises?\b|\bthrows?\b|\bcorrect\b|\bwrong\b|\bgot\b|\bbut\b",
     re.IGNORECASE,
 )
 _API_NOUNS = re.compile(
@@ -182,22 +187,21 @@ _EXISTING_TESTS = re.compile(r"\b(?:existing|current|pre-existing|present)\s+(?:
 _SUITE_CLAUSE = re.compile(
     r"\b(?:every|all|each|the)\s+(?:existing|current|pre-existing)\s+(?:unit\s+)?tests?\b|"
     r"\b(?:the\s+)?(?:existing\s+)?(?:test\s+)?suite\b", re.IGNORECASE)
-# Words a compound constraint made only of recognized clauses may contain
-# beside the clause vocabularies: a leftover word outside this set keeps the
-# statement's BEHAVIOR claim (closing never gets easier by accident).
-_CONSTRAINT_FILLER = frozenset({
+# Review VC3-R1: the leftover of a compound constraint is computed against the
+# RECOGNIZED CLAUSE SPANS (the API noun and cue, the suite noun and cues, the
+# negated change verb and its "existing tests" object), never against a
+# vocabulary allow-list: a second clause the recognizers did not match ("do
+# not break the tests", "do not delete tests") keeps the statement's BEHAVIOR
+# claim and the goal stays authority-required. Only connective filler may
+# remain once the spans are removed.
+_PURE_FILLER = frozenset({
     "constraint", "constraints", "hard", "please", "also", "and", "or", "the", "a", "an", "of", "to", "in", "as",
-    "is", "are", "be", "its", "their", "this", "that", "these", "those", "any", "all", "every", "each", "both",
-    "existing", "current", "pre-existing", "must", "should", "shall", "may", "not", "no", "never", "stay", "stays",
-    "remain", "remains", "kept", "keep", "keeps", "unchanged", "intact", "untouched", "unmodified", "as-is",
-    "public", "protected", "api", "apis", "interface", "interfaces", "signature", "signatures", "method", "methods",
-    "class", "classes", "constructor", "constructors", "field", "fields", "member", "members", "change", "changed",
-    "changes", "alter", "altered", "modify", "modified", "remove", "removed", "rename", "renamed", "break", "broken",
-    "added", "compatible", "compatibility", "binary", "source", "backwards", "backward", "hierarchy", "test", "tests",
-    "suite", "pass", "passes", "passing", "green", "unit", "including", "under", "with", "without", "delete",
-    "deleted", "touch", "touched", "edit", "edited", "rewrite", "rewritten", "preserve", "preserved", "do", "does",
-    "don't", "ever", "other", "whatsoever",
+    "its", "their", "this", "that", "these", "those", "both", "must", "should", "shall", "may", "be", "is", "are",
+    "every", "all", "each", "any", "existing", "current", "keep", "keeps", "kept", "stay", "stays", "remain",
+    "remains", "still", "so", "too", "well",
 })
+_NEGATED_CHANGE_VERB = re.compile(
+    rf"\b(?:{'|'.join(re.escape(n) for n in sorted(_NEGATIONS))})\b[^.;]{{0,40}}?{_IMMUTABILITY_VERBS}", re.IGNORECASE)
 # Filler a pure test-addition statement may carry beside its clause.
 _TEST_ADDITION_FILLER = frozenset({"please", "also", "and", "for", "it", "this", "that", "the", "a", "an", "new",
                                    "regression", "unit", "integration", "acceptance", "case", "cases", "covering",
@@ -314,19 +318,30 @@ def has_suite_preservation_clause(text: str) -> bool:
 
 def constraint_without_behaviour_leftover(text: str) -> bool:
     """Whether a compound constraint is made only of its recognized clauses:
-    every word outside code spans, quotes and parentheticals belongs to the
-    preservation, suite, immutability or API vocabulary or to the closed
-    filler set. Only then does the statement make no BEHAVIOR claim beside
-    its clause claims; one foreign word ("and log a warning") keeps it. A
+    once the spans the recognizers matched (API noun + preservation cue,
+    suite noun + preservation cue, negated change verb + existing-tests
+    object) are removed from the prose, only connective filler remains. A
+    second clause nothing recognized ("do not break the tests") keeps the
+    statement's BEHAVIOR claim: closing never gets easier by accident. A
     quoted, parenthesized or fenced span that is not a command or a path is
     prose (the final-review rule of REQUIREMENT-CLOSURE-PLAIN-GOAL-001): a
-    request hidden in it keeps the statement's behaviour claim."""
+    request hidden in it keeps the behaviour claim too."""
     if not _spans_are_commands(text):
         return False
-    words = {word.lower().strip("'") for word in _WORD.findall(_prose(text))}
-    allowed = (_CONSTRAINT_FILLER | _SUITE_PRESERVATION_WORDS | _PRESERVATION_WORDS | _SUITE_PRESERVATION_CUES
-               | _NEGATIONS | set(re.findall(r"[a-z]+", _IMMUTABILITY_VERBS)))
-    return not {word for word in words if len(word) > 1} - allowed
+    prose = _prose(text)
+    spans = []
+    for pattern in (_API_NOUNS, _API_PRESERVATION_CUE, _SUITE_CLAUSE, _NEGATED_CHANGE_VERB, _EXISTING_TESTS):
+        spans += [m.span() for m in pattern.finditer(prose)]
+    lowered = prose.lower()
+    for cue in _SUITE_PRESERVATION_CUES:
+        spans += [m.span() for m in re.finditer(rf"\b{re.escape(cue)}\b", lowered)]
+    kept = [True] * len(prose)
+    for start, end in spans:
+        for index in range(start, end):
+            kept[index] = False
+    remainder = "".join(ch if keep else " " for ch, keep in zip(prose, kept, strict=True))
+    words = {word for word in (raw.lower().strip("'") for raw in _WORD.findall(remainder)) if len(word) > 1}
+    return not words - _PURE_FILLER
 
 
 def test_addition_only(text: str) -> bool:
@@ -356,8 +371,13 @@ def documentation_clause(text: str) -> Optional[Dict[str, object]]:
     if clause is None:
         return None
     name = clause.group("name") or clause.group("word")
-    noun = _DOCUMENTATION_LIST_NOUN.search(prose, clause.start())
-    return {"referent": name, "conditional": bool(_DOCUMENTATION_CONDITIONAL.search(prose)),
+    # Review VC3-R4: the conditional belongs to the documentation clause only
+    # when it follows it within the same sentence segment - never a condition
+    # stated earlier for another clause ("... if any exist, and document that").
+    segment_end = re.search(r"[.;]", prose[clause.end():])
+    segment = prose[clause.start():clause.end() + (segment_end.start() if segment_end else len(prose))]
+    noun = _DOCUMENTATION_LIST_NOUN.search(segment)
+    return {"referent": name, "conditional": bool(_DOCUMENTATION_CONDITIONAL.search(segment)),
             "list_noun": noun.group("noun").lower() if noun else None, "clause": clause.group(0)}
 
 
