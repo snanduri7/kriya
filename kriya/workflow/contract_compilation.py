@@ -539,7 +539,9 @@ def _documentation_list_present(
     return bool(matched), evidence
 
 
-_LIST_ENTRY_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\|)\s*\S|^\s*(?:`|\*\*|[A-Za-z_])")
+# An entry of a list: a list item, a table row, or a line opening with a code span or bold name; a plain prose line
+# counts only when it OPENS with the subject (a definition entry such as ``lower(string) - ...``).
+_LIST_ENTRY_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\|)\s*\S|^\s*(?:`|\*\*)")
 
 
 def documentation_sections(data: bytes, noun: str) -> Dict[str, List[str]]:
@@ -574,10 +576,10 @@ def documentation_entries_present(sections: Mapping[str, Sequence[str]], subject
     found: Dict[str, List[str]] = {subject: [] for subject in subjects}
     for heading, lines in sections.items():
         for line in lines:
-            if not _LIST_ENTRY_LINE.match(line):
-                continue
+            entry_line = bool(_LIST_ENTRY_LINE.match(line))
             for subject in subjects:
-                if re.search(r"(?<![\w.])" + re.escape(subject) + r"(?![\w])", line):
+                whole_word = r"(?<![\w.])" + re.escape(subject) + r"(?![\w])"
+                if (entry_line and re.search(whole_word, line)) or re.match(r"\s*" + whole_word, line):
                     found[subject].append(f"{heading}: {line.strip()}")
     return found
 

@@ -140,3 +140,12 @@ def test_04_section_and_entry_helpers_are_whole_word_and_section_scoped():
     rst_sections = documentation_sections(rst, "function")
     assert list(rst_sections) == ["Functions"] and documentation_entries_present(rst_sections, ["lower", "trim"]) == {
         "lower": ["Functions: * ``lower()`` - x"], "trim": []}
+
+
+def test_05_a_prose_sentence_inside_the_section_is_not_an_entry_but_a_definition_line_is():
+    """m50: an entry is a list item, a table row, a code-span/bold line or a line opening with the subject."""
+    readme = b"## Function list\n\nWe will add trim and upper later.\n\nlower(string) - lower-case\n| upper | upper-case |\n"
+    sections = documentation_sections(readme, "function")
+    present = documentation_entries_present(sections, ["lower", "upper", "trim"])
+    assert present["lower"] == ["Function list: lower(string) - lower-case"]
+    assert present["upper"] == ["Function list: | upper | upper-case |"] and present["trim"] == []
