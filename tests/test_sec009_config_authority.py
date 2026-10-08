@@ -66,9 +66,11 @@ def test_packaged_defaults_continue_working(tmp_path):
     with _cwd(tmp_path / "packaged_ws"):
         cfg = load_config()
         assert cfg.execution_policy.mode == "audit"
-        # GRADLE-WRAPPER-CONTAINMENT-001: + services.gradle.org and plugins.gradle.org (acquisition phase only)
+        # GRADLE-WRAPPER-CONTAINMENT-001: + services.gradle.org and plugins.gradle.org (acquisition phase only);
+        # GRADLE-PLUGIN-PORTAL-ACQUISITION-001 (BACKEND-READINESS-004): + plugins-artifacts.gradle.org (measured)
         assert cfg.autonomy.acquisition_registry_hosts == [
-            "files.pythonhosted.org", "plugins.gradle.org", "pypi.org", "repo.maven.apache.org", "services.gradle.org",
+            "files.pythonhosted.org", "plugins-artifacts.gradle.org", "plugins.gradle.org", "pypi.org",
+            "repo.maven.apache.org", "services.gradle.org",
         ]
 
 

@@ -29,6 +29,7 @@ from typing import Any, Dict, FrozenSet, List, Literal, Mapping, Optional, Seque
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.static_analysis.model import (
     CAPABILITY_UNKNOWN,
     CONTAINMENT_UNAVAILABLE,
@@ -345,8 +346,7 @@ def _parse_rules(spec: _PackSpec, files: Sequence[Tuple[str, bytes]]) -> List[Tu
 
 
 def _inside(path: str, root: str) -> bool:
-    root = os.path.realpath(root)
-    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+    return path_relation(root, path) is PathRelation.WITHIN
 
 
 def _load_packs(specs: Sequence[_PackSpec], workspace_root: str) -> _LoadedPacks:

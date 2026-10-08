@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.static_analysis.coverage import language_of
 from kriya.static_analysis.model import (
     BASELINE_IDENTITY_MISMATCH,
@@ -165,7 +166,7 @@ def resolve_roots(
         for root in build_graph_roots:
             relative = _safe_relpath(root)
             real = os.path.realpath(os.path.join(workspace_root, relative))
-            if os.path.commonpath((real_workspace, real)) != real_workspace:
+            if path_relation(real_workspace, real) is not PathRelation.WITHIN:
                 raise ScopeError(SCOPE_UNRESOLVABLE, f"build-graph root {root!r} resolves outside the workspace")
             roots.add("" if relative == "." else relative)
     return _outermost(roots)

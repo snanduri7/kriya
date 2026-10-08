@@ -67,6 +67,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Tuple
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
+
 
 class MCPCapabilityConfigError(ValueError):
     """A capability profile could not be resolved - an invalid/unsupported
@@ -164,8 +166,7 @@ def compute_mcp_capability_profile_digest(profile: MCPCapabilityProfile) -> str:
 
 
 def _resolve_path_scope(real_path: str, workspace_root: str) -> MCPPathScope:
-    real_root = os.path.realpath(workspace_root)
-    if real_path == real_root or real_path.startswith(real_root + os.sep):
+    if path_relation(workspace_root, real_path) is PathRelation.WITHIN:
         return MCPPathScope.WORKSPACE_RELATIVE
     return MCPPathScope.HOST_PATH
 

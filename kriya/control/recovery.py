@@ -56,6 +56,7 @@ from kriya.control.run_record import (
     COMMIT_ROLLED_BACK,
     RunRecord,
 )
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 from kriya.workflow.edit_safety import (
     CommitEvidence,
     CommitState,
@@ -101,8 +102,11 @@ _EVIDENCE_TO_CYCLE = {
 
 
 def canonical_workspace(workspace_path: str) -> str:
-    """The same canonical form begin_mutating_run locks and records."""
-    return os.path.normcase(os.path.realpath(os.path.abspath(workspace_path)))
+    """The same canonical form begin_mutating_run locks and records (PLAT-017:
+    kriya/control/workspace_identity.canonical_workspace)."""
+    from kriya.control.workspace_identity import canonical_workspace as _canonical
+
+    return _canonical(workspace_path)
 
 
 # ---------------------------------------------------------------- findings
@@ -261,10 +265,7 @@ def matches_file_state(current: Dict[str, Any], expected: Any) -> bool:
 
 def _inside(workspace: str, path: str) -> bool:
     real = os.path.realpath(path)
-    try:
-        return os.path.commonpath((workspace, real)) == workspace and real != workspace
-    except ValueError:
-        return False
+    return path_relation(workspace, real) is PathRelation.WITHIN and path_identity(workspace, real) is not PathIdentity.SAME
 
 
 def contained_workspace_path(workspace: str, relpath: Any) -> Optional[str]:

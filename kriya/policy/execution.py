@@ -64,6 +64,7 @@ import re
 import shlex
 from typing import Callable, FrozenSet, List, Optional, Sequence, Tuple
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.model import (
     ActionRequest,
     ActionType,
@@ -655,7 +656,7 @@ class ExecutionPolicy:
             return None
 
         workspace = _normalize_path(request.workspace_path)
-        if normalized == workspace or normalized.startswith(workspace + os.sep):
+        if path_relation(workspace, normalized) is PathRelation.WITHIN:
             return PolicyResult(
                 decision=PolicyDecision.ALLOW,
                 reason_code="PATH_WITHIN_WORKSPACE_ALLOWED",

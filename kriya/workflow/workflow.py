@@ -40,6 +40,7 @@ from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
 from kriya.core.state_paths import trace_db_path
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
@@ -825,7 +826,7 @@ def _resolve_protected_relpath(workspace_path: str, protected_source_file: Optio
         abs_workspace = os.path.realpath(os.path.expanduser(workspace_path))
     except Exception:
         return None
-    if abs_target != abs_workspace and not abs_target.startswith(abs_workspace + os.sep):
+    if path_relation(abs_workspace, abs_target) is not PathRelation.WITHIN:
         return None
     return os.path.normpath(os.path.relpath(abs_target, abs_workspace))
 

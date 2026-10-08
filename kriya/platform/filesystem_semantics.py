@@ -151,3 +151,33 @@ def path_identity(first: str, second: str) -> PathIdentity:
         return PathIdentity.DIFFERENT
     same_tail = tuple(map(fold_name, first_tail)) == tuple(map(fold_name, second_tail))
     return PathIdentity.SAME if same_tail else PathIdentity.DIFFERENT
+
+
+def canonical_spelling(path: str) -> str:
+    """PLAT-017 (BACKEND-READINESS-004): the real path re-spelled exactly as
+    the filesystem stores each existing component, so every case or
+    normalization variant of one directory yields one string on a
+    case-insensitive filesystem (and a case-sensitive one is unchanged:
+    only an exact entry matches there). Components that do not exist keep
+    the spelling given. Used for identities that are persisted and
+    compared, never for authority decisions (``path_relation`` does those)."""
+    try:
+        real = os.path.realpath(os.path.abspath(path))
+    except (OSError, ValueError):
+        return path
+    drive, tail = os.path.splitdrive(real)
+    parts = [p for p in tail.split(os.sep) if p]
+    current = drive + os.sep if tail.startswith(os.sep) else drive or ""
+    spelled = []
+    for part in parts:
+        candidate = os.path.join(current, part) if current else part
+        try:
+            entries = os.listdir(current or ".")
+        except OSError:
+            spelled.append(part)
+            current = candidate
+            continue
+        actual = part if part in entries else next((e for e in entries if fold_name(e) == fold_name(part)), part)
+        spelled.append(actual)
+        current = os.path.join(current, actual) if current else actual
+    return (drive + os.sep if tail.startswith(os.sep) else drive) + os.sep.join(spelled) if spelled else real

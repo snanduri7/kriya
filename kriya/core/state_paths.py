@@ -27,6 +27,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
+
 ENV_STATE_DIR = "KRIYA_STATE_DIR"
 TRACE_DB_FILENAME = "traces.db"
 
@@ -86,10 +88,10 @@ def require_workspace_local_state_under_kriya_dir(resolved: str, workspace_root:
     would put Kriya state among the repository's own files."""
     workspace = os.path.realpath(workspace_root)
     target = os.path.realpath(resolved)
-    if os.path.commonpath([workspace, target]) != workspace:
+    if path_relation(workspace, target) is not PathRelation.WITHIN:
         return  # outside the workspace: SEC-009 path authority decides
     kriya_dir = os.path.join(workspace, WORKSPACE_STATE_PARENT)
-    if target != kriya_dir and os.path.commonpath([kriya_dir, target]) == kriya_dir:
+    if path_relation(kriya_dir, target) is PathRelation.WITHIN and path_identity(kriya_dir, target) is not PathIdentity.SAME:
         return
     raise StateDirectoryError(
         f"paths.state {original!r} resolves inside the workspace ({target}) but not beneath "

@@ -28,10 +28,11 @@ default" (see _REPOSITORY_SAFE_FIELDS: only fields explicitly listed there
 are ever authorized from repository-equivalent provenance).
 """
 
-import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 
 class ConfigSource(str, Enum):
@@ -319,9 +320,8 @@ def path_field_classification(leaf_key: str, resolved_value: str, container_root
     field is unconditionally SECURITY_AUTHORITY regardless of containment,
     because the malicious payload it would load is typically INSIDE the
     same repository/workspace that is under attack."""
-    real_value = os.path.realpath(resolved_value)
-    real_root = os.path.realpath(container_root)
-    if real_value == real_root or real_value.startswith(real_root + os.sep):
+    # PLAT-PATH-CONTAINMENT-001: filesystem identity, never a lexical prefix (case/normalization aliases).
+    if path_relation(container_root, resolved_value) is PathRelation.WITHIN:
         return FieldClassification.REPOSITORY_SAFE
     return FieldClassification.SECURITY_AUTHORITY
 
@@ -353,9 +353,7 @@ def explicit_config_source(resolved_config_path: str, workspace_root: str) -> Co
     inside the workspace pointing at a target outside it is correctly
     treated as an escape, and a symlink whose real target stays inside the
     workspace is correctly treated as in-workspace."""
-    real_path = os.path.realpath(resolved_config_path)
-    real_workspace = os.path.realpath(workspace_root)
-    if real_path == real_workspace or real_path.startswith(real_workspace + os.sep):
+    if path_relation(workspace_root, resolved_config_path) is PathRelation.WITHIN:
         return ConfigSource.EXPLICIT_CONFIG_PATH_INSIDE_WORKSPACE
     return ConfigSource.EXPLICIT_CONFIG_PATH_OUTSIDE_WORKSPACE
 

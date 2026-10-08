@@ -80,7 +80,9 @@ _ACTIVE_RUN: ContextVar[Optional[RunContext]] = ContextVar(
 
 
 def _canonical_workspace(workspace_path: str) -> str:
-    return os.path.normcase(os.path.realpath(os.path.abspath(workspace_path)))
+    from kriya.control.workspace_identity import canonical_workspace  # PLAT-017: one canonical form everywhere
+
+    return canonical_workspace(workspace_path)
 
 
 def _git_revision(workspace_path: str, revision: str) -> Optional[str]:

@@ -207,10 +207,7 @@ def is_within_scope(scope: FilesystemScope, target_path: str) -> bool:
     contained."""
 
     canonical_target = _canonical(target_path)
-    return any(
-        canonical_target == root or canonical_target.startswith(root + os.sep)
-        for root in scope.writable_roots
-    )
+    return any(path_relation(root, canonical_target) is PathRelation.WITHIN for root in scope.writable_roots)
 
 
 class AuthorizedFileWriter:

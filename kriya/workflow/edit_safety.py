@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.workflow.file_integrity import (
@@ -305,10 +306,7 @@ def candidate_digest_of_entries(
 def _within_workspace(workspace_path: str, path: str) -> bool:
     root = os.path.realpath(workspace_path)
     candidate = os.path.realpath(path)
-    try:
-        return os.path.commonpath((root, candidate)) == root and candidate != root
-    except ValueError:
-        return False
+    return path_relation(root, candidate) is PathRelation.WITHIN and path_identity(root, candidate) is not PathIdentity.SAME
 
 
 def _fsync_directory(path: str) -> None:
@@ -514,7 +512,7 @@ def _operation_kind(item: StagedFileWrite, target_exists: bool) -> str:
 def _preflight_batch(
     staged: List[StagedFileWrite], workspace_path: Optional[str],
 ) -> None:
-    canonical_targets = [os.path.normcase(os.path.realpath(item.target_path)) for item in staged]
+    canonical_targets = [fold_name(os.path.realpath(item.target_path)) for item in staged]  # PLAT-018: aliases collide
     if len(set(canonical_targets)) != len(canonical_targets):
         raise BatchCommitError("A candidate batch contains duplicate or aliased target paths.")
     for item in staged:

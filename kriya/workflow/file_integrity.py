@@ -32,6 +32,7 @@ import subprocess
 from dataclasses import dataclass, replace
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 from kriya.workflow.failure import Failure, QualityGateFailure
 
 EMPTY_SEARCH_BLOCK = "EMPTY_SEARCH_BLOCK"
@@ -612,7 +613,7 @@ class VerificationTreeBinding:
             except OSError:
                 continue  # left in place: the caller's re-listing fails closed
             parent = os.path.dirname(path)
-            while parent != root and parent.startswith(root + os.sep):
+            while path_identity(root, parent) is not PathIdentity.SAME and path_relation(root, parent) is PathRelation.WITHIN:
                 try:
                     os.rmdir(parent)
                 except OSError:

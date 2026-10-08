@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from kriya.analyzer.analyzer import RepositoryModel
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,7 @@ def is_accidental_shared_skills_write(skills_dir: str, workspace_path: str) -> b
         resolved_workspace = os.path.abspath(workspace_path)
         return (
             resolved_skills_dir == global_skills_dir
-            and resolved_workspace != kriya_install_dir
-            and not resolved_workspace.startswith(kriya_install_dir + os.sep)
+            and path_relation(kriya_install_dir, resolved_workspace) is not PathRelation.WITHIN
         )
     except Exception:
         return False
@@ -71,12 +71,8 @@ def is_accidental_shared_skill_write(skill_source_path: str, workspace_path: str
         global_skills_dir = get_global_skills_dir()
         kriya_install_dir = os.path.dirname(global_skills_dir)
         resolved_workspace = os.path.abspath(workspace_path)
-        inside_global = resolved_source == global_skills_dir or resolved_source.startswith(global_skills_dir + os.sep)
-        return (
-            inside_global
-            and resolved_workspace != kriya_install_dir
-            and not resolved_workspace.startswith(kriya_install_dir + os.sep)
-        )
+        inside_global = path_relation(global_skills_dir, resolved_source) is PathRelation.WITHIN
+        return inside_global and path_relation(kriya_install_dir, resolved_workspace) is not PathRelation.WITHIN
     except Exception:
         return False
 
@@ -407,7 +403,7 @@ class SkillEngine:
             _global_skills_dir = get_global_skills_dir()
             _kriya_install_dir = os.path.dirname(_global_skills_dir)
             _supplied = os.path.abspath(skills_dir)
-            if _supplied == _global_skills_dir or _supplied.startswith(_global_skills_dir + os.sep):
+            if path_relation(_global_skills_dir, _supplied) is PathRelation.WITHIN:
                 self.workspace_path = _kriya_install_dir
             else:
                 self.workspace_path = os.getcwd()

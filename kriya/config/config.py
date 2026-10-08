@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
+
 logger = logging.getLogger(__name__)
 
 
@@ -1968,7 +1970,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                                     # written as an absolute path.
                                     real_root = os.path.realpath(config_dir)
                                     real_target = os.path.realpath(os.path.join(real_root, raw))
-                                    if real_target != real_root and not real_target.startswith(real_root + os.sep):
+                                    if path_relation(real_root, real_target) is not PathRelation.WITHIN:
                                         raise ValueError(
                                             f"mcp.{_server_name}.capabilities.{_path_field} entry "
                                             f"{raw!r} is a relative path that resolves outside "

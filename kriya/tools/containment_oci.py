@@ -71,6 +71,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
@@ -203,8 +204,7 @@ def dangling_gitfile_mask(workspace_host: str) -> List[str]:
         return []
     target = first[len("gitdir:"):].strip()
     resolved = os.path.realpath(os.path.join(workspace_host, target))
-    root = os.path.realpath(workspace_host)
-    if os.path.commonpath([resolved, root]) == root:
+    if path_relation(workspace_host, resolved) is PathRelation.WITHIN:
         return []
     return bind_mount_args("/dev/null", f"{_CONTAINER_WORKSPACE}/.git", writable=False)
 
