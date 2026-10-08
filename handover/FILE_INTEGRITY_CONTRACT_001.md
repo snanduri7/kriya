@@ -294,3 +294,13 @@ Hidden `pom.xml` repairs no longer exist, so a demo repository must build before
 - Tamper injection points (PRD-032 D10/E02, `test_candidate_verification_binding`): a candidate changed right after static analysis is now caught by the verification-tree binding before the terminal regression (earlier layer, covered by `test_f4_a_candidate_changed_between_gates_is_caught_before_the_next_gate_runs`). The commit-time verified-candidate binding keeps its own coverage through `_chaos_harness.inject_before_terminal_commit`, which changes the candidate after every gate and immediately before the terminal batch is materialized - the only window that binding alone guards. (A change made after `final_writes` is materialized never reaches the workspace: the commit writes the verified bytes.)
 - `test_agent_contracts` unsafe-path test is parametrized: legacy keeps its historical pass-through pin; structured refuses `../outside.py` at parse time (S-2).
 - `test_worktree_canonical_root` line pin `production_doctor.py:596→597` (the doctor ID list grew by one line; same read-only `git worktree list`).
+
+
+## Direct-write audit addendum (VERIFICATION-CONTRACT-003, 2026-10-08)
+New filesystem write sites, all under Kriya's state directory or a Kriya-owned scratch, never a target repository:
+`kriya/workflow/contract_compilation.py` (2: the sealed contract store, atomic temp + replace),
+`kriya/workflow/example_oracle.py` (2: the derived example module in the acceptance store, atomic temp + replace),
+`kriya/workflow/authority_bundle.py` (5: the verification-authority store - manifest and assets, atomic directory
+replace; staged read-only asset copies and the candidate export inside a scratch under `<state>/authority-runs/`),
+`kriya/workflow/workflow.py` (+4: the baseline export under the same scratch, removed after the run). Counted in
+`tests/test_file_integrity_contract_001.py::_AUDITED_WRITE_SITES`.

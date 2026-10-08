@@ -884,8 +884,13 @@ _AUDITED_WRITE_SITES = {
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,
     "kriya/workflow/regression_attribution.py": 1, "kriya/workflow/resume_fingerprints.py": 2,
-    "kriya/workflow/skill_extraction.py": 3, "kriya/workflow/workflow.py": 2, "kriya/workflow/workflow_controller.py": 1,
+    "kriya/workflow/skill_extraction.py": 3, "kriya/workflow/workflow.py": 6, "kriya/workflow/workflow_controller.py": 1,
     "kriya/workflow/worktree.py": 0, "plugins/core_tools/__init__.py": 1,
+    # VERIFICATION-CONTRACT-003: Kriya state-directory writes only (sealed contract store, derived example module,
+    # verification-authority store, scratch exports) - never the workspace.
+    "kriya/workflow/authority_bundle.py": 5,
+    "kriya/workflow/contract_compilation.py": 2,
+    "kriya/workflow/example_oracle.py": 2,
 }
 # The writer modules themselves: their sites ARE the staged writer and the
 # sandbox manager (counted separately so a change there is still visible).

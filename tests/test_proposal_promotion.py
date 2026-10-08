@@ -167,10 +167,20 @@ def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, fingerprint_inputs=None
     # expects to RESUME needs this present and accurate.
     # PRD-008: plus the resume fingerprints the workflow itself would have
     # saved for run_generation_workflow(goal=goal, **fingerprint_inputs).
+    # VERIFICATION-CONTRACT-003: the checkpoint carries the digest of the verification contract the run compiles
+    # for this goal and workspace (no acceptance, approval or authority bound) - the same production function.
+    from types import SimpleNamespace as _NS
+
+    from kriya.workflow.requirements import derive_requirements as _derive
+    from kriya.workflow.workflow import compile_run_contract as _compile
+
+    inputs = dict(fingerprint_inputs or {})
+    inputs.setdefault("verification_contract_digest",
+                      _compile(_NS(), goal, goal, str(tmp_path), _derive(goal)).digest)
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
         RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
-            cfg, str(tmp_path), goal=goal, **(fingerprint_inputs or {}),
+            cfg, str(tmp_path), goal=goal, **inputs,
         )),
         "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
         "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
