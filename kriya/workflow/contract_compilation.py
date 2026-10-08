@@ -98,6 +98,7 @@ CLOSER_ACCEPTANCE_APPROVAL = "acceptance_approval"
 CLOSER_DERIVED_EXAMPLES = "derived_examples"
 CLOSER_API_PRESERVATION = "api_preservation"
 CLOSER_DOCUMENTATION_NOT_APPLICABLE = "documentation_not_applicable"
+CLOSER_DOCUMENTATION_LIST_ENTRIES = "documentation_list_entries"  # BACKEND-READINESS-004 (owner decision 2)
 CLOSER_TEST_ADDITION = "test_addition"
 CLOSER_EXTERNAL_ACCEPTANCE = "external_acceptance_command"
 CLOSER_NOT_A_CLAIM = "not_a_claim"
@@ -172,6 +173,13 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "claim": DOCUMENTATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
         "pass": "the conditional documentation referent does not exist in the repository (nothing to document)",
         "fail": "never (a present referent is a content claim, not a failure)", "unknown": "never"},
+    CLOSER_DOCUMENTATION_LIST_ENTRIES: {
+        "claim": DOCUMENTATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the referent's named list section (sealed at compile time from the baseline) still exists in the "
+                "candidate and carries an entry for every subject the goal adds (identifiers derived from the goal's "
+                "own addition statements) - a whole-word match inside that section only, never a repository-wide search",
+        "fail": "never (a missing entry or a removed list leaves the claim open)",
+        "unknown": "the referent unreadable in the candidate"},
     CLOSER_TEST_ADDITION: {
         "claim": TEST_ADDITION_CLAIM, "authority": AUTHORITY_REPOSITORY,
         "pass": "the candidate adds a runnable test file, or its complete structured suite report carries a test "
@@ -531,6 +539,83 @@ def _documentation_list_present(
     return bool(matched), evidence
 
 
+_LIST_ENTRY_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|\|)\s*\S|^\s*(?:`|\*\*|[A-Za-z_])")
+
+
+def documentation_sections(data: bytes, noun: str) -> Dict[str, List[str]]:
+    """The lines of every section of a Markdown/RST document whose heading
+    names ``noun`` ("Function list", "Functions"), keyed by heading: from
+    the heading to the next heading of any level."""
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    headings = []  # (line index, title, is RST underline heading)
+    for index, line in enumerate(lines):
+        match = _MD_HEADING.match(line)
+        if match:
+            headings.append((index, match.group("title")))
+        elif index + 1 < len(lines) and _RST_UNDERLINE.match(lines[index + 1]) and line.strip() \
+                and len(lines[index + 1].strip()) >= len(line.strip()) - 1:
+            headings.append((index, line.strip()))
+    sections: Dict[str, List[str]] = {}
+    family = noun.lower()
+    for position, (index, title) in enumerate(headings):
+        if family not in title.lower():
+            continue
+        end = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
+        sections[title] = lines[index + 1:end]
+    return sections
+
+
+def documentation_entries_present(sections: Mapping[str, Sequence[str]], subjects: Sequence[str]) -> Dict[str, List[str]]:
+    """subject -> the ``heading: line`` entries that name it as a whole word
+    (``name`` or ``name(``) inside a matching section; an entry is a list
+    item, a table row, a definition or a code-spanned name - prose elsewhere
+    in the document never counts."""
+    found: Dict[str, List[str]] = {subject: [] for subject in subjects}
+    for heading, lines in sections.items():
+        for line in lines:
+            if not _LIST_ENTRY_LINE.match(line):
+                continue
+            for subject in subjects:
+                if re.search(r"(?<![\w.])" + re.escape(subject) + r"(?![\w])", line):
+                    found[subject].append(f"{heading}: {line.strip()}")
+    return found
+
+
+def documentation_entries_predicate(
+    text: str, clause: Mapping[str, Any], evidence: Mapping[str, Any], other_statements: Sequence[Tuple[str, str]],
+    reader: Callable[[str], Optional[bytes]],
+) -> Optional[Dict[str, Any]]:
+    """The sealed list-entries predicate of a documentation clause whose
+    referent and list section exist at baseline: the paths, the matching
+    headings, the subjects (from the goal's own words) and which of them the
+    baseline already lists. None when no deterministic subject set exists
+    (the clause stays a content claim)."""
+    from kriya.workflow.requirement_scopes import documentation_subjects
+
+    subjects, sources = documentation_subjects(text, clause, other_statements)
+    if not subjects:
+        return None
+    noun = str(clause.get("list_noun") or "")
+    present_at_baseline: Dict[str, List[str]] = {subject: [] for subject in subjects}
+    headings: List[str] = []
+    for path in evidence.get("paths") or ():
+        data = reader(path)
+        if data is None:
+            continue
+        sections = documentation_sections(data, noun)
+        headings += [f"{path}: {heading}" for heading in sections]
+        for subject, entries in documentation_entries_present(sections, subjects).items():
+            present_at_baseline[subject] += [f"{path}: {entry}" for entry in entries]
+    if not headings:
+        return None
+    return {"paths": list(evidence.get("paths") or ()), "list_noun": noun, "headings": headings,
+            "subjects": list(subjects), "source_requirements": list(sources),
+            "baseline_present": {s: entries for s, entries in present_at_baseline.items() if entries},
+            "baseline_satisfied": all(present_at_baseline[s] for s in subjects),
+            "requirement_text_sha256": hashlib.sha256((text or "").encode("utf-8")).hexdigest()}
+
+
 # ------------------------------------------------------------ compilation
 
 class _AcceptanceIds:
@@ -656,6 +741,16 @@ def compile_verification_contract(
                     if clause.get("conditional") and present is False:
                         bindings.append(ClaimBinding(claim, CLOSER_DOCUMENTATION_NOT_APPLICABLE, AUTHORITY_REPOSITORY,
                                                      detail=evidence))
+                    elif present and clause.get("list_noun") and tracked_file_reader is not None:
+                        # BACKEND-READINESS-004 (owner decision 2): the list exists - seal the predicate now, from
+                        # the baseline: which section, which subjects, which are already listed.
+                        predicate = documentation_entries_predicate(
+                            requirement.text, clause, evidence,
+                            [(r.id, r.text) for r in requirement_set.requirements if r.id != requirement.id],
+                            tracked_file_reader)
+                        if predicate is not None:
+                            bindings.append(ClaimBinding(claim, CLOSER_DOCUMENTATION_LIST_ENTRIES, AUTHORITY_REPOSITORY,
+                                                         detail=predicate))
                     if external is not None:
                         bindings.append(_external_binding(claim, external, requirement.id))
                     if not any(b.claim == claim for b in bindings):

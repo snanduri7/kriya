@@ -1379,9 +1379,13 @@ def close_requirements_by_documentation(
     """VERIFICATION-CONTRACT-003: a conditional documentation request whose
     referent the candidate still lacks (kriya/workflow/contract_closers.py)."""
     from kriya.workflow.contract_closers import close_documentation_requirements
-    from kriya.workflow.contract_compilation import CLOSER_DOCUMENTATION_NOT_APPLICABLE
+    from kriya.workflow.contract_compilation import (
+        CLOSER_DOCUMENTATION_LIST_ENTRIES,
+        CLOSER_DOCUMENTATION_NOT_APPLICABLE,
+    )
 
-    if contract is None or not contract.binding_closers(CLOSER_DOCUMENTATION_NOT_APPLICABLE):
+    if contract is None or not (contract.binding_closers(CLOSER_DOCUMENTATION_NOT_APPLICABLE)
+                                or contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES)):
         return []
     tracked = set(_tracked_workspace_paths(candidate_root))
     for root, dirs, files in os.walk(candidate_root):  # untracked additions count as present too

@@ -24,14 +24,18 @@ import re
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.workflow.contract_compilation import (
+    CLOSER_DOCUMENTATION_LIST_ENTRIES,
     CLOSER_DOCUMENTATION_NOT_APPLICABLE,
     CLOSER_TEST_ADDITION,
     VerificationContract,
     _documentation_list_present,
+    documentation_entries_present,
+    documentation_sections,
 )
 from kriya.workflow.obligations import ObligationLedger, ObligationStatus
 from kriya.workflow.requirements import (
     DOCUMENTATION_CLAIM,
+    DOCUMENTATION_ENTRIES_METHOD,
     DOCUMENTATION_METHOD,
     TEST_ADDITION_CLAIM,
     TEST_ADDITION_METHOD,
@@ -44,6 +48,10 @@ TEST_ADDED = "TEST_ADDED"
 TEST_ADDITION_UNPROVEN = "TEST_ADDITION_UNPROVEN"
 DOCUMENTATION_NOT_APPLICABLE = "DOCUMENTATION_NOT_APPLICABLE"
 DOCUMENTATION_REFERENT_PRESENT = "DOCUMENTATION_REFERENT_PRESENT"
+# BACKEND-READINESS-004 (owner decision 2): the sealed list-entries predicate on the candidate.
+DOCUMENTATION_ENTRIES_PRESENT = "DOCUMENTATION_ENTRIES_PRESENT"
+DOCUMENTATION_ENTRIES_MISSING = "DOCUMENTATION_ENTRIES_MISSING"
+DOCUMENTATION_LIST_REMOVED = "DOCUMENTATION_LIST_REMOVED"
 
 
 _JVM_TEST_ANNOTATION = re.compile(r"@(?:org\.junit\.(?:jupiter\.api\.)?)?(?:Test|ParameterizedTest|RepeatedTest)\b")
@@ -136,6 +144,14 @@ def close_documentation_requirements(
     now -> open, with why (a content claim)."""
     attempts: List[Dict[str, Any]] = []
     tracked = sorted(set(candidate_tracked_paths))
+    for requirement_id, binding in contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES):
+        requirement = requirements.get(requirement_id)
+        if requirement is None:
+            continue
+        attempts.append(_close_documentation_entries(ledger, requirements, requirement, binding, tracked, read_candidate,
+                                                     evidence_id=_evidence_id(ledger, requirement_id),
+                                                     required_claims=contract.required_claims_by_requirement()[requirement_id],
+                                                     source=source, revision=revision))
     for requirement_id, _binding in contract.binding_closers(CLOSER_DOCUMENTATION_NOT_APPLICABLE):
         entry_contract = contract.entry(requirement_id)
         requirement = requirements.get(requirement_id)
@@ -162,6 +178,59 @@ def close_documentation_requirements(
                                f"the referent could not be inspected: {evidence.get('reason')}")
         attempts.append(entry)
     return attempts
+
+
+def _close_documentation_entries(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement: Any, binding: Any, tracked: Sequence[str],
+    read_candidate: Callable[[str], Optional[bytes]], *, evidence_id: Optional[str], required_claims: Sequence[str],
+    source: str, revision: Any,
+) -> Dict[str, Any]:
+    """The sealed list-entries predicate re-evaluated on the candidate: the
+    referent's named list section still exists and names every subject -
+    SATISFIED; a missing entry or a removed section leaves the claim open
+    (never VIOLATED: the operator reads which names are missing)."""
+    predicate = dict(binding.detail)
+    subjects = list(predicate.get("subjects") or ())
+    noun = str(predicate.get("list_noun") or "")
+    entry: Dict[str, Any] = {"requirement": requirement.id, "kind": DOCUMENTATION_ENTRIES_METHOD, "closed": False,
+                             "subjects": subjects, "paths": list(predicate.get("paths") or ())}
+    if not evidence_id:
+        entry["reason"] = "the verdict has no evidence id to bind to"
+        return entry
+    present: Dict[str, List[str]] = {subject: [] for subject in subjects}
+    headings: List[str] = []
+    unreadable: List[str] = []
+    for path in predicate.get("paths") or ():
+        if path not in tracked:
+            continue
+        data = read_candidate(path)
+        if data is None:
+            unreadable.append(path)
+            continue
+        sections = documentation_sections(data, noun)
+        headings += [f"{path}: {heading}" for heading in sections]
+        for subject, found in documentation_entries_present(sections, subjects).items():
+            present[subject] += [f"{path}: {line}" for line in found]
+    missing = [subject for subject in subjects if not present[subject]]
+    entry.update({"headings": headings, "present": {s: lines for s, lines in present.items() if lines}, "missing": missing})
+    if unreadable and missing:
+        entry.update({"reason_code": DOCUMENTATION_LIST_REMOVED, "reason": f"referent unreadable in the candidate: {unreadable}"})
+    elif not headings:
+        entry.update({"reason_code": DOCUMENTATION_LIST_REMOVED,
+                      "reason": f"the {noun} list section sealed from the baseline no longer exists in the candidate"})
+    elif missing:
+        entry.update({"reason_code": DOCUMENTATION_ENTRIES_MISSING,
+                      "reason": f"no entry of the {noun} list names: {', '.join(missing)}"})
+    else:
+        record_requirement_claim(
+            ledger, requirements, requirement.id, DOCUMENTATION_CLAIM, evidence_id=evidence_id,
+            method=DOCUMENTATION_ENTRIES_METHOD,
+            detail={"reason_code": DOCUMENTATION_ENTRIES_PRESENT, "subjects": subjects, "headings": headings,
+                    "present": entry["present"], "source_requirements": list(predicate.get("source_requirements") or ()),
+                    "required_claims": list(required_claims)},
+            source=source, revision=revision, status=ObligationStatus.SATISFIED)
+        entry.update({"closed": True, "reason_code": DOCUMENTATION_ENTRIES_PRESENT})
+    return entry
 
 
 def contract_claims_map(contract: Optional[VerificationContract]) -> Mapping[str, Sequence[str]]:

@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 from kriya.workflow.requirements import (
     _CONSTRAINT_CUE,
@@ -509,3 +509,97 @@ def behavior_strength_label(scope: StatementScope) -> Optional[str]:
         return None
     return "BEHAVIOR_EXACT" if scope.strength == BEHAVIOR_EXACT else (
         "BEHAVIOR_GENERAL" if scope.strength == BEHAVIOR_GENERAL else scope.strength)
+
+
+# ------------------------------------------------------------ documentation subjects (BACKEND-READINESS-004, owner decision 2)
+#
+# "Document them in the README's function list": the subjects are the things the goal asks to add. They are read from
+# the statement itself when it names them (backticked or call-formed identifiers before the referent) and otherwise from
+# the goal's own addition statements - "Add three built-in string functions ...: lower, upper and trim" - whose noun
+# matches the list noun ("function list" <-> "functions"). Pure text, no model, no repository; an undeterminable
+# subject set leaves the clause a content claim (authority required), never a guess.
+_ADDITION_VERB = re.compile(
+    r"\b(?:add|adds|added|adding|introduce|introduces|introduced|implement|implements|implemented|provide|provides|"
+    r"provided|create|creates|created|expose|exposes|exposed|define|defines|defined)\b", re.IGNORECASE)
+_SUBJECT_PRONOUN = re.compile(r"\b(?:them|these|those|it|the new \w+|the added \w+|each of them|all of them)\b", re.IGNORECASE)
+_DOCUMENTATION_VERB = re.compile(
+    r"\b(?:document|documents|documented|mention|mentions|mentioned|describe|describes|described|update|updates|"
+    r"updated|add|adds|added|list|lists|listed|note|notes|noted|record|records|recorded)\b", re.IGNORECASE)
+_IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
+_CODE_SPAN_IDENTIFIER = re.compile(r"`(" + _IDENTIFIER + r")(?:\(\))?`")
+_CALL_IDENTIFIER = re.compile(r"\b(" + _IDENTIFIER + r")\(\)")
+_IDENTIFIER_LIST = re.compile(
+    r"(?P<list>" + _IDENTIFIER + r"(?:\(\))?(?:\s*(?:,|and|or|,\s*and|,\s*or)\s*" + _IDENTIFIER + r"(?:\(\))?)*)")
+_LIST_SEPARATOR = re.compile(r"\s*(?:,\s*(?:and|or)\s+|,\s*|\s+(?:and|or)\s+)")
+_SUBJECT_STOP_WORDS = frozenset({"the", "a", "an", "to", "in", "of", "for", "new", "and", "or", "that", "which", "so",
+                                 "it", "them", "these", "those", "same", "as", "existing", "style", "with", "all",
+                                 "each", "every", "its", "their", "this", "is", "are", "be", "must", "should"})
+
+
+def _plural_family(noun: str) -> str:
+    noun = noun.lower().strip()
+    for suffix in ("ies", "es", "s"):
+        if noun.endswith(suffix) and len(noun) > len(suffix) + 2:
+            return noun[:-len(suffix)] + ("y" if suffix == "ies" else "")
+    return noun
+
+
+def _identifiers(fragment: str) -> List[str]:
+    found: List[str] = []
+    for token in _LIST_SEPARATOR.split(fragment):
+        name = token.strip().rstrip("()").strip("`'\"")
+        if re.fullmatch(_IDENTIFIER, name) and name.lower() not in _SUBJECT_STOP_WORDS and name not in found:
+            found.append(name)
+    return found
+
+
+def documentation_subjects(text: str, clause: Mapping[str, object], other_statements: Iterable[Tuple[str, str]],
+                           ) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """(subjects, source requirement ids) of a documentation clause: the
+    identifiers the statement itself names before the referent (code spans
+    or ``name()`` forms), else - when the clause refers to "them"/"the new
+    <noun>" - the identifier list of every other statement that adds things
+    of the list noun's family ("functions" for a "function list"), written as
+    "<verb> ... <noun>[:] a, b and c" or with code spans. Empty when no
+    deterministic subject exists."""
+    raw = text or ""
+    own = str(clause.get("clause") or "")
+    # The clause text is prose (code spans stripped): read explicit identifiers from the RAW statement, in the
+    # window between the last documentation verb and the referent.
+    referent = re.search(_DOCUMENTATION_REFERENT, raw, re.IGNORECASE)
+    window = raw[: referent.start()] if referent else raw
+    verbs = list(_DOCUMENTATION_VERB.finditer(window))
+    window = window[verbs[-1].end():] if verbs else window
+    named = _CODE_SPAN_IDENTIFIER.findall(window) + _CALL_IDENTIFIER.findall(window)
+    if named:
+        return tuple(dict.fromkeys(named)), ()
+    if not _SUBJECT_PRONOUN.search(own) and not _SUBJECT_PRONOUN.search(_prose(raw)):
+        return (), ()
+    family = _plural_family(str(clause.get("list_noun") or ""))
+    if not family:
+        return (), ()
+    subjects: List[str] = []
+    sources: List[str] = []
+    for rid, statement in other_statements:
+        if not _ADDITION_VERB.search(statement):
+            continue
+        spans = _CODE_SPAN_IDENTIFIER.findall(statement)
+        nouns = [m for m in re.finditer(r"\b(" + _IDENTIFIER + r")\b", statement) if _plural_family(m.group(1)) == family]
+        if not nouns:
+            continue
+        found: List[str] = []
+        if spans:
+            found = [name for name in spans if name.lower() not in _SUBJECT_STOP_WORDS]
+        else:
+            after = statement[nouns[0].end():]
+            colon = after.find(":")
+            fragment = after[colon + 1:] if 0 <= colon < 80 else after
+            match = _IDENTIFIER_LIST.search(fragment)
+            if match is not None and fragment[: match.start()].strip(" \t") == "":
+                found = _identifiers(match.group("list"))
+        for name in found:
+            if name not in subjects:
+                subjects.append(name)
+        if found and rid not in sources:
+            sources.append(rid)
+    return tuple(subjects), tuple(sources)

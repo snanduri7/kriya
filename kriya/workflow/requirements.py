@@ -568,8 +568,11 @@ API_PRESERVATION_CLOSURE_METHODS = frozenset({API_PRESERVATION_METHOD, EXTERNAL_
 TEST_ADDITION_METHOD = "test_addition_record"
 TEST_ADDITION_CLOSURE_METHODS = frozenset({TEST_ADDITION_METHOD})
 DOCUMENTATION_METHOD = "documentation_referent_absent"
-DOCUMENTATION_CLOSURE_METHODS = frozenset({DOCUMENTATION_METHOD, EXTERNAL_ACCEPTANCE_METHOD, "acceptance_oracle",
-                                           "human_bound_acceptance"})
+# BACKEND-READINESS-004 (owner decision 2): the sealed list-entries predicate - every subject the goal adds is an
+# entry of the named list section of the referent (kriya/workflow/contract_closers.py).
+DOCUMENTATION_ENTRIES_METHOD = "documentation_list_entries"
+DOCUMENTATION_CLOSURE_METHODS = frozenset({DOCUMENTATION_METHOD, DOCUMENTATION_ENTRIES_METHOD, EXTERNAL_ACCEPTANCE_METHOD,
+                                           "acceptance_oracle", "human_bound_acceptance"})
 REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
 
 # Words a pure regression-preservation statement is made of besides the test

@@ -31,6 +31,7 @@ from kriya.workflow.contract_compilation import (
     CLOSER_ACCEPTANCE,
     CLOSER_ACCEPTANCE_APPROVAL,
     CLOSER_DERIVED_EXAMPLES,
+    CLOSER_DOCUMENTATION_LIST_ENTRIES,
     CLOSER_DOCUMENTATION_NOT_APPLICABLE,
     CLOSER_EXTERNAL_ACCEPTANCE,
     CLOSER_MIGRATION_GATE,
@@ -237,6 +238,16 @@ def run_baseline_authorities(
                                  "why": "a zero mutation preserves it by definition"}
             elif claim == DOCUMENTATION_CLAIM and binding is not None and binding.closer == CLOSER_DOCUMENTATION_NOT_APPLICABLE:
                 claims[claim] = {"state": BASELINE_PASS, "authority": "repository", "why": "the referent is absent"}
+            elif claim == DOCUMENTATION_CLAIM and binding is not None and binding.closer == CLOSER_DOCUMENTATION_LIST_ENTRIES:
+                # BACKEND-READINESS-004 (owner decision 2): the sealed predicate judged the baseline at compile time.
+                if binding.detail.get("baseline_satisfied"):
+                    claims[claim] = {"state": BASELINE_PASS, "authority": "repository",
+                                     "why": "every subject is already an entry of the named list"}
+                else:
+                    claims[claim] = {"state": BASELINE_MUTATION_REQUIRED, "authority": "repository",
+                                     "why": "the named list lacks an entry for a subject the goal adds"}
+                    report.mutation_required.setdefault(rid, []).append(claim)
+                    all_satisfied = False
             elif judged:
                 # One FAIL from any bound authority is the determinate signal (discriminating); PASS needs every
                 # judged authority to pass; anything else is INDETERMINATE.
