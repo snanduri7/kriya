@@ -584,21 +584,47 @@ def _resolve_known_target_member_hints(
     return _validated_member_hints(ctx, candidates_by_path)
 
 
+_GOAL_CALL_NAME = re.compile(r"\b([a-z_][A-Za-z0-9_]*)\s*\(")
+_GOAL_MEMBER_HINTS_MAX = 4
+
+
+def _goal_named_member_candidates(goal: str, path: str) -> List[str]:
+    """The member names the goal names that may ground ``path`` when its whole
+    source is unfit, most specific first: members the goal qualifies with
+    this file's owner (Element.absUrl for Element.java), then members of any
+    other qualified name (Element.absUrl for Node.java, which defines absUrl
+    too - P4-T2-r2), then bare call names (attr("abs:href")). Every one is
+    validated against the file's current member boundaries before it becomes
+    a hint; a name the file does not define is dropped."""
+    from kriya.workflow.relocalization import goal_qualified_names
+
+    owner = os.path.splitext(os.path.basename(path))[0]
+    ordered: List[str] = list(_goal_named_members_of(goal, owner))
+    for qualified in goal_qualified_names(goal):
+        member = qualified.rpartition(".")[2]
+        if member and member not in ordered:
+            ordered.append(member)
+    for name in _GOAL_CALL_NAME.findall(goal):
+        if name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
 def _goal_named_member_hints(ctx: "AttemptContext", known_target_files: List[str]) -> Dict[str, List[str]]:
     """KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001 (BACKEND-READINESS-004 cohort,
-    T2): the goal's own qualified names ("Element.absUrl(...)") as member
-    candidates for the known target whose file is the owner they qualify
-    (Element.java for Element.absUrl; never Node.attr into Element.java),
-    validated against the current member boundaries exactly like a retrieval
-    hint - nothing is invented for a name no boundary carries. Used only as the
-    capacity fallback below: a target that fits whole keeps its full source."""
+    T2): the goal's own named members as member candidates for a known target
+    (``_goal_named_member_candidates``), validated against the current member
+    boundaries exactly like a retrieval hint - nothing is invented for a name
+    no boundary carries - and capped at ``_GOAL_MEMBER_HINTS_MAX`` per file.
+    Used only as the capacity fallback below: a target that fits whole keeps
+    its full, authoritative source."""
     candidates_by_path: Dict[str, List[str]] = {}
     for path in known_target_files:
-        owner = os.path.splitext(os.path.basename(path))[0]
-        members = _goal_named_members_of(ctx.goal, owner)
-        if members:
-            candidates_by_path[path] = members
-    return _validated_member_hints(ctx, candidates_by_path)
+        candidates = _goal_named_member_candidates(ctx.goal, path)
+        if candidates:
+            candidates_by_path[path] = candidates
+    hints = _validated_member_hints(ctx, candidates_by_path)
+    return {path: members[:_GOAL_MEMBER_HINTS_MAX] for path, members in hints.items()}
 
 
 def _validated_member_hints(ctx: "AttemptContext", candidates_by_path: Dict[str, List[str]]) -> Dict[str, List[str]]:

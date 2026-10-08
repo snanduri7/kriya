@@ -735,8 +735,12 @@ def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint
     assert _goal_named_members_of(goal, "Node") == ["attr"] and _goal_named_members_of(goal, "StringUtil") == []
     ctx = _minimal_attempt_ctx(tmp_path, goal=goal, retrieval_member_hints={})
     hints = _goal_named_member_hints(ctx, ["Element.java", "Node.java"])
-    assert [h.split(".")[-1].split("(")[0] for h in hints["Element.java"]] == ["absUrl"]  # never Node.attr into Element.java
-    assert [h.split(".")[-1].split("(")[0] for h in hints["Node.java"]] == ["attr"]
+    # owner-qualified members first; a member the goal names under another owner or as a bare call counts only when
+    # THIS file defines it (P4-T2-r2: the plan targeted Node.java while the goal says Element.absUrl - Node defines absUrl)
+    assert [h.split(".")[-1].split("(")[0] for h in hints["Element.java"]] == ["absUrl", "attr"]
+    assert [h.split(".")[-1].split("(")[0] for h in hints["Node.java"]] == ["attr"]  # Node.java here defines no absUrl
+    (tmp_path / "Node.java").write_text("package org.jsoup.nodes;\n\npublic class Node {\n    public String attr(String k) {\n        return \"\";\n    }\n\n    public String absUrl(String k) {\n        return k;\n    }\n}\n")
+    assert sorted(h.split(".")[-1].split("(")[0] for h in _goal_named_member_hints(ctx, ["Node.java"])["Node.java"]) == ["absUrl", "attr"]
     # a goal-named member no boundary carries is dropped, never fabricated; retrieval hints are untouched by the goal
     assert _goal_named_member_hints(_minimal_attempt_ctx(tmp_path, goal="Element.vanish(...) is broken.",
                                                          retrieval_member_hints={}), ["Element.java"]) == {}
@@ -748,5 +752,6 @@ def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint
     exact = [i for i in package.relevant_files if i.path == "Element.java" and i.tier == "member_exact" and i.is_exact]
     assert exact and "StringUtil.resolve(baseUri()" in rendered
     # a small target that fits whole is shown whole and exact, never demoted: no fallback, full tier
+    (tmp_path / "Node.java").write_text("package org.jsoup.nodes;\n\npublic class Node {\n    public String attr(String k) {\n        return \"\";\n    }\n}\n")
     rendered, package, fallback = _target_package_with_goal_member_fallback(ctx, ["Node.java"], 900, 8000, {})
     assert fallback is None and [i.tier for i in package.relevant_files if i.path == "Node.java"] == ["full"]
