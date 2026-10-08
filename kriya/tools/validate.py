@@ -151,6 +151,50 @@ def _has_real_requirements(requirements_path: str) -> bool:
     return False
 
 
+_VENV_INSTALLED_MARKER = ".kriya-installed.json"
+
+
+def _installed_specifiers(venv_dir: str) -> Optional[List[str]]:
+    """The pip specifiers Kriya last installed into ``venv_dir`` (the marker
+    written after a successful install), None when the venv has no marker
+    (never created by this mechanism, or its install never completed)."""
+    try:
+        with open(os.path.join(venv_dir, _VENV_INSTALLED_MARKER), "r", encoding="utf-8") as handle:
+            recorded = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    specifiers = recorded.get("specifiers") if isinstance(recorded, dict) else None
+    return [s for s in specifiers if isinstance(s, str)] if isinstance(specifiers, list) else None
+
+
+def _declared_specifiers(workspace_path: str, install_args: Sequence[str]) -> List[str]:
+    """The dependency specifiers ``install_args`` declares: the flat list
+    itself, or - for ``-r <file>`` - the requirement lines of that file as
+    they are NOW (comments, blanks and pip options dropped), read on the host
+    whether the argument is absolute or workspace-relative. A removed line is
+    then a removed specifier, like a removed pyproject entry."""
+    if not (len(install_args) == 2 and install_args[0] == "-r"):
+        return [str(arg) for arg in install_args]
+    path = install_args[1]
+    full = path if os.path.isabs(path) else os.path.join(workspace_path, path)
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return [f"-r:{path}:unreadable"]
+    return sorted({line.split("#", 1)[0].strip() for line in lines
+                   if line.split("#", 1)[0].strip() and not line.lstrip().startswith("-")})
+
+
+def _record_installed_specifiers(venv_dir: str, specifiers: Sequence[str]) -> None:
+    """Record the specifiers just installed beside the venv (``_installed_specifiers`` reads it back)."""
+    try:
+        with open(os.path.join(venv_dir, _VENV_INSTALLED_MARKER), "w", encoding="utf-8") as handle:
+            json.dump({"specifiers": sorted(set(specifiers))}, handle)
+    except OSError as error:  # the marker is best effort; without it the next install recreates nothing
+        logger.warning(f"Project venv marker not written ({error}); a dependency removal will not rebuild the venv")
+
+
 def _pyproject_dependencies(pyproject_path: str) -> List[str]:
     """Extracts PEP 621's [project.dependencies] array - plain requirement
     strings, the same shape a requirements.txt line already is - so a
@@ -444,6 +488,7 @@ class PolymorphicValidator:
         # count deterministically") - incremented ONLY on a real cache MISS,
         # i.e. only when the expensive pip install subprocess actually ran.
         self.venv_install_attempts = 0
+        self.venv_recreations = 0  # VENV-ADDITIVE-REUSE-001: venvs rebuilt because a declared dependency was dropped
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -605,6 +650,21 @@ class PolymorphicValidator:
         # without the project's dependencies.
         venv_present = os.path.lexists if contained else os.path.exists
 
+        # VENV-ADDITIVE-REUSE-001 (BACKEND-READINESS-004, CONFIRMED by a real pip
+        # measurement): the venv persists across attempts and `pip install`
+        # never uninstalls, so a candidate that REMOVES a declared dependency
+        # its code still imports would pass the test gate against the earlier
+        # attempt's install while a fresh install fails. The specifiers last
+        # installed are recorded beside the venv (host-visible marker); when the
+        # new declaration drops any of them the venv is recreated from nothing.
+        declared = _declared_specifiers(self.workspace_path, install_args)
+        previous = _installed_specifiers(venv_dir_host)
+        if previous is not None and not set(previous) <= set(declared):
+            removed = sorted(set(previous) - set(declared))
+            logger.info("Project venv recreated: the declared dependency set dropped %s", removed)
+            shutil.rmtree(venv_dir_host, ignore_errors=True)
+            self.venv_recreations += 1
+
         if not venv_present(venv_python_host):
             try:
                 create_res = self._run_cmd_with_timeout(
@@ -657,6 +717,7 @@ class PolymorphicValidator:
             return None, (
                 f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
             )
+        _record_installed_specifiers(venv_dir_host, declared)
         return venv_python, None
 
     def _resolve_python_interpreter(self) -> Tuple[str, Optional[str]]:

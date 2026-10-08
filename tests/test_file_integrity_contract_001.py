@@ -870,6 +870,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/core/model_qualification.py": 3, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
 
     "kriya/core/attempt_evidence/retention.py": 3, "kriya/core/attempt_evidence/writer.py": 2, "kriya/core/state_paths.py": 2, "kriya/knowledge/staging.py": 4, "kriya/mcp/invocation_approval.py": 2,
+    # REJECTED-CANDIDATE-RETENTION-001: the export of a rejected candidate's sealed bytes into an operator directory
+    # that must lie OUTSIDE any workspace (checked), plus its manifest - never a repository write.
+    "kriya/core/attempt_evidence/candidate_export.py": 2,
     "kriya/memory/memory.py": 2, "kriya/metrics/adjudication.py": 2, "kriya/metrics/report.py": 2,
     "kriya/policy/approved_sources.py": 1, "kriya/production_doctor.py": 4, "kriya/skills/skill.py": 4,
     "kriya/static_analysis/scope.py": 1, "kriya/static_analysis/service.py": 2, "kriya/static_analysis/waivers.py": 2,
@@ -880,7 +883,9 @@ _AUDITED_WRITE_SITES = {
     "kriya/tools/dependency_execution.py": 3,
     "kriya/workflow/acceptance_jvm.py": 3, "kriya/workflow/acceptance_approval.py": 2,
     "kriya/workflow/requirement_contract.py": 2,
-    "kriya/tools/validate.py": 5, "kriya/workflow/checkpoint.py": 4, "kriya/workflow/context_certification.py": 3,
+    # VENV-ADDITIVE-REUSE-001: the install marker beside the project venv and the venv's removal when a declared
+    # dependency is dropped - both under the sandbox's own .kriya/, never tracked content.
+    "kriya/tools/validate.py": 7, "kriya/workflow/checkpoint.py": 4, "kriya/workflow/context_certification.py": 3,
     "kriya/workflow/deterministic_failure_diagnostic.py": 2, "kriya/workflow/edit_safety.py": 0,
     "kriya/workflow/milestone_completion.py": 1, "kriya/workflow/proposal_store.py": 3,
     "kriya/workflow/regression_attribution.py": 1, "kriya/workflow/resume_fingerprints.py": 2,
