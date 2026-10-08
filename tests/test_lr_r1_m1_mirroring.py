@@ -156,6 +156,9 @@ def test_no_production_code_reads_the_store():
     allowed = {"kriya/core/attempt_evidence/reader.py",
                # Consumers (M1.9): the evidence CLI and the explainer it is built on.
                "kriya/cli.py", "kriya/core/attempt_evidence/explain.py",
+               # BACKEND-READINESS-004 consumers: the blob-level leak check and the rejected-candidate export
+               # (`kriya evidence leak-check` / `evidence candidate`), read-only over a sealed store.
+               "kriya/core/attempt_evidence/leak_check.py", "kriya/core/attempt_evidence/candidate_export.py",
                # The doctor's evidence.attempt_recorder row (read-only diagnostics, outside the
                # workflow/control/policy/agents/tools/core packages design §9.1 forbids).
                "kriya/production_doctor.py"}

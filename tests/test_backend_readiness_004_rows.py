@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from _strict_doubles import strict_config
+from _strict_doubles import strict_config, strict_kernel
 from click.testing import CliRunner
 from test_embedding_contract_001 import _client, _Server
 from test_embedding_contract_001 import _run as _run_coro
@@ -300,7 +300,8 @@ def test_a_store_outside_the_workspace_proceeds_to_discovery(tmp_path, monkeypat
     monkeypatch.chdir(ws)
     monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "outside"))
     cfg = strict_config(mcp={"fake": {"command": "/usr/bin/false"}}, logging={"file_enabled": False})
-    kernel = AsyncMock()
+    kernel = strict_kernel(cfg)
+    kernel.stop = AsyncMock()
     with patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli._discover_mcp_tools", new=AsyncMock(return_value=(kernel, []))):
         result = CliRunner().invoke(main, ["mcp", "inspect"])

@@ -80,6 +80,11 @@ def test_01_subjects_come_from_the_goals_own_addition_statement_or_the_clause_it
     # no addition statement of the list noun's family: no subjects (a content claim)
     assert rs.documentation_subjects(reqs.get("REQ-2").text, clause, [("REQ-1", "Add three new options: fast, slow and off.")]) == ((), ())
     assert rs.documentation_subjects(reqs.get("REQ-2").text, clause, [("REQ-1", "The functions lower, upper and trim are slow.")]) == ((), ())
+    # Track A (T5 REQ-10): a statement that mentions the family BEFORE an addition verb adds nothing - "names" is
+    # never a subject; beside the real addition statement the subjects stay exactly the added ones.
+    unknown = ("REQ-10", "Function names that are not defined (e.g. capitalize, trim_left) must still raise UnknownFunctionError.")
+    assert rs.documentation_subjects(reqs.get("REQ-2").text, clause, [unknown]) == ((), ())
+    assert rs.documentation_subjects(reqs.get("REQ-2").text, clause, [("REQ-1", reqs.get("REQ-1").text), unknown]) == (("lower", "upper", "trim"), ("REQ-1",))
 
 
 def test_02_the_predicate_is_sealed_from_the_baseline_and_closes_only_inside_the_named_section():

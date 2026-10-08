@@ -581,10 +581,15 @@ def documentation_subjects(text: str, clause: Mapping[str, object], other_statem
     subjects: List[str] = []
     sources: List[str] = []
     for rid, statement in other_statements:
-        if not _ADDITION_VERB.search(statement):
+        verb = _ADDITION_VERB.search(statement)
+        if verb is None:
             continue
         spans = _CODE_SPAN_IDENTIFIER.findall(statement)
-        nouns = [m for m in re.finditer(r"\b(" + _IDENTIFIER + r")\b", statement) if _plural_family(m.group(1)) == family]
+        # The list noun must FOLLOW the addition verb ("<verb> ... <noun>[:] a, b and c"): a statement that merely
+        # mentions the family before some verb ("Function names that are not defined ... must still raise ...")
+        # adds nothing and contributes no subject (BACKEND-READINESS-004 Track A, T5 REQ-10 yielded "names").
+        nouns = [m for m in re.finditer(r"\b(" + _IDENTIFIER + r")\b", statement)
+                 if m.start() > verb.end() and _plural_family(m.group(1)) == family]
         if not nouns:
             continue
         found: List[str] = []
