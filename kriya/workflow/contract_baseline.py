@@ -35,6 +35,7 @@ from kriya.workflow.contract_compilation import (
     CLOSER_EXTERNAL_ACCEPTANCE,
     CLOSER_MIGRATION_GATE,
     CLOSER_TEST_ADDITION,
+    STATUS_DISPOSITIONED,
     STATUS_NOT_A_CLAIM,
     VerificationContract,
 )
@@ -90,6 +91,8 @@ class BaselineAuthorityReport:
         for rid, claims in self.claims.items():
             if any(entry["state"] == "NOT_A_CLAIM" for entry in claims.values()):
                 outcomes[rid] = RequirementOutcome.NOT_A_CLAIM.value
+            elif any(entry["state"] == "DISPOSITIONED" for entry in claims.values()):
+                outcomes[rid] = RequirementOutcome.DISPOSITIONED.value
             elif any(entry.get("authority") in ("external_acceptance_command", "acceptance_approval")
                      for entry in claims.values()):
                 outcomes[rid] = RequirementOutcome.HUMAN_ACCEPTED.value
@@ -197,6 +200,12 @@ def run_baseline_authorities(
         claims: Dict[str, Dict[str, Any]] = {}
         if entry.status == STATUS_NOT_A_CLAIM:
             claims["NON_CLAIM"] = {"state": "NOT_A_CLAIM", "authority": "contract", "why": entry.scope.non_claim_reason}
+            report.claims[rid] = claims
+            continue
+        if entry.status == STATUS_DISPOSITIONED:
+            # BACKEND-READINESS-004 (D3): removed from the obligation set by the operator, never judged.
+            claims["STATEMENT"] = {"state": "DISPOSITIONED", "authority": "operator_disposition",
+                                   "why": (entry.disposition or {}).get("reason")}
             report.claims[rid] = claims
             continue
         for claim in entry.required_claims or ((MIGRATION,) if MIGRATION in entry.scope.scopes else ()):

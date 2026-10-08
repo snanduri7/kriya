@@ -141,6 +141,11 @@ class RequirementOutcome(str, Enum):
     # independent closure, visible everywhere, never a requirement needing
     # closure, never derived from a verdict or from what Kriya can verify.
     NOT_A_CLAIM = "not_a_claim"
+    # BACKEND-READINESS-004 (owner decision D3): the operator sealed a disposition
+    # for this exact statement (rejected false premise, historical, informational,
+    # out of scope) before any model call - reported, never satisfied, never
+    # verified; derived only from the disposition record, never from a verdict.
+    DISPOSITIONED = "dispositioned"
 
 
 # MODEL-EVIDENCE-HARDENING-001: why a requirement has its verdict.
@@ -166,6 +171,13 @@ _DEFAULT_REASON = {
     "unverified": INSUFFICIENT_CODE_EVIDENCE,
     "unknown": MODEL_RETURNED_NO_VERDICT,
     "pending": NOT_YET_VERIFIED,
+    # The derived outcomes: a verdict that merely names one (closed by evidence, human accepted, not a claim,
+    # dispositioned) is a model claim contradicted by the stronger authority that alone derives them
+    # (``requirement_outcomes`` reports it UNKNOWN); recorded as provenance, never raised on.
+    "closed_by_evidence": CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
+    "human_accepted": CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
+    "not_a_claim": CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
+    "dispositioned": CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
 }
 
 _OUTCOME_STATUS = {
@@ -176,6 +188,7 @@ _OUTCOME_STATUS = {
     RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
     RequirementOutcome.CLOSED_BY_EVIDENCE: ObligationStatus.SATISFIED,
     RequirementOutcome.HUMAN_ACCEPTED: ObligationStatus.SATISFIED,
+    RequirementOutcome.DISPOSITIONED: ObligationStatus.INDETERMINATE,  # a verdict naming it is a model claim
     RequirementOutcome.NOT_A_CLAIM: ObligationStatus.SATISFIED,
 }
 
@@ -924,6 +937,55 @@ def record_non_claim(
     )
 
 
+# BACKEND-READINESS-004 (D3): an operator disposition is recorded once, for every
+# candidate, under this evidence id; only ``record_requirement_disposition`` writes it.
+DISPOSITION_EVIDENCE_ID = "contract:disposition"
+OPERATOR_DISPOSITION_METHOD = "operator_disposition"
+OPERATOR_DISPOSITIONED = "OPERATOR_DISPOSITIONED"
+
+
+def record_requirement_disposition(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, *,
+    disposition: str, reason: str, claim: Optional[str], disposition_digest: str, operator: Mapping[str, str],
+    evidence: Sequence[str], source: str,
+) -> None:
+    """Record the operator's sealed disposition of ``requirement_id`` (the
+    whole statement when ``claim`` is None, else exactly that claim) as the
+    contract compiler bound it. Candidate-independent, never SATISFIED-as-
+    verified: the statement stays in the set, in lineage and in every report
+    with its text, the disposition kind, the reason and the operator."""
+    requirement = requirements.get(requirement_id)
+    if requirement is None:
+        raise ValueError(f"unknown requirement id {requirement_id!r}")
+    detail = {"reason_code": OPERATOR_DISPOSITIONED, "disposition": disposition, "reason": reason, "claim": claim,
+              "disposition_digest": disposition_digest, "operator": dict(operator), "evidence": list(evidence),
+              "requirement_text_sha256": hashlib.sha256((requirement.text or "").encode("utf-8")).hexdigest(),
+              "outcome": RequirementOutcome.DISPOSITIONED.value}
+    if claim is None:
+        record_requirement_closure(ledger, requirements, requirement_id, evidence_id=DISPOSITION_EVIDENCE_ID,
+                                   method=OPERATOR_DISPOSITION_METHOD, detail=detail, source=source, revision="contract")
+        return
+    ledger.record(ObligationRecord(
+        id=requirement_claim_id(requirement_id, claim), kind=ObligationKind.ORIGINAL_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description=requirement.text, source=source, revision="contract",
+        evidence={"requirement_set_digest": requirements.digest, "evidence_id": DISPOSITION_EVIDENCE_ID,
+                  "claim": claim, "method": OPERATOR_DISPOSITION_METHOD, **detail},
+        terminal_required=False,
+    ))
+
+
+def disposition_record(ledger: ObligationLedger, requirement_id: str) -> Optional[Dict[str, Any]]:
+    """The whole-statement disposition record of ``requirement_id``, if the
+    contract compiler recorded one (``record_requirement_disposition``)."""
+    for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
+        evidence = record.evidence or {}
+        if (record.status is ObligationStatus.SATISFIED and evidence.get("evidence_id") == DISPOSITION_EVIDENCE_ID
+                and evidence.get("method") == OPERATOR_DISPOSITION_METHOD):
+            return evidence
+    return None
+
+
 def non_claim_record(ledger: ObligationLedger, requirement_id: str) -> Optional[Dict[str, Any]]:
     """The structural non-claim record of ``requirement_id``, if the contract
     compiler recorded one (``record_non_claim``); None otherwise."""
@@ -941,7 +1003,7 @@ def requirement_closure(
     """The closure evidence recorded for ``requirement_id`` on the candidate
     ``evidence_id``, if any (the most recent matching record). A structural
     non-claim record is never a candidate's closure (``non_claim_record``)."""
-    if not evidence_id or evidence_id == NON_CLAIM_EVIDENCE_ID:
+    if not evidence_id or evidence_id in (NON_CLAIM_EVIDENCE_ID, DISPOSITION_EVIDENCE_ID):
         return None
     for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
         evidence = record.evidence or {}
@@ -979,6 +1041,14 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             # verifier said about it - decided structurally, before any model.
             outcomes[requirement.id] = RequirementOutcome.NOT_A_CLAIM
             continue
+        disposition = disposition_record(ledger, requirement.id)
+        if disposition is not None and disposition.get("requirement_text_sha256") == hashlib.sha256(
+                (requirement.text or "").encode("utf-8")).hexdigest():
+            # BACKEND-READINESS-004 (D3): the operator removed this exact statement
+            # from the obligation set before any model call; a record for other
+            # words (a resumed or altered ledger) binds nothing.
+            outcomes[requirement.id] = RequirementOutcome.DISPOSITIONED
+            continue
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence = (record.evidence or {}) if record is not None else {}
         raw = evidence.get("outcome")
@@ -987,7 +1057,7 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
         except ValueError:
             outcome = RequirementOutcome.UNKNOWN
         if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED,
-                       RequirementOutcome.NOT_A_CLAIM):
+                       RequirementOutcome.NOT_A_CLAIM, RequirementOutcome.DISPOSITIONED):
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
         if outcome is RequirementOutcome.VIOLATED:
             # GR-R0: a verdict record is the verifier's MODEL_CLAIMED judgment
@@ -1021,6 +1091,10 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
         non_claim = non_claim_record(ledger, requirement.id)
         if non_claim is not None:
             found[requirement.id] = dict(non_claim)
+            continue
+        disposition = disposition_record(ledger, requirement.id)
+        if disposition is not None:
+            found[requirement.id] = dict(disposition)
             continue
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
@@ -1434,10 +1508,12 @@ class AdmissionRefusal(Exception):
     reason_code: str = ""
 
     def __init__(self, residual: Sequence[Mapping[str, Any]], closers: Mapping[str, Sequence[str]],
-                 report: Optional[Mapping[str, Any]] = None) -> None:
+                 report: Optional[Mapping[str, Any]] = None, authority_requests: Sequence[Any] = ()) -> None:
         self.residual = [dict(entry) for entry in residual]
         self.closers = {key: list(value) for key, value in closers.items()}
         self.report = dict(report) if report is not None else None
+        # BACKEND-READINESS-004 (D2): one typed request per residual claim (kriya/workflow/authority_request.py)
+        self.authority_requests = list(authority_requests)
         super().__init__(self.message)
 
     @property
@@ -1451,6 +1527,7 @@ class AdmissionRefusal(Exception):
     def to_dict(self) -> Dict[str, Any]:
         return {"reason_code": self.reason_code, "residual": list(self.residual), "closers": dict(self.closers),
                 "accepted_forms": list(ACCEPTED_GOAL_FORMS),
+                "authority_requests": [r.to_dict() if hasattr(r, "to_dict") else dict(r) for r in self.authority_requests],
                 **({"verification_contract": self.report} if self.report is not None else {})}
 
 

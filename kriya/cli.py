@@ -907,6 +907,51 @@ def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Opt
     return (checkpoint or {}).get("model_routes")
 
 
+def _echo_admission_refusal(res: Dict[str, Any]) -> None:
+    """The typed pre-model refusals (GOAL_INSUFFICIENT_FOR_VERIFICATION, VERIFICATION_AUTHORITY_UNAVAILABLE,
+    VERIFICATION_AUTHORITY_REQUIRED with its authority requests). BACKEND-READINESS-004: printed whether or
+    not any file was written - a refusal before the first model call writes none, and used to show only
+    "No files written" in terminal mode (the --json result always carried the detail)."""
+    if res.get("failure_category") == "goal_insufficient_for_verification":
+        click.secho(
+            f"\n[GOAL INSUFFICIENT FOR VERIFICATION] {res['environment_failure']}\n"
+            "Nothing was generated and no model was called: the goal does not establish what must be "
+            "verified (an undecidable statement, or no determinate claim at all). Clarify the statement "
+            "named above.",
+            fg="yellow", bold=True
+        )
+    if res.get("failure_category") == "verification_authority_unavailable":
+        click.secho(
+            f"\n[VERIFICATION AUTHORITY UNAVAILABLE] {res['environment_failure']}\n"
+            "Nothing was generated and no model was called: a bound verification authority cannot run "
+            "under Kriya's containment in this environment (containment or toolchain unavailable, its "
+            "acquisition phase failed, or it timed out), so no candidate could ever be judged.",
+            fg="yellow", bold=True
+        )
+    if res.get("failure_category") == "verification_authority_required":
+        click.secho(
+            f"\n[VERIFICATION AUTHORITY REQUIRED] {res['environment_failure']}\n"
+            "Nothing was generated and no model was called: the goal is clear, but a mandatory "
+            "requirement has no deterministic authority Kriya could verify it with, so success could "
+            "never be reached. Supply one of the acceptable authorities named above (an acceptance file "
+            "with --acceptance, an approval with --acceptance-approval, or a sealed verification "
+            "authority with --verification-authority), or restate it in an accepted form.",
+            fg="yellow", bold=True
+        )
+        requests = res.get("authority_requests") or []
+        if requests:
+            # BACKEND-READINESS-004 (D2): what must be proven, per claim, and the cheapest way to supply it.
+            click.secho(f"\n[AUTHORITY REQUESTS] {len(requests)} uncovered claim(s)"
+                        + (f" - sealed at {res['authority_requests_path']}" if res.get("authority_requests_path") else "")
+                        + " (a request proposes authority; only you seal it):", fg="yellow", bold=True)
+            for request in requests:
+                click.secho(f"  {request['requirement_id']} / {request['claim']}"
+                            f"{' ' + request['strength'] if request.get('strength') else ''}: "
+                            f"prove {request['must_prove']}\n    why insufficient: {request['why_insufficient']}\n"
+                            f"    cheapest safe closer: {request['cheapest_safe_closer']}\n"
+                            f"    accepted: {'; '.join(request['acceptable_authorities'])}", fg="yellow")
+
+
 def _echo_final_review_refusal(res: Dict[str, Any]) -> None:
     """PROMPT-BUDGET-FIT-001C: gates passed but the final review was refused
     before inference. Not a success, and never reported as unapplied or
@@ -2622,15 +2667,16 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--acceptance', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.")
 @click.option('--acceptance-approval', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator approval (JSON, outside the workspace) that the --acceptance suite is SUFFICIENT evidence for named GENERAL requirements - human authority, not a proof (B3). Every binding (goal, requirement text, acceptance digest, cases, runner contract, base revision) must match.")
 @click.option('--requirements', 'requirements_file', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.")
+@click.option('--requirement-disposition', 'requirement_disposition', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement disposition (JSON kriya.requirement_disposition/1, outside the workspace): statements or single claims the operator removes from the obligation set with a sealed reason (REJECTED_FALSE_PREMISE, HISTORICAL_CONTEXT, INFORMATIONAL_CONTEXT, OUT_OF_SCOPE). Bound to the goal, requirement set, exact text and base revision before any model call; reported, never satisfied; its digest joins the verification contract.")
 @click.option('--verification-authority', 'verification_authority', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator verification authority (JSON kriya.verification_authority/1 beside its assets, outside the workspace): a sealed external acceptance command Kriya runs under its containment against a copy of the candidate, covering the requirements it declares (operator sufficiency, never a proof). Bound before any model call; its digest joins the verification contract.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str], verification_authority: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str], requirement_disposition: Optional[str], verification_authority: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                        resume, resume_id, json_output, from_milestones, output, acceptance=acceptance,
                        acceptance_approval=acceptance_approval, requirements_file=requirements_file,
-                       verification_authority=verification_authority)
+                       verification_authority=verification_authority, requirement_disposition=requirement_disposition)
 
 
 def _bind_requirement_contract(cfg: AppConfig, contract_path: str, requirement_goal: str) -> Any:
@@ -2694,9 +2740,27 @@ def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, ac
                          state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=base_revision)
 
 
+def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, requirement_goal: str, workspace: str,
+                                  contract: Any = None) -> Any:
+    """BACKEND-READINESS-004 (D3): reads, validates and stores the operator's
+    sealed requirement disposition before any model call, bound to the goal,
+    the authoritative requirement set, each statement's exact text and the
+    workspace's HEAD. Raises RequirementDispositionError."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.requirement_contract import requirement_set_for
+    from kriya.workflow.requirement_disposition import load_requirement_dispositions
+    from kriya.workflow.workflow import _workspace_head
+
+    return load_requirement_dispositions(
+        disposition_path, requirement_set_for(requirement_goal, contract), requirement_goal,
+        state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=_workspace_head(workspace),
+    )
+
+
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
-                   acceptance_approval=None, requirements_file=None, verification_authority=None):
+                   acceptance_approval=None, requirements_file=None, verification_authority=None,
+                   requirement_disposition=None):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -2778,12 +2842,28 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     "operator sufficiency, not a proof; runs "
                     "under containment only)", dim=True, err=True)
 
+    dispositions = None
+    if requirement_disposition:
+        from kriya.workflow.requirement_disposition import RequirementDispositionError
+        try:
+            dispositions = _bind_requirement_disposition(cfg, requirement_disposition, requirement_goal or "",
+                                                         os.getcwd(), contract_artifact)
+        except RequirementDispositionError as e:
+            click.secho(f"[Requirement disposition refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        listed = ", ".join(f"{rid}" + ("" if e.claim is None else f":{e.claim}") + f"={e.disposition}"
+                           for rid in sorted(dispositions.entries) for e in dispositions.entries[rid])
+        click.secho(f"Requirement disposition bound: {dispositions.source_name} sha256 {dispositions.digest[:12]} "
+                    f"({listed}; operator {dispositions.operator['identity']}; reported, never satisfied)", dim=True, err=True)
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
     we.acceptance = acceptance_artifact
     we.acceptance_approval = approval_artifact
     we.requirement_contract = contract_artifact
+    we.requirement_dispositions = dispositions
     we.verification_authority_bundle = authority_bundle
     we.verification_authorities = (authority_bundle.authority(),) if authority_bundle is not None else ()
     if approval_artifact is not None:
@@ -3294,32 +3374,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         "finding, and coverage gaps or scanner failures are never waivable.",
                         fg="yellow", bold=True
                     )
-                if res.get("failure_category") == "goal_insufficient_for_verification":
-                    click.secho(
-                        f"\n[GOAL INSUFFICIENT FOR VERIFICATION] {res['environment_failure']}\n"
-                        "Nothing was generated and no model was called: the goal does not establish what must be "
-                        "verified (an undecidable statement, or no determinate claim at all). Clarify the statement "
-                        "named above.",
-                        fg="yellow", bold=True
-                    )
-                if res.get("failure_category") == "verification_authority_unavailable":
-                    click.secho(
-                        f"\n[VERIFICATION AUTHORITY UNAVAILABLE] {res['environment_failure']}\n"
-                        "Nothing was generated and no model was called: a bound verification authority cannot run "
-                        "under Kriya's containment in this environment (containment or toolchain unavailable, its "
-                        "acquisition phase failed, or it timed out), so no candidate could ever be judged.",
-                        fg="yellow", bold=True
-                    )
-                if res.get("failure_category") == "verification_authority_required":
-                    click.secho(
-                        f"\n[VERIFICATION AUTHORITY REQUIRED] {res['environment_failure']}\n"
-                        "Nothing was generated and no model was called: the goal is clear, but a mandatory "
-                        "requirement has no deterministic authority Kriya could verify it with, so success could "
-                        "never be reached. Supply one of the acceptable authorities named above (an acceptance file "
-                        "with --acceptance, an approval with --acceptance-approval, or a sealed verification "
-                        "authority with --verification-authority), or restate it in an accepted form.",
-                        fg="yellow", bold=True
-                    )
+                _echo_admission_refusal(res)
                 if res.get("failure_category") == "requirements_unresolved":
                     click.secho(
                         f"\n[REQUIREMENTS UNRESOLVED] {res['environment_failure']}\n"
@@ -3393,6 +3448,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             )
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
+            _echo_admission_refusal(res)
             # Found live, 2026-08-25 (ignite_qpid_protocol, workflow_controller.enabled
             # enforce mode): when the very FIRST subtask of a structured plan fails,
             # `files` above stays empty (nothing was ever established) - the message

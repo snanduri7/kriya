@@ -891,6 +891,10 @@ _AUDITED_WRITE_SITES = {
     "kriya/workflow/authority_bundle.py": 5,
     "kriya/workflow/contract_compilation.py": 2,
     "kriya/workflow/example_oracle.py": 2,
+    # BACKEND-READINESS-004: Kriya state-directory stores only (sealed operator dispositions, sealed authority
+    # requests) - never the workspace.
+    "kriya/workflow/requirement_disposition.py": 2,
+    "kriya/workflow/authority_request.py": 2,
 }
 # The writer modules themselves: their sites ARE the staged writer and the
 # sandbox manager (counted separately so a change there is still visible).

@@ -194,7 +194,7 @@ def test_08_t1_like_goal_compiles_with_non_claims_authority_required_and_reports
     report = contract.report()
     # REQ-4 "Reproducer 2:" is the one non-claim; both reproducer blocks carry comments (review VC3-R3) and are claims
     assert report["totals"] == {"requirements": 7, "non_claim": 1, "closable": 0, "authority_required": 6,
-                                "ambiguous": 0, "residual_claims": 6}
+                                "ambiguous": 0, "dispositioned": 0, "residual_claims": 6}
     assert report["admission"] == "VERIFICATION_AUTHORITY_REQUIRED"
     entry = contract.entry("REQ-7")
     assert entry.status == STATUS_AUTHORITY_REQUIRED and entry.closers == [CLOSER_API_PRESERVATION, TEST_IMMUTABILITY]

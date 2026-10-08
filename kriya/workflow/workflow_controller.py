@@ -3516,6 +3516,8 @@ class WorkflowController:
                     "error": str(e),
                     "environment_failure": e.message,
                     "requirements_admission": e.to_dict(),
+                    "authority_requests": [r.to_dict() for r in getattr(e, "authority_requests", ())],
+                    "authority_requests_path": getattr(e, "authority_requests_path", None),
                     "run_id": run_id,
                     **({"verification_contract": e.report} if e.report is not None else {}),
                 }
@@ -4091,6 +4093,18 @@ class WorkflowController:
                     attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
                     message=str(result.get("error") or "")[:600], details=refusal,
                 ).to_dict())
+                if result.get("authority_requests"):
+                    # BACKEND-READINESS-004 (D2): the typed requests, same payload as the direct path.
+                    requests = list(result["authority_requests"])
+                    events.append(RunEvent(
+                        kind="verification_contract.authority_requested", attempt=0, source=source,
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message=f"{len(requests)} authority request(s) for "
+                                f"{len({r.get('requirement_id') for r in requests})} requirement(s); "
+                                "a request proposes authority, only the operator seals it",
+                        details={"contract_digest": contract.get("contract_digest"),
+                                 "stored_path": result.get("authority_requests_path"), "requests": requests},
+                    ).to_dict())
             else:
                 events.append(RunEvent(
                     kind="verification_contract.sealed", attempt=0, source=source,
@@ -4098,8 +4112,22 @@ class WorkflowController:
                     message=f"verification contract {str(contract.get('contract_digest'))[:12]} sealed before the first model call",
                     details={"digest": contract.get("contract_digest"), "stored_path": contract.get("stored_path"),
                              "admission": contract.get("admission"), "totals": contract.get("totals"),
-                             "authorities": contract.get("authorities"), "visibility": contract.get("visibility")},
+                             "authorities": contract.get("authorities"), "visibility": contract.get("visibility"),
+                             "dispositions": contract.get("dispositions")},
                 ).to_dict())
+                if contract.get("dispositions"):
+                    # BACKEND-READINESS-004 (D3): audit event, same payload as the direct path.
+                    dispositioned = [{"requirement_id": row.get("id"), "status": row.get("status"),
+                                      "claims": row.get("dispositioned_claims"), "disposition": row.get("disposition")}
+                                     for row in (contract.get("requirements") or [])
+                                     if row.get("disposition") or row.get("dispositioned_claims")]
+                    events.append(RunEvent(
+                        kind="verification_contract.dispositioned", attempt=0, source=source,
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message=f"operator disposition {str((contract.get('dispositions') or {}).get('digest'))[:12]}: "
+                                f"{len(dispositioned)} statement(s) dispositioned before the first model call",
+                        details={"dispositions": contract.get("dispositions"), "entries": dispositioned},
+                    ).to_dict())
         requirements = result.get("requirements") if isinstance(result.get("requirements"), dict) else {}
         if requirements.get("verdicts"):
             events.append(RunEvent(
@@ -4308,6 +4336,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         if _requirement_policy_blocks(autonomy):
             admission = verification_contract.refusal()
             if admission is not None:
+                if isinstance(admission, VerificationAuthorityRequired) and admission.authority_requests:
+                    # BACKEND-READINESS-004 (D2): seal the typed requests before the typed stop.
+                    from kriya.workflow.authority_request import seal_requests_for_refusal
+
+                    admission.authority_requests_path = seal_requests_for_refusal(kernel_config, verification_contract, admission)
                 raise admission
         sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
         baseline_report = None
@@ -4568,10 +4601,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         obligation_ledger = ObligationLedger()
         seed_requirement_obligations(obligation_ledger, requirement_set)
         # VERIFICATION-CONTRACT-003 (D1): structural non-claims need no closure.
-        from kriya.workflow.contract_compilation import record_contract_non_claims
+        from kriya.workflow.contract_compilation import record_contract_dispositions, record_contract_non_claims
 
         record_contract_non_claims(obligation_ledger, requirement_set, verification_contract,
                                    source="workflow_controller.verification_contract")
+        # BACKEND-READINESS-004 (D3): the operator's sealed dispositions, recorded once as audit.
+        record_contract_dispositions(obligation_ledger, requirement_set, verification_contract,
+                                     source="workflow_controller.verification_contract")
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. One store for the whole run,
         # deliberately separate from obligation_ledger above (see that

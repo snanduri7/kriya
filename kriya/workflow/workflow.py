@@ -1129,6 +1129,7 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
     from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.contract_compilation import bound_external_authorities, compile_verification_contract
     from kriya.workflow.example_oracle import derive_example_artifact, example_authority
+    from kriya.workflow.requirement_disposition import bound_dispositions
 
     tracked = _tracked_workspace_paths(workspace_path)
     origins = statement_origins(requirement_goal) if (requirement_goal and requirement_set.contract_digest is None) else {}
@@ -1162,6 +1163,7 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
         acceptance=bound_acceptance(engine), approval=bound_approval(engine),
         external_authorities=authorities, project_language=language,
         tracked_file_reader=_workspace_file_reader(workspace_path), base_revision=_workspace_head(workspace_path),
+        dispositions=bound_dispositions(engine),
     )
 
 
@@ -1787,6 +1789,10 @@ class WorkflowEngine:
         # GR-R1A: the operator's explicit requirement contract, bound by the CLI
         # before any model call (kriya/workflow/requirement_contract.py).
         self.requirement_contract: Any = None
+        # BACKEND-READINESS-004 (D3): the operator's sealed requirement dispositions
+        # (`--requirement-disposition`), bound by the CLI before any model call
+        # (kriya/workflow/requirement_disposition.py); None = none.
+        self.requirement_dispositions: Any = None
         # PRD-024: the last applied candidate's terminal full-suite result
         # (full_suite_evidence_for_reuse), offered to the next run as its
         # baseline; reused only if it describes that run's exact start.
@@ -2731,6 +2737,21 @@ class WorkflowEngine:
                     authority=EventAuthority.AUTHORITATIVE, message=admission.message[:600],
                     details=admission.to_dict(),
                 ))
+                requests_path = None
+                if isinstance(admission, VerificationAuthorityRequired) and admission.authority_requests:
+                    # BACKEND-READINESS-004 (D2): the typed requests, sealed under the state root and recorded.
+                    from kriya.workflow.authority_request import seal_requests_for_refusal
+
+                    requests_path = seal_requests_for_refusal(self.kernel.config, verification_contract, admission)
+                    state.record_event(RunEvent(
+                        kind="verification_contract.authority_requested", attempt=0,
+                        source="workflow.run_generation_workflow", authority=EventAuthority.AUTHORITATIVE,
+                        message=f"{len(admission.authority_requests)} authority request(s) for "
+                                f"{len({r.requirement_id for r in admission.authority_requests})} requirement(s); "
+                                "a request proposes authority, only the operator seals it",
+                        details={"contract_digest": verification_contract.digest, "stored_path": requests_path,
+                                 "requests": [r.to_dict() for r in admission.authority_requests]},
+                    ))
                 try:
                     TraceLogger(trace_db_path(self.kernel.config)).log_run(
                         run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
@@ -2747,6 +2768,8 @@ class WorkflowEngine:
                     "environment_failure": admission.message, "goal": goal, "workspace_path": workspace_path,
                     "run_id": trace_id, "files": [], "quality_gates_passed": False,
                     "requirements_admission": admission.to_dict(),
+                    "authority_requests": [r.to_dict() for r in getattr(admission, "authority_requests", ())],
+                    "authority_requests_path": requests_path,
                     **({"verification_contract": admission.report} if admission.report is not None else {}),
                 }
         if verification_contract is not None:
@@ -2761,8 +2784,21 @@ class WorkflowEngine:
                          "admission": verification_contract.report()["admission"],
                          "totals": verification_contract.report()["totals"],
                          "authorities": [a.to_dict() for a in verification_contract.authorities],
-                         "visibility": verification_contract.visibility()},
+                         "visibility": verification_contract.visibility(),
+                         "dispositions": verification_contract.dispositions},
             ))
+            if verification_contract.dispositions:
+                # BACKEND-READINESS-004 (D3): audit event - which statements/claims the operator dispositioned.
+                dispositioned = [{"requirement_id": e.requirement_id, "status": e.status,
+                                  "claims": list(e.dispositioned_claims), "disposition": e.disposition}
+                                 for e in verification_contract.dispositioned_entries()]
+                state.record_event(RunEvent(
+                    kind="verification_contract.dispositioned", attempt=0, source="workflow.run_generation_workflow",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    message=f"operator disposition {str(verification_contract.dispositions.get('digest'))[:12]}: "
+                            f"{len(dispositioned)} statement(s) dispositioned before the first model call",
+                    details={"dispositions": verification_contract.dispositions, "entries": dispositioned},
+                ))
             # The baseline authority run: deterministic evidence before any
             # model call; a baseline that already satisfies every mandatory
             # claim is NO_MUTATION_REQUIRED (a success without a model).
@@ -4674,10 +4710,13 @@ class WorkflowEngine:
             if verification_contract is not None:
                 # VERIFICATION-CONTRACT-003 (D1): the contract's structural
                 # non-claims need no closure; recorded once, visible everywhere.
-                from kriya.workflow.contract_compilation import record_contract_non_claims
+                from kriya.workflow.contract_compilation import record_contract_dispositions, record_contract_non_claims
 
                 record_contract_non_claims(resolved_obligation_ledger, requirement_set, verification_contract,
                                            source="workflow.verification_contract")
+                # BACKEND-READINESS-004 (D3): the operator's sealed dispositions, recorded once as audit.
+                record_contract_dispositions(resolved_obligation_ledger, requirement_set, verification_contract,
+                                             source="workflow.verification_contract")
         if ownership_findings:
             record_findings(resolved_obligation_ledger, ownership_findings, revision=0,
                             source="workflow.architect_file_resolution")

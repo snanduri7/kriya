@@ -57,6 +57,7 @@ from kriya.workflow.requirements import (
     CLOSER_MIGRATION_GATE,
     CLOSER_MUTATION_SCOPE,
     CLOSER_NAMED_TESTS,
+    DISPOSITION_EVIDENCE_ID,
     DOCUMENTATION_CLAIM,
     MUTATION_SCOPE,
     ORIGIN_SENTENCE,
@@ -70,9 +71,12 @@ from kriya.workflow.requirements import (
     GoalAdmissionError,
     RequirementSet,
     VerificationAuthorityRequired,
+    disposition_record,
     mutation_path_roles,
     non_claim_record,
     record_non_claim,
+    record_requirement_disposition,
+    requirement_claim_id,
 )
 
 CONTRACT_FORMAT = "kriya.verification_contract/1"
@@ -86,6 +90,8 @@ STATUS_CLOSABLE = "CLOSABLE"
 STATUS_AUTHORITY_REQUIRED = "AUTHORITY_REQUIRED"
 STATUS_NOT_A_CLAIM = "NOT_A_CLAIM"
 STATUS_AMBIGUOUS = "AMBIGUOUS"
+# BACKEND-READINESS-004 (D3): the operator sealed a disposition for the whole statement (or every claim of it).
+STATUS_DISPOSITIONED = "DISPOSITIONED"
 
 # Closer ids beyond the existing ones (requirements.CLOSER_* / SUITE_PRESERVATION / TEST_IMMUTABILITY).
 CLOSER_ACCEPTANCE_APPROVAL = "acceptance_approval"
@@ -95,6 +101,8 @@ CLOSER_DOCUMENTATION_NOT_APPLICABLE = "documentation_not_applicable"
 CLOSER_TEST_ADDITION = "test_addition"
 CLOSER_EXTERNAL_ACCEPTANCE = "external_acceptance_command"
 CLOSER_NOT_A_CLAIM = "not_a_claim"
+CLOSER_OPERATOR_DISPOSITION = "operator_disposition"
+DISPOSITIONED_STATEMENT = "STATEMENT"  # the binding label of a whole-statement disposition
 
 # Who created the evidence a closer judges.
 AUTHORITY_GOAL = "goal"  # the user's own words (examples, named tests, the statements themselves)
@@ -104,6 +112,7 @@ AUTHORITY_ACCEPTANCE_APPROVAL = "acceptance_approval"  # B3 human-bound approval
 AUTHORITY_GOAL_EXAMPLES = "goal_examples"  # the goal's example lines compiled deterministically
 AUTHORITY_EXTERNAL_COMMAND = "external_acceptance_command"  # a sealed operator oracle bundle
 AUTHORITY_CONTRACT = "contract"  # the compiler's own structural decision
+AUTHORITY_OPERATOR_DISPOSITION = "operator_disposition"  # a sealed operator disposition (kriya/workflow/requirement_disposition.py)
 
 VISIBILITY_HIDDEN = "hidden"  # never in a prompt, never in the workspace
 VISIBILITY_GOAL_TEXT = "goal_text"  # part of the goal the Developer reads anyway
@@ -178,6 +187,11 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
         "claim": NON_CLAIM, "authority": AUTHORITY_CONTRACT,
         "pass": "the statement is a label or a bare code block with no expected value (structural)",
         "fail": "never", "unknown": "never"},
+    CLOSER_OPERATOR_DISPOSITION: {
+        "claim": "the dispositioned statement or claim", "authority": AUTHORITY_OPERATOR_DISPOSITION,
+        "pass": "the operator sealed a disposition (rejected false premise, historical, informational, out of scope) for "
+                "this exact text before any model call: removed from the obligation set, reported, never satisfied",
+        "fail": "never", "unknown": "never"},
 }
 
 # Acceptable authority types for a residual claim, by claim and strength.
@@ -192,6 +206,8 @@ _ACCEPTABLE: Dict[Tuple[str, Optional[str]], Tuple[str, ...]] = {
 }
 
 VERIFICATION_CONTRACT_EVENT_KINDS = frozenset({
+    "verification_contract.authority_requested",  # BACKEND-READINESS-004 (D2): typed requests sealed on refusal
+    "verification_contract.dispositioned",  # BACKEND-READINESS-004 (D3): operator dispositions bound and sealed
     "verification_contract.compiled",
     "verification_contract.sealed",
     "verification_contract.refused",
@@ -280,6 +296,8 @@ class ContractEntry:
     bindings: Tuple[ClaimBinding, ...] = ()
     residual: Tuple[ResidualClaim, ...] = ()
     ambiguity: Optional[str] = None
+    disposition: Optional[Mapping[str, Any]] = None  # D3: the sealed disposition of the whole statement
+    dispositioned_claims: Tuple[str, ...] = ()  # D3: claims the operator removed from the obligation
 
     @property
     def closers(self) -> List[str]:
@@ -291,7 +309,7 @@ class ContractEntry:
 
     @property
     def required_claims(self) -> Tuple[str, ...]:
-        return self.scope.claims
+        return tuple(claim for claim in self.scope.claims if claim not in self.dispositioned_claims)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"requirement_id": self.requirement_id, "text": self.text, "kind": self.kind, "source": self.source,
@@ -302,7 +320,9 @@ class ContractEntry:
                 "non_claim": ({"kind": self.scope.non_claim_kind, "reason": self.scope.non_claim_reason}
                               if self.scope.is_non_claim else None),
                 "named_tests": list(self.scope.named_tests),
-                "documentation": dict(self.scope.documentation) if self.scope.documentation else None}
+                "documentation": dict(self.scope.documentation) if self.scope.documentation else None,
+                "disposition": dict(self.disposition) if self.disposition else None,
+                "dispositioned_claims": list(self.dispositioned_claims)}
 
 
 @dataclass(frozen=True)
@@ -317,10 +337,12 @@ class VerificationContract:
     derivation_version: int = REQUIREMENT_DERIVATION_VERSION
     recognizer_version: int = SCOPE_RECOGNIZER_VERSION
     compiler_version: int = CONTRACT_COMPILER_VERSION
+    dispositions: Optional[Mapping[str, Any]] = None  # D3: the bound operator dispositions' identity
 
     # ---- identity
     def identity_payload(self) -> Dict[str, Any]:
         return {"format": CONTRACT_FORMAT, "compiler_version": self.compiler_version,
+                "dispositions": dict(self.dispositions) if self.dispositions else None,
                 "recognizer_version": self.recognizer_version, "derivation_version": self.derivation_version,
                 "goal_digest": self.goal_digest, "requirement_set_digest": self.requirement_set_digest,
                 "requirement_contract_digest": self.requirement_contract_digest, "base_revision": self.base_revision,
@@ -359,7 +381,10 @@ class VerificationContract:
         return [e.requirement_id for e in self.entries if e.status == STATUS_NOT_A_CLAIM]
 
     def mandatory_entries(self) -> List[ContractEntry]:
-        return [e for e in self.entries if e.status != STATUS_NOT_A_CLAIM]
+        return [e for e in self.entries if e.status not in (STATUS_NOT_A_CLAIM, STATUS_DISPOSITIONED)]
+
+    def dispositioned_entries(self) -> List[ContractEntry]:
+        return [e for e in self.entries if e.disposition is not None or e.dispositioned_claims]
 
     def visibility(self) -> Dict[str, str]:
         return {authority.kind + ":" + authority.digest[:12]: authority.visibility for authority in self.authorities}
@@ -379,7 +404,8 @@ class VerificationContract:
             residual = self.residual_requirements()
             if not self.mandatory_entries():
                 residual = [{"id": e.requirement_id, "text": e.text,
-                             "why": "every statement of the goal is a label or a bare code block: nothing to verify"}
+                             "why": "every statement of the goal is a label, a bare code block or an operator-"
+                                    "dispositioned statement: nothing to verify"}
                             for e in self.entries] or [{"id": "-", "text": "", "why": "the goal has no statement"}]
             return GoalAdmissionError(residual, closers, report=self.report())
         residual_entries = [e for e in self.entries if e.status == STATUS_AUTHORITY_REQUIRED]
@@ -388,16 +414,20 @@ class VerificationContract:
                      "scopes": list(e.scope.scopes), "why": r.why,
                      "acceptable_authorities": list(r.acceptable_authorities)}
                     for e in residual_entries for r in e.residual]
-            return VerificationAuthorityRequired(rows, closers, report=self.report())
+            # BACKEND-READINESS-004 (D2): one typed request per residual claim (local import: that module
+            # imports this one's vocabulary).
+            from kriya.workflow.authority_request import authority_requests
+
+            return VerificationAuthorityRequired(rows, closers, report=self.report(), authority_requests=authority_requests(self))
         return None
 
     # ---- reporting
     def report(self) -> Dict[str, Any]:
         counts = {"requirements": len(self.entries), "non_claim": 0, "closable": 0, "authority_required": 0,
-                  "ambiguous": 0, "residual_claims": 0}
+                  "ambiguous": 0, "dispositioned": 0, "residual_claims": 0}
         rows = []
         for entry in self.entries:
-            key = {STATUS_NOT_A_CLAIM: "non_claim", STATUS_CLOSABLE: "closable",
+            key = {STATUS_NOT_A_CLAIM: "non_claim", STATUS_CLOSABLE: "closable", STATUS_DISPOSITIONED: "dispositioned",
                    STATUS_AUTHORITY_REQUIRED: "authority_required", STATUS_AMBIGUOUS: "ambiguous"}[entry.status]
             counts[key] += 1
             counts["residual_claims"] += len(entry.residual)
@@ -406,11 +436,13 @@ class VerificationContract:
                          "strength": entry.scope.strength, "closers": entry.closers,
                          "authorities": sorted({b.authority_kind for b in entry.bindings}),
                          "status": entry.status, "residual": [r.to_dict() for r in entry.residual],
-                         "ambiguity": entry.ambiguity})
+                         "ambiguity": entry.ambiguity, "disposition": dict(entry.disposition) if entry.disposition else None,
+                         "dispositioned_claims": list(entry.dispositioned_claims)})
         return {"format": CONTRACT_FORMAT, "contract_digest": self.digest, "goal_digest": self.goal_digest,
                 "requirement_set_digest": self.requirement_set_digest, "base_revision": self.base_revision,
                 "project_language": self.project_language, "totals": counts, "requirements": rows,
                 "authorities": [a.to_dict() for a in self.authorities], "visibility": self.visibility(),
+                "dispositions": dict(self.dispositions) if self.dispositions else None,
                 "admission": ("GOAL_INSUFFICIENT_FOR_VERIFICATION" if counts["ambiguous"] or not self.mandatory_entries()
                               else "VERIFICATION_AUTHORITY_REQUIRED" if counts["authority_required"] else "ADMITTED")}
 
@@ -522,6 +554,7 @@ def compile_verification_contract(
     project_language: Optional[str] = None,
     tracked_file_reader: Optional[Callable[[str], Optional[bytes]]] = None,
     base_revision: Optional[str] = None,
+    dispositions: Any = None,
 ) -> VerificationContract:
     """Compile the contract of ``requirement_set``. Pure given its inputs:
     the statements and their origins, the repository's test files and
@@ -552,10 +585,17 @@ def compile_verification_contract(
         bindings: List[ClaimBinding] = []
         residual: List[ResidualClaim] = []
         ambiguity: Optional[str] = None
+        # BACKEND-READINESS-004 (D3): a sealed operator disposition of the whole statement, or of single claims.
+        whole = dispositions.whole(requirement.id) if dispositions is not None else None
+        dispositioned: List[str] = []
+        disposition_detail: Optional[Dict[str, Any]] = None
         if scope.is_non_claim:
             bindings.append(ClaimBinding(NON_CLAIM, CLOSER_NOT_A_CLAIM, AUTHORITY_CONTRACT,
                                          detail={"non_claim_kind": scope.non_claim_kind,
                                                  "reason": scope.non_claim_reason}))
+        elif whole is not None:
+            disposition_detail = {**whole.to_dict(), "digest": dispositions.digest, "operator": dict(dispositions.operator)}
+            bindings.append(_disposition_binding(DISPOSITIONED_STATEMENT, whole, dispositions.digest))
         elif scope.scopes == (MUTATION_SCOPE,):
             if roles and roles["ambiguous"]:
                 ambiguity = "the goal names paths whose role (change target or reference) cannot be determined"
@@ -573,6 +613,11 @@ def compile_verification_contract(
                     "the rest of the sentence has no closer", _acceptable(BEHAVIOR, BEHAVIOR_GENERAL)))
         else:
             for claim in scope.claims:
+                partial = dispositions.for_claim(requirement.id, claim) if dispositions is not None else None
+                if partial is not None:
+                    dispositioned.append(claim)
+                    bindings.append(_disposition_binding(claim, partial, dispositions.digest))
+                    continue
                 if claim == REGRESSION_PRESERVATION:
                     if SUITE_PRESERVATION_SCOPE in scope.scopes:
                         bindings.append(ClaimBinding(claim, SUITE_PRESERVATION, AUTHORITY_REPOSITORY))
@@ -651,16 +696,36 @@ def compile_verification_contract(
                         residual.append(ResidualClaim(claim, strength, why, _acceptable(claim, strength)))
             if not scope.claims and not bindings:  # a determinate statement with no claim at all cannot happen; fail closed
                 residual.append(ResidualClaim(BEHAVIOR, None, "no claim recognized", _acceptable(BEHAVIOR, None)))
-        # One status rule for every branch: undecidable first, then structural, then any residual claim.
+        if dispositioned and scope.claims and set(dispositioned) == set(scope.claims):
+            # every claim the statement makes is dispositioned: nothing of it remains an obligation
+            parts = [dispositions.for_claim(requirement.id, claim) for claim in scope.claims]
+            kinds = sorted({part.disposition for part in parts})
+            disposition_detail = {"requirement_id": requirement.id, "claim": None,
+                                  "disposition": kinds[0] if len(kinds) == 1 else "MULTIPLE",
+                                  "reason": "; ".join(f"{part.claim}: {part.reason}" for part in parts),
+                                  "evidence": sorted({item for part in parts for item in part.evidence}),
+                                  "claims": [part.to_dict() for part in parts],
+                                  "requirement_text_sha256": parts[0].requirement_text_sha256,
+                                  "digest": dispositions.digest, "operator": dict(dispositions.operator)}
+        # One status rule for every branch: undecidable first, then structural, then dispositioned, then any
+        # residual claim.
         status = (STATUS_AMBIGUOUS if ambiguity else STATUS_NOT_A_CLAIM if scope.is_non_claim
+                  else STATUS_DISPOSITIONED if disposition_detail is not None
                   else STATUS_AUTHORITY_REQUIRED if residual else STATUS_CLOSABLE)
         entries.append(ContractEntry(requirement.id, requirement.text, requirement.kind, requirement.source, scope,
-                                     status, tuple(bindings), tuple(residual), ambiguity))
+                                     status, tuple(bindings), tuple(residual), ambiguity,
+                                     disposition=disposition_detail, dispositioned_claims=tuple(dispositioned)))
     return VerificationContract(
         goal_digest=requirement_set.goal_digest, requirement_set_digest=requirement_set.digest,
         requirement_contract_digest=requirement_set.contract_digest, base_revision=base_revision,
         project_language=project_language, entries=tuple(entries), authorities=authorities,
+        dispositions=dispositions.identity() if dispositions is not None else None,
     )
+
+
+def _disposition_binding(claim: str, entry: Any, digest: str) -> ClaimBinding:
+    return ClaimBinding(claim, CLOSER_OPERATOR_DISPOSITION, AUTHORITY_OPERATOR_DISPOSITION, digest,
+                        detail={"disposition": entry.disposition, "reason": entry.reason, "evidence": list(entry.evidence)})
 
 
 # ------------------------------------------------------------ sealing and ledger
@@ -693,6 +758,39 @@ def record_contract_non_claims(ledger: Any, requirement_set: RequirementSet, con
         record_non_claim(ledger, requirement_set, entry.requirement_id, origin=entry.scope.origin,
                          reason=entry.scope.non_claim_reason or "", source=source)
         recorded.append(entry.requirement_id)
+    return recorded
+
+
+def record_contract_dispositions(ledger: Any, requirement_set: RequirementSet, contract: VerificationContract, *,
+                                 source: str) -> List[str]:
+    """Record every operator disposition the contract bound (idempotent): the
+    whole statement when its status is DISPOSITIONED, else each dispositioned
+    claim - audit records, never a candidate's closure."""
+    recorded: List[str] = []
+    for entry in contract.entries:
+        rid = entry.requirement_id
+        if entry.status == STATUS_DISPOSITIONED and entry.disposition is not None:
+            if disposition_record(ledger, rid) is not None:
+                continue
+            detail = entry.disposition
+            record_requirement_disposition(ledger, requirement_set, rid, disposition=str(detail["disposition"]),
+                                           reason=str(detail["reason"]), claim=None, disposition_digest=str(detail["digest"]),
+                                           operator=dict(detail["operator"]), evidence=list(detail.get("evidence") or ()),
+                                           source=source)
+            recorded.append(rid)
+            continue
+        for binding in entry.bindings:
+            if binding.closer != CLOSER_OPERATOR_DISPOSITION or binding.claim not in entry.dispositioned_claims:
+                continue
+            if any((r.evidence or {}).get("evidence_id") == DISPOSITION_EVIDENCE_ID
+                   for r in ledger.history(requirement_claim_id(rid, binding.claim))):
+                continue
+            record_requirement_disposition(ledger, requirement_set, rid, disposition=str(binding.detail["disposition"]),
+                                           reason=str(binding.detail["reason"]), claim=binding.claim,
+                                           disposition_digest=str(binding.authority_digest),
+                                           operator=dict((contract.dispositions or {}).get("operator") or {}),
+                                           evidence=list(binding.detail.get("evidence") or ()), source=source)
+            recorded.append(f"{rid}:{binding.claim}")
     return recorded
 
 
