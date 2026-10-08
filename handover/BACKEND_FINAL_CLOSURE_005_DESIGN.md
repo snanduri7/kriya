@@ -171,4 +171,11 @@ cross-language integration gate is the explicit `npm run check:integration` (= `
 
 ## 8. Certification and cohort records
 
-(pending)
+Independent review (`reviews/INDEPENDENT_REVIEW.md`): APPROVE WITH CHANGES, no BLOCKER; every finding reconciled in
+c48d8de / 03a3ee2 (`reviews/RECONCILIATION.md`). Full suite: run 1 @e37a8f1 9773/3 (tripwire classifications), run 2
+@03a3ee2 9777/2 (two counts moved by the reconciliation), run 3 @1e2d0ed **9779 passed / 0 failed / 0 errors, root
+pollution none** - the certified run. ruff 0, pylint 0, mutants 30/30 KILLED. **BACKEND_FINAL_EXECUTABLE_SHA = 1e2d0ed.**
+Registry after certification: 0 OPEN, 10 DEFERRED classified non-defects. One authorized push: main fast-forwarded to
+the records commit on top of 1e2d0ed. Primary cohort (`primary/run_all.sh`, from the certified main) and cohort 2:
+`~/kriya-m1-live/backend-final-closure-005/FINAL_REPORT.md` sections I-L (records after the runs stay local until
+the owner authorizes a further push).
