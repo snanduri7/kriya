@@ -13,9 +13,12 @@ def test_default_hosts_are_empirically_required_only_no_wildcards():
     # GRADLE-WRAPPER-CONTAINMENT-001: services.gradle.org (wrapper distributions) and plugins.gradle.org (the Plugin
     # Portal) were MEASURED as required by the first cohort's Gradle project (T3: UnknownHostException
     # services.gradle.org in the denied container; settings.gradle plugins block) and approved by the owner for the
-    # acquisition phase only.
+    # acquisition phase only. GRADLE-PLUGIN-PORTAL-ACQUISITION-001 (owner decision 2026-10-08): plugins-artifacts.
+    # gradle.org, the Portal's artifact host plugins.gradle.org/m2 redirects to - MEASURED 403 under the allowlist
+    # (T3 foojay-resolver-0.8.0.pom); one exact official host, acquisition phase only.
     assert cfg.acquisition_registry_hosts == [
-        "files.pythonhosted.org", "plugins.gradle.org", "pypi.org", "repo.maven.apache.org", "services.gradle.org",
+        "files.pythonhosted.org", "plugins-artifacts.gradle.org", "plugins.gradle.org", "pypi.org",
+        "repo.maven.apache.org", "services.gradle.org",
     ]
 
 

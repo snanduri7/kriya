@@ -424,8 +424,16 @@ class AutonomyConfig(BaseModel):
         # GRADLE-WRAPPER-CONTAINMENT-001 (owner decision 2026-10-07): the
         # Gradle distribution host and the Gradle Plugin Portal, for the
         # acquisition phase only (the only phase that ever has a network).
+        # GRADLE-PLUGIN-PORTAL-ACQUISITION-001 (owner decision 2026-10-08,
+        # BACKEND-READINESS-004): `plugins-artifacts.gradle.org`, the Plugin
+        # Portal's own artifact host - MEASURED under the scoped proxy: a
+        # settings-plugin resolution GETs plugins.gradle.org/m2/<pom>, which
+        # redirects to plugins-artifacts.gradle.org/<pom> and was answered
+        # 403 by the allowlist (evidence: ~/kriya-m1-live/backend-readiness-004/
+        # defects/gradle-plugin-acquisition/). One exact official host, no
+        # wildcard; the proxy still refuses every other redirect target.
         default_factory=lambda: ["repo.maven.apache.org", "pypi.org", "files.pythonhosted.org",
-                                 "services.gradle.org", "plugins.gradle.org"],
+                                 "services.gradle.org", "plugins.gradle.org", "plugins-artifacts.gradle.org"],
         # validate_default: without this, pydantic v2 does not run
         # field_validator over a DEFAULT value at all (only over an
         # explicitly-supplied one) - the packaged default would then stay
