@@ -242,3 +242,35 @@ as T3-ORACLE-COMPAT-PIPELINE-STATUS-001 (harness; the external bash oracle carri
 classification depended on it). Run precondition: SEC-009 durable approval of the six cohort-2 configs (same security
 configuration as the approved primary config) under the cohort authority home. Cohort 2 runs only after the
 reviewer's FROZEN-OK on the remediated freeze (`reviews/COHORT2_FREEZE_REVIEW_R2.md`).
+
+## 11. Cohort 2 results and the readiness decision (Phase 15-17, 2026-10-08/09)
+
+Run from clean local main d81e46b (executable b185bd6), serial, six tasks, 61 model calls, 67 min of Kriya runs (74 min end to end); every store
+VERIFIED and sealed, every workspace restored, 0 false success, 0 authority violation, 0 hidden-oracle leak (three LEAKED
+checker verdicts traced unit-by-unit to goal text or shown workspace lines). Tally 0/6 genuine, 4 safe failures, 2 false
+negatives -> cohort-2 gate FAIL, combined readiness FAIL (4/12 genuine, 2 FN on the current executable): backend
+readiness NO (`~/kriya-m1-live/backend-final-closure-005/cohort-002/COHORT2_GATE.md`, FINAL_REPORT.md K-O).
+
+Four Kriya defects measured live on the unchanged executable, none model- or benchmark-specific, each TRACED to its
+producer, two CONFIRMED by deterministic reproduction on the frozen workspaces (`COHORT2_KRIYA_DEFECTS.md`):
+- D1 CANDIDATE-GATE-BASELINE-POLICY-001: the per-attempt candidate test gate (attempt.py, declared-test-verification
+  branch) judges the raw suite result; PRD-024's PRE/POST baseline attribution exists only at the terminal
+  full-regression check. One pre-existing failure, two verdicts in the same run; a correct one-line fix discarded (S2_A).
+- D2 STRUCTURAL-EVIDENCE-SELF-CALL-EDGE-001: build_planning_structural_evidence resolves a file's own-method calls to a
+  twin class defining the same names (owner lookup excludes only the caller), producing a false mutual edge that makes a
+  two-unit plan over TextStringBuilder/StrBuilder unplannable (S3_A).
+- D3 FILE-RESOLUTION-SCOPE-ESCAPE-001: prefer_existing_artifact_owners redirects a planned new test to an existing file
+  outside the unit's validated scope (and ignores action=create); the write authority refuses the resolver's own target
+  and the run dies, discarding a correct fix (S4_A).
+- D4 ENFORCE-IDENTICAL-WRITE-COMPLETION-001: an implementation unit whose writes are byte-identical to the baseline
+  completes as a mutation; the OD-3 no-change contract treats an identical rewrite as a write (S4_B).
+Shared pattern (ENFORCE-UPSTREAM-WORK-PRESERVATION-001, P2): a later unit's out-of-scope trouble ends the run and
+restores the base, throwing away earlier units' accepted work; the Batch-005 owner-reopen covers verification units only.
+Also recorded: ENFORCE-FALSE-PREMISE-MUTATION-GUARD-001 (P2; S6_A rewrote a correct function and only D1 prevented a
+false success - INFERRED), LEAK-CHECK-SHARED-LINE-FALSE-POSITIVE-001 (P3, tooling).
+
+Decision discipline: the one authorized repair cycle was spent on the primary cohort (section 9); D1-D4 are OPEN P1 rows
+awaiting the owner's authorization of a second cycle, which turns `tests/test_backlog_registry.py::test_an_open_p0_or_p1_
+is_never_parked_in_the_backlog` red by design on the records commit. The certified executable b185bd6 (9785/0) is
+unchanged. Recommendation: authorize the second cycle; its fixes are local and reproducible, and the shared-pattern rule
+would have made both false negatives safe failures with a preserved candidate.
