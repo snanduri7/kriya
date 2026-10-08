@@ -202,3 +202,17 @@ tests fixed, docstrings reworded; no widening of model-output authority. Mutants
 clean full run at the fix-up commit; then reruns of T3, T5, T2 and the T1 control from local main (a further push needs
 the owner's authorization).
 
+
+### 9.1 Rerun outcomes from b185bd6 (2026-10-08) and the final primary gate
+Re-certification at b185bd6: full suite 9785/0, ruff 0, pylint 0, mutants 36/36. Reruns (`primary/P5-<T>-r2/`):
+T3 SAFE_FAILURE - the suite-preservation evidence is now `gradle COMPLETE 489/489` (the false negative's mechanism is
+gone, measured live) and the candidate itself was wrong (ASCII-only `Character.isWhitespace`; the sealed authority
+failed hidden 1/2, the frozen external oracle agrees on the exported candidate). T5 GENUINE - one plan repair, the
+documentation-only unit ran with no verification entry and closed by the sealed predicate. T2 SAFE_FAILURE - planner
+non-convergence: the model declared five preserved references on the modifying production source instead of the
+referencing test file in both repair drafts, although every error line and the correction rule named the test file;
+Kriya refused and applied nothing. Recorded as an observation, not a defect: PLAN-PRESERVED-REFERENCE-SOURCE-
+ATTRIBUTION-001 (P3, DEFERRED, owner decision) - accepting a plan-wide preservation of an unowned target would be a
+plan-validation architecture extension (PRV-11), outside the one authorized repair cycle. T1 control GENUINE,
+unchanged. Final primary gate (best run per task): 4/6 genuine, 0 false success, 0 authority violation, 0 corruption,
+1 historical false negative (retired by measurement) -> PASS (`primary/PRIMARY_GATE.md`).
