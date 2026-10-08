@@ -6842,6 +6842,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     ),
                     acceptance=bound_acceptance(self.workflow_engine),
                     acceptance_approval=bound_approval(self.workflow_engine),
+                    verification_contract=verification_contract, engine=self.workflow_engine,
                 ), _emit_gate_outcome)
                 all_completed = gate_report.commit_eligible
 

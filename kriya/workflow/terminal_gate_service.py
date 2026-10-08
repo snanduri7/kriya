@@ -208,6 +208,12 @@ class TerminalGateRequest:
     acceptance: Any = None
     # FS-1C2 B3: the operator's approval of that suite (acceptance_approval.py).
     acceptance_approval: Any = None
+    # VERIFICATION-CONTRACT-003: the sealed verification contract of the run
+    # (claims per requirement, bound closers); None for a run without one. The
+    # engine carries the artifacts the contract compilation bound (the goal's
+    # compiled examples), read through their typed accessors only.
+    verification_contract: Any = None
+    engine: Any = None
 
 
 @dataclass(frozen=True)
@@ -464,12 +470,17 @@ class TerminalGateService:
                 from kriya.policy.filesystem import WriteScopeMode
                 from kriya.workflow.toolchain import toolchain_declaration_mutable
                 from kriya.workflow.workflow import (
+                    close_requirements_by_api_preservation,
+                    close_requirements_by_documentation,
                     close_requirements_by_mutation_scope,
                     close_requirements_by_suite_preservation,
+                    close_requirements_by_test_addition,
                     close_requirements_by_test_immutability,
                     close_requirements_with_acceptance_tests,
+                    close_requirements_with_derived_examples,
                     close_requirements_with_named_tests,
                 )
+                contract = request.verification_contract
 
                 scope_closures = await asyncio.to_thread(
                     close_requirements_by_mutation_scope, ledger, requirement_set,
@@ -502,10 +513,35 @@ class TerminalGateService:
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
                         WriteScopeMode.DENY_ALL, (), request.plan,
                     ),
-                    tree_binding=tree_binding,
+                    tree_binding=tree_binding, contract=contract,
                 )
                 if acceptance_closures:
                     logger.info("Original requirement acceptance evidence: %s", acceptance_closures)
+                # VERIFICATION-CONTRACT-003: the contract's other closers on this final candidate.
+                contract_closures: List[Dict[str, Any]] = []
+                if contract is not None:
+                    contract_closures += await asyncio.to_thread(
+                        close_requirements_with_derived_examples, autonomy, ledger, requirement_set,
+                        request.candidate_root, request.workspace_path, engine=request.engine,
+                        modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                        toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                        tree_binding=tree_binding, contract=contract,
+                    )
+                    contract_closures += await asyncio.to_thread(
+                        close_requirements_by_api_preservation, ledger, requirement_set, contract,
+                        request.candidate_root, request.workspace_path,
+                        candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
+                    )
+                    contract_closures += await asyncio.to_thread(
+                        close_requirements_by_test_addition, ledger, requirement_set, contract,
+                        request.candidate_root, request.workspace_path, revision="terminal",
+                    )
+                    contract_closures += await asyncio.to_thread(
+                        close_requirements_by_documentation, ledger, requirement_set, contract,
+                        request.candidate_root, revision="terminal",
+                    )
+                    if contract_closures:
+                        logger.info("Original requirement contract closures: %s", contract_closures)
                 # D8: the terminal writes nothing; the toolchain authority is
                 # the approved plan's (the same derivation its units used).
                 closures = await asyncio.to_thread(
@@ -515,7 +551,7 @@ class TerminalGateService:
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
                         WriteScopeMode.DENY_ALL, (), request.plan,
                     ),
-                    tree_binding=tree_binding,
+                    tree_binding=tree_binding, contract=contract,
                 )
                 if closures:
                     logger.info("Original requirement closure by named tests: %s", closures)
@@ -524,7 +560,7 @@ class TerminalGateService:
                 immutability_closures = await asyncio.to_thread(
                     close_requirements_by_test_immutability, ledger, requirement_set,
                     request.candidate_root, request.workspace_path,
-                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal",
+                    candidate_paths=_terminal_candidate_paths(request.plan), revision="terminal", contract=contract,
                 )
                 if immutability_closures:
                     logger.info("Original requirement test-immutability evidence: %s", immutability_closures)
@@ -535,11 +571,12 @@ class TerminalGateService:
                     toolchain_declaration_mutable=toolchain_declaration_mutable(
                         WriteScopeMode.DENY_ALL, (), request.plan,
                     ),
-                    tree_binding=tree_binding,
+                    tree_binding=tree_binding, contract=contract,
                 )
                 if suite_closures:
                     logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
-                closure_attempts = scope_closures + acceptance_closures + closures + immutability_closures + suite_closures
+                closure_attempts = (scope_closures + acceptance_closures + contract_closures + closures
+                                    + immutability_closures + suite_closures)
                 # The terminal migration gate just judged this same final
                 # candidate; a requirement stating the migration itself
                 # is closed by it (attempt._close_requirements_by_migration_gate).

@@ -961,7 +961,8 @@ def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[
 def close_requirements_with_acceptance_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     acceptance: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
-    tree_binding: Any = None, approval: Any = None,
+    tree_binding: Any = None, approval: Any = None, contract: Any = None, companion: Any = None,
+    source: str = "requirement_closure.acceptance",
 ) -> List[Dict[str, Any]]:
     """FS-1C2 B2-a: judges the BEHAVIOR claims the operator's acceptance file
     (bound before generation; ``acceptance`` None = none was given) covers,
@@ -999,11 +1000,37 @@ def close_requirements_with_acceptance_tests(
                                        base_revision=base_revision, validator_factory=export_validator)
         return run_acceptance(artifact, candidate_root, candidate_paths=modified, validator_factory=validator)
 
+    from kriya.workflow.contract_closers import contract_claims_map
+
     return close_requirements_with_acceptance(
         ledger, requirement_set, acceptance,
         test_files=None if reference is None else sorted(set(test_files) | set(reference)),
-        execute=execute, source="requirement_closure.acceptance", revision=revision,
-        approval=approval, base_revision=base_revision,
+        execute=execute, source=source, revision=revision,
+        approval=approval, base_revision=base_revision, contract_claims=contract_claims_map(contract),
+        companion_digests=[companion.digest] if companion is not None else (),
+    )
+
+
+def close_requirements_with_derived_examples(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    engine: Any, modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
+    tree_binding: Any = None, contract: Any = None,
+) -> List[Dict[str, Any]]:
+    """VERIFICATION-CONTRACT-003: the goal's compiled example module (bound by
+    the contract compilation before any model call) judges the EXACT
+    behaviour statements it covers, through the same B2-a boundary as the
+    operator's file; the operator's artifact (if any) is its companion, so
+    neither supersedes the other's records."""
+    from kriya.workflow.example_oracle import bound_derived_examples
+
+    examples = bound_derived_examples(engine)
+    if examples is None:
+        return []
+    return close_requirements_with_acceptance_tests(
+        autonomy_cfg, ledger, requirement_set, candidate_root, workspace_path, acceptance=examples,
+        modified=modified, revision=revision, toolchain_declaration_mutable=toolchain_declaration_mutable,
+        tree_binding=tree_binding, approval=None, contract=contract, companion=bound_acceptance(engine),
+        source="requirement_closure.derived_examples",
     )
 
 
@@ -1099,15 +1126,36 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
     B3 approval and external authorities, the project language and the
     workspace's HEAD. Shared by the direct and the enforce path; pure given
     the workspace, never a model call."""
+    from kriya.core.state_paths import resolve_state_directory
     from kriya.workflow.contract_compilation import bound_external_authorities, compile_verification_contract
+    from kriya.workflow.example_oracle import derive_example_artifact, example_authority
 
     tracked = _tracked_workspace_paths(workspace_path)
     origins = statement_origins(requirement_goal) if (requirement_goal and requirement_set.contract_digest is None) else {}
+    authorities = list(bound_external_authorities(engine))
+    # The goal's own example lines, compiled deterministically into a sealed
+    # acceptance module (EXACT behaviour authority; B2-COV applies). Bound
+    # once here, before any model call, on both paths.
+    config = getattr(getattr(engine, "kernel", None), "config", None)
+    engine.derived_examples = None
+    engine.derived_examples_report = None
+    if requirement_goal and config is not None:
+        try:
+            artifact, report = derive_example_artifact(requirement_goal, requirement_set,
+                                                       state_root=resolve_state_directory(config)[0],
+                                                       candidate_root=workspace_path)
+        except Exception as exc:  # a compiler defect is recorded, never a silent loss of authority
+            artifact, report = None, {"refusal": {"reason_code": "EXAMPLE_COMPILER_ERROR",
+                                                  "message": f"{type(exc).__name__}: {exc}"}}
+        engine.derived_examples = artifact
+        engine.derived_examples_report = report
+        if artifact is not None:
+            authorities.append(example_authority(artifact, report))
     return compile_verification_contract(
         requirement_set, origins=origins, test_files=_candidate_test_files(workspace_path), tracked_paths=tracked,
         migration_identities=_migration_identities(goal, workspace_path),
         acceptance=bound_acceptance(engine), approval=bound_approval(engine),
-        external_authorities=bound_external_authorities(engine), project_language=_project_language(tracked),
+        external_authorities=authorities, project_language=_project_language(tracked),
         tracked_file_reader=_workspace_file_reader(workspace_path), base_revision=_workspace_head(workspace_path),
     )
 
@@ -1127,29 +1175,102 @@ def seal_run_contract(config: Any, contract: Any) -> Optional[str]:
 
 def close_requirements_by_test_immutability(
     ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
-    candidate_paths: Iterable[str], revision: Any,
+    candidate_paths: Iterable[str], revision: Any, contract: Any = None,
 ) -> List[Dict[str, Any]]:
     """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: decides every "do not change any
     existing test" requirement from the run's own mutation record
     (mutation_scope_evidence) against the tests that existed before the run
     (_reference_test_files). Shared by the pre-apply boundary and enforce's
-    terminal gate; a goal without such a requirement costs nothing."""
-    from kriya.workflow.requirements import close_test_immutability_requirements, is_test_immutability_requirement
+    terminal gate; a goal without such a requirement costs nothing. With the
+    sealed contract (VERIFICATION-CONTRACT-003) every requirement claiming
+    TEST_IMMUTABILITY is decided, compound statements as their claim."""
+    from kriya.workflow.contract_closers import contract_claims_map
+    from kriya.workflow.requirements import (
+        TEST_IMMUTABILITY_CLAIM,
+        close_test_immutability_requirements,
+        is_test_immutability_requirement,
+    )
 
-    if not any(is_test_immutability_requirement(r.text) for r in requirement_set.requirements):
+    claims = contract_claims_map(contract)
+    if not any(TEST_IMMUTABILITY_CLAIM in (claims.get(r.id) or ()) or (not claims and is_test_immutability_requirement(r.text))
+               for r in requirement_set.requirements):
         return []
     _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
     return close_test_immutability_requirements(
         ledger, requirement_set, reference_test_files=_reference_test_files(candidate_root, workspace_path),
         present_test_files=_candidate_test_files(candidate_root), scope_evidence=evidence,
-        source="requirement_closure.test_immutability", revision=revision,
+        source="requirement_closure.test_immutability", revision=revision, contract_claims=claims,
+    )
+
+
+def close_requirements_by_api_preservation(
+    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
+    candidate_paths: Iterable[str], revision: Any,
+) -> List[Dict[str, Any]]:
+    """VERIFICATION-CONTRACT-003: the Python public-API predicate
+    (kriya/workflow/api_preservation.py) for every requirement the sealed
+    contract bound to it: base revision versus the candidate, one comparison."""
+    from kriya.workflow.api_preservation import close_api_preservation_requirements, compare_public_api
+    from kriya.workflow.contract_closers import contract_claims_map
+    from kriya.workflow.contract_compilation import CLOSER_API_PRESERVATION
+
+    if contract is None or not contract.binding_closers(CLOSER_API_PRESERVATION):
+        return []
+    candidate_files = sorted(set(_tracked_workspace_paths(candidate_root)) | set(candidate_paths))
+    comparison = compare_public_api(candidate_root, _oracle_base_revision(candidate_root, workspace_path),
+                                    candidate_files=candidate_files, read_candidate=_workspace_file_reader(candidate_root))
+    return close_api_preservation_requirements(
+        ledger, requirement_set, contract_claims=contract_claims_map(contract), comparison=comparison,
+        source="requirement_closure.api_preservation", revision=revision,
+    )
+
+
+def close_requirements_by_test_addition(
+    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
+    base_test_identities: Optional[Iterable[str]] = None, candidate_test_identities: Optional[Iterable[str]] = None,
+    revision: Any,
+) -> List[Dict[str, Any]]:
+    """VERIFICATION-CONTRACT-003: "add a test for it" from the candidate's own
+    test files versus the pre-run set, or its structured test identities
+    versus the base's (kriya/workflow/contract_closers.py)."""
+    from kriya.workflow.contract_closers import close_test_addition_requirements
+    from kriya.workflow.contract_compilation import CLOSER_TEST_ADDITION
+
+    if contract is None or not contract.binding_closers(CLOSER_TEST_ADDITION):
+        return []
+    return close_test_addition_requirements(
+        ledger, requirement_set, contract, reference_test_files=_reference_test_files(candidate_root, workspace_path),
+        candidate_test_files=_candidate_test_files(candidate_root), base_test_identities=base_test_identities,
+        candidate_test_identities=candidate_test_identities, source="requirement_closure.test_addition",
+        revision=revision,
+    )
+
+
+def close_requirements_by_documentation(
+    ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, *, revision: Any,
+) -> List[Dict[str, Any]]:
+    """VERIFICATION-CONTRACT-003: a conditional documentation request whose
+    referent the candidate still lacks (kriya/workflow/contract_closers.py)."""
+    from kriya.workflow.contract_closers import close_documentation_requirements
+    from kriya.workflow.contract_compilation import CLOSER_DOCUMENTATION_NOT_APPLICABLE
+
+    if contract is None or not contract.binding_closers(CLOSER_DOCUMENTATION_NOT_APPLICABLE):
+        return []
+    tracked = set(_tracked_workspace_paths(candidate_root))
+    for root, dirs, files in os.walk(candidate_root):  # untracked additions count as present too
+        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", "__pycache__"}]
+        tracked.update(os.path.relpath(os.path.join(root, name), candidate_root) for name in files)
+    return close_documentation_requirements(
+        ledger, requirement_set, contract, candidate_tracked_paths=tracked,
+        read_candidate=_workspace_file_reader(candidate_root), source="requirement_closure.documentation",
+        revision=revision,
     )
 
 
 def close_requirements_by_suite_preservation(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     revision: Any, toolchain_declaration_mutable: bool, candidate_paths: Iterable[str] = (),
-    java_home_override: Optional[str] = None, tree_binding: Any = None,
+    java_home_override: Optional[str] = None, tree_binding: Any = None, contract: Any = None,
 ) -> List[Dict[str, Any]]:
     """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
     preservation requirement ("every existing test must keep passing") from
@@ -1157,14 +1278,20 @@ def close_requirements_by_suite_preservation(
     the run's toolchain authority (as the named-test closer): COMPLETE
     structured evidence, the gate passed, tests executed, no executed case
     failed. The suite runs once, only when such a requirement is open."""
+    from kriya.workflow.contract_closers import contract_claims_map
     from kriya.workflow.requirements import (
+        SUITE_PRESERVATION,
         close_suite_preservation_requirements,
         is_suite_preservation_requirement,
         test_immutability_evidence,
     )
 
+    suite_ids = None
+    if contract is not None:
+        suite_ids = sorted({rid for rid, _b in contract.binding_closers(SUITE_PRESERVATION)})
     immutability = None
-    if any(is_suite_preservation_requirement(r.text) for r in requirement_set.requirements):
+    if (suite_ids if suite_ids is not None else
+            any(is_suite_preservation_requirement(r.text) for r in requirement_set.requirements)):
         _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=list(candidate_paths))
         immutability = test_immutability_evidence(
             _reference_test_files(candidate_root, workspace_path), _candidate_test_files(candidate_root), evidence)
@@ -1181,13 +1308,14 @@ def close_requirements_by_suite_preservation(
     return close_suite_preservation_requirements(
         ledger, requirement_set, test_files=_candidate_test_files(candidate_root), run_suite=run_suite,
         source="requirement_closure.suite_preservation", revision=revision, test_immutability=immutability,
+        contract_claims=contract_claims_map(contract), suite_requirement_ids=suite_ids,
     )
 
 
 def close_requirements_with_named_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
-    java_home_override: Optional[str] = None, tree_binding: Any = None,
+    java_home_override: Optional[str] = None, tree_binding: Any = None, contract: Any = None,
 ) -> List[Dict[str, Any]]:
     """PRD-020: runs the tests an UNVERIFIED requirement's own text names, on
     the candidate at ``candidate_root`` (the one the verifier just judged),
@@ -1231,6 +1359,8 @@ def close_requirements_with_named_tests(
         validator.java_home_override = java_home_override
         return validator
 
+    from kriya.workflow.contract_closers import contract_claims_map
+
     modified = list(modified)
     base_revision = _oracle_base_revision(candidate_root, workspace_path)
     return close_unverified_requirements_with_named_tests(
@@ -1238,7 +1368,7 @@ def close_requirements_with_named_tests(
         judge=lambda named: judge_named_tests(
             named, candidate_root=candidate_root, base_revision=base_revision, modified=modified,
             candidate_validator=candidate_validator, base_validator=base_validator),
-        source="requirement_closure.named_test_run", revision=revision,
+        source="requirement_closure.named_test_run", revision=revision, contract_claims=contract_claims_map(contract),
     )
 
 
@@ -4572,10 +4702,36 @@ class WorkflowEngine:
                             toolchain_declaration_mutable=toolchain_declaration_mutable(
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
                             ),
+                            contract=verification_contract,
                         )
                     except Exception as exc:
                         acceptance_closures = []
                         logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
+                    # VERIFICATION-CONTRACT-003: the goal's compiled examples, the
+                    # API predicate, the test-addition record and the documentation
+                    # referent - each closer bound by the sealed contract.
+                    contract_closures: List[Dict[str, Any]] = []
+                    for closer_name, closer_call in (
+                        ("derived examples", lambda: close_requirements_with_derived_examples(
+                            self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set, worktree_path,
+                            workspace_path, engine=self, modified=state.all_files_written,
+                            revision=state.attempt_number, contract=verification_contract,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan))),
+                        ("API preservation", lambda: close_requirements_by_api_preservation(
+                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                            workspace_path, candidate_paths=state.all_files_written, revision=state.attempt_number)),
+                        ("test addition", lambda: close_requirements_by_test_addition(
+                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                            workspace_path, revision=state.attempt_number)),
+                        ("documentation", lambda: close_requirements_by_documentation(
+                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                            revision=state.attempt_number)),
+                    ):
+                        try:
+                            contract_closures += await asyncio.to_thread(closer_call)
+                        except Exception as exc:
+                            logger.warning(f"Requirement {closer_name} evidence unavailable: {exc}")
                     # An UNVERIFIED (cannot confirm from code) requirement whose
                     # own text names existing tests is closed only by running
                     # exactly those tests on this candidate.
@@ -4587,7 +4743,7 @@ class WorkflowEngine:
                             toolchain_declaration_mutable=toolchain_declaration_mutable(
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
                             ),
-                            java_home_override=state.java_home_override,
+                            java_home_override=state.java_home_override, contract=verification_contract,
                         )
                     except Exception as exc:
                         closures = []
@@ -4600,7 +4756,7 @@ class WorkflowEngine:
                         immutability_closures = await asyncio.to_thread(
                             close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
                             worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                            revision=state.attempt_number,
+                            revision=state.attempt_number, contract=verification_contract,
                         )
                     except Exception as exc:
                         immutability_closures = []
@@ -4613,12 +4769,13 @@ class WorkflowEngine:
                             toolchain_declaration_mutable=toolchain_declaration_mutable(
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
                             ),
-                            java_home_override=state.java_home_override,
+                            java_home_override=state.java_home_override, contract=verification_contract,
                         )
                     except Exception as exc:
                         suite_closures = []
                         logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
-                    closures = scope_closures + acceptance_closures + closures + immutability_closures + suite_closures
+                    closures = (scope_closures + acceptance_closures + contract_closures + closures
+                                + immutability_closures + suite_closures)
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,

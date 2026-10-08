@@ -81,7 +81,7 @@ import os
 import shutil
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.tools import test_execution
 
@@ -692,6 +692,7 @@ def close_requirements_with_acceptance(
     ledger: Any, requirements: Any, acceptance: Optional[AcceptanceArtifact], *,
     test_files: Optional[Iterable[str]], execute: Callable[[AcceptanceArtifact], AcceptanceRun], source: str,
     revision: Any, approval: Any = None, base_revision: Optional[str] = None,
+    contract_claims: Optional[Mapping[str, Sequence[str]]] = None, companion_digests: Iterable[str] = (),
 ) -> List[Dict[str, Any]]:
     """Judge every requirement the acceptance artifact covers on the
     candidate its verdict judged (``evidence_id``), recording the BEHAVIOR
@@ -711,7 +712,15 @@ def close_requirements_with_acceptance(
     whose approved suite executed and fully passed is HUMAN_ACCEPTED (method
     ``human_bound_acceptance``) when the approval binds exactly this goal,
     requirement, artifact, case list, runner contract and ``base_revision``;
-    a contradicting case stays VIOLATED and anything INDETERMINATE stays so."""
+    a contradicting case stays VIOLATED and anything INDETERMINATE stays so.
+
+    VERIFICATION-CONTRACT-003: ``contract_claims`` (requirement id -> every
+    claim the sealed contract says the statement makes) replaces the local
+    FS-1C1 reading when given, so a compound statement's BEHAVIOR record
+    carries all of them as ``required_claims`` and the requirement closes
+    only when each is closed. ``companion_digests``: other acceptance
+    artifacts bound to the same run (the goal's compiled examples beside the
+    operator's file); their records are never superseded by this one."""
     from kriya.workflow.acceptance_approval import (
         ACCEPTANCE_HUMAN_ACCEPTED,
         HUMAN_ACCEPTANCE_METHOD,
@@ -735,6 +744,8 @@ def close_requirements_with_acceptance(
 
     files = list(test_files) if test_files is not None else None
     current_digest = acceptance.digest if acceptance is not None else None
+    bound_digests = set(companion_digests) | ({current_digest} if current_digest else set())
+    contract_claims = dict(contract_claims or {})
     attempts: List[Dict[str, Any]] = []
     pending: List[Tuple[Any, str, Tuple[str, ...], Dict[str, Any]]] = []
 
@@ -752,7 +763,7 @@ def close_requirements_with_acceptance(
         if not covered:
             if (prior is not None and prior.status is not ObligationStatus.INDETERMINATE
                     and (prior.evidence or {}).get("method") in (ACCEPTANCE_METHOD, HUMAN_ACCEPTANCE_METHOD)
-                    and prior_digest != current_digest):
+                    and prior_digest not in bound_digests):
                 record(requirement, evidence_id, ObligationStatus.INDETERMINATE,
                        {"reason_code": ACCEPTANCE_SUPERSEDED, "acceptance_digest": current_digest,
                         "superseded_digest": prior_digest})
@@ -769,6 +780,8 @@ def close_requirements_with_acceptance(
             continue
         claims = (requirement_claims(requirement.text, named_existing_tests(requirement.text, files))
                   if files is not None else (BEHAVIOR, REGRESSION_PRESERVATION))
+        if contract_claims.get(requirement.id):
+            claims = tuple(contract_claims[requirement.id])  # the sealed contract's reading of the statement
         entry["claims"] = list(claims)
         if BEHAVIOR not in claims:
             entry["reason"] = "the statement makes no behaviour claim (it only names tests that keep passing)"

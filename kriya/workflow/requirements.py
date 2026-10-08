@@ -537,7 +537,21 @@ CLAIM_KINDS = (BEHAVIOR, REGRESSION_PRESERVATION, API_PRESERVATION, TEST_IMMUTAB
 # must keep passing"); it proves regression preservation only, like a named test.
 FULL_REGRESSION_METHOD = "full_regression_oracle"
 NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle", FULL_REGRESSION_METHOD})
-BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance"})
+# VERIFICATION-CONTRACT-003: a sealed operator oracle run under containment
+# (kriya/workflow/authority_bundle.py) is operator sufficiency - HUMAN_ACCEPTED
+# class, never "verified" - and may close the claims its coverage declares.
+EXTERNAL_ACCEPTANCE_METHOD = "external_acceptance_command"
+BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance", EXTERNAL_ACCEPTANCE_METHOD})
+# The producers of the other claim kinds (kriya/workflow/api_preservation.py,
+# the mutation record, kriya/workflow/contract_closers.py). Closed tables: a
+# producer outside them cannot record the claim (record_requirement_claim).
+API_PRESERVATION_METHOD = "api_preservation_predicate"
+API_PRESERVATION_CLOSURE_METHODS = frozenset({API_PRESERVATION_METHOD, EXTERNAL_ACCEPTANCE_METHOD})
+TEST_ADDITION_METHOD = "test_addition_record"
+TEST_ADDITION_CLOSURE_METHODS = frozenset({TEST_ADDITION_METHOD})
+DOCUMENTATION_METHOD = "documentation_referent_absent"
+DOCUMENTATION_CLOSURE_METHODS = frozenset({DOCUMENTATION_METHOD, EXTERNAL_ACCEPTANCE_METHOD, "acceptance_oracle",
+                                           "human_bound_acceptance"})
 REQUIREMENT_BEHAVIOR_UNVERIFIED = "REQUIREMENT_BEHAVIOR_UNVERIFIED"
 
 # Words a pure regression-preservation statement is made of besides the test
@@ -683,7 +697,9 @@ def record_requirement_claim(
     allowed for that claim may record it: a regression oracle can never judge
     BEHAVIOR. The latest record for a candidate is its judgment."""
     allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
-               BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS}
+               BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS, API_PRESERVATION: API_PRESERVATION_CLOSURE_METHODS,
+               TEST_IMMUTABILITY_CLAIM: frozenset({TEST_IMMUTABILITY_METHOD}),
+               TEST_ADDITION_CLAIM: TEST_ADDITION_CLOSURE_METHODS, DOCUMENTATION_CLAIM: DOCUMENTATION_CLOSURE_METHODS}
     if method not in allowed.get(claim, frozenset()):
         raise ValueError(f"method {method!r} cannot close a {claim} claim")
     if status not in _CLAIM_STATUSES:
@@ -730,11 +746,13 @@ def requirement_claim(
 def _claim_counter_evidence(
     ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
 ) -> Optional[Dict[str, Any]]:
-    """BEHAVIOR counter-evidence: the latest acceptance judgment of this
-    candidate observed the behaviour contradicted (B2-a)."""
-    record = requirement_claim_record(ledger, requirement_id, BEHAVIOR, evidence_id)
-    if record is not None and record.status is ObligationStatus.VIOLATED:
-        return record.evidence or {}
+    """Claim counter-evidence: the latest judgment of one of this
+    candidate's claims observed it contradicted (B2-a for BEHAVIOR; the API
+    predicate, the mutation record for the other kinds)."""
+    for claim in CLAIM_KINDS:
+        record = requirement_claim_record(ledger, requirement_id, claim, evidence_id)
+        if record is not None and record.status is ObligationStatus.VIOLATED:
+            return {**(record.evidence or {}), "claim": claim}
     return None
 
 
@@ -1472,45 +1490,73 @@ def admission_gap(
 def close_test_immutability_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *, reference_test_files: Optional[Sequence[str]],
     present_test_files: Iterable[str], scope_evidence: Optional[Mapping[str, Any]], source: str, revision: Any,
+    contract_claims: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Decide every test-immutability requirement from the run's own mutation
     record: an existing test file (``reference_test_files``: the files that
     existed before the run) the candidate changed, or that is no longer
     present (``present_test_files``), is deterministic VIOLATED evidence;
     none changed and nothing foreign closes it. Unavailable evidence or an
-    unknown reference set leaves the verdict as it is (fail closed)."""
+    unknown reference set leaves the verdict as it is (fail closed).
+
+    VERIFICATION-CONTRACT-003: with ``contract_claims`` every requirement
+    whose claims include TEST_IMMUTABILITY is decided - a pure statement as
+    a whole closure (as before), a compound statement ("do not change the
+    public API ... or existing tests") as its TEST_IMMUTABILITY claim, so
+    the requirement closes only when its other claims are closed too."""
     attempts: List[Dict[str, Any]] = []
     outcomes = requirement_outcomes(ledger, requirements)
     immutability = test_immutability_evidence(reference_test_files, present_test_files, scope_evidence)
+    contract_claims = dict(contract_claims or {})
     for requirement in requirements.requirements:
-        if not is_test_immutability_requirement(requirement.text):
+        claims = tuple(contract_claims.get(requirement.id) or ())
+        if claims:
+            if TEST_IMMUTABILITY_CLAIM not in claims:
+                continue
+            whole = claims == (TEST_IMMUTABILITY_CLAIM,)
+        elif is_test_immutability_requirement(requirement.text):
+            whole = True
+        else:
             continue
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
         closable = outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED  # the mapped outcome (GR-R0)
-        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": TEST_IMMUTABILITY, "closed": False}
+        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": TEST_IMMUTABILITY, "closed": False,
+                                 "whole_statement": whole}
         if not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
         elif not immutability["available"]:
             entry["reason"] = immutability["reason"]
         else:
             touched, missing = immutability["changed_test_files"], immutability["missing_test_files"]
-            detail = {"kind": TEST_IMMUTABILITY, "requirement": requirement.id, **immutability}
+            detail = {"kind": TEST_IMMUTABILITY, "requirement": requirement.id, **immutability,
+                      "required_claims": list(claims)}
             entry.update(detail)
-            if touched or missing:
-                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
-                                           method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
-                                           revision=revision, violated=True)
+            violated = bool(touched or missing)
+            if violated:
                 entry["reason"] = ("existing test file(s) changed: " + ", ".join(touched) if touched else
                                    "existing test file(s) missing: " + ", ".join(missing))
                 entry["violated"] = True
-            elif not closable:
-                entry["reason"] = f"the requirement's outcome is {outcomes.get(requirement.id)}, which evidence never closes"
+            if whole:
+                if violated:
+                    record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                               method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                               revision=revision, violated=True)
+                elif not closable:
+                    entry["reason"] = f"the requirement's outcome is {outcomes.get(requirement.id)}, which evidence never closes"
+                else:
+                    record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                               method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
+                                               revision=revision)
+                    entry["closed"] = True
             else:
-                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
-                                           method=TEST_IMMUTABILITY_METHOD, detail=detail, source=source,
-                                           revision=revision)
-                entry["closed"] = True
+                record_requirement_claim(ledger, requirements, requirement.id, TEST_IMMUTABILITY_CLAIM,
+                                         evidence_id=evidence_id, method=TEST_IMMUTABILITY_METHOD, detail=detail,
+                                         source=source, revision=revision,
+                                         status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED)
+                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] in (
+                    RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED)
+                entry["claim_recorded"] = TEST_IMMUTABILITY_CLAIM
         attempts.append(entry)
     return attempts
 
@@ -1518,6 +1564,7 @@ def close_test_immutability_requirements(
 def close_suite_preservation_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *, test_files: Iterable[str],
     run_suite: Any, source: str, revision: Any, test_immutability: Optional[Mapping[str, Any]] = None,
+    contract_claims: Optional[Mapping[str, Sequence[str]]] = None, suite_requirement_ids: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Close every UNVERIFIED whole-suite preservation requirement from the
     candidate's own full test run (``run_suite()``: the production test gate
@@ -1529,14 +1576,26 @@ def close_suite_preservation_requirements(
     surface (conftest, pytest/tox configuration, build declarations - the
     FS-1C0 oracle's rule) gets no closure from its own suite; a statement
     that also says "unchanged"/"intact" is VIOLATED when an existing test
-    changed or vanished; an unavailable record closes nothing."""
+    changed or vanished; an unavailable record closes nothing.
+
+    VERIFICATION-CONTRACT-003: ``suite_requirement_ids`` (the requirements
+    the sealed contract bound to this closer, pure or compound) replaces the
+    whole-statement recognizer when given; a compound statement records its
+    REGRESSION_PRESERVATION claim (with the contract's ``required_claims``)
+    instead of a whole closure."""
     from kriya.tools import test_execution
 
     files = list(test_files)
     outcomes = requirement_outcomes(ledger, requirements)
-    pending = [r for r in requirements.requirements
-               if outcomes.get(r.id) is RequirementOutcome.UNVERIFIED and is_suite_preservation_requirement(r.text)
-               and not named_existing_tests(r.text, files)]
+    contract_claims = dict(contract_claims or {})
+    if suite_requirement_ids is not None:
+        bound = set(suite_requirement_ids)
+        pending = [r for r in requirements.requirements
+                   if r.id in bound and outcomes.get(r.id) is RequirementOutcome.UNVERIFIED]
+    else:
+        pending = [r for r in requirements.requirements
+                   if outcomes.get(r.id) is RequirementOutcome.UNVERIFIED and is_suite_preservation_requirement(r.text)
+                   and not named_existing_tests(r.text, files)]
     if not pending:
         return []
     result = run_suite()
@@ -1579,7 +1638,10 @@ def close_suite_preservation_requirements(
                                    "independent oracle: " + ", ".join(surface))
                 attempts.append(entry)
                 continue
-            if suite_statement_requires_immutability(requirement.text):
+            claims = tuple(contract_claims.get(requirement.id) or ())
+            whole = not claims or set(claims) <= {REGRESSION_PRESERVATION, TEST_IMMUTABILITY_CLAIM}
+            detail["required_claims"] = list(claims)
+            if whole and suite_statement_requires_immutability(requirement.text):
                 touched = list(immutability.get("changed_test_files") or ()) + list(immutability.get("missing_test_files") or ())
                 if touched:
                     record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
@@ -1589,9 +1651,20 @@ def close_suite_preservation_requirements(
                     entry["violated"] = True
                     attempts.append(entry)
                     continue
-            record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
-                                       method=FULL_REGRESSION_METHOD, detail=detail, source=source, revision=revision)
-            entry["closed"] = True
+            if whole:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method=FULL_REGRESSION_METHOD, detail=detail, source=source, revision=revision)
+                entry["closed"] = True
+            else:
+                # A compound statement: the green suite proves its regression
+                # claim only; the immutability / API / behaviour claims have
+                # their own producers (the requirement closes when all are).
+                record_requirement_claim(ledger, requirements, requirement.id, REGRESSION_PRESERVATION,
+                                         evidence_id=evidence_id, method=FULL_REGRESSION_METHOD, detail=detail,
+                                         source=source, revision=revision, status=ObligationStatus.SATISFIED)
+                entry["claim_recorded"] = REGRESSION_PRESERVATION
+                entry["closed"] = requirement_outcomes(ledger, requirements)[requirement.id] in (
+                    RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED)
         attempts.append(entry)
     return attempts
 
@@ -1719,6 +1792,7 @@ def verifier_result_verdicts(
 def close_unverified_requirements_with_named_tests(
     ledger: ObligationLedger, requirements: RequirementSet, *,
     test_files: Iterable[str], modified: Iterable[str], judge: Any, source: str, revision: Any,
+    contract_claims: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Close each UNVERIFIED requirement whose own text names existing tests,
     by running exactly those tests on the candidate the verifier judged.
@@ -1737,6 +1811,7 @@ def close_unverified_requirements_with_named_tests(
     files = list(test_files)
     attempts: List[Dict[str, Any]] = []
     outcomes = requirement_outcomes(ledger, requirements)
+    contract_claims = dict(contract_claims or {})
     for requirement in requirements.requirements:
         if outcomes.get(requirement.id) is not RequirementOutcome.UNVERIFIED:
             continue
@@ -1754,11 +1829,11 @@ def close_unverified_requirements_with_named_tests(
         else:
             judgment = judge(named)
             entry["reason_code"] = judgment.reason_code
-            claims = requirement_claims(requirement.text, named)
+            claims = tuple(contract_claims.get(requirement.id) or requirement_claims(requirement.text, named))
             entry["claims"] = list(claims)
             if not judgment.closed:
                 entry["reason"] = judgment.reason
-            elif BEHAVIOR not in claims:
+            elif set(claims) <= {REGRESSION_PRESERVATION}:
                 record_requirement_closure(
                     ledger, requirements, requirement.id, evidence_id=evidence_id, method=judgment.evidence["method"],
                     detail={**judgment.evidence, "tests": named, "claim": REGRESSION_PRESERVATION}, source=source,
@@ -1767,11 +1842,12 @@ def close_unverified_requirements_with_named_tests(
                 entry["closed"] = True
             else:
                 # FS-1C1: the oracle proves only that the named tests still
-                # pass; the new behaviour the same statement asks for needs
-                # its own independent evidence.
+                # pass; the new behaviour (or any other claim) the same
+                # statement makes needs its own independent evidence.
                 record_requirement_claim(
                     ledger, requirements, requirement.id, REGRESSION_PRESERVATION, evidence_id=evidence_id,
-                    method=judgment.evidence["method"], detail={**judgment.evidence, "tests": named}, source=source,
+                    method=judgment.evidence["method"],
+                    detail={**judgment.evidence, "tests": named, "required_claims": list(claims)}, source=source,
                     revision=revision,
                 )
                 entry["regression_preserved"] = True
