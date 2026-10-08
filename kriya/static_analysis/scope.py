@@ -86,19 +86,34 @@ def _write_bytes(root: str, relpath: str, data: bytes) -> None:
         handle.write(data)
 
 
-def build_change_set(writes: Iterable[object], workspace_root: str) -> Tuple[Tuple[ChangedPath, ...], Dict[str, bytes]]:
+def build_change_set(
+    writes: Iterable[object], workspace_root: str, originals: Optional[Mapping[str, Optional[bytes]]] = None,
+) -> Tuple[Tuple[ChangedPath, ...], Dict[str, bytes]]:
     """The committed batch as a change set, and each changed path's PRE bytes.
 
     ``writes`` are the StagedFileWrite objects the commit will receive. The
     PRE content of a changed path is the real workspace file, accepted only
     when its revision equals the one the commit transaction is grounded on
     (``expected_base_revision`` is a content hash, not something to read
-    back from). Raises ScopeError(BASELINE_IDENTITY_MISMATCH) otherwise."""
+    back from). Raises ScopeError(BASELINE_IDENTITY_MISMATCH) otherwise.
+
+    STATIC-ANALYSIS-INPLACE-BASELINE-001 (BACKEND-READINESS-004): for a
+    candidate generated IN the real workspace the disk already holds the
+    candidate bytes, so ``originals`` - the exact bytes captured before each
+    write (None: the file did not exist) - stand in for the disk and are held
+    to the same identity check; a written path with no captured original is
+    a BASELINE_IDENTITY_MISMATCH, never a guess."""
     changes: List[ChangedPath] = []
     pre_bytes: Dict[str, bytes] = {}
     for write in writes:
         relpath = workspace_relpath(write.target_path, workspace_root)
-        disk = _read_regular(os.path.join(workspace_root, relpath))
+        if originals is not None:
+            if relpath not in originals:
+                raise ScopeError(BASELINE_IDENTITY_MISMATCH,
+                                 f"{relpath}: no captured original for an in-place candidate write")
+            disk = originals[relpath]
+        else:
+            disk = _read_regular(os.path.join(workspace_root, relpath))
         expected = write.expected_base_revision
         base_exists = write.expected_base_exists
         if disk is None:

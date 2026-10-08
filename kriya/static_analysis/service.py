@@ -156,8 +156,11 @@ class StaticAnalysisRequest:
     workspace_path: str
     run_id: str
     unit_id: str
-    # The candidate was generated in the real workspace: no pristine base.
+    # The candidate was generated in the real workspace: no pristine base on disk. STATIC-ANALYSIS-INPLACE-
+    # BASELINE-001: ``originals`` (relpath -> the bytes captured before the write, None when it did not exist)
+    # supply the PRE side instead; without them an in-place candidate is refused (BASELINE_UNAVAILABLE_IN_PLACE).
     in_place: bool = False
+    originals: Optional[Mapping[str, Optional[bytes]]] = None
     # The workspace whose identity keys the waiver store; defaults to
     # workspace_path (the operator scan evaluates a base worktree of it).
     identity_root: Optional[str] = None
@@ -174,6 +177,7 @@ class StaticAnalysisCandidate:
     run_id: str
     unit_id: str
     in_place: bool = False
+    originals: Optional[Mapping[str, Optional[bytes]]] = None  # in-place: the captured pre-write bytes
 
 
 @dataclass(frozen=True)
@@ -185,6 +189,9 @@ class StaticAnalysisGateResult:
     evidence: Mapping[str, Any]
     identity: Optional[EvidenceIdentity] = None
     waiver_ids: Tuple[str, ...] = ()
+    # In-memory only (never persisted): the in-place candidate's captured originals, so the commit guard re-derives
+    # the same PRE side the scan used instead of reading candidate bytes from disk as the base.
+    originals: Optional[Mapping[str, Optional[bytes]]] = field(default=None, compare=False, repr=False)
 
     @property
     def accepted_risk(self) -> bool:
@@ -336,7 +343,7 @@ class StaticAnalysisService:
             writes=(), workspace_path=candidate.workspace_path, run_id=candidate.run_id,
             unit_id=candidate.unit_id, in_place=candidate.in_place,
         )
-        if candidate.in_place:
+        if candidate.in_place and candidate.originals is None:
             return self.evaluate(request)
         # Imported here: terminal_commit imports this module (its guard type).
         from kriya.workflow.terminal_commit import CandidateMaterializationError
@@ -349,7 +356,7 @@ class StaticAnalysisService:
             ))
         return self.evaluate(StaticAnalysisRequest(
             writes=writes, workspace_path=candidate.workspace_path, run_id=candidate.run_id,
-            unit_id=candidate.unit_id,
+            unit_id=candidate.unit_id, in_place=candidate.in_place, originals=candidate.originals,
         ))
 
     # -- helpers -------------------------------------------------------------
@@ -387,7 +394,7 @@ class StaticAnalysisService:
         return StaticAnalysisGateResult(
             outcome=result.outcome, requirement=result.requirement, permits_commit=result.permits_commit,
             reason_codes=result.reason_codes, evidence=evidence, identity=result.identity,
-            waiver_ids=result.waiver_ids,
+            waiver_ids=result.waiver_ids, originals=request.originals,
         )
 
     # -- the gate ------------------------------------------------------------
@@ -396,10 +403,11 @@ class StaticAnalysisService:
         cfg = self._cfg
         static = cfg.static_analysis
         workspace = os.path.realpath(request.workspace_path)
-        if request.in_place:
+        if request.in_place and request.originals is None:
             return self._fail(
                 Outcome.UNKNOWN, BASELINE_UNAVAILABLE_IN_PLACE, {},
-                "the candidate was generated in the real workspace, so no pristine PRE base exists",
+                "the candidate was generated in the real workspace and no pre-write originals were captured, so no "
+                "PRE base exists",
             )
         settings = dict(static.providers.get(static.provider, {}))
         try:
@@ -443,7 +451,7 @@ class StaticAnalysisService:
             )
 
         try:
-            changes, pre_bytes = build_change_set(request.writes, workspace)
+            changes, pre_bytes = build_change_set(request.writes, workspace, originals=request.originals)
             graph_roots = (
                 port.build_graph_roots(workspace, [c.relpath for c in changes])
                 if kind is ScanScope.BUILD_GRAPH else ()
@@ -679,11 +687,13 @@ class StaticAnalysisCommitGuard:
         identity = result.identity
         if identity is None:
             return CommitRefusal(STATIC_ANALYSIS_EVIDENCE_MISSING, "the evidence carries no identity to verify")
-        return _stale_component(self.cfg, identity, writes, os.path.realpath(workspace_path), self.create)
+        return _stale_component(self.cfg, identity, writes, os.path.realpath(workspace_path), self.create,
+                                originals=result.originals)
 
 
 def _stale_component(
     cfg: Any, identity: EvidenceIdentity, writes: Sequence[Any], workspace: str, create: ProviderCreator,
+    originals: Optional[Mapping[str, Optional[bytes]]] = None,
 ) -> Optional[CommitRefusal]:
     def stale(component: str, detail: str = "") -> CommitRefusal:
         return CommitRefusal(STATIC_ANALYSIS_EVIDENCE_STALE, f"{component} changed after the scan{': ' + detail if detail else ''}")
@@ -693,7 +703,7 @@ def _stale_component(
     if batch_digest(writes, workspace) != identity.batch_digest:
         return stale("candidate batch")
     try:
-        changes, pre_bytes = build_change_set(writes, workspace)
+        changes, pre_bytes = build_change_set(writes, workspace, originals=originals)
         plan = build_scope(identity.scope_inputs, changes, pre_bytes, workspace)
     except (ScopeError, OSError) as error:
         return stale("base", str(error))

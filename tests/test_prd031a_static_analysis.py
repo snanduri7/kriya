@@ -1118,3 +1118,43 @@ def test_a_waiver_for_another_provider_never_applies(tmp_path):
     with FakeRegistration():
         result = _evaluate(_config(), workspace, [_write(workspace, "A.java", "x BAD_HIGH\n", base=BASE_A)], tmp_path)
     assert result.outcome is Outcome.BLOCKED and result.waiver_ids == ()
+
+
+def test_an_in_place_candidate_with_captured_originals_is_scanned_against_them_and_commits(tmp_path):
+    """STATIC-ANALYSIS-INPLACE-BASELINE-001 (BACKEND-READINESS-004): the disk already holds the candidate; the bytes
+    captured before the write are the PRE side (held to the grounded revision), the scan sees PRE=base/POST=candidate,
+    and the commit guard re-derives the same PRE from the originals instead of the disk."""
+    candidate_text = "class A { }\n"
+    workspace = _workspace(tmp_path, {"A.java": candidate_text})  # in place: already the candidate bytes
+    writes = [_write(workspace, "A.java", candidate_text, base=BASE_A)]
+    with FakeRegistration() as fake:
+        cfg = _config()
+        service = StaticAnalysisService(cfg, evidence_root=str(tmp_path / "e"))
+        result = service.evaluate_candidate(StaticAnalysisCandidate(
+            materialize=lambda: writes, workspace_path=workspace, run_id="r", unit_id="u", in_place=True,
+            originals={"A.java": BASE_A.encode()}))
+        assert result.outcome is Outcome.PASS and result.permits_commit, result.reason_codes
+        trees = {scan_id: tree for instance in fake.instances for scan_id, tree in instance.trees.items()}
+        assert trees["pre"]["A.java"] == BASE_A and trees["post"]["A.java"] == candidate_text
+        assert commit_guard(cfg, result).verify(writes, workspace) is None  # the guard uses the same originals
+        assert "originals" not in json.dumps(result.summary(), default=str)  # never persisted
+        # originals that do not match the grounded revision: identity mismatch, nothing scanned
+        before = len(fake.scans)
+        wrong = service.evaluate_candidate(StaticAnalysisCandidate(
+            materialize=lambda: writes, workspace_path=workspace, run_id="r", unit_id="u2", in_place=True,
+            originals={"A.java": b"class A { int tampered; }\n"}))
+        assert wrong.outcome is Outcome.UNKNOWN and wrong.reason_codes == (model.BASELINE_IDENTITY_MISMATCH,)
+        assert len(fake.scans) == before
+        # a written path with no captured original: the same refusal (never read from the candidate's disk)
+        missing = service.evaluate_candidate(StaticAnalysisCandidate(
+            materialize=lambda: writes, workspace_path=workspace, run_id="r", unit_id="u3", in_place=True, originals={}))
+        assert missing.outcome is Outcome.UNKNOWN and missing.reason_codes == (model.BASELINE_IDENTITY_MISMATCH,)
+        # a created file: original None -> ADDED, PRE without it
+        created_text = "class B { }\n"
+        Path(workspace, "B.java").write_text(created_text)
+        added = service.evaluate_candidate(StaticAnalysisCandidate(
+            materialize=lambda: [_write(workspace, "B.java", created_text, base=None)], workspace_path=workspace,
+            run_id="r", unit_id="u4", in_place=True, originals={"B.java": None}))
+        assert added.outcome is Outcome.PASS
+        last = fake.instances[-1].trees  # a created file has no PRE member: at most a PRE tree without it
+        assert "B.java" not in last.get("pre", {}) and last["post"]["B.java"] == created_text

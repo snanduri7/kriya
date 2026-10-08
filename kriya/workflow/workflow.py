@@ -1698,15 +1698,32 @@ def _bind_direct_candidate(worktree_path: str, workspace_path: str, state: Gener
         return None
 
 
+def _captured_originals(state: GenerationState) -> Dict[str, Optional[bytes]]:
+    """relpath -> the bytes of every written file as captured before the
+    attempt wrote it (None: the file did not exist), from the attempt's
+    raw capture first (FILE-INTEGRITY-CONTRACT-001), else its text capture."""
+    originals: Dict[str, Optional[bytes]] = {}
+    for relpath in sorted(state.all_files_written):
+        if relpath in state.all_original_raw:
+            originals[relpath] = state.all_original_raw[relpath] or None
+        else:
+            text = state.all_original_contents.get(relpath)
+            originals[relpath] = text.encode("utf-8") if text else None
+    return originals
+
+
 def _run_static_analysis_gate(
     cfg: Any, state: GenerationState, *, worktree_path: str, workspace_path: str, run_id: str, unit_id: str,
 ) -> None:
     """PRD-031A at the direct/milestone pre-apply boundary: the same
     StaticAnalysisService the enforce TerminalGateService uses."""
+    in_place = worktree_path == workspace_path
     result = StaticAnalysisService(cfg).evaluate_candidate(StaticAnalysisCandidate(
         materialize=lambda: _direct_terminal_writes(worktree_path, workspace_path, state),
         workspace_path=workspace_path, run_id=run_id, unit_id=unit_id,
-        in_place=worktree_path == workspace_path,
+        in_place=in_place,
+        # STATIC-ANALYSIS-INPLACE-BASELINE-001: the exact pre-write bytes the attempt captured are the PRE side.
+        originals=_captured_originals(state) if in_place else None,
     ))
     state.static_analysis_result = result
     state.record_event(RunEvent(
