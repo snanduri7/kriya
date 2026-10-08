@@ -448,7 +448,9 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     assert raw_save_calls == 1, f"expected exactly 1 raw save_control_state call (inside the closure itself), found {raw_save_calls}"
     # 10: PRD-008 S3 added the post-commit save that records the
     # completions as landed in the workspace (subtask_completion_scope).
-    assert persist_calls == 10, persist_calls
+    # 11: BACKEND-FINAL-CLOSURE-005 - the verification-owner recovery persists
+    # the owner's real written set before the verification rerun (review F8).
+    assert persist_calls == 11, persist_calls
 
 
 # ---------------------------------------------------------------------------
