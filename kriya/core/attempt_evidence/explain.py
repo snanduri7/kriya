@@ -259,7 +259,9 @@ _UNIT_RESULT_FIELDS = ("failure_category", "quality_gates_passed")
 # when it ended on an exception. Its other events (requirement.verdicts,
 # model.role_metrics) also occur on success and are never terminal causes.
 _CONTROLLER_SOURCE = "workflow_controller.enforce"
-_CONTROLLER_TERMINAL_KINDS = frozenset({"planning.failed", "run.exception"})
+# BACKEND-FINAL-CLOSURE-005: a verification-only unit's failure that reopened its upstream owner once and found no
+# accepted change ends the run there - the controller's decision, not the (successful) owner unit that closed last.
+_CONTROLLER_TERMINAL_KINDS = frozenset({"planning.failed", "run.exception", "verification.owner_recovery_rejected"})
 
 
 def _content(run: Optional[reader.EvidenceRun], record: Mapping[str, Any], name: str) -> Optional[Dict[str, Any]]:

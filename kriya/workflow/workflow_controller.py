@@ -242,6 +242,7 @@ from kriya.workflow.requirements import (
     requirements_prompt_block,
     seed_requirement_obligations,
 )
+from kriya.workflow.retry_progress import VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
 from kriya.workflow.static_checks import (
     derive_stack_contract,
     log_stack_contract_boundary,
@@ -1520,6 +1521,62 @@ def resolve_scope_conflict_owners(
             continue
         owners.setdefault(owner.id, []).append(path)
     return owners
+
+
+def nearest_mutating_upstream_owner(
+    plan: EngineeringPlan, subtask: Subtask, completed_ids: Sequence[str],
+) -> Optional[Subtask]:
+    """ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001 (BACKEND-FINAL-
+    CLOSURE-005, measured on P4-T4): the nearest completed depends_on
+    ancestor of a verification-only unit that owns planned files - the one
+    unit whose work the verification judged and that can act on its failure.
+    Breadth-first over the plan's declared dependencies only (its own
+    structure, never a name, a file's content or a model's word); None when
+    no such ancestor exists."""
+    completed = set(completed_ids)
+    seen: set = set()
+    frontier = list(subtask.depends_on)
+    while frontier:
+        next_frontier: List[str] = []
+        for dependency_id in frontier:
+            if dependency_id in seen:
+                continue
+            seen.add(dependency_id)
+            dependency = plan.subtask_by_id(dependency_id)
+            if dependency is None:
+                continue
+            if dependency.planned_files and dependency.id in completed:
+                return dependency
+            next_frontier.extend(dependency.depends_on)
+        frontier = next_frontier
+    return None
+
+
+def verification_failure_evidence(call_result: Mapping[str, Any]) -> str:
+    """The verification-only unit's own deterministic failure text - its
+    gate's output, run by Kriya, public to the run (never a hidden oracle's
+    content, never model text) - bounded for the reopened owner's context."""
+    failure = call_result.get("last_failure") or {}
+    text = str(failure.get("raw_output") or failure.get("message") or call_result.get("environment_failure") or "")
+    return text[-2000:]
+
+
+def verification_owner_recovery_context(
+    *, verification_subtask_id: str, owner_id: str, owner_files: Sequence[str], evidence: str,
+) -> str:
+    """The Developer-facing recovery text for an owner reopened by a failed
+    downstream verification unit (unit-testable like every other retry-prompt
+    builder here)."""
+    return (
+        "--- VERIFICATION FAILURE RECOVERY ---\n"
+        f"Reopened owner: {owner_id}\n"
+        f"Verification unit that failed after your change: {verification_subtask_id}\n"
+        f"Repair files (your own planned files only): {json.dumps(list(owner_files))}\n"
+        "Deterministic verification evidence (the unit's own gate output):\n"
+        f"{evidence or 'unavailable'}\n"
+        "Fix the cause of this failure in the files above. Preserve every provided contract and global "
+        "invariant; a candidate identical to the current content is not a repair."
+    )
 
 
 class ArtifactOwnerResolutionBasis(str, Enum):
@@ -5594,6 +5651,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
 
+        # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001: each verification-only unit may reopen its
+        # upstream owner once per run (the bound), whatever the owner then produces.
+        verification_owner_reopened: set = set()
         for position, subtask_id in enumerate(order, start=1):
             subtask = plan.subtask_by_id(subtask_id)
             if subtask is None:
@@ -6732,6 +6792,107 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 if not scope_conflict:
                     break
                 continue
+            # ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001 (BACKEND-FINAL-CLOSURE-005, measured on
+            # P4-T4): a verification-only unit that fails and cannot change its own inputs used to end the run
+            # right there (LR-R1-P4's truthful terminal) - but the unit whose work it judged never heard of the
+            # failure. The unit's own deterministic gate output IS new information for the nearest completed
+            # mutating ancestor: that owner is reopened ONCE per verification unit with the evidence; only a
+            # candidate that actually changed the owner's files, passed the owner's own gates and stayed inside
+            # its declared scope is folded forward, and the verification unit then runs once more on the new
+            # tree. An unchanged or failed owner candidate leaves the original failure standing (GR-R0: no retry
+            # without new information; nothing here ever turns a failure into success).
+            if (
+                call_result.get("no_progress_reason") == VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+                and not subtask.planned_files
+                and subtask.id not in verification_owner_reopened
+            ):
+                verification_owner_reopened.add(subtask.id)
+                owner = nearest_mutating_upstream_owner(
+                    plan, subtask,
+                    [sid for sid, stage_state in approved_stage_states.items()
+                     if stage_state == SubtaskStatus.COMPLETED.value],
+                )
+                if owner is not None:
+                    owner_files = sorted(pf.path for pf in owner.planned_files if pf.action != FileAction.DELETE)
+                    owner_position = order.index(owner.id) + 1 if owner.id in order else position
+                    before = tuple(read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
+                    evidence = verification_failure_evidence(call_result)
+                    logger.warning(
+                        "VERIFICATION_OWNER_RECOVERY_STARTED verification=%s owner=%s files=%s",
+                        subtask.id, owner.id, owner_files,
+                    )
+                    owner_result = await _invoke_bounded_subtask(
+                        owner, owner_position, execution_role="verification_owner_recovery",
+                        recovery_context=verification_owner_recovery_context(
+                            verification_subtask_id=subtask.id, owner_id=owner.id, owner_files=owner_files,
+                            evidence=evidence,
+                        ),
+                    )
+                    after = tuple(read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
+                    owner_undeclared = sorted(
+                        set(owner_result.get("files") or []) - {pf.path for pf in owner.planned_files})
+                    owner_accepted = (
+                        bool(owner_result.get("quality_gates_passed")) and after != before and not owner_undeclared
+                    )
+                    logger.warning(
+                        "VERIFICATION_OWNER_RECOVERY_%s verification=%s owner=%s changed=%s gates=%s undeclared=%s",
+                        "ACCEPTED" if owner_accepted else "REJECTED", subtask.id, owner.id, after != before,
+                        bool(owner_result.get("quality_gates_passed")), owner_undeclared,
+                    )
+                    # The decision in the attempt-evidence store (LR-R1-M1): a rejected reopen is the run's
+                    # terminal cause (the verification failure stands and the loop stops below); an accepted
+                    # one is followed by the verification rerun, whose own unit result then speaks.
+                    from kriya.workflow.run_events import EventAuthority, RunEvent
+
+                    attempt_evidence_scope.mirror_event(RunEvent(
+                        kind=("verification.owner_recovery_accepted" if owner_accepted
+                              else "verification.owner_recovery_rejected"),
+                        attempt=0, source="workflow_controller.enforce", authority=EventAuthority.AUTHORITATIVE,
+                        message=(f"upstream owner {owner.id} reopened for verification unit {subtask.id}: "
+                                 + ("accepted, the verification runs again" if owner_accepted
+                                    else "no accepted change, the verification failure stands")),
+                        details={
+                            "verification_subtask_id": subtask.id, "owner_subtask_id": owner.id,
+                            "owner_files": owner_files, "changed": after != before,
+                            "owner_quality_gates_passed": bool(owner_result.get("quality_gates_passed")),
+                            "undeclared_files": owner_undeclared,
+                            "reason_codes": [VERIFICATION_RETRY_NO_CHANGE_POSSIBLE],
+                            "error": None if owner_accepted else (
+                                "the reopened owner produced no accepted change; the verification unit's "
+                                f"failure stands ({VERIFICATION_RETRY_NO_CHANGE_POSSIBLE})"),
+                        },
+                    ))
+                    if owner_accepted:
+                        for path in owner_result.get("files") or []:
+                            try:
+                                with open(os.path.join(plan_workspace_path, path), "r", encoding="utf-8",
+                                          errors="replace") as fh:
+                                    owner_content = fh.read()
+                            except OSError:
+                                continue
+                            projection = project_implementation_source(
+                                owner_content, path, _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+                                reason="recovered_upstream_subtask",
+                            )
+                            established_file_context[path] = projection.content
+                            established_provenance.record(path, owner.id)
+                        _evaluate_integration_obligations(
+                            plan, obligation_ledger, owner.id, established_file_context, owner_position,
+                            provenance=established_provenance,
+                        )
+                        control_state = control_state.with_updates(subtask_written_files={
+                            **control_state.subtask_written_files,
+                            owner.id: sorted(set(control_state.subtask_written_files.get(owner.id, ()))
+                                             | set(owner_result.get("files") or [])),
+                        })
+                        call_result = await _invoke_bounded_subtask(
+                            subtask, position, execution_role="verification_rerun",
+                            recovery_context=(
+                                "--- upstream recovery completed ---\n"
+                                f"Upstream owner {owner.id} was repaired after this verification failed; "
+                                "the current tree is the one to verify."
+                            ),
+                        )
             subtask_call_results.append(call_result)
 
             quality_gates_passed = bool(call_result.get("quality_gates_passed"))

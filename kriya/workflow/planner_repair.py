@@ -39,6 +39,7 @@ straight from workflow_controller.py) would be a real circular import, not
 a style choice. This module has no dependency on either, so both can
 import from it safely."""
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from kriya.workflow.triage import ChangeKind
@@ -207,6 +208,20 @@ def planner_response_model(planner: Any) -> Optional[str]:
     return None
 
 
+# PLANNER-REPAIR-VERIFIER-SHAPE-001: a schema error whose rejected value is a check's kind (what belongs in
+# tool_name / verifier_kind) in a field that takes only 'tool' or 'judgment' (a verification item's type, an
+# acceptance criterion's method). Read from pydantic's own report, never from the model's prose.
+_VERIFIER_KIND_AS_TYPE = re.compile(
+    r"(?:verification\.\d+\.type|acceptance_criteria\.\d+\.method)\s*\n?\s*Input should be 'tool' or 'judgment'.*?"
+    r"input_value='(compile|test|tests|regression|quality_gates|application_runtime|command|runtime)'",
+    re.DOTALL,
+)
+
+
+def _names_a_verifier_kind_as_a_type(errors: List[str]) -> bool:
+    return any(_VERIFIER_KIND_AS_TYPE.search(error or "") for error in errors)
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -364,6 +379,21 @@ def build_structured_plan_repair_prompt(
             "verification item must be an object with type, description, verifier_kind, and "
             "requires_runtime_execution; never use a string verification item.\n"
         )
+        # PLANNER-REPAIR-VERIFIER-SHAPE-001 (BACKEND-FINAL-CLOSURE-005, measured
+        # on P4-T5-r2): the planner expressed a runtime check as
+        # type="application_runtime" (and an acceptance criterion's method the
+        # same way); pydantic's enum error names the two legal values but not
+        # the shape that carries the check, and the next two repairs circled
+        # (judgment -> scope unjustified) without finding it. Name it.
+        if _names_a_verifier_kind_as_a_type(errors):
+            targeted_correction += (
+                "- The errors show a check's KIND used where only 'tool' or 'judgment' is legal (a verification "
+                "item's type, an acceptance criterion's method). Express the check as type 'tool' and put the kind "
+                "in tool_name (compile, test, regression or application_runtime; set requires_runtime_execution "
+                "true and verifier_kind 'application_runtime' for a runtime check); an acceptance criterion that "
+                "a tool proves is method 'tool' with that tool_name. Use 'judgment' only for what no tool can "
+                "check.\n"
+            )
     if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
         targeted_correction += (
             "- Replace each unprovided requires value with the exact, character-for-character "

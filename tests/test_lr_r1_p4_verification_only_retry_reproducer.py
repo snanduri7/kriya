@@ -21,6 +21,12 @@ only while s2 runs):
   so no equivalent retry is scheduled: one verification, the same truthful
   terminal (s2 failed, failure_category no_progress), typed reason
   VERIFICATION_RETRY_NO_CHANGE_POSSIBLE.
+- BACKEND-FINAL-CLOSURE-005 (ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-
+  GATE-001): the enforce controller now reopens the completed upstream owner
+  (s1) ONCE with s2's own gate output; here the scripted Developer regenerates
+  the same bytes, so nothing is folded, s2 is not verified a second time and
+  the terminal above stands unchanged (tests/test_backend_final_closure_005_
+  verification_owner_reopen.py covers the owner that does fix it).
 """
 import asyncio
 import subprocess
@@ -154,10 +160,12 @@ def test_a_failing_verification_only_unit_with_no_change_mechanism_is_not_retrie
     assert (workspace / SERVICE).read_text() == BASE_SOURCE
     assert result.legacy_result["status"] == "failed"
 
-    # s2: ONE verification, no Developer, no producer re-run, no model call at all.
-    assert test_gate_runs == ["s1", "s2"]
+    # s2: ONE verification, no Developer, no model call at all; the owner s1 was reopened once with s2's gate
+    # output (its own gates ran: the third test-gate run is s1's terminal regression) and regenerated identical
+    # bytes, so s2 was not verified again.
+    assert test_gate_runs == ["s1", "s2", "s1"]
     assert [c for c in model_calls if c[0] == "s2"] == []
-    assert sum(1 for _unit, first in model_calls if "Developer Agent" in first) == 1   # s1's only
+    assert sum(1 for _unit, first in model_calls if "Developer Agent" in first) == 2   # s1 planned + s1 reopened
 
     assert [(e.attempt, e.details.get("failure_type")) for e in events if e.kind == "attempt.failed"] == [(1, "test")]
     [admission] = [e.details for e in events if e.kind == "retry.verification_admission"]
@@ -170,14 +178,19 @@ def test_a_failing_verification_only_unit_with_no_change_mechanism_is_not_retrie
 
     # M1: the deciding recovery record and the run's terminal say why (Q6 / Q9).
     state_dir = os.environ[ENV_STATE_DIR]
-    [run_id] = reader.list_runs(state_dir)
-    explained = explain_run(state_dir, run_id)
+    runs = [explain_run(state_dir, run_id) for run_id in reader.list_runs(state_dir)]
+    [explained] = [run for run in runs if any(a["unit_id"] == "s2" for a in run["attempts"])]  # s2's own unit run
     [s2] = [a for a in explained["attempts"] if a["unit_id"] == "s2"]
     [decision] = s2["answers"]["Q6"]["items"]
     assert decision["retry"] is False and decision["stop_loop"] is True
     assert decision["no_progress_reason"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
-    assert explained["Q9"]["terminal_cause"]["failure_category"] == "no_progress"
-    assert explained["Q9"]["terminal_cause"]["quality_gates_passed"] is False   # never converted to success
+    # BACKEND-FINAL-CLOSURE-005: the controller's own recorded decision ends the run - the reopened owner produced
+    # no accepted change, so s2's typed failure stands (never the owner's successful unit that closed last).
+    terminal_cause = explained["Q9"]["terminal_cause"]
+    assert terminal_cause["source"] == "controller_terminal_event"
+    assert terminal_cause["kind"] == "verification.owner_recovery_rejected"
+    assert terminal_cause["reason_codes"] == ["VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"]
+    assert "failure stands" in terminal_cause["error"]
     [s2_unit] = [u for u in explained["Q9"]["units"] if u["unit_id"] == "s2"]
     assert s2_unit["quality_gates_passed"] is False and s2_unit["failure_category"] == "no_progress"
     assert explained["Q9"]["items"][0]["terminal_status"] == "FAILURE"

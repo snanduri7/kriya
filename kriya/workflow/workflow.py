@@ -7070,6 +7070,16 @@ class WorkflowEngine:
             "completion_kind": state.completion_kind if quality_passed else None,
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
+            # PRD-026 / LR-R1-P4: which no-progress terminal ended the run (None otherwise) - the enforce
+            # controller keys its one bounded upstream-owner reopen on VERIFICATION_RETRY_NO_CHANGE_POSSIBLE.
+            "no_progress_reason": state.no_progress_reason if not quality_passed else None,
+            # The unit's own last deterministic failure (type, message, the gate's output, bounded) - the evidence
+            # a reopened upstream owner receives. Never model text: Failure.raw_output is the validator's output.
+            "last_failure": (
+                {"type": state.last_failure.type, "message": str(state.last_failure.message or "")[-2000:],
+                 "raw_output": str(state.last_failure.raw_output or "")[-4000:]}
+                if state.last_failure is not None and not quality_passed else None
+            ),
             "retry_progress": state.retry_progress_summary(),
             # PRD-029: the ContractRegistry transition committed with this
             # run's source (None when no contract changed).

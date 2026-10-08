@@ -182,7 +182,9 @@ def test_the_reproducer_still_stops_typed_when_the_run_resumes_from_its_inputs(t
             recorded.append((state.attempt_number, state.verification_only_inputs))
     with patch.object(attempt_module, "_run_verification_only_attempt", spy):
         _workspace, events, _result, _calls, test_gate_runs = repro._enforce(tmp_path)
-    assert test_gate_runs == ["s1", "s2"] and len(recorded) == 1
+    # BACKEND-FINAL-CLOSURE-005: the controller reopens s1 once with s2's evidence (its gates run: the third
+    # test-gate run); the identical regeneration is rejected, so s2 is verified exactly once (one recorded attempt).
+    assert test_gate_runs == ["s1", "s2", "s1"] and len(recorded) == 1
     [(attempt, digest)] = recorded
     assert attempt == 1 and digest and len(digest) == 64
     [admission] = [e.details for e in events if e.kind == "retry.verification_admission"]

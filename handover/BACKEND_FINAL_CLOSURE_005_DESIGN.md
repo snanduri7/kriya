@@ -97,11 +97,37 @@ Design (`kriya/tools/git_metadata.py`, `kriya/tools/containment.py::GitMetadataM
 
 ## 4. Phase 4 registry sweep
 
-(pending)
+Start: 139 rows, 0 OPEN, 12 DEFERRED. Every row the instruction's sweep list names was already CLOSED (static-analysis
+in-place baseline, OCI mount syntax, path containment, Python live reliability, plan-target localization, Java API
+preservation, Java examples, Gradle JVM acceptance, Gradle plugin acquisition and evidence, false-premise authority,
+rejected-candidate retention and restaging, Kotlin DSL, Gradle wrapper and project root). Of the 12 DEFERRED:
+- resolved in this batch: ENFORCE-PARTIAL-NO-CHANGE-001 (section 2), ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-
+  GATE-001 (section 5);
+- classified non-defects that stay DEFERRED with their reason: ENFORCE-EXECUTE-PLAN-CONVERGENCE-001 and
+  RUN-ATTEMPT-GATE-EXTRACTION-001 (architecture convergence, no behavioural gap; rule 9 substantial redesign), the four
+  Windows rows (not a supported backend platform), LEAK-SIGKILL-RECOVERY-GAP-001 (crash-recovery capability, measured
+  safe, owner-approved deferral), TEST-RESOURCEWARNING-HYGIENE-001 (harness hygiene), DEMO-TIME-BUDGET-001 (operator
+  configuration choice), GUI-CI-GATE-001 (GUI tail, section 7).
+New rows this batch, all CLOSED_FIXED with reproducers: GRADLE-VERIFY-PHASE-CACHE-READONLY-001 (P1),
+RETRY-CONTEXT-GOAL-MEMBER-LOSS-001 (P1), PLANNER-REPAIR-VERIFIER-SHAPE-001 (P2). GRADLE-GIT-AT-CONFIGURATION-
+BOUNDARY-001 marked SUPERSEDED by OD-1 (its evidence: the T3 prepare phase exits 0).
 
 ## 5. Phases 5-7: model-execution reliability, retry quality, rejected candidates
 
-(pending)
+Each Batch-004 "model behaviour" classification was re-traced from the recorded evidence (attempt-evidence store,
+generate logs) rather than accepted:
+
+| Run | Batch-004 label | Re-trace | Finding |
+|---|---|---|---|
+| P4-T2-r3 (jsoup) | anchored-edit protocol, model | the model's reasoning at attempt 2: "only cssSelector, wholeTextOf, shallowClone are shown, absUrl is not among them"; `_prepare_retry_context` built the retry's member set from failure loci and rejected SEARCH text only | **Kriya mechanism** RETRY-CONTEXT-GOAL-MEMBER-LOSS-001 (fixed 9b010cd): goal-named members of a planned target stay in every retry's member set; an unhinted unfit target gets attempt 1's capacity fallback |
+| P4-T5-r2 (jmespath) | planner non-convergence, model | decoded repair prompts: attempt 0 used type=application_runtime (schema enum error shown, legal shape never named); attempt 1 switched to judgment (EVIDENCE_PATH_MISSING), attempt 2 SCOPE_UNJUSTIFIED; must_preserve was present and specific | **Kriya feedback gap** PLANNER-REPAIR-VERIFIER-SHAPE-001 (fixed): the schema-invalid guidance names type 'tool' + tool_name when the rejected value is a check kind. Feedback content only; no protocol-adapter change, qualification identity untouched. The remaining non-convergence (two bounded repairs) is the model's; budgets unchanged by owner instruction |
+| P4-T4 (python-slugify) | wrong candidate, correctly refused; P3 reliability gap | s2 (verification-only) stopped typed VERIFICATION_RETRY_NO_CHANGE_POSSIBLE; s1's Developer never saw s2's gate output although it was deterministic new information for exactly that unit | **Kriya orchestration** ENFORCE-VERIFICATION-UNIT-STOP-BEFORE-TERMINAL-GATE-001 (fixed): the enforce controller reopens the nearest completed mutating upstream owner ONCE per verification unit with the unit's own gate output; only a candidate that changed the owner's files, passed its gates and stayed in scope is folded forward, then the verification unit runs once more; an unchanged owner leaves the original typed failure standing (GR-R0 preserved: no retry without new information). The decision is recorded in the attempt-evidence store (`verification.owner_recovery_accepted/_rejected`; a rejected reopen is the run's terminal cause). The sealed external authority's verdict is NOT fed to the model (hidden-oracle isolation); the public gate output is |
+| P4-T1 / P4-T6 | genuine | - | unchanged |
+
+Phase 6 audit of "new information": the three retry paths above now either carry new deterministic evidence (goal
+members, the legal plan shape, the verification output) or stop as before. Phase 7: `kriya evidence candidate` (byte-
+for-byte rejected-candidate export, content-addressed, attempt/base bound, local) and `kriya evidence leak-check`
+(blob-level, positive control) are unchanged and remain the standing tools (REJECTED-CANDIDATE-RETENTION-001, OBS-1).
 
 ## 6. Mutations, certification, T3 re-run, cohorts
 
