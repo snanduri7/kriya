@@ -79,6 +79,14 @@ VERIFICATION_CONTRACT_CHANGED). Retries and fallback within a run bind the engin
 ## 8. Events (closed table, tripwire) and GUI classification
 verification_contract.compiled / sealed / refused / baseline / no_mutation_required / invalidated,
 requirement.authority_required. All BACKEND_EVENT_ADDED; persisted via the trace row (KUP), no new store.
+GUI_FUTURE_TELEMETRY (batch 003 §38; recorded, not implemented - GUI M1 stays accepted): the inspector should
+eventually display, from the `verification_contract.*` event payloads and the `verification_contract` /
+`requirements_admission` result fields already persisted: the verification contract (digest, format, base revision,
+project language), its requirements with scopes/claims/strength/status, the closers per requirement, the
+authority-required residuals (claim, why, acceptable authorities), the authority provenance (authority id, format,
+asset digests, original-oracle digests, visibility), the admission result (ADMITTED / VERIFICATION_AUTHORITY_REQUIRED /
+GOAL_INSUFFICIENT_FOR_VERIFICATION) and the per-requirement closure outcome (verified / human_accepted / not_a_claim /
+unverified / violated with reason code). Nothing of this is exposed by the KUP read path today beyond the raw events.
 
 ## 9. Deferred (registry rows)
 Java API-preservation predicate; Java example compiler; Gradle JVM acceptance; VENV-ADDITIVE-REUSE-001.
