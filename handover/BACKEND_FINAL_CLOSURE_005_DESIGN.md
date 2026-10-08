@@ -158,7 +158,12 @@ Certification, cohorts: section 8 (pending).
 
 ## 7. GUI tail (Phase 18)
 
-(pending)
+Backend first, no M2 features. Done after the backend slices: `npm run check` green (10 test files / 55 tests, java
+round-trip 270 files, exit 0; `certification/npm_check_786f9c1.log`); the owner's GUI-M1 launchability regression test
+committed (`ui/standalone/test/host_mode_launchability.test.ts`, 3/3 under vitest); GUI-CI-GATE-001 decided: the
+cross-language integration gate is the explicit `npm run check:integration` (= `check` + `fixtures:serializer:check`),
+`npm run check` stays pure-node, the serializer step fails closed without a Kriya-capable interpreter
+(`KRIYA_PYTHON`). Measured with the repository venv: every serializer fixture current. No roadmap/accessibility work.
 
 ## 8. Certification and cohort records
 

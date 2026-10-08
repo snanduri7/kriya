@@ -19,6 +19,7 @@ imported by `kriya/` (P-34).
 ```
 cd ui && npm install            # pinned versions, package-lock.json committed
 npm run check                   # fixtures + typecheck + lint + shared dependency check + every test
+KRIYA_PYTHON=../.venv/bin/python npm run check:integration   # check + the Kriya serializer fixtures (needs a Python that imports kriya; fails closed otherwise)
 npm run build -w @kriya-ui/standalone && npm start -w @kriya-ui/standalone     # the Electron app on fixtures
 KRIYA_UI_MEASURE=1 npm start -w @kriya-ui/standalone                          # P-35 measurement (forced-GC diagnostic) -> standalone/measurements/
 KRIYA_UI_SOAK=1 npm start -w @kriya-ui/standalone                             # 2 h soak, >=1,000 selections, no forced GC, 5-min samples -> soak-*.json

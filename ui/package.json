@@ -18,6 +18,7 @@
     "fixtures": "node fixtures/generate.mjs",
     "fixtures:serializer": "node scripts/serializer-fixtures.mjs",
     "fixtures:serializer:check": "node scripts/serializer-fixtures.mjs --check",
+    "check:integration": "npm run check && npm run fixtures:serializer:check",
     "build": "npm run build --workspaces --if-present",
     "test:scripts": "node --test \"scripts/*.test.mjs\""
   },
