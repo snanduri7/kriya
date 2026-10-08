@@ -44,7 +44,15 @@ BATCH_SIZE = 32
 # A conservative local admission estimate (an optimization only; the provider
 # decides): code averages well above 2 bytes per token.
 ESTIMATE_BYTES_PER_TOKEN = 2.0
-MAX_SEGMENT_DEPTH = 12  # 2**12 segments per chunk at most: bounded progress
+# Bounded progress against the PROVIDER: a piece the local estimate accepts but
+# the provider refuses is halved at most this many times along one path. An
+# estimate-driven halving is bounded by the text itself (every halving shrinks
+# the piece: a chunk of N bytes needs at most ceil(log2(N / limit)) of them)
+# and never counts here. OBS-2 (Graphify, 2026-10-06): a tracked 1.8 MB
+# graph.html with a 934 KB single line needed 13 estimate halvings and was
+# refused under the old bound shared by both, leaving the file with no
+# current vectors (OBS-2-EMBEDDING-INPUT-TOO-LONG-INDEX-GAP).
+MAX_SEGMENT_DEPTH = 12
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=60.0, pool=10.0)
 
 EMBEDDING_UNAVAILABLE = "EMBEDDING_UNAVAILABLE"
@@ -331,25 +339,35 @@ def _halves(text: str) -> Optional[Tuple[str, str]]:
 async def _segment(client: OllamaEmbeddingClient, text: str, limit_bytes: float,
                    deadline: Optional[float]) -> List[Tuple[str, List[float]]]:
     """(text, vector) pieces of one chunk: whole when the provider accepts it,
-    else halved at line boundaries until every piece is accepted (bounded).
-    Every piece is estimated first; only an estimated fit is sent."""
+    else halved at line boundaries until every piece is accepted. Every piece
+    is estimated first; only an estimated fit is sent. The halving ORDER is
+    the same for every input (SEGMENTATION_VERSION 1): an input that was
+    embeddable before yields byte-identical segments; only the bound differs
+    (MAX_SEGMENT_DEPTH counts the provider's refusals of an estimated fit
+    along one path, never the estimate-driven halvings the text itself
+    bounds)."""
     pieces: List[Tuple[str, List[float]]] = []
     pending = [(text, 0, len(text.encode("utf-8")) <= limit_bytes)]
     while pending:
-        piece, depth, fits = pending.pop(0)
-        try:
-            if not fits:
-                raise EmbeddingInputTooLongError("estimated over the served context")
-            pieces.append((piece, (await client.embed([piece], deadline=deadline))[0]))
-        except EmbeddingInputTooLongError:
-            if fits:
+        piece, misses, fits = pending.pop(0)
+        halves: Optional[Tuple[str, str]] = None
+        if fits:
+            try:
+                pieces.append((piece, (await client.embed([piece], deadline=deadline))[0]))
+                continue
+            except EmbeddingInputTooLongError:
                 client.admission_misses += 1
                 logger.info("embedding_admission_miss: a piece accepted by the local estimate was "
                             "refused by the provider as over its served context")
-            halves = _halves(piece) if depth < MAX_SEGMENT_DEPTH else None
+                misses += 1
+                halves = _halves(piece) if misses <= MAX_SEGMENT_DEPTH else None
+                if halves is None:
+                    raise
+        else:
+            halves = _halves(piece)
             if halves is None:
-                raise
-            pending[0:0] = [(half, depth + 1, len(half.encode("utf-8")) <= limit_bytes) for half in halves]
+                raise EmbeddingInputTooLongError("estimated over the served context")
+        pending[0:0] = [(half, misses, len(half.encode("utf-8")) <= limit_bytes) for half in halves]
     return pieces
 
 

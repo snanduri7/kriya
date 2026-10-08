@@ -72,6 +72,8 @@ class TraceRun:
     full_set_retries: int
     targeted_retries: int
     milestone_group: bool
+    # TRACE-ENFORCE-SUBTASK-LINKAGE-001: the enforce run a subtask row belongs to.
+    enforce_run_id: Optional[str]
     failure_types: Tuple[str, ...]
     # (attempt, gate type, success)
     gates: Tuple[Tuple[int, str, bool], ...]
@@ -168,6 +170,7 @@ def project_trace_row(row: Mapping[str, Any]) -> TraceRun:
         full_set_retries=int(_number(retry.get("full_set_attempts"))),
         targeted_retries=int(_number(retry.get("targeted_attempts"))),
         milestone_group=bool(row.get("milestone_group_id")),
+        enforce_run_id=str(row["enforce_run_id"]) if row.get("enforce_run_id") else None,
         failure_types=failure_types, gates=gates, event_counts=counts, events=tuple(events),
         role_rows=tuple(role_rows),
     )
@@ -176,7 +179,7 @@ def project_trace_row(row: Mapping[str, Any]) -> TraceRun:
 # The only columns ever read from traces.db.
 _TRACE_COLUMNS = (
     "run_id", "timestamp", "status", "failure_category", "duration_sec", "generation_metrics",
-    "gate_outcomes", "failure_report", "run_events", "milestone_group_id",
+    "gate_outcomes", "failure_report", "run_events", "milestone_group_id", "enforce_run_id",
 )
 
 

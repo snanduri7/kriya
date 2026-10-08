@@ -22,7 +22,7 @@ from kriya.agents.agent import (
     SkillGapAgent,
     SpecComplianceAgent,
 )
-from kriya.agents.contracts import parse_planner_structured_output
+from kriya.agents.contracts import parse_planner_structured_output, partition_file_list_escapes
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.code_intel.model import CALLABLE_KINDS
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
@@ -411,6 +411,11 @@ def _review_refit_recorder(state: Any, stage: str, config: Any) -> Any:
     return record
 
 
+# FINAL-REVIEW-BACKEND-ERROR-001: the reason code of a final-review failure
+# that carries none of its own (a transport/provider/protocol error).
+FINAL_REVIEW_BACKEND_ERROR = "FINAL_REVIEW_BACKEND_ERROR"
+
+
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
     """MODEL-EVIDENCE-HARDENING-001: a run that raises (e.g. mid-planning,
     after Planner/Architect calls) still leaves a traces row,
@@ -430,7 +435,7 @@ def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseExcepti
         trace_db, run_id=f"{trace['trace_id']}.exception", goal=str(trace.get("goal") or ""), status="error",
         llm=getattr(getattr(engine, "developer", None), "llm", None), source="workflow.run_generation_workflow",
         started_at=trace.get("started_at"), failure_category=type(error).__name__,
-        milestone_group_id=trace.get("milestone_group_id"),
+        milestone_group_id=trace.get("milestone_group_id"), enforce_run_id=trace.get("enforce_run_id"),
         events=[RunEvent(
             kind="run.exception", attempt=0, source="workflow.run_generation_workflow",
             authority=EventAuthority.AUTHORITATIVE, message=f"{type(error).__name__}: {str(error)[:300]}",
@@ -2131,6 +2136,9 @@ class WorkflowEngine:
         milestone_group_id: Optional[str] = None,
         milestone_index: Optional[int] = None,
         milestone_total: Optional[int] = None,
+        # TRACE-ENFORCE-SUBTASK-LINKAGE-001: the enforce run this call is a
+        # subtask of (<run_id>.enforce), recorded on its traces.db row.
+        enforce_run_id: Optional[str] = None,
         supplementary_context: str = "",
         planned_source_files: Optional[Sequence[str]] = None,
         reference_context: str = "",
@@ -2745,7 +2753,8 @@ class WorkflowEngine:
         start_time = time.time()
         # MODEL-EVIDENCE-HARDENING-001: what the exception guard needs to
         # attribute this run's calls if it raises (_record_run_exception).
-        note_run_trace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id)
+        note_run_trace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id,
+                       enforce_run_id=enforce_run_id)
 
         # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: before any model call, every
         # mandatory requirement must have a deterministic closer; a goal that
@@ -2788,7 +2797,7 @@ class WorkflowEngine:
                         attempts=0, status="failure", files_modified=[],
                         failure_category=admission.failure_category,
                         milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                        milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                        milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
                     )
                 except Exception as trace_ex:
                     logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -2873,7 +2882,7 @@ class WorkflowEngine:
                                 run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                                 attempts=0, status="failure", files_modified=[], failure_category=stop.failure_category,
                                 milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                                milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                                milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
                             )
                         except Exception as trace_ex:
                             logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -2891,7 +2900,7 @@ class WorkflowEngine:
                                 run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                                 attempts=0, status="success", files_modified=[],
                                 milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                                milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                                milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
                             )
                         except Exception as trace_ex:
                             logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -2944,7 +2953,7 @@ class WorkflowEngine:
                     failure_category="knowledge_gap",
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
-                    milestone_total=milestone_total,
+                    milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                     # MODEL-EVIDENCE-HARDENING-001: every early exit carries
                     # the run's events, including its role metrics.
                     run_events=self._trace_run_events(state),
@@ -3956,7 +3965,7 @@ class WorkflowEngine:
                     failure_category=status,
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
-                    milestone_total=milestone_total,
+                    milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                     # The Planner's calls and outcomes survive the rejection.
                     run_events=self._trace_run_events(state),
                 )
@@ -4061,18 +4070,61 @@ class WorkflowEngine:
         # the subtask's own prose description - defeating the whole point of
         # a non-mutating subtask before it even reached the write gate.
         if not architect_files and predetermined_architect_files is None:
-            # The Architect's response had no valid JSON file-list block (see
-            # ArchitectAgent.run_with_file_list/kriya/agents/contracts.py), or
-            # this is an old checkpoint saved before architect_files existed at
-            # all. Fall back to the older heuristic regex extraction rather than
-            # fail the run outright over a formatting hiccup in a newer
-            # mechanism - kept specifically as this path's safety net, see
-            # kriya/agents/contracts.py's module docstring.
-            architect_files = _resolve_file_paths_from_design(sorted(extract_expected_files(design)), design)
-            logger.warning(
-                "Architect file list: structured JSON extraction unavailable - falling back to "
-                "heuristic regex extraction over the design's prose."
-            )
+            # ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001: a file list the Architect
+            # DID produce, rejected only because entries escape the workspace
+            # (../x, an absolute path), is never laundered through the prose
+            # heuristic below (which re-derived in-workspace basenames:
+            # evil.py from ../outside/evil.py). The escaping entries are
+            # dropped and recorded; the in-workspace remainder is the plan. A
+            # list whose every entry escapes is a typed plan refusal before
+            # any Developer call, the Planner-rejection shape.
+            partition = partition_file_list_escapes(design)
+            if partition.escaping:
+                state.record_event(RunEvent(
+                    kind="plan.file_list_entries_rejected", attempt=0, source="workflow.architect",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    message=(f"{len(partition.escaping)} Architect file-list entries escape the workspace "
+                             "and were dropped from the plan"),
+                    details={"rejected": list(partition.escaping), "kept": list(partition.files or [])},
+                ))
+            if partition.escaping and not partition.files:
+                status = "architect_file_list_rejected"
+                plan_issue = f"every Architect file-list entry escapes the workspace: {list(partition.escaping)!r}"
+                logger.warning(f"Architect file list rejected ({status}): {plan_issue}")
+                if step_callback:
+                    step_callback(status, plan_issue)
+                try:
+                    from kriya.core.trace import TraceLogger
+                    TraceLogger(trace_db_path(self.kernel.config)).log_run(
+                        run_id=trace_id, goal=goal, duration_sec=time.time() - start_time, attempts=0,
+                        status=status, files_modified=[], failure_category=status,
+                        milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                        milestone_total=milestone_total, enforce_run_id=enforce_run_id,
+                        run_events=self._trace_run_events(state),
+                    )
+                except Exception as trace_ex:
+                    logger.warning(f"Failed to write run trace: {trace_ex}")
+                return {
+                    "status": status, "reason": plan_issue, "plan": plan, "design": design, "goal": goal,
+                    "workspace_path": workspace_path, "run_id": trace_id,
+                    "rejected_file_list_entries": list(partition.escaping),
+                }
+            if partition.files:
+                architect_files = partition.files
+            else:
+                # The Architect's response had no JSON file-list block at all,
+                # or one that is malformed for another reason (see
+                # ArchitectAgent.run_with_file_list/kriya/agents/contracts.py),
+                # or this is an old checkpoint saved before architect_files
+                # existed. Fall back to the older heuristic regex extraction
+                # rather than fail the run outright over a formatting hiccup
+                # in a newer mechanism - kept specifically as this path's
+                # safety net, see kriya/agents/contracts.py's module docstring.
+                architect_files = _resolve_file_paths_from_design(sorted(extract_expected_files(design)), design)
+                logger.warning(
+                    "Architect file list: structured JSON extraction unavailable - falling back to "
+                    "heuristic regex extraction over the design's prose."
+                )
 
         # Brownfield ownership outranks creation of a parallel, similarly
         # named artifact. Apply to bounded task/enhancement requests; larger
@@ -4648,7 +4700,7 @@ class WorkflowEngine:
                     attempts=0, status="baseline_indeterminate", files_modified=[],
                     failure_category="baseline_indeterminate",
                     milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                    milestone_total=milestone_total,
+                    milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                     run_events=self._trace_run_events(state),
                 )
             except Exception as trace_ex:
@@ -4682,7 +4734,7 @@ class WorkflowEngine:
                     run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                     attempts=0, status="failure", files_modified=[], failure_category=category,
                     milestone_group_id=milestone_group_id, milestone_index=milestone_index,
-                    milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                    milestone_total=milestone_total, enforce_run_id=enforce_run_id, run_events=self._trace_run_events(state),
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -5411,7 +5463,7 @@ class WorkflowEngine:
                             failure_report=abort_failure_report_dicts,
                             milestone_group_id=milestone_group_id,
                             milestone_index=milestone_index,
-                            milestone_total=milestone_total,
+                            milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                             run_events=self._trace_run_events(state),
                             evidence_records=[record.to_dict() for record in state.evidence_records],
                             generation_metrics=state.generation_metrics(
@@ -6455,7 +6507,7 @@ class WorkflowEngine:
                 model_hops=state.model_hops,
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
-                milestone_total=milestone_total,
+                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                 run_events=self._trace_run_events(state),
                 evidence_records=[record.to_dict() for record in state.evidence_records],
                 generation_metrics=state.generation_metrics(
@@ -6604,6 +6656,33 @@ class WorkflowEngine:
                     ))
                     logger.error(f"Final review not performed: {refusal}")
                     review_parts.append(label + f"Final review not performed: {refusal}")
+                    break
+                except Exception as error:
+                    # FINAL-REVIEW-BACKEND-ERROR-001: any other failure of the
+                    # review request (a provider/transport error, a protocol
+                    # error, an unexpected exception) once the candidate is
+                    # applied and committed ends the run the same typed way
+                    # (final_review_refused, naming the committed state) with
+                    # the error's own reason code (FINAL_REVIEW_BACKEND_ERROR
+                    # when it carries none) and type - never a raw exception
+                    # out of run_generation_workflow over work already in the
+                    # workspace. Nothing is retried or rolled back. A coding
+                    # error here still surfaces: its type and message are the
+                    # recorded detail, and the run is a non-success.
+                    code = getattr(error, "reason_code", None)
+                    state.final_review_refusal = {
+                        "reason_code": code if isinstance(code, str) and code else FINAL_REVIEW_BACKEND_ERROR,
+                        "detail": f"{type(error).__name__}: {error}", "exception_type": type(error).__name__,
+                        "batch": i, "batches": len(review_batches),
+                    }
+                    state.record_event(RunEvent(
+                        kind="review.refused", attempt=state.attempt_number, source="workflow",
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message="the final review request failed in the model backend",
+                        details=dict(state.final_review_refusal),
+                    ))
+                    logger.error(f"Final review not performed: {type(error).__name__}: {error}")
+                    review_parts.append(label + f"Final review not performed: {type(error).__name__}: {error}")
                     break
                 # Demo-01 Finding 3 (2026-09-11): the structural enforcement
                 # boundary itself - applied per-batch (not to the joined
@@ -6833,7 +6912,7 @@ class WorkflowEngine:
                 failure_report=failure_report_dicts,
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
-                milestone_total=milestone_total,
+                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
                 run_events=self._trace_run_events(state),
                 evidence_records=[record.to_dict() for record in state.evidence_records],
                 generation_metrics=state.generation_metrics(

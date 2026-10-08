@@ -14,8 +14,9 @@ Populations are never mixed:
 - ``enforce``: the enforce terminal rows;
 - ``milestone_plan``: planning rows.
 
-traces.db does not link an enforce subtask's row to its enforce run, so
-enforce outcomes are reported only from the terminal rows.
+An enforce subtask's row names its enforce run (``enforce_run_id``,
+TRACE-ENFORCE-SUBTASK-LINKAGE-001): ``by_enforce_run`` groups the unit rows of
+each enforce run; ``outcomes.enforce`` still counts each terminal row once.
 
 False success and regression escape come only from adjudications (never
 from a Reviewer or any model output).
@@ -290,6 +291,9 @@ def derive_metrics(
             "milestone_plans": {"rows": len(plans), "statuses": _tally(run.status for run in plans)},
         },
         "by_task_class": _grouped(generation, lambda run: run.task_class),
+        # TRACE-ENFORCE-SUBTASK-LINKAGE-001: the unit rows of each enforce run.
+        "by_enforce_run": _grouped([run for run in generation if run.enforce_run_id],
+                                   lambda run: str(run.enforce_run_id)),
         "by_developer_identity": _grouped(generation, lambda run: run.developer_identity or NO_DEVELOPER),
         "model_protocol": model_protocol_rows(runs),
         "static_analysis": static_analysis_block(generation),

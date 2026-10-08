@@ -35,11 +35,11 @@ def _event(kind, **details):
 
 
 def _log(db, run_id, *, status="success", category=None, gates=(), events=(), route="TASK", retry=(0, 0),
-         failure_types=(), wall=10.0, verification=4.0, llm_calls=3, group=None):
+         failure_types=(), wall=10.0, verification=4.0, llm_calls=3, group=None, enforce=None):
     TraceLogger(str(db)).log_run(
         run_id=run_id, goal=f"goal {CANARY}", duration_sec=wall, attempts=1, status=status,
         files_modified=[f"{CANARY}.py"], retrieved_chunks=[{"text": CANARY}], prompt_rendered=CANARY,
-        gate_outcomes=list(gates), failure_category=category, milestone_group_id=group,
+        gate_outcomes=list(gates), failure_category=category, milestone_group_id=group, enforce_run_id=enforce,
         run_events=list(events),
         evidence_records=[{"payload": CANARY}],
         generation_metrics={

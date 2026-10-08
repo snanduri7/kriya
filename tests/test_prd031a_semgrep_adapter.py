@@ -250,7 +250,7 @@ def test_host_probe_identity_and_capability(executable, workspace, monkeypatch):
     # The entry script AND the packaged engine it loads.
     assert identity.executable_digest == host_digest(executable)
     assert identity.execution_location == "local_process" and identity.network_enforced is False
-    assert identity.severity_map_version == SEVERITY_MAP_VERSION == 1
+    assert identity.severity_map_version == SEVERITY_MAP_VERSION == 2
     (pack,) = identity.rule_packs
     assert pack.ref == RULES and pack.digest == MANIFEST["rule_pack_digests"]["rules"]
     assert pack.rule_count == 4 and pack.languages == ("java", "python")
@@ -768,6 +768,13 @@ def test_malformed_output(stdout):
     ("ERROR", {}, Severity.HIGH),
     ("WARNING", {}, Severity.MEDIUM),
     ("INFO", {}, Severity.LOW),
+    # SEVERITY_MAP_VERSION 2: the newer values the pinned scanner reports verbatim
+    # (MEASURED 2026-10-08, evidence: backend-readiness-004/defects/semgrep-severity-v2/).
+    ("CRITICAL", {}, Severity.CRITICAL),
+    ("HIGH", {}, Severity.HIGH),
+    ("MEDIUM", {}, Severity.MEDIUM),
+    ("LOW", {}, Severity.LOW),
+    ("HIGH", {"impact": "LOW"}, Severity.LOW),  # metadata impact still outranks the rule severity
     ("INVENTORY", {}, Severity.UNKNOWN),
     ("error", {}, Severity.UNKNOWN),
     (None, {"impact": "SEVERE"}, Severity.UNKNOWN),

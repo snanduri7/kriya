@@ -176,6 +176,21 @@ def _audit_git_write(command: List[str], workspace_path: str) -> None:
         logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
 
+# WORKTREE-SYNC-BYTECODE-CACHE-001 (REG-R1 finding): interpreter caches the
+# gates themselves produce (validate.gate_output_roots: __pycache__/ of every
+# Python directory, pytest's .pytest_cache/) are never synced into the
+# candidate tree. In a repository that does not ignore __pycache__, the
+# baseline run's assertion-rewritten bytecode (compiled at the workspace path,
+# copy2 keeps the mtime so the interpreter accepts it) was reused in the
+# worktree and a failure's crash line named the workspace file (MEASURED 2/5
+# runs). The candidate tree rebuilds them from its own sources.
+_INTERPRETER_CACHE_DIRS = frozenset({"__pycache__", ".pytest_cache"})
+
+
+def _interpreter_cache_path(rel: str) -> bool:
+    return any(part in _INTERPRETER_CACHE_DIRS for part in rel.replace("\\", "/").split("/"))
+
+
 def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) -> None:
     """After create_git_worktree resets the sandbox to a clean git HEAD checkout, copy
     over any uncommitted changes (modified tracked files, new untracked files) from the
@@ -210,7 +225,7 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
     synced: List[str] = []
     try:
         for _code, rel, original in entries:
-            if rel == ".kriya" or rel.startswith(".kriya/"):
+            if rel == ".kriya" or rel.startswith(".kriya/") or _interpreter_cache_path(rel):
                 continue
             if original and not os.path.lexists(os.path.join(repo_path, original)):
                 _remove_path(os.path.join(worktree_path, original))

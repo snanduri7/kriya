@@ -1951,6 +1951,9 @@ def build_known_target_context(
     # (CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE) before any model call.
     items_by_path: Dict[str, List[Any]] = {}
     omitted: List[Dict[str, Any]] = []
+    # KNOWN-TARGET-CAPACITY-REFUSAL-EVIDENCE-001: each target's admitted
+    # minimum authoritative unit (tokens), for the capacity evidence below.
+    minimums: Dict[str, int] = {}
     consumed = 0
     consumed_exact = 0
 
@@ -2009,8 +2012,10 @@ def build_known_target_context(
             tier="member_exact", is_exact=True, revision=resolved.revision,
             omitted_regions=False,
         ), member_cost, mandatory=True)
+        minimums[path] = minimums.get(path, 0) + member_cost
         return True
 
+    protected_room = mandatory_room()
     # Pass 1: each target's minimum authoritative unit, in rank order.
     # Per target: (rank, path, resolved, member units still to try, the
     # boundary its minimum came from, whole file deferred to pass 2).
@@ -2090,12 +2095,38 @@ def build_known_target_context(
                 source_type="named_in_request", trust_level=TrustLevel.REPOSITORY, score=effective_score(path),
                 tier="full", is_exact=True, revision=resolved.revision, omitted_regions=False,
             ), cost, mandatory=True)
+            minimums[path] = cost
             continue
         if cost > 0:
             omitted.append(make_omitted_entry(
                 path=path, rank=rank, reason=REASON_MINIMUM_AUTHORITY_UNFIT, estimated_tokens=cost,
             ))
         pending.append((rank, path, resolved, [], None, True))
+
+    # KNOWN-TARGET-CAPACITY-REFUSAL-EVIDENCE-001: a capacity omission carries
+    # the collective condition - the sum of every target's minimum against the
+    # protected room, each target's minimum and which condition held - so the
+    # refusal it leads to (CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE) can never be
+    # read as one file's problem when the real limit is the sum. Diagnostic
+    # only: allocation and authority are unchanged.
+    unfit = [entry for entry in omitted if entry["reason"] == REASON_MINIMUM_AUTHORITY_UNFIT]
+    if unfit:
+        minimum_by_target = dict(minimums)
+        for entry in unfit:
+            minimum_by_target[entry["path"]] = int(entry["estimated_tokens"])
+        required_total = sum(minimum_by_target.values())
+        for entry in unfit:
+            alone = int(entry["estimated_tokens"]) > protected_room
+            entry.update({
+                "minimum_tokens": int(entry["estimated_tokens"]),
+                "required_minimum_tokens_total": required_total,
+                "available_protected_tokens": protected_room,
+                "minimum_tokens_by_target": dict(sorted(minimum_by_target.items())),
+                "refusal_reason": (
+                    "this target's minimum authoritative unit alone exceeds the protected room" if alone
+                    else "the sum of the known targets' minimum authoritative units exceeds the protected room"
+                ),
+            })
 
     # Pass 2: enrichment, in rank order, from what is left.
     for rank, path, resolved, units, first_boundary, whole_file_deferred in pending:

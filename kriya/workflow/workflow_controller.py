@@ -2715,6 +2715,35 @@ def _transitive_upstream_ids(plan: EngineeringPlan, subtask_id: str) -> set[str]
     return upstream
 
 
+PLAN_SCOPE_REVISION_REQUIRED = "PLAN_SCOPE_REVISION_REQUIRED"
+
+
+def subtask_scope_conflict_report(scope_conflict: Dict[str, Any]) -> Tuple[str, Tuple[str, ...]]:
+    """PLAN-SCOPE-CONFLICT-REASON-TYPING-001: the error text and reason codes a
+    subtask's ``plan_scope_conflict`` reports. Every conflict carries
+    PLAN_SCOPE_REVISION_REQUIRED (the aggregate recovery the controller runs);
+    one with its own ``reason_code`` (VERIFICATION_CONTRACT_REVISION_REQUIRED,
+    RUNTIME_PLAN_GAP, PLANNED_PREREQUISITE_OWNER_REQUIRED,
+    PLAN_TARGET_RELOCALIZATION_REQUIRED, ...) reports that code beside it, and
+    one that names no files reports its own reason instead of an empty
+    grounded-files sentence. Pure; the conflict itself is never changed."""
+    own = scope_conflict.get("reason_code")
+    own = own if isinstance(own, str) and own else None
+    codes: Tuple[str, ...] = (PLAN_SCOPE_REVISION_REQUIRED,)
+    if own and own != PLAN_SCOPE_REVISION_REQUIRED:
+        codes += (own,)
+    required = list(scope_conflict.get("required_files") or [])
+    if own and not required:
+        reason = str(scope_conflict.get("reason") or "").strip() or "no reason recorded"
+        return f"subtask repair requires approved-plan revision ({own}): {reason}", codes
+    return (
+        "subtask repair requires approved-plan scope revision; grounded required "
+        f"files {required!r} are outside this stage's "
+        f"allowed files {list(scope_conflict.get('allowed_files') or [])!r}",
+        codes,
+    )
+
+
 def _plan_scope_conflict_files(scope_conflict: Optional[Dict[str, object]]) -> List[str]:
     """The file(s) a PLAN_SCOPE_DEFECT scope_conflict names as needing
     authoritative plan revision - grounded_owner_files if present, else
@@ -5550,6 +5579,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 work_unit=WorkUnitInvocation(
                     PlanSourceKind.STRUCTURED, plan.plan_id, target.id, plan.content_hash(),
                 ),
+                # TRACE-ENFORCE-SUBTASK-LINKAGE-001: the subtask's own traces.db
+                # row names the enforce run it belongs to (<run_id>.enforce,
+                # the terminal row _write_enforce_trace writes).
+                enforce_run_id=f"{run_id}.enforce",
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )
 
@@ -6719,11 +6752,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # its final review was refused before inference.
                     error = f"subtask final review not performed: {review_refusal.get('detail')}"
                 elif scope_conflict:
-                    error = (
-                        "subtask repair requires approved-plan scope revision; grounded required "
-                        f"files {scope_conflict.get('required_files', [])!r} are outside this stage's "
-                        f"allowed files {scope_conflict.get('allowed_files', [])!r}"
-                    )
+                    error = subtask_scope_conflict_report(scope_conflict)[0]
                 else:
                     error = f"subtask did not pass Quality Gates (status={call_result.get('status')!r})"
             elif undeclared_files:
@@ -6747,7 +6776,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 execution_method=ExecutionMethod.MODEL.value,
                 undeclared_files=tuple(undeclared_files), error=error,
                 reason_codes=(
-                    ("PLAN_SCOPE_REVISION_REQUIRED",)
+                    subtask_scope_conflict_report(call_result["plan_scope_conflict"])[1]
                     if call_result.get("plan_scope_conflict")
                     else (review_refusal.get("reason_code"),) if review_refusal
                     # ENFORCE-VERIFIED-NO-CHANGE-001: the unit completed with
@@ -7092,7 +7121,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         if scope_conflict_result is not None:
             aggregated["failure_type"] = "PLANNING_ERROR"
             aggregated["recovery"] = "PLAN_REPAIR"
-            aggregated.setdefault("reason_codes", []).append("PLAN_SCOPE_REVISION_REQUIRED")
+            codes = aggregated.setdefault("reason_codes", [])
+            codes.append(PLAN_SCOPE_REVISION_REQUIRED)
+            codes.extend(code for code in subtask_scope_conflict_report(scope_conflict_result)[1]
+                         if code not in codes)
             aggregated["plan_scope_conflict"] = scope_conflict_result
         if plan_recovery_events:
             aggregated["plan_recovery_events"] = plan_recovery_events

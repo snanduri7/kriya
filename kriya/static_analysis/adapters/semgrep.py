@@ -72,7 +72,10 @@ from kriya.tools.sandbox import build_restricted_env
 PROVIDER = "semgrep"
 EDITION = "community"
 # Part of every identity: bump when the severity mapping below changes.
-SEVERITY_MAP_VERSION = 1
+# /2 (STATIC-ANALYSIS-SEVERITY-MAP-V2-001): the newer rule severities
+# CRITICAL/HIGH/MEDIUM/LOW map to their own levels; /1 decided them UNKNOWN
+# (fail-safe high). Every /1 identity digest is stale by design.
+SEVERITY_MAP_VERSION = 2
 
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 # Same shape the OCI backend accepts for ContainmentProfile.image_reference.
@@ -161,7 +164,13 @@ _LANGUAGE_ALIASES: Mapping[str, str] = {
 
 _SECURITY_SEVERITY = {"critical": Severity.CRITICAL}
 _IMPACT = {"HIGH": Severity.HIGH, "MEDIUM": Severity.MEDIUM, "LOW": Severity.LOW}
-_RULE_SEVERITY = {"ERROR": Severity.HIGH, "WARNING": Severity.MEDIUM, "INFO": Severity.LOW}
+# MEASURED on the pinned Semgrep 1.178.0 (2026-10-08): a rule written
+# `severity: HIGH` / `CRITICAL` is reported with that exact string in
+# results[].extra.severity, beside the classic ERROR/WARNING/INFO.
+_RULE_SEVERITY = {
+    "CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH, "MEDIUM": Severity.MEDIUM, "LOW": Severity.LOW,
+    "ERROR": Severity.HIGH, "WARNING": Severity.MEDIUM, "INFO": Severity.LOW,
+}
 
 # errors[] kinds that are rule/configuration problems. A SemgrepError is one
 # only by its code: 4 invalid rule, 5 invalid YAML, 7 invalid config file,

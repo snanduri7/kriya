@@ -483,7 +483,7 @@ def test_service_resolved_finding_passes_with_recorded_identity(mode, rule_copy,
 
     provider = result.evidence["provider"]
     assert provider["provider"] == "semgrep" and provider["version"] == PINNED_VERSION
-    assert provider["edition"] == "community" and provider["severity_map_version"] == 1
+    assert provider["edition"] == "community" and provider["severity_map_version"] == 2
     assert provider["rule_packs"][0]["digest"] == MANIFEST["rule_pack_digests"]["rules"]
     assert provider["effective_options_digest"] and provider["identity_digest"]
     assert result.evidence["runtime_fingerprint"]

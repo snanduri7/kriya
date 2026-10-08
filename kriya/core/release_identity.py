@@ -48,8 +48,17 @@ def _command(argv: List[str], cwd: Optional[str] = None) -> Optional[str]:
 
 
 def kriya_revision(source_root: str = _SOURCE_ROOT) -> Dict[str, Any]:
-    """The git revision of the Kriya source, or UNAVAILABLE outside a checkout."""
+    """The git revision of the Kriya source. Outside a checkout (an installed
+    wheel) the exact commit KRIYA-VERSION-001 embedded at build time stands in,
+    with its dirty flag (RELEASE-IDENTITY-WHEEL-001); UNAVAILABLE only when
+    neither exists. A checkout's identity is unchanged (git is still read)."""
     if not os.path.exists(os.path.join(source_root, ".git")):
+        from kriya.build_info import UNKNOWN as UNKNOWN_BUILD
+        from kriya.build_info import embedded_build_info
+
+        embedded = embedded_build_info()
+        if embedded["commit"] != UNKNOWN_BUILD:
+            return {"revision": embedded["commit"], "dirty": embedded["dirty"]}
         return {"revision": UNAVAILABLE, "dirty": None}
     revision = _command(["git", "rev-parse", "HEAD"], cwd=source_root)
     status = _command(["git", "status", "--porcelain", "--untracked-files=no"], cwd=source_root)

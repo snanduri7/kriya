@@ -30,6 +30,8 @@ import shutil
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.tools.process import spawn_subprocess_exec_fail_closed, terminate_process_tree
+
 logger = logging.getLogger(__name__)
 
 # jdtls itself needs a modern JVM to RUN - separate from whatever JDK the
@@ -117,7 +119,11 @@ class JdtlsClient:
         # inheriting JAVA_HOME lets jdtls's own wrapper script fall back to its
         # sensible built-in default, confirmed live to work.
         jdtls_env = {k: v for k, v in os.environ.items() if k != "JAVA_HOME"}
-        self.process = await asyncio.create_subprocess_exec(
+        # PLAT-LSP-TREE-KILL-001: spawned as the root of a process tree the
+        # platform's ProcessControlPort owns (its own session on POSIX), so
+        # _release can kill the launcher AND the JVM it starts, not only the
+        # direct PID; a host without tree ownership refuses before spawning.
+        self.process = await spawn_subprocess_exec_fail_closed(
             self.jdtls_path, "-data", self._data_dir,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -230,15 +236,17 @@ class JdtlsClient:
                 # jdtls not honoring SIGTERM promptly would otherwise leave
                 # an orphan process (and its temp data dir) behind across
                 # separate generation runs.
+                # PLAT-LSP-TREE-KILL-001: the LSP shutdown/exit handshake
+                # (shutdown()) already asked a cooperative jdtls to leave;
+                # here the WHOLE tree is killed (SIGKILL to the process group
+                # while its leader is still alive, so a JVM child the launcher
+                # started dies with it) and the leader is reaped. A leader that
+                # already exited and was reaped is the desired end state.
                 try:
-                    self.process.terminate()
+                    terminate_process_tree(self.process)
                     await asyncio.wait_for(self.process.wait(), timeout=5)
                 except asyncio.TimeoutError:
-                    try:
-                        self.process.kill()
-                        await self.process.wait()
-                    except ProcessLookupError:
-                        pass
+                    logger.warning("jdtls did not exit within 5s of SIGKILL; not reaped")
                 except ProcessLookupError:
                     pass
                 except Exception as ex:

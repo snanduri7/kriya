@@ -1854,6 +1854,20 @@ def _mcp_workspace_root() -> str:
     return os.path.realpath(os.getcwd())
 
 
+def _mcp_local_approval_path(workspace_root: str) -> str:
+    """This workspace's local MCP invocation-approval store, resolved BEFORE
+    any MCP server is started: a store configured inside the workspace
+    (KRIYA_MCP_APPROVAL_HOME) is a typed operator error with its reason code
+    and remediation, exit 1 - never a traceback and never a server spawn
+    (MCP-APPROVAL-PATH-TRACEBACK-001, the AUTHORITY-INSPECT-TRACEBACK-001
+    shape). The refusal itself is unchanged."""
+    from kriya.mcp.invocation_approval import MCPTrustPathInsideWorkspaceError, default_local_approval_path
+    try:
+        return default_local_approval_path(workspace_root)
+    except MCPTrustPathInsideWorkspaceError as error:
+        _authority_fail(error)
+
+
 async def _discover_mcp_tools(cfg: AppConfig):
     """Starts a real Kernel - spawning every configured MCP server exactly
     like `tools list`/`tools execute` do - and returns (kernel, pairs)
@@ -1917,12 +1931,12 @@ def mcp_inspect(ctx: click.Context) -> None:
 
     from kriya.control.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
-        default_local_approval_path,
         is_tool_approved,
         load_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
+    store_path = _mcp_local_approval_path(workspace_root)
 
     async def run() -> None:
         kernel, pairs = await _discover_mcp_tools(cfg)
@@ -1930,7 +1944,7 @@ def mcp_inspect(ctx: click.Context) -> None:
             if not pairs:
                 click.echo("No MCP tools discovered.")
                 return
-            path = default_local_approval_path(workspace_root)
+            path = store_path
             try:
                 artifact = load_approval_artifact(path)
             except Exception as e:
@@ -1979,13 +1993,13 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
     from kriya.control.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
         add_approval,
-        default_local_approval_path,
         empty_artifact,
         load_approval_artifact,
         save_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
+    store_path = _mcp_local_approval_path(workspace_root)
 
     async def run() -> None:
         kernel, pairs = await _discover_mcp_tools(cfg)
@@ -2015,7 +2029,7 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
                     click.echo("Not approved - no artifact written.")
                     sys.exit(1)
 
-            path = default_local_approval_path(workspace_root)
+            path = store_path
             try:
                 existing = load_approval_artifact(path)
             except Exception:
@@ -2052,13 +2066,13 @@ def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
         return
 
     from kriya.mcp.invocation_approval import (
-        default_local_approval_path,
         load_approval_artifact,
         remove_approvals_for_identity,
         save_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
+    store_path = _mcp_local_approval_path(workspace_root)
 
     async def run() -> None:
         kernel, pairs = await _discover_mcp_tools(cfg)
@@ -2072,7 +2086,7 @@ def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
                 )
                 sys.exit(1)
 
-            path = default_local_approval_path(workspace_root)
+            path = store_path
             try:
                 artifact = load_approval_artifact(path)
             except Exception as e:

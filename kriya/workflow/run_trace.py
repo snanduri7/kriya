@@ -52,7 +52,7 @@ def write_outcome_trace(
     trace_db: Optional[str], *, run_id: str, goal: str, status: str, llm: Any, source: str,
     started_at: Optional[float] = None, failure_category: Optional[str] = None,
     events: Iterable[Dict[str, Any]] = (), files: Iterable[str] = (),
-    milestone_group_id: Optional[str] = None,
+    milestone_group_id: Optional[str] = None, enforce_run_id: Optional[str] = None,
 ) -> bool:
     """Write one ``runs`` row for ``run_id`` with its terminal ``status``,
     ``events`` and the unreported role metrics. Returns whether it was
@@ -74,7 +74,7 @@ def write_outcome_trace(
             duration_sec=max(0.0, time.time() - started_at) if started_at else 0.0,
             attempts=0, status=status, files_modified=sorted(files),
             failure_category=failure_category, milestone_group_id=milestone_group_id,
-            run_events=run_events,
+            run_events=run_events, enforce_run_id=enforce_run_id,
         )
         return True
     except Exception as error:  # the work's own result stands; tested for the normal output

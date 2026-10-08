@@ -275,14 +275,16 @@ def test_t6_final_review_refusal(tmp_path, monkeypatch):
 def test_t6_exception_escape(tmp_path, monkeypatch):
     from _chaos_harness import ChaosRuntime, RuntimeRegistration, chaos_engine, git_workspace, run_direct
 
-    import kriya.agents.agent as agent
     from kriya.core.attempt_evidence import reader
     from kriya.core.attempt_evidence.explain import explain_run
     from kriya.core.state_paths import ENV_STATE_DIR
 
-    async def crash(self, *args, **kwargs):
-        raise RuntimeError("injected reviewer crash")
-    monkeypatch.setattr(agent.ReviewerAgent, "run", crash)
+    # FINAL-REVIEW-BACKEND-ERROR-001 (BACKEND-READINESS-004): a Reviewer crash in
+    # the final review is a typed final_review_refused now, so the escaping
+    # exception is injected after the commit, in the checkpoint cleanup.
+    def crash(*args, **kwargs):
+        raise RuntimeError("injected post-commit crash")
+    monkeypatch.setattr("kriya.workflow.workflow.delete_checkpoint", crash)
     monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path / "state"))
     with RuntimeRegistration(ChaosRuntime(_always(CALC_WITH_SUB))), pytest.raises(RuntimeError):
         run_direct(chaos_engine(chaos_config()), "add sub to calc.py", git_workspace(tmp_path, FILES))

@@ -66,7 +66,16 @@ class MCPTrustPathInsideWorkspaceError(ValueError):
     """A store path (the default local store, or an explicit override)
     resolved to somewhere inside the workspace root - refused, matching
     kriya/config/authority_approval.py's own load-bearing guard for the
-    identical reason (see module docstring)."""
+    identical reason (see module docstring). An expected operator error:
+    the CLI prints ``reason_code`` and ``remediation``, never a traceback
+    (MCP-APPROVAL-PATH-TRACEBACK-001)."""
+
+    reason_code = "MCP_TRUST_PATH_INSIDE_WORKSPACE"
+    remediation = (
+        "Point KRIYA_MCP_APPROVAL_HOME at a directory outside the workspace, or unset it to use "
+        "~/.kriya/mcp_approvals; an invocation-approval store inside a repository would let the "
+        "repository approve its own tools."
+    )
 
 
 def _canonical_json_bytes(value: Any) -> bytes:

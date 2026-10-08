@@ -416,6 +416,19 @@ def requirement_closure_id(requirement_id: str) -> str:
     return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}.closure"
 
 
+DERIVED_REQUIREMENTS_SOURCE = "requirements.derive_requirements"
+CONTRACT_REQUIREMENTS_SOURCE = "requirements.requirement_contract"
+
+
+def requirement_set_source(requirements: RequirementSet) -> str:
+    """Where the authoritative closed set came from, as the ledger records and
+    the terminal requirement.verdicts detail name it (OBS-3-CONTRACT-
+    PROVENANCE-LABEL): the operator's explicit contract when one is bound
+    (``contract_digest``), else goal derivation. Semantics, digests and
+    authority are unchanged by the label."""
+    return CONTRACT_REQUIREMENTS_SOURCE if requirements.contract_digest else DERIVED_REQUIREMENTS_SOURCE
+
+
 def seed_requirement_obligations(ledger: ObligationLedger, requirements: RequirementSet) -> None:
     """Record every requirement PENDING, once. Seeded at JUDGMENT (the
     lowest authority) so the verifier's verdict, not the seed, becomes the
@@ -429,7 +442,7 @@ def seed_requirement_obligations(ledger: ObligationLedger, requirements: Require
         ledger.record(ObligationRecord(
             id=obligation_id, kind=ObligationKind.ORIGINAL_REQUIREMENT,
             status=ObligationStatus.PENDING, authority=ObligationAuthority.JUDGMENT,
-            description=requirement.text, source="requirements.derive_requirements",
+            description=requirement.text, source=requirement_set_source(requirements),
             revision=0,
             evidence={"requirement_set_digest": requirements.digest, "kind": requirement.kind,
                       "source": requirement.source, "outcome": RequirementOutcome.PENDING.value},

@@ -71,6 +71,10 @@ class TraceLogger:
             # human/dashboard ask "what KIND of thing kept failing across
             # this run's attempts", not just "why did the loop stop".
             ("failure_report", "TEXT"),
+            # TRACE-ENFORCE-SUBTASK-LINKAGE-001: an enforce subtask row names
+            # its enforce run (<run_id>.enforce, the terminal row), so per-
+            # enforce-run outcomes can be derived from the unit rows.
+            ("enforce_run_id", "TEXT"),
         ):
             try:
                 cursor.execute(f"ALTER TABLE runs ADD COLUMN {col} {coltype}")
@@ -123,6 +127,7 @@ class TraceLogger:
         evidence_records: list = None,
         generation_metrics: dict = None,
         failure_report: list = None,
+        enforce_run_id: Optional[str] = None,
     ) -> None:
         with self._connect() as conn:
             cursor = conn.cursor()
@@ -143,14 +148,14 @@ class TraceLogger:
                     run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
                     retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
                     failure_category, milestone_group_id, milestone_index, milestone_total,
-                    run_events, evidence_records, generation_metrics, failure_report
+                    run_events, evidence_records, generation_metrics, failure_report, enforce_run_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id, timestamp, goal, duration_sec, attempts, status, files_str,
                 chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
                 failure_category, milestone_group_id, milestone_index, milestone_total,
-                events_json, evidence_json, generation_metrics_json, failure_report_json
+                events_json, evidence_json, generation_metrics_json, failure_report_json, enforce_run_id
             ))
             conn.commit()
 

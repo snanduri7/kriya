@@ -90,6 +90,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     for name, block in content["by_task_class"].items():
         lines.append(f"| {name} | {block['runs']} | {_value(block['final_verified_success'])} | "
                      f"{_value(block['first_pass_compile'])} |")
+    lines += ["", "## By enforce run (subtask rows linked to their enforce terminal row)", "",
+              "| Enforce run | Subtask rows | Final verified success | First-pass compile |", "|---|---|---|---|"]
+    for name, block in content.get("by_enforce_run", {}).items():
+        lines.append(f"| `{name}` | {block['runs']} | {_value(block['final_verified_success'])} | "
+                     f"{_value(block['first_pass_compile'])} |")
     lines += ["", "## By Developer runtime identity (runtime digest | inference settings digest)", "",
               "| Identity | Runs | Final verified success | First-pass compile |", "|---|---|---|---|"]
     for name, block in content["by_developer_identity"].items():

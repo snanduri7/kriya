@@ -177,7 +177,7 @@ async def test_start_and_check_file_end_to_end_via_fake_process(tmp_path, temp_r
             "params": {"uri": "file://" + client._mirror_path(source), "diagnostics": diagnostics_payload},
         })
 
-    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)):
+    with patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)):
         await client.start()
         push_task = asyncio.create_task(push_diagnostics_after_delay())
         result = await client.check_file(source, "class IntegrationApp {}", timeout=2)
@@ -202,7 +202,7 @@ async def test_start_does_not_inherit_java_home_from_parent_process():
     init_response = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}
     client = _make_client([init_response])
     with patch.dict("os.environ", {"JAVA_HOME": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home", "PATH": "/usr/bin"}), \
-         patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)) as mock_exec, \
+         patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)) as mock_exec, \
          patch("tempfile.mkdtemp", return_value="/tmp/fake-jdtls-data"):
         await client.start()
 
@@ -211,45 +211,37 @@ async def test_start_does_not_inherit_java_home_from_parent_process():
     assert launch_kwargs["env"]["PATH"] == "/usr/bin"  # everything else still passed through
 
 @pytest.mark.asyncio
-async def test_shutdown_sigkills_a_process_that_ignores_sigterm():
-    """Regression test for a finding from the 2026-08-12 SME review:
-    shutdown() previously only sent SIGTERM with no confirmation of death and
-    no SIGKILL fallback - the exact leaked-orphan-subprocess bug class
-    already fixed for validate.py's _run_cmd_with_timeout(), not applied
-    here."""
-    client = _make_client([])
-    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
-    client.process.terminate = MagicMock()
-    client.process.kill = MagicMock()
-    wait_calls = {"n": 0}
-
-    async def fake_wait():
-        wait_calls["n"] += 1
-        if wait_calls["n"] == 1:
-            raise asyncio.TimeoutError()
-        return None
-
-    client.process.wait = fake_wait
-
-    await client.shutdown()
-
-    client.process.terminate.assert_called_once()
-    client.process.kill.assert_called_once()
-    assert wait_calls["n"] == 2
-
-
-@pytest.mark.asyncio
-async def test_shutdown_does_not_sigkill_a_process_that_terminates_promptly():
+async def test_shutdown_kills_the_whole_process_tree_and_reaps_the_leader():
+    """PLAT-LSP-TREE-KILL-001 (supersedes the 2026-08-12 SIGTERM/SIGKILL
+    regression): after the LSP handshake, _release kills jdtls's WHOLE tree
+    through the platform's process-tree port (the launcher and the JVM it
+    started) and reaps the leader - never a SIGTERM/SIGKILL of the direct PID
+    alone, which left a JVM child running past a timeout."""
     client = _make_client([])
     client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
     client.process.terminate = MagicMock()
     client.process.kill = MagicMock()
     client.process.wait = AsyncMock(return_value=None)
-
-    await client.shutdown()
-
-    client.process.terminate.assert_called_once()
+    with patch("kriya.tools.lsp.terminate_process_tree") as tree_kill:
+        await client.shutdown()
+    tree_kill.assert_called_once_with(client.process)
+    client.process.wait.assert_awaited_once()
+    client.process.terminate.assert_not_called()
     client.process.kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_survives_a_leader_that_is_not_reaped_in_time():
+    client = _make_client([])
+    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
+
+    async def never_exits():
+        raise asyncio.TimeoutError()
+
+    client.process.wait = never_exits
+    with patch("kriya.tools.lsp.terminate_process_tree") as tree_kill:
+        await client.shutdown()  # logged, never raised
+    tree_kill.assert_called_once_with(client.process)
 
 
 @pytest.mark.asyncio
@@ -341,14 +333,14 @@ async def test_initialize_timeout_releases_data_dir_process_and_reader(tmp_path,
     # The pid of the process Kriya spawned, not one the child writes itself: under load
     # the child could still be starting when the 1 s timeout kills it.
     spawned = []
-    real_spawn = asyncio.create_subprocess_exec
+    real_spawn = lsp.spawn_subprocess_exec_fail_closed  # PLAT-LSP-TREE-KILL-001: the port spawn
 
     async def recording_spawn(*args, **kwargs):
         process = await real_spawn(*args, **kwargs)
         spawned.append(process.pid)
         return process
 
-    monkeypatch.setattr(lsp.asyncio, "create_subprocess_exec", recording_spawn)
+    monkeypatch.setattr(lsp, "spawn_subprocess_exec_fail_closed", recording_spawn)
 
     client = await _get_or_start_jdtls_client(None, str(tmp_path))
 
@@ -374,7 +366,7 @@ async def test_launch_failure_releases_the_data_dir(tmp_path, temp_root):
 @pytest.mark.asyncio
 async def test_successful_start_keeps_the_data_dir_until_shutdown(temp_root):
     client = _make_client([{"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}])
-    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)):
+    with patch("kriya.tools.lsp.spawn_subprocess_exec_fail_closed", new=AsyncMock(return_value=client.process)):
         await client.start()
     assert len(_jdtls_data_dirs(temp_root)) == 1
 
