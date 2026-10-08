@@ -10,6 +10,7 @@ import pytest
 from kriya.config import AppConfig
 from kriya.tools.validate import (
     PolymorphicValidator,
+    _record_installed_specifiers,
     get_pom_dependencies,
     get_pom_own_coordinate,
     get_pom_reactor_modules,
@@ -454,6 +455,7 @@ def test_run_app_sequence_uses_isolated_venv_interpreter_for_python(tmp_path):
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
+    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -483,6 +485,7 @@ def test_run_app_sequence_reports_pip_install_failure_without_running_commands(t
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
+    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
 
@@ -592,6 +595,7 @@ def test_python_run_tests_installs_requirements_into_isolated_venv_before_pytest
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")  # simulates an already-created venv
+    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -625,6 +629,7 @@ def test_python_run_tests_reports_pip_install_failure_without_running_pytest(tmp
     venv_python = tmp_path / ".kriya" / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n")
+    _record_installed_specifiers(str(venv_python.parent.parent), [])  # a venv Kriya built carries its marker (review F5)
 
     validator = PolymorphicValidator(str(tmp_path))
 

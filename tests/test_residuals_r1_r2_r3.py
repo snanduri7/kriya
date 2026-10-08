@@ -28,7 +28,7 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.validate import PolymorphicValidator, _record_installed_specifiers
 from kriya.workflow.attempt import _resolve_retry_member_hints
 from kriya.workflow.context_package import make_context_item
 from kriya.workflow.context_source import SourceDerivationCache
@@ -51,6 +51,10 @@ def _make_fake_venv(workspace_path: str) -> None:
     with open(python_path, "w", encoding="utf-8") as fh:
         fh.write("#!/bin/sh\n")
     os.chmod(python_path, 0o755)
+    # A venv Kriya built carries its installed-set marker (VENV-ADDITIVE-REUSE-001); one without it has an unknown
+    # set and is rebuilt once (review F5, tests/test_backend_readiness_004_venv_reuse.py). These tests are about the
+    # install cache of a venv Kriya already owns, so the marker is present (an empty recorded set: nothing removed).
+    _record_installed_specifiers(os.path.dirname(venv_bin), [])
 
 
 class TestPerfDependency001VenvCache:
