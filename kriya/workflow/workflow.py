@@ -412,8 +412,30 @@ def _review_refit_recorder(state: Any, stage: str, config: Any) -> Any:
 
 
 # FINAL-REVIEW-BACKEND-ERROR-001: the reason code of a final-review failure
-# that carries none of its own (a transport/provider/protocol error).
+# that carries none of its own: a transport/provider/protocol error is
+# FINAL_REVIEW_BACKEND_ERROR; any other exception type (a Kriya coding error
+# inside the review path, review F3) is FINAL_REVIEW_INTERNAL_ERROR and says so.
 FINAL_REVIEW_BACKEND_ERROR = "FINAL_REVIEW_BACKEND_ERROR"
+FINAL_REVIEW_INTERNAL_ERROR = "FINAL_REVIEW_INTERNAL_ERROR"
+
+
+def _final_review_error_code(error: BaseException) -> Tuple[str, str]:
+    """(reason code, message) for an exception out of the final review request."""
+    import httpx
+
+    from kriya.core.completion import CompletionProtocolError
+    from kriya.core.llm import EgressViolationError, StructuredOutputUnsupportedError
+    from kriya.core.model_capabilities import ModelCapabilityError
+    from kriya.core.provider_contract import ProviderContractError
+
+    code = getattr(error, "reason_code", None)
+    if isinstance(code, str) and code:
+        return code, "the final review request was refused by the model backend"
+    backend = (httpx.HTTPError, ProviderContractError, CompletionProtocolError, EgressViolationError,
+               StructuredOutputUnsupportedError, ModelCapabilityError, ConnectionError, TimeoutError)
+    if isinstance(error, backend):
+        return FINAL_REVIEW_BACKEND_ERROR, "the final review request failed in the model backend"
+    return FINAL_REVIEW_INTERNAL_ERROR, "the final review request failed inside Kriya's review path (internal error)"
 
 
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
@@ -1710,8 +1732,12 @@ def _captured_originals(state: GenerationState) -> Dict[str, Optional[bytes]]:
     originals: Dict[str, Optional[bytes]] = {}
     for relpath in sorted(state.all_files_written):
         if relpath in state.all_original_raw:
-            originals[relpath] = state.all_original_raw[relpath] or None
+            # The raw capture is exact: None = did not exist, b"" = existed and
+            # was empty (an __init__.py; review F1 - never folded into None).
+            originals[relpath] = state.all_original_raw[relpath]
         else:
+            # The text capture alone cannot tell an empty file from a missing
+            # one ("" for both): only a non-empty text is a known original.
             text = state.all_original_contents.get(relpath)
             originals[relpath] = text.encode("utf-8") if text else None
     return originals
@@ -2789,6 +2815,7 @@ class WorkflowEngine:
                                 f"{len({r.requirement_id for r in admission.authority_requests})} requirement(s); "
                                 "a request proposes authority, only the operator seals it",
                         details={"contract_digest": verification_contract.digest, "stored_path": requests_path,
+                                 "sealing_error": getattr(admission, "authority_requests_sealing_error", None),
                                  "requests": [r.to_dict() for r in admission.authority_requests]},
                     ))
                 try:
@@ -6669,16 +6696,15 @@ class WorkflowEngine:
                     # workspace. Nothing is retried or rolled back. A coding
                     # error here still surfaces: its type and message are the
                     # recorded detail, and the run is a non-success.
-                    code = getattr(error, "reason_code", None)
+                    code, message = _final_review_error_code(error)
                     state.final_review_refusal = {
-                        "reason_code": code if isinstance(code, str) and code else FINAL_REVIEW_BACKEND_ERROR,
+                        "reason_code": code,
                         "detail": f"{type(error).__name__}: {error}", "exception_type": type(error).__name__,
                         "batch": i, "batches": len(review_batches),
                     }
                     state.record_event(RunEvent(
                         kind="review.refused", attempt=state.attempt_number, source="workflow",
-                        authority=EventAuthority.AUTHORITATIVE,
-                        message="the final review request failed in the model backend",
+                        authority=EventAuthority.AUTHORITATIVE, message=message,
                         details=dict(state.final_review_refusal),
                     ))
                     logger.error(f"Final review not performed: {type(error).__name__}: {error}")

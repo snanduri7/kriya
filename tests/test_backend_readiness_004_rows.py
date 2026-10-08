@@ -572,3 +572,85 @@ def test_the_maven_dependency_cache_lives_under_the_state_root_and_survives_a_wo
     subprocess.run(["git", "clean", "-fdx"], cwd=worktree, check=True, capture_output=True)
     assert os.path.isfile(os.path.join(cache_dir, "seed.jar"))
     assert validator._maven_cache_dir() == cache_dir  # stable per workspace across work units
+
+
+# ------------------------------------------------- independent review reconciliation (reviews/INDEPENDENT_REVIEW.md)
+
+def test_f1_an_existing_empty_original_is_captured_as_empty_bytes_never_as_missing():
+    from kriya.workflow.state import GenerationState
+    from kriya.workflow.workflow import _captured_originals
+
+    state = GenerationState()
+    state.all_files_written = {"pkg/__init__.py", "pkg/new.py", "pkg/mod.py", "legacy.py"}
+    state.all_original_raw = {"pkg/__init__.py": b"", "pkg/new.py": None, "pkg/mod.py": b"x = 1\n"}
+    state.all_original_contents = {"legacy.py": "old\n"}
+    assert _captured_originals(state) == {"pkg/__init__.py": b"", "pkg/new.py": None, "pkg/mod.py": b"x = 1\n",
+                                          "legacy.py": b"old\n"}
+
+
+class _ReviewerInternalCrash(Transport):
+    """A Kriya-side coding error inside the review path, not a backend failure."""
+
+    def __init__(self):
+        super().__init__()
+        self.failed = 0
+
+    async def __call__(self, client, model, system_prompt, user_prompt, *args, **kwargs):
+        if current_model_role() == "reviewer":
+            self.failed += 1
+            raise RuntimeError("simulated coding error in the review path")
+        return await super().__call__(client, model, system_prompt, user_prompt, *args, **kwargs)
+
+
+def test_f3_a_non_backend_exception_in_the_final_review_is_attributed_as_internal(tmp_path, monkeypatch):
+    from kriya.workflow.workflow import FINAL_REVIEW_INTERNAL_ERROR
+
+    workspace = _workspace(tmp_path)
+    monkeypatch.setattr(model_runtime, "probe_model_runtime", _probe)
+    model_runtime.clear_model_runtime_cache()
+    monkeypatch.chdir(workspace)
+    cfg = _config(tmp_path)
+    transport = _ReviewerInternalCrash()
+    results = []
+    real_run = WorkflowEngine.run_generation_workflow
+
+    async def capturing(self, *a, **kw):
+        result = await real_run(self, *a, **kw)
+        results.append(result)
+        return result
+
+    with patch("kriya.cli.load_config", return_value=cfg), patch.object(LLMClient, "_request_once", new=transport), \
+         patch.object(WorkflowEngine, "run_generation_workflow", new=capturing):
+        cli = CliRunner().invoke(main, ["generate", "build M1: create m1.py", "-y"])
+    assert cli.exception is None or isinstance(cli.exception, SystemExit), cli.output
+    assert cli.exit_code != 0 and transport.failed == 1
+    refusal = results[-1]["final_review_refusal"]
+    assert refusal["reason_code"] == FINAL_REVIEW_INTERNAL_ERROR and refusal["exception_type"] == "RuntimeError"
+    status, category, events = _trace_rows(cfg)[-1]
+    assert (status, category) == ("failure", "final_review_refused")
+    [refused] = [e for e in json.loads(events) if e["kind"] == "review.refused"]
+    assert "internal error" in refused["message"] and "model backend" not in refused["message"]
+    assert (workspace / "m1.py").read_text().strip() == "VALUE = 'm1.py'"  # still applied and committed
+
+
+def test_f8_a_sealing_failure_is_recorded_on_the_refusal_never_silent(caplog):
+    from kriya.workflow import authority_request as ar
+    from kriya.workflow.contract_compilation import compile_verification_contract
+    from kriya.workflow.requirements import VerificationAuthorityRequired, statement_origins
+
+    goal = "Entries must leave the cache at the expiry instant for every ttl.\n"
+    reqs = derive_requirements(goal)
+    contract = compile_verification_contract(reqs, origins=statement_origins(goal), test_files=[], project_language=None)
+    admission = contract.refusal()
+    assert isinstance(admission, VerificationAuthorityRequired) and admission.authority_requests
+    cfg = strict_config(logging={"file_enabled": False})
+    with patch.object(ar, "seal_authority_requests", side_effect=OSError("store is read-only")), caplog.at_level("WARNING"):
+        assert ar.seal_requests_for_refusal(cfg, contract, admission) is None
+    assert admission.authority_requests_sealing_error == "OSError: store is read-only"
+    assert admission.to_dict()["authority_requests_sealing_error"] == "OSError: store is read-only"
+    assert "Authority requests not sealed: OSError: store is read-only" in caplog.text
+    # the normal path: sealed, no error recorded
+    fresh = contract.refusal()
+    with patch.object(ar, "seal_authority_requests", return_value="/outside/requests.json"):
+        assert ar.seal_requests_for_refusal(cfg, contract, fresh) == "/outside/requests.json"
+    assert fresh.to_dict()["authority_requests_sealing_error"] is None

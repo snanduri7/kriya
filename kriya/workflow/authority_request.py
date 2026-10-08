@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -44,6 +45,8 @@ from kriya.workflow.requirements import (
     DOCUMENTATION_CLAIM,
     REGRESSION_PRESERVATION,
 )
+
+logger = logging.getLogger(__name__)
 
 AUTHORITY_REQUEST_FORMAT = "kriya.authority_request/1"
 AUTHORITY_REQUEST_STORE_DIR = "authority-requests"
@@ -186,5 +189,8 @@ def seal_requests_for_refusal(config: Any, contract: Any, admission: Any) -> Opt
         return None
     try:
         return seal_authority_requests(contract, requests, resolve_state_directory(config)[0])
-    except Exception:  # the refusal stands with the requests on the result; the store is evidence
+    except Exception as error:  # the refusal stands with the requests on the result; the store is evidence
+        # Review F8: never silent - the refusal and its event carry why the store has no copy.
+        logger.warning("Authority requests not sealed: %s: %s", type(error).__name__, error)
+        admission.authority_requests_sealing_error = f"{type(error).__name__}: {error}"
         return None

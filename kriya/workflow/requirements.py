@@ -1544,6 +1544,7 @@ class AdmissionRefusal(Exception):
         return {"reason_code": self.reason_code, "residual": list(self.residual), "closers": dict(self.closers),
                 "accepted_forms": list(ACCEPTED_GOAL_FORMS),
                 "authority_requests": [r.to_dict() if hasattr(r, "to_dict") else dict(r) for r in self.authority_requests],
+                "authority_requests_sealing_error": getattr(self, "authority_requests_sealing_error", None),
                 **({"verification_contract": self.report} if self.report is not None else {})}
 
 

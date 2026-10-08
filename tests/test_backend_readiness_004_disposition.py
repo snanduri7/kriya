@@ -21,7 +21,6 @@ from kriya.workflow.contract_compilation import (
     STATUS_AUTHORITY_REQUIRED,
     STATUS_CLOSABLE,
     STATUS_DISPOSITIONED,
-    ExternalAuthority,
     compile_verification_contract,
     record_contract_dispositions,
 )
@@ -247,7 +246,6 @@ def test_09_the_template_is_unsealed_and_a_non_claim_statement_needs_no_disposit
     ws2, base2, reqs2, loaded, _p = _bind(tmp_path / "h", heading, [("REQ-1", None, rd.OUT_OF_SCOPE, "x")])
     entry = _compile(reqs2, heading, loaded).entry("REQ-1")
     assert entry.status == "NOT_A_CLAIM" and entry.disposition is None  # structure decides first; nothing to remove
-    assert ExternalAuthority  # imported for parity with the coverage module's surface
 
 
 def test_10_a_goal_whose_every_statement_is_dispositioned_is_refused_never_a_no_mutation_success(tmp_path):

@@ -146,7 +146,6 @@ def test_03_an_uncovered_mandatory_claim_leaves_the_requirement_open(tmp_path):
     assert contract2.entry("REQ-1").status == STATUS_CLOSABLE
     assert sorted((b.claim, b.closer) for b in contract2.entry("REQ-1").bindings) == [
         (API_PRESERVATION, CLOSER_API_PRESERVATION), (BEHAVIOR, CLOSER_EXTERNAL_ACCEPTANCE)]
-    assert STATUS_AUTHORITY_REQUIRED  # the uncovered case is the NAMED statement above
 
 
 # ---------------------------------------------------------------- one claim / several complementary authorities

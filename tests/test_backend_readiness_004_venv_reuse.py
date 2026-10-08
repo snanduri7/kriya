@@ -93,6 +93,12 @@ def test_02_a_requirements_line_removal_is_a_removed_specifier_too(tmp_path):
         (root / "requirements.txt").write_text("attrs\n")
         validator._resolve_python_interpreter()
         assert validator.venv_recreations == 1 and not os.path.exists(os.path.join(site, "six.py"))
-    # a venv without the marker (created before this mechanism) is kept: nothing is known to have been removed
+    # Review F5: a venv without the marker (created before this mechanism, or whose marker could not be written)
+    # has an UNKNOWN installed set and is rebuilt once - never trusted as-is.
     assert v._installed_specifiers(str(tmp_path / "nowhere")) is None
+    os.remove(os.path.join(str(root / ".kriya" / "venv"), v._VENV_INSTALLED_MARKER))
+    next_attempt = _validator(root)  # a new attempt gets a new validator (the per-validator install cache is gone)
+    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=_faithful_runner(installs)):
+        next_attempt._resolve_python_interpreter()
+    assert next_attempt.venv_recreations == 1 and v._installed_specifiers(str(root / ".kriya" / "venv")) == ["attrs"]
     assert v._declared_specifiers(str(root), ["-r", "missing.txt"]) == ["-r:missing.txt:unreadable"]

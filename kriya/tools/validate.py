@@ -191,8 +191,8 @@ def _record_installed_specifiers(venv_dir: str, specifiers: Sequence[str]) -> No
     try:
         with open(os.path.join(venv_dir, _VENV_INSTALLED_MARKER), "w", encoding="utf-8") as handle:
             json.dump({"specifiers": sorted(set(specifiers))}, handle)
-    except OSError as error:  # the marker is best effort; without it the next install recreates nothing
-        logger.warning(f"Project venv marker not written ({error}); a dependency removal will not rebuild the venv")
+    except OSError as error:  # without the marker the venv's set is unknown: the next attempt rebuilds it (fail closed)
+        logger.warning(f"Project venv marker not written ({error}); the venv will be rebuilt on the next attempt")
 
 
 def _pyproject_dependencies(pyproject_path: str) -> List[str]:
@@ -659,9 +659,15 @@ class PolymorphicValidator:
         # new declaration drops any of them the venv is recreated from nothing.
         declared = _declared_specifiers(self.workspace_path, install_args)
         previous = _installed_specifiers(venv_dir_host)
-        if previous is not None and not set(previous) <= set(declared):
-            removed = sorted(set(previous) - set(declared))
-            logger.info("Project venv recreated: the declared dependency set dropped %s", removed)
+        if venv_present(venv_python_host) and (previous is None or not set(previous) <= set(declared)):
+            # Review F5: a venv whose installed set is unknown (no marker: created
+            # before this mechanism, or its marker could not be written) is never
+            # trusted - it may already hold a removed package - and is rebuilt once.
+            if previous is None:
+                logger.info("Project venv recreated: its installed dependency set is unknown (no marker)")
+            else:
+                logger.info("Project venv recreated: the declared dependency set dropped %s",
+                            sorted(set(previous) - set(declared)))
             shutil.rmtree(venv_dir_host, ignore_errors=True)
             self.venv_recreations += 1
 

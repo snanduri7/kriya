@@ -12,9 +12,15 @@ only the operator can grant it, and only from pre-existing, sealed truth.
   `CONTRACT_COMPILER_VERSION = 2`) binds every applicable closer to every claim; an external authority's coverage is
   `rid -> claim -> {accepted_strength, why}` (`kriya/workflow/authority_bundle.py`, `AuthorityBundle.covers`,
   `coverage_entry(rid, claim)`; a duplicate (rid, claim) entry is refused; REGRESSION_PRESERVATION is coverable).
-- Per-producer claim judgments (`kriya/workflow/requirements.py`, `requirement_claim_records`): VIOLATED is sticky;
-  an INDETERMINATE producer revokes only its own method or the methods it declares (`revokes_methods`); the
-  acceptance family declares its revocations. A claim closes only when every bound producer reports SATISFIED.
+- Per-producer claim judgments (`kriya/workflow/requirements.py`, `requirement_claim_records`): VIOLATED is sticky
+  (any producer's counter-evidence keeps the claim open for that candidate); an INDETERMINATE producer revokes only
+  its own method or the methods it declares (`revokes_methods`); the acceptance family declares its revocations.
+  Candidate closure rule (`requirement_claim_record`): a claim is SATISFIED when at least one bound producer reports
+  SATISFIED for this exact candidate and none reports VIOLATED - an operator authority's PASS closes a claim Kriya's
+  own oracle could not judge (INDETERMINATE: the T4-v2 shape), while any deterministic counter-evidence still blocks.
+  Baseline rule (`contract_baseline.py`): PASS only when EVERY judged authority passes, FAIL if any fails - so
+  NO_MUTATION_REQUIRED is never declared on partial evidence. The two bars differ on purpose (review F2; owner may
+  tighten the candidate bar to "every producer" - that re-opens the T4-v2 false negative, see section 10).
 - Baseline aggregation (`contract_baseline.py`): FAIL if any authority fails, PASS only if all pass, else INDETERMINATE.
 - Invariant kept: operator sufficiency closes claims, never whole requirements; the base revision is re-checked at
   closure; the contract digest is part of the resume identity.
@@ -28,9 +34,10 @@ only the operator can grant it, and only from pre-existing, sealed truth.
   A dispositioned statement is `STATUS_DISPOSITIONED` / outcome `DISPOSITIONED` - reported, never satisfied. A goal
   whose every statement is dispositioned is refused (GOAL_INSUFFICIENT), never a zero-obligation success.
   Events: `verification_contract.dispositioned`.
-- `kriya/workflow/authority_request.py`: on a contract refusal, one `kriya.authority_request/1` per requirement is
-  sealed (which claim, which authority kinds would be acceptable, the exact text digest); carried on the
-  `AdmissionRefusal` (`authority_requests`), the result and the event `verification_contract.authority_requested`.
+- `kriya/workflow/authority_request.py`: on a contract refusal, one `kriya.authority_request/1` per residual
+  (requirement, claim) is sealed (which authority kinds would be acceptable, the exact text digest); carried on the
+  `AdmissionRefusal` (`authority_requests`), the result and the event `verification_contract.authority_requested`;
+  a store that cannot be written is recorded on the refusal and the event (`authority_requests_sealing_error`).
   The request is a form the operator fills from frozen truth; nothing in it is derived from model output.
 
 ## 3. Documentation list-entries predicate (owner decision 2)
@@ -87,6 +94,14 @@ without interpreter caches, contract provenance label, scope-conflict reason typ
 CLI typed refusal, final-review backend error typed, enforce subtask trace linkage (`enforce_run_id`,
 `by_enforce_run`), Architect file-list escape partition (`partition_file_list_escapes`,
 `plan.file_list_entries_rejected`, typed stop `architect_file_list_rejected`), Maven cache proof.
+
+## 9b. Independent review reconciliation (reviews/INDEPENDENT_REVIEW.md, APPROVE WITH CHANGES)
+
+F1 fixed (an empty original is b"", never "missing"); F3 fixed (FINAL_REVIEW_INTERNAL_ERROR for a non-backend
+exception type); F5 fixed (a marker-less venv is rebuilt once); F8 fixed (the sealing error is recorded); F10 fixed;
+F2, F4, F6, F7, F11 are record/doc corrections; F9 is an owner decision: the git-at-configuration boundary is kept
+"by design" (candidate trees carry no repository: hooks and config are never the candidate's) and listed for the
+owner as a capability choice (a sanitized, read-only repository-metadata export for configuration-time builds).
 
 ## 10. Verification discipline
 
