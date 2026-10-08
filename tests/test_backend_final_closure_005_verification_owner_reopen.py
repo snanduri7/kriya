@@ -35,6 +35,7 @@ SERVICE = "shop/service.py"
 BASE_SOURCE = "def page_size():\n    return 5\n"
 WRONG_SOURCE = "PAGE_SIZE = 5\n\n\ndef page_size():\n    return PAGE_SIZE\n"
 FIXED_SOURCE = "PAGE_SIZE = 10\n\n\ndef page_size():\n    return PAGE_SIZE\n"
+BROKEN_SOURCE = "PAGE_SIZE = \n"  # a changed owner candidate whose own gates fail
 FAILING = {"success": False, "output": "tests/test_shop.py F\n=================================== FAILURES "
                                        "===================================\nE   assert 5 == 10\n1 failed in 0.10s"}
 PASSING = {"success": True, "output": "tests/test_shop.py .\n1 passed in 0.01s"}
@@ -62,7 +63,7 @@ def _git(repo, *args):
                    capture_output=True)
 
 
-def _enforce(tmp_path, *, owner_fixes: bool, plan=None):
+def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False):
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -100,7 +101,7 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None):
         elif "Developer Agent" in first:
             developer_prompts.append((system_prompt or "") + "\n" + (user_prompt or ""))
             reopened = "VERIFICATION FAILURE RECOVERY" in developer_prompts[-1]
-            source = FIXED_SOURCE if (reopened and owner_fixes) else WRONG_SOURCE
+            source = BROKEN_SOURCE if (reopened and owner_breaks) else FIXED_SOURCE if (reopened and owner_fixes) else WRONG_SOURCE
             content = sentinel(SERVICE, analysis="introduce PAGE_SIZE.", content=source)
         else:
             content = "Review: Approved"
@@ -113,6 +114,11 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None):
     async def run_unit(self, *args, **kwargs):
         active["id"] = kwargs.get("current_subtask_id")
         return await real_workflow(self, *args, **kwargs)
+
+    def run_compile_check(self, *_args, **_kwargs):
+        import os
+        current = open(os.path.join(self.workspace_path, SERVICE), encoding="utf-8").read()
+        return {"success": False, "output": "SyntaxError: invalid syntax"} if current == BROKEN_SOURCE else {"success": True, "output": "ok"}
 
     def run_tests(self, *_args, **_kwargs):
         test_gate_runs.append(active.get("id"))
@@ -135,8 +141,7 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None):
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
          patch.object(WorkflowEngine, "run_generation_workflow", new=run_unit), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
-               new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=run_compile_check), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests), \
          patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(object(), None)), \
          patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
@@ -178,6 +183,17 @@ def test_an_owner_that_does_not_change_its_files_leaves_the_failure_standing(tmp
     assert "VERIFICATION FAILURE RECOVERY" in prompts[1]
     [terminal] = [e.details for e in events if e.kind == "retry.no_progress_terminal"]
     assert terminal["reason_code"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+
+
+def test_an_owner_candidate_that_changed_but_failed_its_own_gates_is_not_folded(tmp_path):
+    """Negative control (mutant m118): the reopened owner writes a different, broken candidate; its gates fail, so
+    nothing is folded forward and the verification unit is not re-run, whatever landed in the plan worktree."""
+    workspace, _events, result, model_calls, prompts, test_gate_runs = _enforce(tmp_path, owner_fixes=False, owner_breaks=True)
+    status = {r.subtask_id: r.status.value for r in result.subtask_results}
+    assert status == {"s1": "completed", "s2": "failed"}
+    assert test_gate_runs.count("s2") == 1 and result.legacy_result["status"] == "failed"
+    assert any("VERIFICATION FAILURE RECOVERY" in p for p in prompts[1:])
+    assert (workspace / SERVICE).read_text() == BASE_SOURCE
 
 
 def test_the_owner_resolver_walks_declared_dependencies_only():

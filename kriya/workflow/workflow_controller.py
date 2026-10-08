@@ -6831,9 +6831,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     after = tuple(read_file_revision(os.path.join(plan_workspace_path, path)) for path in owner_files)
                     owner_undeclared = sorted(
                         set(owner_result.get("files") or []) - {pf.path for pf in owner.planned_files})
-                    owner_accepted = (
-                        bool(owner_result.get("quality_gates_passed")) and after != before and not owner_undeclared
-                    )
+                    # Acceptance is the byte change in the plan worktree: a unit's candidate lands there only
+                    # after its own gates passed (a failed attempt never applies), so the result's
+                    # quality_gates_passed flag added nothing a test could distinguish (mutant m118 survived
+                    # with it removed - MEASURED: after a reopened owner's failed attempt the worktree still
+                    # held the prior bytes). The flag is recorded below, never relied on; the declared-scope
+                    # check mirrors the owner-recovery path's own (MA6 invariant 4).
+                    owner_accepted = after != before and not owner_undeclared
                     logger.warning(
                         "VERIFICATION_OWNER_RECOVERY_%s verification=%s owner=%s changed=%s gates=%s undeclared=%s",
                         "ACCEPTED" if owner_accepted else "REJECTED", subtask.id, owner.id, after != before,

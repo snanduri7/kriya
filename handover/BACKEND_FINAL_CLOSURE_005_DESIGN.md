@@ -129,6 +129,37 @@ members, the legal plan shape, the verification output) or stop as before. Phase
 for-byte rejected-candidate export, content-addressed, attempt/base bound, local) and `kriya evidence leak-check`
 (blob-level, positive control) are unchanged and remain the standing tools (REJECTED-CANDIDATE-RETENTION-001, OBS-1).
 
-## 6. Mutations, certification, T3 re-run, cohorts
+## 6. Mutations, the T3 re-runs and the oracle correction, certification, cohorts
+
+Mutation campaign (`~/kriya-m1-live/backend-final-closure-005/mutations/run_mutations_005.py`, same protocol as
+batches 003/004): m95-m103 (OD-3), m104-m112 (OD-1), m113-m119 (verify-phase cache, retry grounding, planner guidance,
+verification-owner reopen incl. the explain terminal cause) - every mutant KILLED (m118 only after the broken-owner
+negative control was added, rule 8).
+
+T3 bundle baseline re-runs on the frozen base (`reproducers/`), each preserved:
+| Kriya | Bundle | Prepare | Verify | Reading |
+|---|---|---|---|---|
+| 2f381ee (OD-1) | 004 | **exit 0** (git describe at configuration answered from the export) | exit 2, ORACLE_ENVIRONMENT_PROBLEM: every `./gradlew` died on `gradle-8.10.1-bin.zip.lck (Read-only file system)` | GRADLE-VERIFY-PHASE-CACHE-READONLY-001 (Kriya) |
+| 9b010cd (cache fix) | 004 | exit 0 | exit 1, but HIDDEN without counts (junit engine unavailable offline), COMPAT FAIL on the base itself | the frozen oracle's own defects (harness) |
+| 9b010cd | 005 v2 | exit 0 | exit 1: HIDDEN tests="2" failures="2", COMPAT PASS, REGRESS fails only through the two injected hidden tests | the expected discriminating baseline |
+
+Oracle correction (T3-ORACLE-BASELINE-TOOLCHAIN-001, harness): `base_signatures.txt` had been dumped with the host
+JDK 17 (javac 9+ no longer marks anonymous classes `final`: 43/43 differing lines, `reproducers/t3-compat/`), its sort
+was locale-dependent, and prepare never warmed the test runtime classpath (Gradle's `dependencies` report resolves
+metadata only - MEASURED). v2 assets: the baseline dumped by the container's own toolchain on the frozen base,
+`LC_ALL=C sort`, prepare runs one stable existing test class (`org.hamcrest.core.IsTest`) online so the junit engine is
+cached. Disclosed consequences: a candidate that breaks `IsTest` itself ends INDETERMINATE (prepare) rather than FAIL
+(the pre-existing `compileJava`/`compileTestJava` prepare already had this shape); the regression phase counts the two
+hidden tests. The Batch-004 bundle is untouched (`backend-readiness-004/primary/bundles/T3`); the primary cohort runs
+from `backend-final-closure-005/primary/bundles` through `primary/p5_run.sh` (p4_run.sh with the 005 bundle and output
+roots, otherwise identical: same repositories, bases, goals, dispositions, config, model profile, leak check).
+
+Certification, cohorts: section 8 (pending).
+
+## 7. GUI tail (Phase 18)
+
+(pending)
+
+## 8. Certification and cohort records
 
 (pending)
