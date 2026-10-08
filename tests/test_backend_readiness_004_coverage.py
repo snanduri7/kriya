@@ -260,3 +260,9 @@ def test_10_baseline_fail_from_any_bound_authority_is_the_determinate_signal():
     claim = report.claims["REQ-1"][BEHAVIOR]
     assert claim["state"] == BASELINE_FAIL and report.discriminating and not report.no_mutation_required
     assert {a["kind"]: a["verdict"] for a in claim["authorities"]} == {"goal_examples": "PASS", "external_acceptance_command": "FAIL"}
+    # m37a: one authority passing while the other could not judge is not a baseline PASS
+    partial = run_baseline_authorities(
+        contract, reqs, base_revision="base", run_bundle=lambda: ab.AuthorityRun(verdict=ab.VERDICT_INDETERMINATE),
+        bundle_digest="b" * 64, judge_examples=lambda: {"REQ-1": _Judgment()}, examples_digest="e" * 64)
+    assert partial.claims["REQ-1"][BEHAVIOR]["state"] == "INDETERMINATE" and not partial.no_mutation_required
+    assert not partial.discriminating and partial.unsatisfied == {"REQ-1": [BEHAVIOR]}
