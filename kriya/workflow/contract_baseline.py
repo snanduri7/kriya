@@ -51,6 +51,10 @@ from kriya.workflow.requirements import (
 )
 
 NO_MUTATION_REQUIRED = "NO_MUTATION_REQUIRED"
+# Owner decision D2: an oracle that cannot presently execute under containment
+# is reported, never admitted - a typed stop before any model call.
+VERIFICATION_AUTHORITY_UNAVAILABLE = "VERIFICATION_AUTHORITY_UNAVAILABLE"
+_ENVIRONMENT_REASON_CODES = frozenset({"AUTHORITY_EXECUTION_UNAVAILABLE", "AUTHORITY_PREPARE_FAILED", "AUTHORITY_TIMEOUT"})
 BASELINE_PASS = "PASS"
 BASELINE_FAIL = "FAIL"
 BASELINE_INDETERMINATE = "INDETERMINATE"
@@ -72,6 +76,12 @@ class BaselineAuthorityReport:
     mutation_required: Dict[str, List[str]] = field(default_factory=dict)
     unsatisfied: Dict[str, List[str]] = field(default_factory=dict)
 
+    def unavailable_authorities(self) -> List[Dict[str, Any]]:
+        """The bound authorities whose baseline run was an environment outcome
+        (containment or toolchain unavailable, acquisition failed, timeout):
+        they cannot judge any candidate either, so the run must not proceed."""
+        return [entry for entry in self.authorities_run if entry.get("reason_code") in _ENVIRONMENT_REASON_CODES]
+
     def outcomes(self) -> Dict[str, str]:
         """Per requirement, the outcome the baseline establishes when nothing
         needs to change (HUMAN_ACCEPTED for operator sufficiency, else
@@ -92,6 +102,32 @@ class BaselineAuthorityReport:
                 "claims": {rid: dict(claims) for rid, claims in self.claims.items()},
                 "no_mutation_required": self.no_mutation_required, "discriminating": self.discriminating,
                 "mutation_required": dict(self.mutation_required), "unsatisfied": dict(self.unsatisfied)}
+
+
+class VerificationAuthorityUnavailable(Exception):
+    """A bound authority cannot execute in this environment (D2: fail closed, never admit)."""
+
+    reason_code = VERIFICATION_AUTHORITY_UNAVAILABLE
+
+    def __init__(self, contract: VerificationContract, report: BaselineAuthorityReport) -> None:
+        self.contract = contract
+        self.report = report
+        unavailable = report.unavailable_authorities()
+        listed = "; ".join(f"{e.get('kind')} {str(e.get('digest'))[:12]}: {e.get('reason_code')} ({e.get('reason')})"
+                           for e in unavailable)
+        self.message = (f"{VERIFICATION_AUTHORITY_UNAVAILABLE}: a bound verification authority cannot execute under "
+                        f"Kriya's containment in this environment, so no candidate could ever be judged - {listed}")
+        super().__init__(self.message)
+
+    @property
+    def failure_category(self) -> str:
+        return VERIFICATION_AUTHORITY_UNAVAILABLE.lower()
+
+    def result(self) -> Dict[str, Any]:
+        return {"status": "failure", "quality_gates_passed": False, "files": [], "failure_category": self.failure_category,
+                "reason_codes": [VERIFICATION_AUTHORITY_UNAVAILABLE], "error": self.message,
+                "environment_failure": self.message, "verification_contract": self.contract.report(),
+                "baseline_authority": self.report.to_dict()}
 
 
 class NoMutationRequired(Exception):

@@ -3198,7 +3198,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                     "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                     "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
-                    "verification_authority_required",
+                    "verification_authority_required", "verification_authority_unavailable",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                     "workspace_commit_failed",
                 ):
@@ -3299,6 +3299,14 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         "Nothing was generated and no model was called: the goal does not establish what must be "
                         "verified (an undecidable statement, or no determinate claim at all). Clarify the statement "
                         "named above.",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "verification_authority_unavailable":
+                    click.secho(
+                        f"\n[VERIFICATION AUTHORITY UNAVAILABLE] {res['environment_failure']}\n"
+                        "Nothing was generated and no model was called: a bound verification authority cannot run "
+                        "under Kriya's containment in this environment (containment or toolchain unavailable, its "
+                        "acquisition phase failed, or it timed out), so no candidate could ever be judged.",
                         fg="yellow", bold=True
                     )
                 if res.get("failure_category") == "verification_authority_required":
@@ -4775,7 +4783,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                 "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                 "requirements_unresolved", "contract_registry_blocked", "goal_insufficient_for_verification",
-                    "verification_authority_required",
+                    "verification_authority_required", "verification_authority_unavailable",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                 "workspace_commit_failed",
             ):

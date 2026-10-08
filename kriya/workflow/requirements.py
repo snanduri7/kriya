@@ -638,6 +638,11 @@ _EMPTY_CALL_EXAMPLE = re.compile(r"`[A-Za-z_][\w.]*\(\s*\)`")
 _SIGNATURE = re.compile(r"\b[A-Za-z_]\w*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)")
 _PLACEHOLDER = re.compile(r"<[^<>\s]+>")
 _CLAUSE_SPLIT = re.compile(r"[,;:()]|\bwhile\b")
+# VERIFICATION-CONTRACT-003: a doctest session ("``>>> expr`` then its expected
+# output") states concrete cases; everything from the first prompt on is
+# content, never prose - its ``None``/``def`` tokens are code, not quantifiers.
+_DOCTEST_SESSION = re.compile(r">>>\s.*$")
+_DOCTEST_PROMPT = re.compile(r">>>\s+([^>]+?)(?=\s+>>>\s|\s*$)")
 
 
 def behavior_strength(text: str, *, regression_covered: bool) -> Tuple[str, Dict[str, Any]]:
@@ -652,10 +657,13 @@ def behavior_strength(text: str, *, regression_covered: bool) -> Tuple[str, Dict
     Quoted text and code spans are content, never quantifiers."""
     raw = text or ""
     reasons: List[str] = []
-    parameters = {name.strip() for match in _SIGNATURE.finditer(raw) for name in match.group(1).split(",")}
+    session = _DOCTEST_SESSION.search(raw)
+    doctest_prompts = [m.group(1).strip() for m in _DOCTEST_PROMPT.finditer(session.group(0))] if session else []
+    outside = raw[:session.start()] if session else raw  # the prose around a doctest session
+    parameters = {name.strip() for match in _SIGNATURE.finditer(outside) for name in match.group(1).split(",")}
     parameters -= {"None", "True", "False"}
-    # Example calls, signatures and quoted/code text are content, never prose.
-    prose = _CODE_SPAN.sub(" CODE ", _SIGNATURE.sub(" CODE ", _EXAMPLE_CALL.sub(" CODE ", raw)))
+    # Example calls, signatures, quoted/code text and a doctest session are content, never prose.
+    prose = _CODE_SPAN.sub(" CODE ", _SIGNATURE.sub(" CODE ", _EXAMPLE_CALL.sub(" CODE ", outside)))
     for clause in _CLAUSE_SPLIT.split(prose):
         lowered = clause.lower()
         words = set(re.findall(r"[a-z]+", lowered))
@@ -669,9 +677,10 @@ def behavior_strength(text: str, *, regression_covered: bool) -> Tuple[str, Dict
         formula = sorted(name for name in parameters if re.search(rf"(?<![\w(]){re.escape(name)}(?![\w(])", clause))
         if formula:
             reasons.append(f"formula over parameter(s) {', '.join(formula)}: {clause.strip()!r}")
-    if _PLACEHOLDER.search(raw):
-        reasons.append("placeholder pattern: " + ", ".join(sorted(set(_PLACEHOLDER.findall(raw)))))
-    examples = sorted(set(_EXAMPLE_CALL.findall(raw)) | set(m.strip("`") for m in _EMPTY_CALL_EXAMPLE.findall(raw)))
+    if _PLACEHOLDER.search(outside):
+        reasons.append("placeholder pattern: " + ", ".join(sorted(set(_PLACEHOLDER.findall(outside)))))
+    examples = sorted(set(_EXAMPLE_CALL.findall(outside)) | set(m.strip("`") for m in _EMPTY_CALL_EXAMPLE.findall(outside))
+                      | set(doctest_prompts))
     if not examples:
         reasons.append("no concrete example case is stated")
     strength = BEHAVIOR_GENERAL if reasons else BEHAVIOR_EXACT

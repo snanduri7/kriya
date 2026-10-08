@@ -192,3 +192,61 @@ async def test_07_enforce_path_returns_the_no_mutation_success_before_planning(t
     assert we.planner.run.await_count == 0 and not we.run_generation_workflow.called
     [(details, status)] = _events(cfg, "verification_contract.no_mutation_required")
     assert status == "success" and details["no_mutation_required"] is True
+
+
+def test_08_an_unexecutable_bound_authority_stops_the_run_before_any_model_call():
+    """Owner decision D2: AUTHORITY_EXECUTION_UNAVAILABLE at baseline is a typed stop, never an admission."""
+    bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
+    reqs, contract = _contract(EXACT_GOAL, [bundle])
+    run = SimpleNamespace(verdict="INDETERMINATE", reason_code="AUTHORITY_EXECUTION_UNAVAILABLE", reason="no backend",
+                          evidence=lambda: {"verdict": "INDETERMINATE", "reason_code": "AUTHORITY_EXECUTION_UNAVAILABLE", "reason": "no backend"})
+    report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", run_bundle=lambda: run, bundle_digest="b" * 64)
+    assert report.no_mutation_required is False and len(report.unavailable_authorities()) == 1
+    stop = cb.VerificationAuthorityUnavailable(contract, report)
+    result = stop.result()
+    assert result["status"] == "failure" and result["failure_category"] == "verification_authority_unavailable"
+    assert result["reason_codes"] == [cb.VERIFICATION_AUTHORITY_UNAVAILABLE] and "no backend" in result["error"]
+    # a FAIL or PASS verdict is never "unavailable"
+    ok = SimpleNamespace(verdict="FAIL", reason_code="AUTHORITY_FAILED", reason="exit 1", evidence=lambda: {"reason_code": "AUTHORITY_FAILED"})
+    assert cb.run_baseline_authorities(contract, reqs, base_revision="abc", run_bundle=lambda: ok, bundle_digest="b" * 64).unavailable_authorities() == []
+
+
+@pytest.mark.asyncio
+async def test_09_enforce_path_stops_typed_when_the_bound_authority_cannot_execute(tmp_path):
+    from kriya.workflow import workflow_controller as wc
+    from kriya.workflow.authority_bundle import AuthorityRun
+    from kriya.workflow.plan_schema import ChangeKind
+    from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+
+    workspace = _workspace(tmp_path, CALC_OK)
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    cfg.autonomy.requirement_unknown_policy = "block"
+    cfg.autonomy.requirement_unverified_policy = "block"
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.state = str(tmp_path / "state")
+    we = MagicMock()
+    we.engineering_triage.classify = AsyncMock(return_value=EngineeringRoute(
+        kind=ChangeKind.TASK, impact=ImpactVector(), initial_risk_class=RiskClass.LOW,
+        current_risk_class=RiskClass.LOW, max_observed_risk_class=RiskClass.LOW, execution_weight=ExecutionWeight.LIGHT))
+    we.kernel = SimpleNamespace(config=cfg)
+    we.acceptance = None
+    we.acceptance_approval = None
+    we.requirement_contract = None
+    goal = "TTLCache keeps entries alive one tick too long at the expiry boundary.\n"
+    reqs = derive_requirements(goal)
+    from test_verification_contract_003_authority import _bundle_dir, _load
+    base = _git(workspace, "rev-parse", "HEAD")
+    bundle = _load(tmp_path, _bundle_dir(tmp_path, reqs, base, goal=goal), reqs, base, workspace, goal=goal)
+    we.verification_authority_bundle = bundle
+    we.verification_authorities = (bundle.authority(),)
+    we.planner.run = AsyncMock(return_value="never")
+    unavailable = AuthorityRun(verdict="INDETERMINATE", reason_code="AUTHORITY_EXECUTION_UNAVAILABLE",
+                               reason="an external acceptance command runs only under Kriya's containment")
+    with patch("kriya.workflow.authority_bundle.run_authority_bundle", return_value=unavailable):
+        result = await wc.WorkflowController(we).execute(goal, str(workspace), migration_mode="enforce")
+    legacy = result.legacy_result
+    assert legacy["status"] == "failure" and legacy["failure_category"] == "verification_authority_unavailable"
+    assert we.planner.run.await_count == 0 and not we.run_generation_workflow.called
+    [(details, status)] = _events(cfg, "verification_contract.refused")
+    assert status == "failure" and details["reason_code"] == "VERIFICATION_AUTHORITY_UNAVAILABLE"

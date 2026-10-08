@@ -161,7 +161,7 @@ from kriya.workflow.context_package import (
     make_context_item,
 )
 from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
-from kriya.workflow.contract_baseline import NoMutationRequired
+from kriya.workflow.contract_baseline import NoMutationRequired, VerificationAuthorityUnavailable
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
@@ -3491,6 +3491,11 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+            except VerificationAuthorityUnavailable as stop:
+                # VERIFICATION-CONTRACT-003 (D2): a bound oracle cannot execute under containment here -
+                # typed stop before planning, nothing generated.
+                logger.error(f"WorkflowController enforce run {run_id!r}: {stop.message}")
+                legacy_result = {**stop.result(), "failure_type": "VERIFICATION_AUTHORITY_UNAVAILABLE", "run_id": run_id}
             except NoMutationRequired as decision:
                 # VERIFICATION-CONTRACT-003: the baseline already satisfies every mandatory claim
                 # under the sealed authorities - a success without a model call.
@@ -4068,6 +4073,15 @@ class WorkflowController:
                         message="NO_MUTATION_REQUIRED: the baseline satisfies every mandatory requirement of the goal",
                         details=baseline,
                     ).to_dict())
+                if result.get("failure_category") == "verification_authority_unavailable":
+                    events.append(RunEvent(
+                        kind="verification_contract.refused", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                        message=str(result.get("error") or "")[:600],
+                        details={"reason_code": "VERIFICATION_AUTHORITY_UNAVAILABLE",
+                                 "unavailable": [e for e in (baseline.get("authorities_run") or [])
+                                                 if e.get("reason_code") in ("AUTHORITY_EXECUTION_UNAVAILABLE",
+                                                                             "AUTHORITY_PREPARE_FAILED", "AUTHORITY_TIMEOUT")]},
+                    ).to_dict())
             refusal = result.get("requirements_admission") if isinstance(result.get("requirements_admission"), dict) else None
             if refusal is not None:
                 events.append(RunEvent(
@@ -4308,6 +4322,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             except Exception as exc:  # the authority could not run: recorded, the run proceeds
                 logger.warning(f"WorkflowController enforce run {run_id!r}: baseline authority run unavailable: "
                                f"{type(exc).__name__}: {exc}")
+            if baseline_report is not None and baseline_report.unavailable_authorities():
+                raise VerificationAuthorityUnavailable(verification_contract, baseline_report)
             if baseline_report is not None and baseline_report.no_mutation_required:
                 raise NoMutationRequired(verification_contract, baseline_report)
         available_tool_names = None

@@ -57,6 +57,7 @@ _REAL_FAILURE_TYPES = {
     "goal_insufficient_for_verification": FailureCategory.VERIFICATION,
     # VERIFICATION-CONTRACT-003: refused before any model call, authority missing.
     "verification_authority_required": FailureCategory.VERIFICATION,
+    "verification_authority_unavailable": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
     # PRD-031A: static-analysis gate stops.
     "static_analysis_blocked": FailureCategory.VERIFICATION,

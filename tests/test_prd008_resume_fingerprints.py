@@ -801,3 +801,20 @@ def test_a_skill_change_reopens_the_knowledge_gate_so_nothing_is_reused():
     current = dict(SAME, skills=Fingerprint("other", "b"))
     result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
     assert not build_resume_plan("ckpt", checkpoint, result.invalidated_stages).resumes
+
+
+@pytest.mark.asyncio
+async def test_a_checkpoint_sealed_under_another_verification_contract_is_not_resumed(git_repo):
+    """VERIFICATION-CONTRACT-003: the sealed contract's digest is part of the goal-side resume identity, so a
+    checkpoint recorded under another contract (here: a different digest) never hands its plan to this run."""
+    cfg = _config()
+    save_checkpoint(str(git_repo), "ckpt-plan", {
+        "stage": "plan", "plan": "Stale plan",
+        RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
+            cfg, str(git_repo), goal=GOAL, verification_contract_digest="0" * 64)),
+    })
+    llm = _fresh_run_llm(cfg)
+    result = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
+        goal=GOAL, workspace_path=str(git_repo), resume=True,
+    )
+    assert result["plan"] == "Step 1: Write code" and llm.complete.await_count == 4  # fresh run, not the stale plan

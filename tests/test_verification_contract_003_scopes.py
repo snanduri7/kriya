@@ -343,3 +343,37 @@ def test_16_every_contract_event_kind_in_production_code_is_in_the_closed_table(
         used.update(re.findall(r'"(requirement\.authority_required)"', path.read_text()))
     assert used, "the contract events must be emitted somewhere"
     assert used <= VERIFICATION_CONTRACT_EVENT_KINDS, used - VERIFICATION_CONTRACT_EVENT_KINDS
+
+
+def test_17_the_contract_digest_is_part_of_the_resume_identity(tmp_path):
+    """m02: a changed verification contract regenerates the candidate; unset keeps every fingerprint byte-identical."""
+    from kriya.config.config import AppConfig
+    from kriya.workflow.resume_fingerprints import ARTIFACT_DEPENDENCIES, generation_resume_fingerprints
+
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    without = generation_resume_fingerprints(cfg, str(tmp_path), goal="Fix it.")
+    assert without == generation_resume_fingerprints(cfg, str(tmp_path), goal="Fix it.", verification_contract_digest=None)
+    bound = generation_resume_fingerprints(cfg, str(tmp_path), goal="Fix it.", verification_contract_digest="a" * 64)
+    changed = generation_resume_fingerprints(cfg, str(tmp_path), goal="Fix it.", verification_contract_digest="b" * 64)
+    assert {name for name in without if without[name] != bound[name]} == {"goal"}
+    assert bound["goal"] != changed["goal"] and "goal" in ARTIFACT_DEPENDENCIES["candidate"]
+
+
+def test_19_doctest_sessions_are_concrete_cases_for_the_strength_rule():
+    """A doctest statement is EXACT (its prompts are stated cases; its code is content, not prose); prose with a
+    universal word outside the session keeps it GENERAL; a doctest-less general rule is unchanged."""
+    from kriya.workflow.requirements import BEHAVIOR_EXACT, BEHAVIOR_GENERAL, behavior_strength
+
+    session = (">>> from toolz import interpose >>> list(interpose('a', [])) [] >>> list(interpose('a', iter([]))) [] "
+               ">>> def grab(path, item): ... items.append(item) ... return None")
+    strength, why = behavior_strength(session, regression_covered=False)
+    assert strength == BEHAVIOR_EXACT and len(why["examples"]) >= 3, why
+    strength, why = behavior_strength("It must work for any sequence. " + session, regression_covered=False)
+    assert strength == BEHAVIOR_GENERAL and any("general rule" in r for r in why["reasons"])
+    strength, _ = behavior_strength("double(x) returns 2 * x for any number x.", regression_covered=False)
+    assert strength == BEHAVIOR_GENERAL
+    # and the S1_A/S6_A shapes: the doctest statement is EXACT so compiled examples may close it
+    s6 = _compile("interpose() blows up on an empty sequence.\n\n>>> from toolz import interpose\n>>> list(interpose('a', []))\n[]\n",
+                  external_authorities=[ExternalAuthority("goal_examples", "c" * 64, {"REQ-2": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}})])[1]
+    assert s6.entry("REQ-2").closers == [CLOSER_DERIVED_EXAMPLES] and s6.entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED

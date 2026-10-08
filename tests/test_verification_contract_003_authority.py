@@ -382,3 +382,47 @@ def test_10_a_pass_recorded_for_other_words_never_closes(tmp_path):
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.HUMAN_ACCEPTED
     altered = derive_requirements(GOAL.replace("one tick", "two ticks"))
     assert requirement_outcomes(ledger, altered)["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
+# ---------------------------------------------------------------- mutation survivors of the first campaign (killed here)
+def test_11_a_contract_bound_to_another_bundle_never_consumes_this_bundles_run(tmp_path):
+    """m10: the closure keys on the contract's own bundle digest; another bundle's binding is never served."""
+    ws, reqs, bundle = _loaded(tmp_path)
+    other = ab.ExternalAuthority("external_acceptance_command", "f" * 64,
+                                 {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
+    contract = compile_verification_contract(reqs, origins=statement_origins(GOAL), test_files=[],
+                                             external_authorities=[other], project_language="python")
+    assert contract.entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]
+    ledger = _ledger(reqs)
+    calls = []
+
+    def execute():
+        calls.append(1)
+        return ab.AuthorityRun(verdict=ab.VERDICT_PASS, reason_code="x")
+    assert ab.close_requirements_with_authority_bundle(ledger, reqs, bundle, contract, execute=execute, source="t", revision=1) == []
+    assert calls == [] and requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
+
+
+def test_12_an_external_pass_on_one_claim_never_closes_a_compound_statement(tmp_path):
+    """m14: the record carries the contract's required claims; the API claim must close on its own."""
+    goal = "Do not change the public API; keep the behaviour of all other cache classes unchanged.\n"
+    ws, base = _workspace(tmp_path)
+    reqs = derive_requirements(goal)
+    bundle_dir = _bundle_dir(tmp_path, reqs, base, goal=goal)
+    manifest = json.loads((bundle_dir / "manifest.json").read_text())
+    manifest["covers"][0]["requirement_text_sha256"] = hashlib.sha256(reqs.get("REQ-1").text.encode()).hexdigest()
+    (bundle_dir / "manifest.json").write_text(json.dumps(manifest))
+    bundle = _load(tmp_path, bundle_dir, reqs, base, ws, goal=goal)
+    contract = compile_verification_contract(reqs, origins=statement_origins(goal), test_files=[],
+                                             external_authorities=[bundle.authority()], project_language="python")
+    entry = contract.entry("REQ-1")
+    assert set(entry.required_claims) == {API_PRESERVATION, BEHAVIOR} and contract.refusal() is None
+    ledger = _ledger(reqs)
+    ab.close_requirements_with_authority_bundle(ledger, reqs, bundle, contract,
+                                                execute=lambda: ab.AuthorityRun(verdict=ab.VERDICT_PASS, reason_code="x"),
+                                                source="t", revision=1)
+    assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED  # the API claim is still open
+    from kriya.workflow import api_preservation as api
+    api.close_api_preservation_requirements(ledger, reqs, contract_claims=contract.required_claims_by_requirement(),
+                                            comparison=api.ApiComparison(True, None, (), (), ()), source="t", revision=1)
+    assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.HUMAN_ACCEPTED

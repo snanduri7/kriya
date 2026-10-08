@@ -1139,7 +1139,12 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
     config = getattr(getattr(engine, "kernel", None), "config", None)
     engine.derived_examples = None
     engine.derived_examples_report = None
-    if requirement_goal and config is not None:
+    language = _project_language(tracked)
+    if requirement_goal and config is not None and language != "python":
+        engine.derived_examples_report = {"refusal": {"reason_code": "EXAMPLE_COMPILER_NOT_APPLICABLE",
+                                                      "message": f"the example compiler supports Python projects; "
+                                                                 f"this project is {language or 'of unknown language'}"}}
+    elif requirement_goal and config is not None:
         try:
             artifact, report = derive_example_artifact(requirement_goal, requirement_set,
                                                        state_root=resolve_state_directory(config)[0],
@@ -1155,7 +1160,7 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
         requirement_set, origins=origins, test_files=_candidate_test_files(workspace_path), tracked_paths=tracked,
         migration_identities=_migration_identities(goal, workspace_path),
         acceptance=bound_acceptance(engine), approval=bound_approval(engine),
-        external_authorities=authorities, project_language=_project_language(tracked),
+        external_authorities=authorities, project_language=language,
         tracked_file_reader=_workspace_file_reader(workspace_path), base_revision=_workspace_head(workspace_path),
     )
 
@@ -2743,6 +2748,28 @@ class WorkflowEngine:
                                  f"discriminating={baseline_report.discriminating}"),
                         details=baseline_report.to_dict(),
                     ))
+                    if baseline_report.unavailable_authorities():
+                        # D2: an oracle that cannot execute here can never judge a
+                        # candidate - stop before any model call, typed.
+                        from kriya.workflow.contract_baseline import VerificationAuthorityUnavailable
+
+                        stop = VerificationAuthorityUnavailable(verification_contract, baseline_report)
+                        logger.error(stop.message)
+                        state.record_event(RunEvent(
+                            kind="verification_contract.refused", attempt=0, source="workflow.run_generation_workflow",
+                            authority=EventAuthority.AUTHORITATIVE, message=stop.message[:600],
+                            details={"reason_code": stop.reason_code, "unavailable": baseline_report.unavailable_authorities()},
+                        ))
+                        try:
+                            TraceLogger(trace_db_path(self.kernel.config)).log_run(
+                                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                                attempts=0, status="failure", files_modified=[], failure_category=stop.failure_category,
+                                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                                milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                            )
+                        except Exception as trace_ex:
+                            logger.warning(f"Failed to write run trace: {trace_ex}")
+                        return {**stop.result(), "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
                     if baseline_report.no_mutation_required:
                         decision = NoMutationRequired(verification_contract, baseline_report)
                         logger.info(str(decision))
