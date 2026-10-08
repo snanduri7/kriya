@@ -1489,6 +1489,61 @@ def evidence_verify(ctx: click.Context, run_id: str, json_output: bool) -> None:
         sys.exit(1 if verification.status in (reader.UNSEALED, reader.NOT_FOUND) else 2)
 
 
+@evidence_group.command(name="leak-check")
+@click.argument("run_id")
+@click.option("--hidden", "hidden", multiple=True, required=True, type=click.Path(exists=True, dir_okay=False),
+              help="A file the model must never have seen (hidden test, oracle script); repeatable.")
+@click.option("--public", "public", multiple=True, type=click.Path(exists=True, dir_okay=False),
+              help="The public workspace counterpart(s) of the hidden files: lines they share are expected in prompts "
+                   "and double as the positive control; repeatable.")
+@click.option("--marker", "markers", multiple=True, help="Extra authority markers to grep for; the defaults always apply.")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_leak_check(ctx: click.Context, run_id: str, hidden: tuple, public: tuple, markers: tuple, json_output: bool) -> None:
+    """Prove, at blob level, that hidden oracle content never reached a model-facing request of a sealed run."""
+    from kriya.core.attempt_evidence.leak_check import DEFAULT_MARKERS, LEAKED, check_run_files, summarize
+
+    report = check_run_files(_evidence_state_dir(ctx), run_id, hidden=list(hidden), public=list(public),
+                             markers=tuple(DEFAULT_MARKERS) + tuple(markers)).to_dict()
+    if json_output:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        click.secho(summarize(report), fg="red" if report["verdict"] == LEAKED else "yellow" if report["hits"] or report["problems"] else "green")
+        for hit in report["hits"]:
+            click.echo(f"  HIT {hit['kind']} {hit['blob'][:19]}: {hit['what']}: {hit['unit']}")
+        for problem in report["problems"]:
+            click.echo(f"  {problem}")
+    sys.exit(0 if report["verdict"] == "CLEAN" else 1)
+
+
+@evidence_group.command(name="candidate")
+@click.argument("run_id")
+@click.option("--out", "out_dir", required=True, type=click.Path(file_okay=False),
+              help="Directory to reconstruct the staged candidate into (must lie outside the workspace).")
+@click.option("--attempt", type=int, default=None, help="Attempt number (default: the last staged attempt).")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def evidence_candidate(ctx: click.Context, run_id: str, out_dir: str, attempt: Optional[int], json_output: bool) -> None:
+    """Reconstruct a run's staged (possibly rejected) candidate from its sealed evidence for external judgement."""
+    from kriya.core.attempt_evidence.candidate_export import export_candidate
+
+    try:
+        manifest = export_candidate(_evidence_state_dir(ctx), run_id, out_dir, attempt=attempt, workspace=os.getcwd())
+    except (FileNotFoundError, ValueError) as error:
+        click.secho(str(error), fg="red", err=True)
+        sys.exit(2)
+    if json_output:
+        click.echo(json.dumps(manifest, indent=2, sort_keys=True))
+    else:
+        click.echo(f"Run {run_id} attempt {manifest.get('attempt')}: {len(manifest['paths'])} path(s) reconstructed under "
+                   f"{out_dir}, {len(manifest['without_bytes'])} without bytes; store {manifest['store_verification']}")
+        for entry in manifest["paths"]:
+            click.echo(f"  {entry['path']} after {str(entry.get('after_digest'))[:12]}" + (" (deleted)" if entry["deleted"] else ""))
+        if manifest.get("reason"):
+            click.echo(f"  {manifest['reason']}")
+    sys.exit(0 if manifest["paths"] else 1)
+
+
 @evidence_group.command(name="prune")
 @click.option("--dry-run", is_flag=True, help="Show what would be pruned; write nothing.")
 @click.option("--workspace", type=click.Path(file_okay=False), default=".",
