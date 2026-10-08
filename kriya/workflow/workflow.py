@@ -1141,15 +1141,19 @@ def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str
     engine.derived_examples = None
     engine.derived_examples_report = None
     language = _project_language(tracked)
-    if requirement_goal and config is not None and language != "python":
+    if requirement_goal and config is not None and language not in ("python", "java"):
         engine.derived_examples_report = {"refusal": {"reason_code": "EXAMPLE_COMPILER_NOT_APPLICABLE",
-                                                      "message": f"the example compiler supports Python projects; "
+                                                      "message": f"the example compiler supports Python and Java projects; "
                                                                  f"this project is {language or 'of unknown language'}"}}
     elif requirement_goal and config is not None:
+        # JAVA-EXAMPLE-COMPILER-001: the Java form compiles into a sealed B2-c class the same way.
+        from kriya.workflow.example_oracle_java import derive_java_example_artifact
+
+        derive = derive_java_example_artifact if language == "java" else derive_example_artifact
         try:
-            artifact, report = derive_example_artifact(requirement_goal, requirement_set,
-                                                       state_root=resolve_state_directory(config)[0],
-                                                       candidate_root=workspace_path)
+            artifact, report = derive(requirement_goal, requirement_set,
+                                      state_root=resolve_state_directory(config)[0],
+                                      candidate_root=workspace_path)
         except Exception as exc:  # a compiler defect is recorded, never a silent loss of authority
             artifact, report = None, {"refusal": {"reason_code": "EXAMPLE_COMPILER_ERROR",
                                                   "message": f"{type(exc).__name__}: {exc}"}}
