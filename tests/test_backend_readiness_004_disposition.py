@@ -248,3 +248,17 @@ def test_09_the_template_is_unsealed_and_a_non_claim_statement_needs_no_disposit
     entry = _compile(reqs2, heading, loaded).entry("REQ-1")
     assert entry.status == "NOT_A_CLAIM" and entry.disposition is None  # structure decides first; nothing to remove
     assert ExternalAuthority  # imported for parity with the coverage module's surface
+
+
+def test_10_a_goal_whose_every_statement_is_dispositioned_is_refused_never_a_no_mutation_success(tmp_path):
+    """m49: a dispositioned statement is not mandatory - and with nothing mandatory left there is nothing to verify,
+    so the goal is refused (GOAL_INSUFFICIENT_FOR_VERIFICATION) rather than succeeding with zero obligations."""
+    goal = "Both cases worked in the version we used before.\n"
+    ws, base, reqs, loaded, _p = _bind(tmp_path, goal, [("REQ-1", None, rd.HISTORICAL_CONTEXT, "a remark")])
+    contract = _compile(reqs, goal, loaded)
+    assert contract.mandatory_entries() == [] and contract.entry("REQ-1").status == STATUS_DISPOSITIONED
+    refusal = contract.refusal()
+    assert refusal is not None and refusal.reason_code == "GOAL_INSUFFICIENT_FOR_VERIFICATION"
+    assert "operator-dispositioned" in refusal.residual[0]["why"]
+    report = run_baseline_authorities(contract, reqs, base_revision=base, judge_suite=lambda: "PASS")
+    assert not report.no_mutation_required
