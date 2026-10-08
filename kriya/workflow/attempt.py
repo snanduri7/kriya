@@ -76,6 +76,7 @@ from kriya.workflow.attribution import (
 from kriya.workflow.authority_escalation import grant_member_hints
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.context_budget import (
+    REASON_MINIMUM_AUTHORITY_UNFIT,
     DeveloperRequestFit,
     OptionalSection,
     _reserve_graph_context_budget,
@@ -577,22 +578,30 @@ def _resolve_known_target_member_hints(
     dropped here, never fabricated. Reuses CurrentSourceResolver as-is;
     this function makes no root-selection decision of its own."""
     candidates_by_path = {
-        path: list(names) for path, names in ctx.retrieval_member_hints.items()
+        path: names for path, names in ctx.retrieval_member_hints.items()
         if path in known_target_files and names
     }
-    # KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001 (BACKEND-READINESS-004 cohort,
-    # T2): the goal's own qualified names ("Element.absUrl(...)") are a second
-    # grounded source - the USER named that member of that owner. A name is a
-    # candidate only for a known target whose file is the owner it qualifies
-    # (Element.java for Element.absUrl; never Node.attr into Element.java), and
-    # it is validated against the current member boundaries exactly like a
-    # retrieval hint below: nothing is invented for a name no boundary carries.
+    return _validated_member_hints(ctx, candidates_by_path)
+
+
+def _goal_named_member_hints(ctx: "AttemptContext", known_target_files: List[str]) -> Dict[str, List[str]]:
+    """KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001 (BACKEND-READINESS-004 cohort,
+    T2): the goal's own qualified names ("Element.absUrl(...)") as member
+    candidates for the known target whose file is the owner they qualify
+    (Element.java for Element.absUrl; never Node.attr into Element.java),
+    validated against the current member boundaries exactly like a retrieval
+    hint - nothing is invented for a name no boundary carries. Used only as the
+    capacity fallback below: a target that fits whole keeps its full source."""
+    candidates_by_path: Dict[str, List[str]] = {}
     for path in known_target_files:
         owner = os.path.splitext(os.path.basename(path))[0]
-        for member in _goal_named_members_of(ctx.goal, owner):
-            if member not in candidates_by_path.setdefault(path, []):
-                candidates_by_path[path].append(member)
-    candidates_by_path = {path: names for path, names in candidates_by_path.items() if names}
+        members = _goal_named_members_of(ctx.goal, owner)
+        if members:
+            candidates_by_path[path] = members
+    return _validated_member_hints(ctx, candidates_by_path)
+
+
+def _validated_member_hints(ctx: "AttemptContext", candidates_by_path: Dict[str, List[str]]) -> Dict[str, List[str]]:
     if not candidates_by_path:
         return {}
     resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)
@@ -2416,6 +2425,33 @@ def _developer_optional_sections(
     if reference is not None:
         sections.append(reference)
     return tuple(sections)
+
+
+def _target_package_with_goal_member_fallback(
+    ctx: "AttemptContext", paths: List[str], limit: int, prompt_window: int, member_hints: Dict[str, List[str]],
+) -> Tuple[str, Any, Optional[Dict[str, Any]]]:
+    """KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001: the attempt-1 package, rebuilt
+    once with the goal's own named members of a target as member hints when -
+    and only when - that target's whole source was omitted as
+    minimum_authority_unfit (its minimum unit, the whole file, exceeds the
+    protected room: P4-T2's Element.java). A target that fits whole, or that
+    already has a hint, is never demoted to a member-only view. Returns
+    (rendered, package, fallback evidence or None)."""
+    rendered, package = _target_package_with_window_reserve(ctx, paths, limit, prompt_window, member_hints)
+    unfit = sorted({
+        entry["path"] for entry in package.omitted
+        if entry.get("reason") == REASON_MINIMUM_AUTHORITY_UNFIT and entry["path"] not in member_hints
+    })
+    if not unfit:
+        return rendered, package, None
+    goal_hints = {path: names for path, names in _goal_named_member_hints(ctx, unfit).items() if names}
+    if not goal_hints:
+        return rendered, package, None
+    merged = {**member_hints, **goal_hints}
+    rendered, package = _target_package_with_window_reserve(ctx, paths, limit, prompt_window, merged)
+    return rendered, package, {"unfit_targets": unfit, "goal_member_hints": goal_hints,
+                               "tiers": [{"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                                         for item in package.relevant_files]}
 
 
 def _target_package_with_window_reserve(
@@ -7456,9 +7492,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # gets {} and build_known_target_context() falls back to its
             # existing file-level handling unchanged.
             known_target_member_hints = _resolve_known_target_member_hints(ctx, known_target_files)
-            known_target_rendered, known_target_package = _target_package_with_window_reserve(
+            known_target_rendered, known_target_package, goal_member_fallback = _target_package_with_goal_member_fallback(
                 ctx, known_target_files, known_target_limit, active_prompt_window, known_target_member_hints,
             )
+            if goal_member_fallback:
+                state.record_event(RunEvent(
+                    kind="context.known_target_goal_member_fallback", attempt=state.attempt_number,
+                    source="attempt.run_attempt", authority=EventAuthority.ADVISORY,
+                    message="a known target's whole source did not fit the protected room; the goal's own named "
+                            "members of that owner were added as member hints and the package rebuilt",
+                    details=goal_member_fallback,
+                ))
             if known_target_rendered:
                 active_code_context += known_target_rendered
                 logger.info(

@@ -710,13 +710,22 @@ def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint
     """P4-T2 (jsoup): the subtask's only target, Element.java (21,042 tokens), had no member hint although the goal
     names Element.absUrl(...), so the whole file was the minimum unit, did not fit the 4,176-token protected room and
     the attempt stopped typed before any model call. The goal's own qualified names of the planned owner are now a
-    second grounded hint source, validated against the current member boundaries like a retrieval hint."""
+    grounded member-hint source, validated against the current member boundaries like a retrieval hint - applied
+    ONLY as the capacity fallback (a target whose whole source does not fit); a target that fits whole keeps its
+    full, authoritative source (the full-file rewrite tests of tests/test_full_file_final_newline.py)."""
     from test_dev_inv_001_investigation import _minimal_attempt_ctx
 
-    from kriya.workflow.attempt import _goal_named_members_of, _resolve_known_target_member_hints
+    from kriya.workflow.attempt import (
+        _goal_named_member_hints,
+        _goal_named_members_of,
+        _resolve_known_target_member_hints,
+        _target_package_with_goal_member_fallback,
+    )
 
+    filler = "".join(f"    public int helper{i}(int a) {{\n        return a + {i};\n    }}\n\n" for i in range(400))
     element = ("package org.jsoup.nodes;\n\npublic class Element extends Node {\n"
                "    public String attr(String attributeKey) {\n        return super.attr(attributeKey);\n    }\n\n"
+               + filler +
                "    public String absUrl(String attributeKey) {\n        return StringUtil.resolve(baseUri(), attr(attributeKey));\n    }\n}\n")
     (tmp_path / "Element.java").write_text(element)
     (tmp_path / "Node.java").write_text("package org.jsoup.nodes;\n\npublic class Node {\n    public String attr(String k) {\n        return \"\";\n    }\n}\n")
@@ -725,12 +734,19 @@ def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint
     assert _goal_named_members_of(goal, "Element") == ["absUrl"]
     assert _goal_named_members_of(goal, "Node") == ["attr"] and _goal_named_members_of(goal, "StringUtil") == []
     ctx = _minimal_attempt_ctx(tmp_path, goal=goal, retrieval_member_hints={})
-    hints = _resolve_known_target_member_hints(ctx, ["Element.java", "Node.java"])
+    hints = _goal_named_member_hints(ctx, ["Element.java", "Node.java"])
     assert [h.split(".")[-1].split("(")[0] for h in hints["Element.java"]] == ["absUrl"]  # never Node.attr into Element.java
     assert [h.split(".")[-1].split("(")[0] for h in hints["Node.java"]] == ["attr"]
-    # a goal-named member no boundary carries is dropped, never fabricated; retrieval hints still merge
-    assert _resolve_known_target_member_hints(_minimal_attempt_ctx(tmp_path, goal="Element.vanish(...) is broken.",
-                                                                   retrieval_member_hints={}), ["Element.java"]) == {}
-    merged = _resolve_known_target_member_hints(_minimal_attempt_ctx(tmp_path, goal=goal, retrieval_member_hints={"Element.java": ["attr"]}),
-                                                ["Element.java"])
-    assert sorted(h.split(".")[-1].split("(")[0] for h in merged["Element.java"]) == ["absUrl", "attr"]
+    # a goal-named member no boundary carries is dropped, never fabricated; retrieval hints are untouched by the goal
+    assert _goal_named_member_hints(_minimal_attempt_ctx(tmp_path, goal="Element.vanish(...) is broken.",
+                                                         retrieval_member_hints={}), ["Element.java"]) == {}
+    assert _resolve_known_target_member_hints(ctx, ["Element.java"]) == {}
+    # the measured shape: Element.java's whole source is unfit for the room -> the fallback adds absUrl and rebuilds
+    rendered, package, fallback = _target_package_with_goal_member_fallback(ctx, ["Element.java"], 900, 8000, {})
+    assert fallback is not None and fallback["unfit_targets"] == ["Element.java"]
+    assert [m.split(".")[-1].split("(")[0] for m in fallback["goal_member_hints"]["Element.java"]] == ["absUrl"]
+    exact = [i for i in package.relevant_files if i.path == "Element.java" and i.tier == "member_exact" and i.is_exact]
+    assert exact and "StringUtil.resolve(baseUri()" in rendered
+    # a small target that fits whole is shown whole and exact, never demoted: no fallback, full tier
+    rendered, package, fallback = _target_package_with_goal_member_fallback(ctx, ["Node.java"], 900, 8000, {})
+    assert fallback is None and [i.tier for i in package.relevant_files if i.path == "Node.java"] == ["full"]
