@@ -616,6 +616,11 @@ FINITE_EVIDENCE_METHODS = frozenset({"acceptance_oracle"})
 # B3: human authority over an exact approved suite (not finite-evidence gated;
 # only ever a BEHAVIOR claim, never a whole-requirement closure record).
 HUMAN_ACCEPTANCE_METHOD = "human_bound_acceptance"
+# Operator sufficiency, never a proof: B3's approved suite and VERIFICATION-
+# CONTRACT-003's sealed external oracle. Both close claims only (never a whole
+# requirement), bind to the requirement's exact words at read time, and make
+# the outcome HUMAN_ACCEPTED.
+OPERATOR_SUFFICIENCY_METHODS = frozenset({HUMAN_ACCEPTANCE_METHOD, "external_acceptance_command"})
 
 _UNIVERSAL_WORDS = frozenset({
     "any", "anything", "every", "everything", "all", "each", "only", "never", "always", "whatever", "whichever",
@@ -773,8 +778,8 @@ def _effective_closure(
     if (closure is not None and closure.get("method") in FINITE_EVIDENCE_METHODS
             and not _finite_evidence_may_close(requirement, tuple(closure.get("required_claims") or ()))):
         closure = None
-    if closure is not None and closure.get("method") == HUMAN_ACCEPTANCE_METHOD:
-        closure = None  # B3 closes only the BEHAVIOR claim, never a whole requirement
+    if closure is not None and closure.get("method") in OPERATOR_SUFFICIENCY_METHODS:
+        closure = None  # operator sufficiency closes claims only, never a whole requirement
     if closure is not None:
         return closure
     claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id) for claim in CLAIM_KINDS}
@@ -790,9 +795,10 @@ def _effective_closure(
     if (behavior is not None and behavior.get("method") in FINITE_EVIDENCE_METHODS
             and not _finite_evidence_may_close(requirement, required)):
         return None  # B2-COV: finite cases never close a general rule, whatever a record says
-    if (behavior is not None and behavior.get("method") == HUMAN_ACCEPTANCE_METHOD
-            and not _human_acceptance_binds(requirement, behavior)):
-        return None  # B3: the approval was for other words (a resumed or altered record)
+    for record in claims.values():
+        if (record is not None and record.get("method") in OPERATOR_SUFFICIENCY_METHODS
+                and not _human_acceptance_binds(requirement, record)):
+            return None  # the operator's sufficiency was for other words (a resumed or altered record)
     if required and all(claims.get(claim) for claim in required):
         return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
@@ -941,7 +947,9 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
                 or _claim_counter_evidence(ledger, requirement.id, evidence_id) is not None):
             outcome = RequirementOutcome.VIOLATED
         elif closure is not None and outcome in (RequirementOutcome.UNVERIFIED, RequirementOutcome.SATISFIED):
-            human = ((closure.get("claims") or {}).get(BEHAVIOR) or {}).get("method") == HUMAN_ACCEPTANCE_METHOD
+            # Operator sufficiency on any claim makes the whole outcome HUMAN_ACCEPTED (never "verified").
+            human = any((record or {}).get("method") in OPERATOR_SUFFICIENCY_METHODS
+                        for record in (closure.get("claims") or {}).values())
             outcome = RequirementOutcome.HUMAN_ACCEPTED if human else RequirementOutcome.CLOSED_BY_EVIDENCE
         elif outcome is RequirementOutcome.SATISFIED:
             # FS-1B: a SATISFIED verdict record without deterministic closure

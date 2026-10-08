@@ -477,6 +477,7 @@ class TerminalGateService:
                     close_requirements_by_test_addition,
                     close_requirements_by_test_immutability,
                     close_requirements_with_acceptance_tests,
+                    close_requirements_with_authority_bundle_evidence,
                     close_requirements_with_derived_examples,
                     close_requirements_with_named_tests,
                 )
@@ -520,6 +521,12 @@ class TerminalGateService:
                 # VERIFICATION-CONTRACT-003: the contract's other closers on this final candidate.
                 contract_closures: List[Dict[str, Any]] = []
                 if contract is not None:
+                    contract_closures += await asyncio.to_thread(
+                        close_requirements_with_authority_bundle_evidence, autonomy, ledger, requirement_set, contract,
+                        request.candidate_root, request.workspace_path, engine=request.engine, revision="terminal",
+                        toolchain_declaration_mutable=toolchain_declaration_mutable(WriteScopeMode.DENY_ALL, (), request.plan),
+                        tree_binding=tree_binding,
+                    )
                     contract_closures += await asyncio.to_thread(
                         close_requirements_with_derived_examples, autonomy, ledger, requirement_set,
                         request.candidate_root, request.workspace_path, engine=request.engine,

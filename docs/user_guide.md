@@ -703,21 +703,52 @@ A violated requirement always blocks success. `autonomy.requirement_unknown_poli
 that unit before its changes are applied, with `[REQUIREMENTS UNRESOLVED]`, and is not retried (the Developer
 cannot supply a verdict). The production profile seals both to `block`. Both fields are SECURITY_AUTHORITY.
 
-Under `requirement_unverified_policy: block` a requirement that nothing deterministic can ever close could only
-ever fail, so Kriya decides that before the first model call (REQUIREMENT-CLOSURE-PLAIN-GOAL-001): every
-requirement of the goal must have a deterministic closer, else the run is refused with
-`[GOAL INSUFFICIENT FOR VERIFICATION]` (`failure_category: goal_insufficient_for_verification`,
-`requirements_admission` lists each residual requirement, why, and the accepted forms). The closers a plain goal can
-have, besides the acceptance file and the approval below: a statement naming existing test files (those tests are
-run); a whole-suite preservation statement such as `Every existing test must keep passing unchanged.` (the
-candidate's own full suite must run to completion, green, with complete structured evidence); a test-immutability
-constraint such as `Do not change any existing test.` (decided from what the run changed); `Do not modify any other
-file.` when the goal names the file(s) to change; a statement of a dependency migration the repository resolves
-(on its own: a coordinated clause beside it is residual). A command or path may sit in parentheses or backticks next
-to a suite statement; a request hidden there, or a fenced block, makes the statement residual. Anything else - a
-behaviour described in prose, a general rule, an API-preservation ask - is residual: model judgment
-never closes it (`MODEL_CLAIMED` is advisory evidence only), so give it an acceptance case or restate it. Under the
-default `record` policy nothing is refused and such requirements are reported as before.
+Before the first model call Kriya compiles the goal's requirements into a **verification contract**
+(VERIFICATION-CONTRACT-003): for every derived statement, what kind of claim it makes, which deterministic closer
+may close each claim, and which authority supplies that closer's evidence. The contract is sealed (stored
+content-addressed under the state directory's `verification-contracts/`, its digest joining the resume identity on
+both execution paths) and reported as `verification_contract` in the result and the trace events
+`verification_contract.compiled` / `verification_contract.sealed`. Claim kinds are decided structurally, from the
+statement's own words and its place in the goal (closed vocabularies, never a model): behaviour (EXACT when it states
+concrete cases, GENERAL otherwise), regression preservation, test immutability, mutation scope, public-API
+preservation, documentation, a procedure, a test addition, a dependency migration. A heading or label
+(`Reproducer 2:`, `Specification:`) or a bare indented code block that states no expected value is a structural
+NON_CLAIM: it stays in the set, in lineage and in every report (`not_a_claim`, reason `STRUCTURAL_NON_CLAIM`) but
+needs no closure. A descriptive sentence, a request or a constraint is never a NON_CLAIM. A compound statement
+("do not change the public API or existing tests; keep the behaviour of all other classes unchanged") makes every
+clause's claim and closes only when each is closed.
+
+Under `requirement_unverified_policy: block` the contract refuses, before any model call, a goal it cannot admit:
+
+- `[GOAL INSUFFICIENT FOR VERIFICATION]` (`failure_category: goal_insufficient_for_verification`): the goal does not
+  establish what must be verified - an undecidable statement (`Do not modify any other file.` with no named file
+  to change, or ambiguous path roles) or no determinate claim at all;
+- `[VERIFICATION AUTHORITY REQUIRED]` (`failure_category: verification_authority_required`): every statement is
+  clear, but a mandatory claim has no bound deterministic authority. `requirements_admission.residual` lists, per
+  requirement, the claim, its strength, why the bound closers cannot close it and the acceptable authority types.
+
+Both leave the workspace untouched, call no model and write a sealed trace. The closers a plain goal can have: a
+statement naming existing test files (those tests are run); a whole-suite preservation statement such as `Every
+existing test must keep passing unchanged.` (the candidate's own full suite must run to completion, green, with
+complete structured evidence); a test-immutability constraint such as `Do not change any existing test.`; `Do not
+modify any other file.` when the goal names the file(s) to change; a dependency migration the repository resolves;
+a public-API preservation constraint on a Python project (the public-signature predicate, base versus candidate);
+a conditional documentation request whose referent the repository does not have (`... if there is one`); `add a
+test for it` (a new runnable test file or test identity); an EXACT behaviour statement whose own example lines Kriya
+compiles into a sealed acceptance module (doctest `>>>` sessions, `expression -> literal`, `expression -> raises
+Error`; the module imports the candidate's flat-layout package, runs under the acceptance boundary, and closes only
+EXACT statements - finite examples never prove a general rule); and the operator authorities below. An acceptance
+file alone no longer admits a GENERAL statement (it could only end `REQUIREMENTS UNRESOLVED` after model calls); the
+approval is the authority for it. Model judgment never closes anything (`MODEL_CLAIMED` is advisory evidence only).
+Under the default `record` policy nothing is refused and such requirements are reported as before.
+
+When the contract binds a behaviour authority (an acceptance file, the goal's examples, a verification authority),
+Kriya runs it against the untouched baseline before the first model call (`verification_contract.baseline`): for a
+defect-fix goal the authority is expected to fail there (`discriminating`). When the baseline already satisfies every
+mandatory claim - every behaviour claim passes, preservation/immutability/scope/API claims hold because nothing
+changes, and nothing asks for a new artifact (a test addition, a migration, an unconditional documentation entry) -
+the run ends `[NO MUTATION REQUIRED]` (`status: success`, `no_mutation_required: true`, no model called, no file
+changed): a false premise never forces a change. `add a test for it` still requires one.
 
 In a milestone plan the check runs in the final integration unit, so earlier milestones are already committed
 when it runs. If it fails, the plan is not successful, and the result's `committed_work_units` (with
@@ -1095,6 +1126,34 @@ When the goal is written as an issue report (headings, a reproducer, version not
 The contract is the complete set: nothing derived from the goal is added. The goal is still what the agents read and plan from. `kind` is `requirement` or `constraint`; an empty set, a duplicate id or another kind is refused before any model call. Acceptance files and approvals must name these ids; an approval for a contract run uses format `kriya.acceptance_approval/2` with the contract's `requirement_set_sha256`, so an approval made for another requirement set never applies. Changing the contract (or the goal it was bound to) on a resumed run regenerates the candidate.
 
 A requirement stated as a general rule cannot be closed by any finite list of passing cases. If you decide that a specific acceptance suite is good enough evidence for such a requirement, say so explicitly with an approval file kept outside the repository (`--acceptance-approval approval.json`). Each approval names one requirement and binds the goal, that requirement's exact text, the acceptance file's digest, its exact cases, the runner contract and the starting revision, with `"accept_suite_as_sufficient": true`; any mismatch refuses it. The requirement is then reported `human_accepted` - your decision, recorded as such, not a proof. A failing case still makes it VIOLATED, and changing or dropping the approval on a resumed run regenerates the candidate.
+
+#### Supplying a sealed verification authority (`--verification-authority`)
+
+An oracle you hold outside Kriya's acceptance-file form - a fresh-install check, a hidden upstream test suite, a
+signature baseline, a tamper check - can be registered as a **verification authority**: a JSON manifest
+(`kriya.verification_authority/1`) beside its assets, outside the repository:
+
+```json
+{"format": "kriya.verification_authority/1", "authority_id": "ttlcache-oracle", "type": "external_acceptance_command",
+ "goal_sha256": "...", "requirement_set_sha256": "...", "base_revision": "...",
+ "assets": {"oracle/prepare.sh": "<sha256>", "oracle/verify.sh": "<sha256>", "hidden/test_ttl.py": "<sha256>"},
+ "prepare": ["sh", "oracle/prepare.sh"], "verify": ["sh", "oracle/verify.sh"], "timeout_seconds": 900,
+ "toolchain": {"language": "python", "build_tool": "pip"}, "verdict_protocol": "exit_code", "visibility": "hidden",
+ "covers": [{"requirement_id": "REQ-1", "requirement_text_sha256": "...", "claim": "BEHAVIOR",
+             "accepted_strength": "GENERAL", "accept_as_sufficient": true,
+             "why": "the hidden test asserts the expiry boundary"}]}
+```
+
+It binds the goal, the requirement set and each covered requirement's exact text, the workspace's HEAD and the
+project's language; every asset must match its digest; any mismatch is a typed refusal before any model call
+(`AUTHORITY_GOAL_MISMATCH`, `AUTHORITY_BASE_MISMATCH`, ...). The bundle is stored content-addressed under the state
+directory's `verification-authority/` and its digest joins the contract. It runs only under Kriya's containment
+(`autonomy.contained_execution_required`), never on the host: the candidate is copied to a Kriya-owned scratch,
+the assets are staged read-only beside it, `prepare` runs with registry-only network (the dependency-acquisition
+authority) and `verify` with network denied; exit 0 is PASS, exit 1 is FAIL, anything else (a timeout, a changed
+asset, a candidate changed during the run, an unavailable toolchain or containment: `AUTHORITY_EXECUTION_UNAVAILABLE`)
+closes nothing. A PASS closes the covered claims as operator sufficiency (`human_accepted`, never "verified"); a
+FAIL is deterministic counter-evidence (`violated`). The bundle's bytes never reach a prompt (`visibility: hidden`).
 
 #### Resuming an interrupted run
 `generate` (and `fix`, below) checkpoint after each stage - Plan, Design, and Developer output that's already passed Quality Gates - to `.kriya/checkpoints/` in your workspace. If a run gets killed or crashes partway through, re-run the *exact same command* (same goal, same workspace, same config) with `--resume` to pick up the most recent checkpoint of a plain `generate`/`fix` run (a milestone's checkpoint is never picked up here - see §3.4.1), or `--resume-id <id>` for a specific one (the `id` is printed if the run finishes without quality gates passing):

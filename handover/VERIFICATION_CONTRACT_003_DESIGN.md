@@ -81,3 +81,21 @@ requirement.authority_required. All BACKEND_EVENT_ADDED; persisted via the trace
 
 ## 9. Deferred (registry rows)
 Java API-preservation predicate; Java example compiler; Gradle JVM acceptance; VENV-ADDITIVE-REUSE-001.
+
+## 10. As built (2026-10-08, feature/verification-contract)
+| Slice | Modules | Tests |
+|---|---|---|
+| 1 scopes + contract + taxonomy | `requirement_scopes.py`, `contract_compilation.py`, `requirements.py` (origins, NOT_A_CLAIM, claim kinds, AdmissionRefusal/GoalAdmissionError/VerificationAuthorityRequired), `resume_fingerprints.py`, `control/state.py`, both paths, `failure_reporting.py`, `cli.py` banners | `tests/test_verification_contract_003_scopes.py` |
+| 2 closers | `example_oracle.py`, `api_preservation.py`, `contract_closers.py`, contract-aware `acceptance_oracle.close_requirements_with_acceptance`, named-test / suite / immutability closers, both boundaries | `tests/test_verification_contract_003_closers.py` |
+| 3 authority bundle (D2) | `authority_bundle.py` (manifest `kriya.verification_authority/1`, store, contained two-phase adapter, verdict protocol, integrity, closure as operator sufficiency), `cli.py --verification-authority`, both boundaries | `tests/test_verification_contract_003_authority.py` |
+| 4 baseline + NO_MUTATION_REQUIRED | `contract_baseline.py`, `workflow.run_contract_baseline`, both paths, enforce trace events, CLI banner | `tests/test_verification_contract_003_baseline.py` |
+
+Semantic changes recorded: an acceptance file alone no longer admits a GENERAL statement (B2-COV decided before any
+model call; the approval is the authority); the enforce ControlState refuses subtask reuse under another or no
+verification contract (`VERIFICATION_CONTRACT_CHANGED`, fail closed for states recorded before contracts existed);
+`requirement_outcomes` reports HUMAN_ACCEPTED when any claim closed by operator sufficiency (B3 or the external
+oracle). Known limits recorded: the Java API predicate, the Java example compiler and Gradle JVM acceptance are
+registry rows (P3); a prose parenthetical beside a clause-only constraint keeps its behaviour claim (fail closed);
+the baseline authority run executes the bound authorities once per run on the untouched tree (cost accepted).
+GUI/KUP: every new fact is a run event in the trace row (`verification_contract.*`, `requirement.authority_required`)
+- BACKEND_EVENT_ADDED; no new store. Mutation campaign: `~/kriya-m1-live/verification-contract-003/mutations/run_mutations.py`.

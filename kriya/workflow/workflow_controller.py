@@ -161,6 +161,7 @@ from kriya.workflow.context_package import (
     make_context_item,
 )
 from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
+from kriya.workflow.contract_baseline import NoMutationRequired
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
@@ -3490,6 +3491,11 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+            except NoMutationRequired as decision:
+                # VERIFICATION-CONTRACT-003: the baseline already satisfies every mandatory claim
+                # under the sealed authorities - a success without a model call.
+                logger.info(f"WorkflowController enforce run {run_id!r}: {decision}")
+                legacy_result = {**decision.result(), "run_id": run_id}
             except AdmissionRefusal as e:
                 # VERIFICATION-CONTRACT-003 (D3): GoalAdmissionError or VerificationAuthorityRequired,
                 # both before any retrieval, planning or model call.
@@ -4048,6 +4054,20 @@ class WorkflowController:
                 message=f"verification contract {str(contract.get('contract_digest'))[:12]}: {contract.get('admission')}; {totals}",
                 details=contract,
             ).to_dict())
+            baseline = result.get("baseline_authority") if isinstance(result.get("baseline_authority"), dict) else None
+            if baseline is not None:
+                events.append(RunEvent(
+                    kind="verification_contract.baseline", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                    message=(f"baseline authority run: no_mutation_required={baseline.get('no_mutation_required')}, "
+                             f"discriminating={baseline.get('discriminating')}"), details=baseline,
+                ).to_dict())
+                if result.get("no_mutation_required"):
+                    events.append(RunEvent(
+                        kind="verification_contract.no_mutation_required", attempt=0, source=source,
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message="NO_MUTATION_REQUIRED: the baseline satisfies every mandatory requirement of the goal",
+                        details=baseline,
+                    ).to_dict())
             refusal = result.get("requirements_admission") if isinstance(result.get("requirements_admission"), dict) else None
             if refusal is not None:
                 events.append(RunEvent(
@@ -4276,6 +4296,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if admission is not None:
                 raise admission
         sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
+        baseline_report = None
+        if verification_contract.authorities and verification_contract.refusal() is None and kernel_config is not None:
+            from kriya.workflow.workflow import run_contract_baseline
+
+            try:
+                baseline_report = run_contract_baseline(
+                    self.workflow_engine, verification_contract,
+                    requirement_set_for(goal, bound_requirement_contract(self.workflow_engine)), workspace_path,
+                    autonomy_cfg=autonomy, config=kernel_config)
+            except Exception as exc:  # the authority could not run: recorded, the run proceeds
+                logger.warning(f"WorkflowController enforce run {run_id!r}: baseline authority run unavailable: "
+                               f"{type(exc).__name__}: {exc}")
+            if baseline_report is not None and baseline_report.no_mutation_required:
+                raise NoMutationRequired(verification_contract, baseline_report)
         available_tool_names = None
         if kernel is not None:
             try:
@@ -7049,6 +7083,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # VERIFICATION-CONTRACT-003: the sealed contract this run executed under
         # (its report; the trace row derives the contract events from it).
         aggregated["verification_contract"] = {**verification_contract.report(), "stored_path": sealed_contract_path}
+        if baseline_report is not None:
+            aggregated["baseline_authority"] = baseline_report.to_dict()
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state

@@ -1203,6 +1203,89 @@ def close_requirements_by_test_immutability(
     )
 
 
+def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, workspace_path: str, *,
+                          autonomy_cfg: Any, config: Any) -> Any:
+    """VERIFICATION-CONTRACT-003: run every bound behaviour authority against
+    the untouched baseline (kriya/workflow/contract_baseline.py) through the
+    same producers the pre-apply boundary uses, before the first model call.
+    Returns the BaselineAuthorityReport; never raises for an authority that
+    cannot run (its verdict is INDETERMINATE there)."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.acceptance_jvm import run_java_acceptance
+    from kriya.workflow.acceptance_oracle import judge_acceptance, run_acceptance
+    from kriya.workflow.authority_bundle import bound_authority_bundle, run_authority_bundle
+    from kriya.workflow.contract_baseline import run_baseline_authorities
+    from kriya.workflow.example_oracle import bound_derived_examples
+
+    base_revision = _workspace_head(workspace_path)
+    state_root = resolve_state_directory(config)[0] if config is not None else None
+
+    def validator_for(root: str) -> PolymorphicValidator:
+        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+
+    def judge(artifact: Any) -> Callable[[], Mapping[str, Any]]:
+        def run() -> Mapping[str, Any]:
+            if artifact.language == "java":
+                executed = run_java_acceptance(artifact, workspace_path, candidate_paths=(), base_revision=base_revision,
+                                               validator_factory=validator_for)
+            else:
+                executed = run_acceptance(artifact, workspace_path, candidate_paths=(),
+                                          validator_factory=lambda: validator_for(workspace_path))
+            return judge_acceptance(artifact, executed)
+        return run
+
+    bundle = bound_authority_bundle(engine)
+    acceptance = bound_acceptance(engine)
+    examples = bound_derived_examples(engine)
+    return run_baseline_authorities(
+        contract, requirement_set, base_revision=base_revision,
+        run_bundle=(lambda: run_authority_bundle(bundle, workspace_path, state_root=state_root, validator_factory=validator_for))
+        if bundle is not None and state_root else None,
+        bundle_digest=bundle.digest if bundle is not None else None,
+        judge_acceptance=judge(acceptance) if acceptance is not None else None,
+        acceptance_digest=acceptance.digest if acceptance is not None else None,
+        judge_examples=judge(examples) if examples is not None else None,
+        examples_digest=examples.digest if examples is not None else None,
+    )
+
+
+def close_requirements_with_authority_bundle_evidence(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
+    engine: Any, revision: Any, toolchain_declaration_mutable: bool, tree_binding: Any = None,
+) -> List[Dict[str, Any]]:
+    """VERIFICATION-CONTRACT-003 (D2): the operator's sealed external oracle
+    (kriya/workflow/authority_bundle.py) judges the requirements the sealed
+    contract bound to it, run once on a Kriya-owned copy of the candidate
+    through the production containment boundary (the validator the gates
+    use, with the run's toolchain authority)."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.authority_bundle import (
+        bound_authority_bundle,
+        close_requirements_with_authority_bundle,
+        run_authority_bundle,
+    )
+
+    bundle = bound_authority_bundle(engine)
+    if bundle is None or contract is None:
+        return []
+    config = getattr(getattr(engine, "kernel", None), "config", None)
+    state_root = resolve_state_directory(config)[0] if config is not None else None
+    if state_root is None:
+        return []
+
+    def validator_for(root: str) -> PolymorphicValidator:
+        built = PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+                                     toolchain_declaration_mutable=toolchain_declaration_mutable)
+        built.tree_binding = tree_binding
+        return built
+
+    return close_requirements_with_authority_bundle(
+        ledger, requirement_set, bundle, contract,
+        execute=lambda: run_authority_bundle(bundle, candidate_root, state_root=state_root, validator_factory=validator_for),
+        source="requirement_closure.external_acceptance_command", revision=revision,
+    )
+
+
 def close_requirements_by_api_preservation(
     ledger: Any, requirement_set: Any, contract: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any,
@@ -2638,6 +2721,46 @@ class WorkflowEngine:
                          "authorities": [a.to_dict() for a in verification_contract.authorities],
                          "visibility": verification_contract.visibility()},
             ))
+            # The baseline authority run: deterministic evidence before any
+            # model call; a baseline that already satisfies every mandatory
+            # claim is NO_MUTATION_REQUIRED (a success without a model).
+            if verification_contract.authorities and verification_contract.refusal() is None:
+                from kriya.core.trace import TraceLogger
+                from kriya.workflow.contract_baseline import NoMutationRequired
+
+                try:
+                    baseline_report = run_contract_baseline(
+                        self, verification_contract, requirement_set, workspace_path,
+                        autonomy_cfg=self.kernel.config.autonomy, config=self.kernel.config)
+                except Exception as exc:  # the authority could not run: recorded, the run proceeds
+                    logger.warning(f"Baseline authority run unavailable: {type(exc).__name__}: {exc}")
+                    baseline_report = None
+                if baseline_report is not None:
+                    state.record_event(RunEvent(
+                        kind="verification_contract.baseline", attempt=0, source="workflow.run_generation_workflow",
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message=(f"baseline authority run: no_mutation_required={baseline_report.no_mutation_required}, "
+                                 f"discriminating={baseline_report.discriminating}"),
+                        details=baseline_report.to_dict(),
+                    ))
+                    if baseline_report.no_mutation_required:
+                        decision = NoMutationRequired(verification_contract, baseline_report)
+                        logger.info(str(decision))
+                        state.record_event(RunEvent(
+                            kind="verification_contract.no_mutation_required", attempt=0,
+                            source="workflow.run_generation_workflow", authority=EventAuthority.AUTHORITATIVE,
+                            message=str(decision), details=baseline_report.to_dict(),
+                        ))
+                        try:
+                            TraceLogger(trace_db_path(self.kernel.config)).log_run(
+                                run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                                attempts=0, status="success", files_modified=[],
+                                milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                                milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                            )
+                        except Exception as trace_ex:
+                            logger.warning(f"Failed to write run trace: {trace_ex}")
+                        return {**decision.result(), "goal": goal, "workspace_path": workspace_path, "run_id": trace_id}
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
 
@@ -4712,6 +4835,12 @@ class WorkflowEngine:
                     # referent - each closer bound by the sealed contract.
                     contract_closures: List[Dict[str, Any]] = []
                     for closer_name, closer_call in (
+                        ("external authority", lambda: close_requirements_with_authority_bundle_evidence(
+                            self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set,
+                            verification_contract, worktree_path, workspace_path, engine=self,
+                            revision=state.attempt_number,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan))),
                         ("derived examples", lambda: close_requirements_with_derived_examples(
                             self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set, worktree_path,
                             workspace_path, engine=self, modified=state.all_files_written,

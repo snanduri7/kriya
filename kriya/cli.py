@@ -2622,13 +2622,15 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--acceptance', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator acceptance file (Python/pytest) whose cases prove the goal's behaviour requirements: each case carries @pytest.mark.kriya_requirement(\"REQ-n\"). Bound before generation; the only evidence that can close a behaviour requirement.")
 @click.option('--acceptance-approval', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator approval (JSON, outside the workspace) that the --acceptance suite is SUFFICIENT evidence for named GENERAL requirements - human authority, not a proof (B3). Every binding (goal, requirement text, acceptance digest, cases, runner contract, base revision) must match.")
 @click.option('--requirements', 'requirements_file', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.")
+@click.option('--verification-authority', 'verification_authority', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator verification authority (JSON kriya.verification_authority/1 beside its assets, outside the workspace): a sealed external acceptance command Kriya runs under its containment against a copy of the candidate, covering the requirements it declares (operator sufficiency, never a proof). Bound before any model call; its digest joins the verification contract.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str], verification_authority: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                        resume, resume_id, json_output, from_milestones, output, acceptance=acceptance,
-                       acceptance_approval=acceptance_approval, requirements_file=requirements_file)
+                       acceptance_approval=acceptance_approval, requirements_file=requirements_file,
+                       verification_authority=verification_authority)
 
 
 def _bind_requirement_contract(cfg: AppConfig, contract_path: str, requirement_goal: str) -> Any:
@@ -2655,6 +2657,24 @@ def _bind_acceptance(cfg: AppConfig, acceptance_path: str, requirement_goal: str
                            resolve_state_directory(cfg)[0])
 
 
+def _bind_verification_authority(cfg: AppConfig, authority_path: str, requirement_goal: str, workspace: str,
+                                 contract: Any = None) -> Any:
+    """VERIFICATION-CONTRACT-003 (D2): reads, validates and stores the
+    operator's sealed external verification authority before any model call,
+    bound to the goal, the authoritative requirement set, the workspace's
+    HEAD and the project's language. Raises AuthorityBundleError."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.authority_bundle import load_authority_bundle
+    from kriya.workflow.requirement_contract import requirement_set_for
+    from kriya.workflow.workflow import _project_language, _tracked_workspace_paths, _workspace_head
+
+    return load_authority_bundle(
+        authority_path, requirement_set_for(requirement_goal, contract), requirement_goal,
+        state_root=resolve_state_directory(cfg)[0], workspace=workspace, base_revision=_workspace_head(workspace),
+        project_language=_project_language(_tracked_workspace_paths(workspace)),
+    )
+
+
 def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, acceptance: Any,
                    contract: Any = None) -> Any:
     """FS-1C2 B3: reads, validates and stores the operator's approval before
@@ -2676,7 +2696,7 @@ def _bind_approval(cfg: AppConfig, approval_path: str, requirement_goal: str, ac
 
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
-                   acceptance_approval=None, requirements_file=None):
+                   acceptance_approval=None, requirements_file=None, verification_authority=None):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -2743,12 +2763,28 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     f"{acceptance_artifact.digest[:12]} ({len(acceptance_artifact.cases)} case(s) for "
                     f"{', '.join(acceptance_artifact.requirement_ids)})", dim=True, err=True)
 
+    authority_bundle = None
+    if verification_authority:
+        from kriya.workflow.authority_bundle import AuthorityBundleError
+        try:
+            authority_bundle = _bind_verification_authority(cfg, verification_authority, requirement_goal or "",
+                                                            os.getcwd(), contract_artifact)
+        except AuthorityBundleError as e:
+            click.secho(f"[Verification authority refused] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        click.secho(f"Verification authority bound: {authority_bundle.authority_id} sha256 {authority_bundle.digest[:12]} "
+                    f"(covers {', '.join(sorted(authority_bundle.covers))}; operator sufficiency, not a proof; runs "
+                    "under containment only)", dim=True, err=True)
+
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
     we.acceptance = acceptance_artifact
     we.acceptance_approval = approval_artifact
     we.requirement_contract = contract_artifact
+    we.verification_authority_bundle = authority_bundle
+    we.verification_authorities = (authority_bundle.authority(),) if authority_bundle is not None else ()
     if approval_artifact is not None:
         click.secho(f"Acceptance approval bound: {approval_artifact.source_name} sha256 {approval_artifact.digest[:12]} "
                     f"(human acceptance authority for {', '.join(sorted(approval_artifact.entries))}; not a proof)",
@@ -3335,6 +3371,17 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         bold=True, fg="red",
                     )
                 click.echo(res.get("review"))
+        elif res.get("no_mutation_required"):
+            # VERIFICATION-CONTRACT-003: the baseline already satisfied every mandatory requirement under the
+            # sealed verification authorities - a legitimate success, no model was called, nothing changed.
+            outcomes = (res.get("requirements") or {}).get("outcomes") or {}
+            click.secho(
+                "\n[NO MUTATION REQUIRED] The baseline already satisfies every mandatory requirement of the goal "
+                "under the sealed verification authorities; no model was called and no file changed. "
+                + ("Requirement outcomes: " + ", ".join(f"{rid}={outcome}" for rid, outcome in sorted(outcomes.items()))
+                   if outcomes else ""),
+                fg="green", bold=True,
+            )
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
             # Found live, 2026-08-25 (ignite_qpid_protocol, workflow_controller.enabled
