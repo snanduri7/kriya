@@ -1254,6 +1254,24 @@ def frozen_file_paths(contract: Any) -> Dict[str, List[str]]:
             for rid, binding in contract.binding_closers(FILE_IMMUTABILITY)}
 
 
+def documentation_referent_paths(contract: Any) -> List[str]:
+    """PLAN-DOCUMENTATION-UNIT-VERIFICATION-001: the tracked documentation
+    files a sealed contract judges deterministically (the referents of its
+    DOCUMENTATION claims bound to the documentation-entries predicate) - a
+    planning input: a unit that edits only these declares no verification
+    of its own."""
+    from kriya.workflow.contract_compilation import CLOSER_DOCUMENTATION_LIST_ENTRIES
+
+    if contract is None:
+        return []
+    paths: List[str] = []
+    for _rid, binding in contract.binding_closers(CLOSER_DOCUMENTATION_LIST_ENTRIES):
+        for path in binding.detail.get("paths") or ():
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
 def close_requirements_by_file_immutability(
     ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     candidate_paths: Iterable[str], revision: Any, contract: Any = None,

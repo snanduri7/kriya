@@ -420,6 +420,7 @@ async def validate_plan(
     stack_contract: Optional[StackContract] = None,
     immutable_test_files: Optional[Iterable[str]] = None,
     frozen_files: Optional[Iterable[str]] = None,
+    documentation_paths: Optional[Iterable[str]] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
     known_requirement_ids: Optional[Iterable[str]] = None,
@@ -1050,21 +1051,40 @@ async def validate_plan(
         # model_subtask_unscoped just above - both are "is this MODEL
         # subtask's own execution contract complete" checks, both meaningful
         # only when the caller is enforcing that contract at all.
+        # PLAN-DOCUMENTATION-UNIT-VERIFICATION-001 (BACKEND-FINAL-CLOSURE-005,
+        # P4-T5-r2 / P5-T5 measured twice): a subtask that only edits the
+        # documentation a sealed contract judges deterministically (the
+        # DOCUMENTATION claim's referent, closed by the documentation-entries
+        # predicate at the terminal gate) had no legal verification shape - a
+        # judgment item has no evidence producer, a runtime item is
+        # unjustified, and no verifier at all was "acceptance path missing";
+        # the Planner circled through every rejection. Its evidence producer
+        # IS the sealed predicate: such a unit declares no verification.
+        documentation_only = bool(
+            documentation_paths and st.planned_files
+            and all(pf.path in set(documentation_paths) for pf in st.planned_files)
+        )
         if require_model_planned_files and st.execution_method == ExecutionMethod.MODEL:
             for vm in st.verification:
                 if not vm.has_evidence_producer:
+                    hint = (
+                        f" This subtask edits only documentation the sealed verification contract judges "
+                        f"deterministically ({[pf.path for pf in st.planned_files]!r}): declare verification: [] "
+                        "for it - the contract's documentation predicate is its evidence."
+                        if documentation_only else
+                        " The requirement cannot remain judgment-only if satisfying it requires application "
+                        "execution; revise the verification method to an executable verifier appropriate to the "
+                        "requirement (verifier_kind=compile/test for build/test evidence, or "
+                        "verifier_kind=application_runtime with requires_runtime_execution=true when only "
+                        "running the application can prove it)."
+                    )
                     errors.append(
                         f"subtask {st.id!r} verification requirement {vm.description!r} "
                         f"(verifier_kind={vm.verifier_kind.value if vm.verifier_kind else None!r}, "
                         f"requires_runtime_execution={vm.requires_runtime_execution!r}, "
                         f"tool_name={vm.tool_name!r}) has no executable or deterministic evidence "
                         "producer - no execution mechanism Kriya has can ever confirm this "
-                        "requirement passed. The requirement cannot remain judgment-only if "
-                        "satisfying it requires application execution; revise the verification "
-                        "method to an executable verifier appropriate to the requirement "
-                        "(verifier_kind=compile/test for build/test evidence, or "
-                        "verifier_kind=application_runtime with requires_runtime_execution=true "
-                        "when only running the application can prove it)."
+                        "requirement passed." + hint
                     )
                     reason_codes.append("VERIFICATION_EVIDENCE_PATH_MISSING")
             # PLAN-EXECUTABILITY-001: a mutation unit that declares no
@@ -1074,7 +1094,10 @@ async def validate_plan(
             # producer is PRV-11's defect just above, reported once there.
             # Judgment criteria beside a real verifier stay valid (every
             # measured live plan, the judge-verified successes included).
-            if st.planned_files and not st.verification and not _cites_deterministic_criterion(st, criteria_by_id):
+            # A documentation-only unit (above) is judged by the sealed
+            # contract's own deterministic predicate, never by a model.
+            if (st.planned_files and not st.verification and not documentation_only
+                    and not _cites_deterministic_criterion(st, criteria_by_id)):
                 errors.append(
                     f"subtask {st.id!r} changes files {[pf.path for pf in st.planned_files]!r} but "
                     "has no deterministic verifier - no compile, test or runtime check Kriya can run "

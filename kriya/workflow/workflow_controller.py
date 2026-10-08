@@ -4446,11 +4446,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
         # PLAN-TEST-IMMUTABILITY-SCOPE-001: existing test files the contract's
         # TEST_IMMUTABILITY claim freezes - a planning constraint, never a model input.
-        from kriya.workflow.workflow import frozen_file_paths, immutable_test_files
+        from kriya.workflow.workflow import documentation_referent_paths, frozen_file_paths, immutable_test_files
 
         immutable_tests = immutable_test_files(verification_contract, workspace_path)
         # OD-3: the files the goal froze by name (FILE_IMMUTABILITY) - the same kind of planning constraint.
         frozen_files = sorted({path for paths in frozen_file_paths(verification_contract).values() for path in paths})
+        # PLAN-DOCUMENTATION-UNIT-VERIFICATION-001: documentation the sealed contract judges itself.
+        documentation_paths = documentation_referent_paths(verification_contract)
         baseline_report = None
         if verification_contract.authorities and verification_contract.refusal() is None and kernel_config is not None:
             from kriya.workflow.contract_baseline import BaselineAuthorityReport
@@ -4832,7 +4834,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stack_contract=derive_stack_contract(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                         known_requirement_ids=requirement_set.ids,
-                        immutable_test_files=immutable_tests, frozen_files=frozen_files,
+                        immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -5817,7 +5819,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
                         stack_contract=derive_stack_contract(goal),
                         known_requirement_ids=requirement_set.ids,
-                        immutable_test_files=immutable_tests, frozen_files=frozen_files,
+                        immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -5956,7 +5958,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             require_semantic_contracts=True,
                             runtime_verification_required=goal_requires_runtime_behavior(goal),
                             stack_contract=derive_stack_contract(goal),
-                            immutable_test_files=immutable_tests, frozen_files=frozen_files,
+                            immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
                         )
                         if obligation_ledger:
                             obligation_ledger.record(ObligationRecord(

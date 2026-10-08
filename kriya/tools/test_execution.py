@@ -382,13 +382,14 @@ def parse_pytest_case_evidence(data: bytes) -> Dict[str, Any]:
 
 
 def _jvm_report_dirs(workspace: str, build_system: str) -> List[str]:
-    from kriya.tools.validate import _project_dirs
+    from kriya.tools.validate import _project_dirs, gradle_project_dirs
 
     if build_system == "maven":
         return [os.path.join(d, "target", "surefire-reports")
                 for d in _project_dirs(workspace, lambda files: "pom.xml" in files)]
-    return [os.path.join(d, "build", "test-results")
-            for d in _project_dirs(workspace, lambda files: "build.gradle" in files or "build.gradle.kts" in files)]
+    # GRADLE-SUBPROJECT-BUILD-FILE-001: every Gradle project, including a subproject whose build file is named
+    # after its directory - the same set the Gradle adapter's output roots and the gate's clearing use.
+    return [os.path.join(d, "build", "test-results") for d in gradle_project_dirs(workspace)]
 
 
 def _jvm_reports(directory: str) -> List[str]:

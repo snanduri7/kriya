@@ -38,13 +38,13 @@ class GradleBuildAdapter(BuildAdapter):
         return any(os.path.exists(os.path.join(workspace_root, script)) for script in _PROJECT_SCRIPTS)
 
     def output_roots(self, cmd: List[str], cwd: str) -> List[str]:
-        """``build/`` of every project (``build.gradle[.kts]``) plus the root
+        """``build/`` of every project (``build.gradle[.kts]``, or the
+        ``<directory>.gradle[.kts]`` a renaming settings file gives a
+        subproject - GRADLE-SUBPROJECT-BUILD-FILE-001) plus the root
         ``.gradle/`` cache."""
-        from kriya.tools.validate import _project_dirs
+        from kriya.tools.validate import gradle_project_dirs
 
-        return ([os.path.join(d, "build") for d in _project_dirs(
-            cwd, lambda files: any(script in files for script in _PROJECT_SCRIPTS))]
-                + [os.path.join(cwd, ".gradle")])
+        return [os.path.join(d, "build") for d in gradle_project_dirs(cwd)] + [os.path.join(cwd, ".gradle")]
 
     @staticmethod
     def command(workspace_root: str) -> str:

@@ -388,11 +388,11 @@ def build_structured_plan_repair_prompt(
         if _names_a_verifier_kind_as_a_type(errors):
             targeted_correction += (
                 "- The errors show a check's KIND used where only 'tool' or 'judgment' is legal (a verification "
-                "item's type, an acceptance criterion's method). Express the check as type 'tool' and put the kind "
-                "in tool_name (compile, test, regression or application_runtime; set requires_runtime_execution "
-                "true and verifier_kind 'application_runtime' for a runtime check); an acceptance criterion that "
-                "a tool proves is method 'tool' with that tool_name. Use 'judgment' only for what no tool can "
-                "check.\n"
+                "item's type, an acceptance criterion's method). A compile/test/regression check is type 'tool' "
+                "with that kind as tool_name (and verifier_kind). A check that only running the application can "
+                "prove is type 'judgment' with NO tool_name, verifier_kind 'application_runtime' and "
+                "requires_runtime_execution true, all together. An acceptance criterion a tool proves is method "
+                "'tool' with that tool_name; 'judgment' is for what no tool can check.\n"
             )
     if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
         targeted_correction += (
@@ -447,7 +447,10 @@ def build_structured_plan_repair_prompt(
             "- all four together; never set type=tool or any tool_name for this case. If it can be "
             "confirmed by compiling or running the test suite instead, set type=tool with "
             "tool_name=compile/verifier_kind=compile or tool_name=test/verifier_kind=test instead. "
-            "Do not just restate the same judgment-only shape.\n"
+            "Do not just restate the same judgment-only shape. If an error says the subtask edits only "
+            "documentation the sealed verification contract judges deterministically, declare verification: [] "
+            "for that subtask (and no runtime verifier): the contract's documentation predicate is its "
+            "evidence.\n"
         )
     if "MUTATION_UNIT_ACCEPTANCE_PATH_MISSING" in reason_codes:
         targeted_correction += (

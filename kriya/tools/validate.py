@@ -294,6 +294,29 @@ def _project_dirs(cwd: str, holds: Callable[[List[str]], bool]) -> List[str]:
     return found
 
 
+_GRADLE_BUILD_SCRIPTS = ("build.gradle", "build.gradle.kts")
+
+
+def gradle_project_dirs(cwd: str) -> List[str]:
+    """Every Gradle project directory under ``cwd`` (inclusive): one holding
+    ``build.gradle[.kts]``, or - Gradle's own convention for a build whose
+    settings rename each subproject's build file after its directory
+    (``childProject.buildFileName = "${childProject.name}.gradle"``) -
+    ``<directory name>.gradle[.kts]``. GRADLE-SUBPROJECT-BUILD-FILE-001
+    (BACKEND-FINAL-CLOSURE-005, MEASURED on JavaHamcrest: ``hamcrest/
+    hamcrest.gradle``): a subproject the old predicate missed had its
+    ``build/test-results`` never cleared nor read, so the suite's structured
+    evidence was STRUCTURED_REPORT_MISSING and a correct candidate's
+    suite-preservation requirement could never close (a false negative)."""
+    found = []
+    for directory, subdirs, files in os.walk(cwd):
+        subdirs[:] = [d for d in subdirs if d not in _GATE_WALK_SKIP and not d.startswith(".")]
+        name = os.path.basename(directory)
+        if any(script in files for script in _GRADLE_BUILD_SCRIPTS) or f"{name}.gradle" in files or f"{name}.gradle.kts" in files:
+            found.append(directory)
+    return found
+
+
 def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     """FILE-INTEGRITY-CONTRACT-001B: where the toolchain ``cmd`` invokes
     writes its own build output, by that tool's documented default layout -

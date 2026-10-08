@@ -21,8 +21,10 @@ def _prompt(errors):
 
 def test_a_check_kind_used_as_a_type_gets_the_legal_shape_named():
     prompt = _prompt([PYDANTIC_ERROR])
-    assert "type 'tool' and put the kind in tool_name" in prompt
-    assert "application_runtime" in prompt and "requires_runtime_execution" in prompt
+    # the schema's own shapes (VerificationMethod.has_evidence_producer): compile/test are tool + tool_name, a
+    # runtime check is judgment + verifier_kind application_runtime + requires_runtime_execution, no tool_name
+    assert "type 'tool' with that kind as tool_name" in prompt
+    assert "type 'judgment' with NO tool_name, verifier_kind 'application_runtime' and requires_runtime_execution true" in prompt
     assert "method 'tool' with that tool_name" in prompt
 
 
@@ -31,6 +33,6 @@ def test_other_schema_errors_keep_the_generic_correction_only():
                "  Input should be a valid dictionary [type=dict_type, input_value='compile', input_type=str]\n")
     prompt = _prompt([generic])
     assert "never use a string verification item" in prompt
-    assert "put the kind in tool_name" not in prompt
+    assert "that kind as tool_name" not in prompt
     # a kind that is not a check kind is not mapped either
-    assert "put the kind in tool_name" not in _prompt([PYDANTIC_ERROR.replace("application_runtime", "manual")])
+    assert "that kind as tool_name" not in _prompt([PYDANTIC_ERROR.replace("application_runtime", "manual")])

@@ -369,6 +369,15 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
             continue
         opened = _STRUCTURED_OPEN_RE.match(line)
         if not opened:
+            # PROTOCOL-FEEDBACK-EDIT-OPENING-001 (BACKEND-FINAL-CLOSURE-005, P5-T2: six of eight attempts began
+            # with a SEARCH line, once carrying a path, and the message named only the symptom): the
+            # diagnostic names the missing frame. The parse outcome is unchanged (INVALID), the wire
+            # protocol is unchanged - this is the repair prompt's text only.
+            if line.startswith(("<<<KRIYA:SEARCH", "<<<KRIYA:REPLACE", "<<<KRIYA:END_EDIT")):
+                return _fail(INVALID_EDIT_PROTOCOL,
+                             f"{line!r} appeared outside an EDIT block - an edit begins with "
+                             f"<<<KRIYA:EDIT path=\"{filepath}\">>> on its own line (SEARCH and REPLACE lines carry "
+                             "no path), its SEARCH/REPLACE pairs follow, and <<<KRIYA:END_EDIT>>> closes it")
             return _fail(INVALID_EDIT_PROTOCOL, f"unexpected protocol line {line!r}")
         kind, path = opened.group(1), opened.group(2)
         normalized = normalize_protocol_path(path)
