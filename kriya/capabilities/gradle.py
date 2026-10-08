@@ -7,12 +7,11 @@ containment, resource limits, gate binding); this module never starts a
 process itself. The project's wrapper (``./gradlew``) is used when it ships
 one, else ``gradle`` from PATH.
 
-R1 support is what the validator already had: a root ``build.gradle`` (Groovy
-DSL) marks the project; ``compileJava`` / ``test`` run once at the root, which
-covers every subproject the root build includes. A Kotlin-DSL-only root
-(``build.gradle.kts``) is not detected yet - recorded as a capability gap
-(registry GRADLE-KOTLIN-DSL-001), not silently widened here. Output roots
-already know both DSLs, as before.
+A root ``build.gradle`` (Groovy DSL) or - GRADLE-KOTLIN-DSL-001, BACKEND-
+READINESS-004 - ``build.gradle.kts`` (Kotlin DSL) marks the project; the
+commands are the wrapper's own tasks and do not depend on the script
+language. ``compileJava`` / ``test`` run once at the root, which covers every
+subproject the root build includes. Output roots already knew both DSLs.
 """
 from __future__ import annotations
 
@@ -36,7 +35,7 @@ class GradleBuildAdapter(BuildAdapter):
     tools = frozenset({"gradle", "gradlew", "gradle.bat"})
 
     def detects(self, workspace_root: str) -> bool:
-        return os.path.exists(os.path.join(workspace_root, BUILD_SCRIPT))
+        return any(os.path.exists(os.path.join(workspace_root, script)) for script in _PROJECT_SCRIPTS)
 
     def output_roots(self, cmd: List[str], cwd: str) -> List[str]:
         """``build/`` of every project (``build.gradle[.kts]``) plus the root

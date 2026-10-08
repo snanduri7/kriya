@@ -454,6 +454,7 @@ class AcceptanceRun:
     # B2-c (JVM) only: the trust-surface digest checked before the run, the
     # candidate's main classes and per-case report detail.
     language: str = "python"
+    runner: Optional[str] = None  # B2-c: the JVM runner detected for this run (maven / gradle)
     trust_surface_digest: Optional[str] = None
     candidate_classes: Optional[List[str]] = None
     case_details: Optional[Dict[str, List[Dict[str, str]]]] = None
@@ -824,7 +825,8 @@ def close_requirements_with_acceptance(
             if judgment.passed and strength != BEHAVIOR_EXACT:
                 record(requirement, evidence_id, ObligationStatus.SATISFIED,
                        {**detail, "reason_code": judgment.code}, claim=BEHAVIOR_EXAMPLES)
-                problem = approval_problem(approval, requirement, requirements, acceptance, base_revision)
+                problem = approval_problem(approval, requirement, requirements, acceptance, base_revision,
+                                           runner_digest=judgment.evidence.get("runner_contract_digest"))
                 if problem is None:
                     # B3: human authority over this exact suite - not a proof.
                     code, method = ACCEPTANCE_HUMAN_ACCEPTED, HUMAN_ACCEPTANCE_METHOD

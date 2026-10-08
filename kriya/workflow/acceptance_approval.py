@@ -88,12 +88,15 @@ def text_sha256(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
-def runner_contract_digest(acceptance: Any) -> str:
-    """The acceptance runner contract an approval binds (per language)."""
+def runner_contract_digest(acceptance: Any, workspace: Optional[str] = None) -> str:
+    """The runner contract the acceptance artifact runs under: Python's, or
+    for a Java artifact the JVM runner detected at ``workspace`` (Maven /
+    Gradle; GRADLE-JVM-ACCEPTANCE-001) - Maven when no workspace is given."""
     if getattr(acceptance, "language", "python") == "java":
-        from kriya.workflow.acceptance_jvm import RUNNER_SOURCE_DIGEST
+        from kriya.workflow.acceptance_jvm import JVM_RUNNER, detect_jvm_runner, runner_source_digest
 
-        return RUNNER_SOURCE_DIGEST
+        runner = (detect_jvm_runner(workspace) if workspace else None) or JVM_RUNNER
+        return runner_source_digest(runner)
     from kriya.workflow.acceptance_oracle import RUNNER_CONTRACT_DIGEST
 
     return RUNNER_CONTRACT_DIGEST
@@ -139,7 +142,7 @@ def load_approval(
     if not base_revision:
         raise _refuse("the workspace has no base revision to bind the approval to")
     entries: Dict[str, ApprovalEntry] = {}
-    runner = runner_contract_digest(acceptance)
+    runner = runner_contract_digest(acceptance, workspace)
     for raw in document["approvals"]:
         if not isinstance(raw, dict) or set(raw) != set(fields):
             raise _refuse("each approval has exactly these fields: " + ", ".join(fields))
@@ -201,17 +204,18 @@ def _entry_mismatch(
 
 def approval_problem(
     approval: Optional[AcceptanceApproval], requirement: Any, requirements: Any, acceptance: Any,
-    base_revision: Optional[str],
+    base_revision: Optional[str], runner_digest: Optional[str] = None,
 ) -> Optional[str]:
     """Why ``approval`` does not make the suite sufficient for ``requirement``
-    at this closure (None: it does)."""
+    at this closure (None: it does). ``runner_digest``: the contract the run
+    actually judged under (its evidence), never re-detected here."""
     if approval is None:
         return "no human approval"
     entry = approval.entries.get(requirement.id)
     if entry is None:
         return f"the approval does not cover {requirement.id}"
-    return _entry_mismatch(entry, requirement, requirements, acceptance, runner_contract_digest(acceptance),
-                           base_revision)
+    return _entry_mismatch(entry, requirement, requirements, acceptance,
+                           runner_digest or runner_contract_digest(acceptance), base_revision)
 
 
 def bound_approval(engine: Any) -> Optional[AcceptanceApproval]:
@@ -219,7 +223,8 @@ def bound_approval(engine: Any) -> Optional[AcceptanceApproval]:
     return approval if isinstance(approval, AcceptanceApproval) else None
 
 
-def approval_template(requirements: Any, acceptance: Any, requirement_ids: List[str], base_revision: str) -> Dict[str, Any]:
+def approval_template(requirements: Any, acceptance: Any, requirement_ids: List[str], base_revision: str,
+                      workspace: Optional[str] = None) -> Dict[str, Any]:
     """An UNAPPROVED approval document for the operator to review: every
     binding filled in, ``accept_suite_as_sufficient`` false - only the
     operator flips it."""
@@ -229,7 +234,7 @@ def approval_template(requirements: Any, acceptance: Any, requirement_ids: List[
         requirement = requirements.get(rid)
         entries.append({**ApprovalEntry(rid, text_sha256(requirement.text), requirements.goal_digest,
                                         acceptance.digest, tuple(sorted(acceptance.identities_for(rid))),
-                                        runner_contract_digest(acceptance), base_revision,
+                                        runner_contract_digest(acceptance, workspace), base_revision,
                                         requirements.digest if explicit else None).to_dict(),
                         "accept_suite_as_sufficient": False})
     return {"format": APPROVAL_FORMAT_V2 if explicit else APPROVAL_FORMAT, "approvals": entries}

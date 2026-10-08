@@ -333,19 +333,23 @@ def test_no_base_revision_is_no_trust_anchor(tmp_path, ws):
     assert run.refusal.reason_code == jvm.ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE
 
 
-def test_a_gradle_or_non_maven_project_is_refused(tmp_path):
+def test_a_project_without_a_root_build_script_is_refused(tmp_path):
+    """Gradle projects are supported since BACKEND-READINESS-004 (tests/test_backend_readiness_004_gradle_acceptance.py);
+    a tree with neither a pom.xml nor a build.gradle[.kts] at the root has no JVM runner."""
     from _b2c_fixtures import _git
 
-    gradle = tmp_path / "g"
-    (gradle / "src/main/java/demo").mkdir(parents=True)
-    (gradle / "build.gradle").write_text("plugins { id 'java' }\n")
-    (gradle / TARGET).write_text(calc_with_clamp("correct"))
-    _git(gradle, "init", "-q")
-    _git(gradle, "add", "-A")
-    _git(gradle, "commit", "-q", "-m", "base")
-    run = jvm.run_java_acceptance(_artifact(tmp_path), str(gradle), candidate_paths=[TARGET],
-                                  base_revision=base_revision(gradle), validator_factory=_validator(gradle))
-    assert run.refusal.reason_code == "ACCEPTANCE_RUNNER_UNSUPPORTED"
+    bare = tmp_path / "g"
+    (bare / "src/main/java/demo").mkdir(parents=True)
+    (bare / "app" ).mkdir()
+    (bare / "app" / "build.gradle").write_text("plugins { id 'java' }\n")  # nested only: not a root build
+    (bare / TARGET).write_text(calc_with_clamp("correct"))
+    _git(bare, "init", "-q")
+    _git(bare, "add", "-A")
+    _git(bare, "commit", "-q", "-m", "base")
+    run = jvm.run_java_acceptance(_artifact(tmp_path), str(bare), candidate_paths=[TARGET],
+                                  base_revision=base_revision(bare), validator_factory=_validator(bare))
+    assert run.refusal.reason_code == "ACCEPTANCE_RUNNER_UNSUPPORTED" and run.runner is None
+    assert jvm.detect_jvm_runner(str(bare)) is None
 
 
 # ---------------------------------------------------------------- J10, 18: the injection path

@@ -200,11 +200,14 @@ def _gradle_runs(tmp_path, *, wrapper=False, result=None, side_effect=None, pom=
     return seen, patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=fake)
 
 
-def test_gradle_detects_the_groovy_root_script_only(tmp_path):
-    """R1 behaviour, pinned: a Kotlin-DSL-only root is a recorded capability
-    gap (GRADLE-KOTLIN-DSL-001), not detected."""
-    _write(tmp_path, "build.gradle.kts")
+def test_gradle_detects_the_groovy_and_the_kotlin_root_script(tmp_path):
+    """GRADLE-KOTLIN-DSL-001 (BACKEND-READINESS-004): a Kotlin-DSL-only root is a Gradle build - the wrapper's
+    tasks do not depend on the script language; a nested script alone is not a root build."""
     assert GRADLE.detects(str(tmp_path)) is False
+    _write(tmp_path, "app/build.gradle.kts")
+    assert GRADLE.detects(str(tmp_path)) is False
+    _write(tmp_path, "build.gradle.kts")
+    assert GRADLE.detects(str(tmp_path)) is True
     _write(tmp_path, "build.gradle")
     assert GRADLE.detects(str(tmp_path)) is True
 

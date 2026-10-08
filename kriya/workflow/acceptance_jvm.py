@@ -1,4 +1,5 @@
-"""FS-1C2 B2-c: operator executable acceptance evidence for JVM projects (Maven + JUnit 5/Surefire only).
+"""FS-1C2 B2-c: operator executable acceptance evidence for JVM projects (Maven and - GRADLE-JVM-ACCEPTANCE-001,
+BACKEND-READINESS-004 - Gradle, JUnit 5 reports from the ordinary test gate of either runner).
 
 The authority model is B2-a's (kriya/workflow/acceptance_oracle.py): an operator-authored JUnit test class, bound
 before generation (`kriya generate --acceptance <File>.java`), stored content-addressed outside the workspace, digest-
@@ -21,14 +22,17 @@ Execution (never in the candidate's real workspace):
    have written under a build output root - else ``ACCEPTANCE_TRUST_SURFACE_CHANGED`` (no evidence).
 2. The injection path ``src/test/java/<package>/<Class>.java`` must exist in neither the base nor the candidate -
    else ``ACCEPTANCE_PATH_COLLISION`` (never overwritten).
-3. The candidate tree is copied into a fresh Kriya-owned directory under the state root; Maven-only projects
-   (``pom.xml`` at the root) are supported, anything else is ``ACCEPTANCE_RUNNER_UNSUPPORTED``.
+3. The candidate tree is copied into a fresh Kriya-owned directory under the state root; a Maven project
+   (``pom.xml`` at the root) or a Gradle project (``build.gradle``/``build.gradle.kts`` at the root) is supported,
+   anything else is ``ACCEPTANCE_RUNNER_UNSUPPORTED``. The runner is detected once per run and sealed on every
+   judgment (``runner``, ``runner_contract_digest``): a report from the other runner is never read.
 4. The candidate's own main code is compiled there first (the ordinary Maven compile gate): a failure is
    ``ACCEPTANCE_CANDIDATE_COMPILE_FAILED`` - an ordinary candidate failure, never acceptance counter-evidence.
-5. The operator class is injected (create-exclusive) and run alone through the ordinary Maven test gate
-   (``-Dtest=<Class>``, containment/offline policy and the FS-1A fresh report binding unchanged). A missing report
-   with the injected class in a compilation error is ``ACCEPTANCE_HARNESS_COMPILE_FAILED``; any other missing or
-   incomplete report is ``ACCEPTANCE_EVIDENCE_INDETERMINATE`` (naming the plugin goal when the build was rejected
+5. The operator class is injected (create-exclusive) and run alone through the ordinary test gate of the detected
+   runner (Maven ``-Dtest=<Class>``, Gradle ``test --tests <Class>``; containment/offline policy and the FS-1A fresh
+   report binding unchanged). A missing report with the injected class in a compilation error is
+   ``ACCEPTANCE_HARNESS_COMPILE_FAILED``; any other missing or
+   incomplete report is ``ACCEPTANCE_EVIDENCE_INDETERMINATE`` (naming the plugin goal or Gradle task when the build was rejected
    before the tests ran - measured: Apache RAT rejects an operator class without the repository's license header,
    so on such repositories the operator file carries that header). The injected file is re-hashed after the run.
 6. Per-case detail is read from the report files FS-1A digested (each re-verified against that digest).
@@ -53,7 +57,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 from kriya.tools import test_execution
 
 JVM_ACCEPTANCE_CONTRACT_VERSION = 1
-JVM_RUNNER = "maven"
+JVM_RUNNER = "maven"  # the legacy default; ``detect_jvm_runner`` decides per project
+JVM_RUNNERS = ("maven", "gradle")
+_RUNNER_GATES = {"maven": "ordinary-maven-test-gate/-Dtest=<Class>", "gradle": "ordinary-gradle-test-gate/--tests <Class>"}
+_GRADLE_SCRIPTS = ("build.gradle", "build.gradle.kts")
 
 ACCEPTANCE_TRUST_SURFACE_CHANGED = "ACCEPTANCE_TRUST_SURFACE_CHANGED"
 ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE = "ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE"
@@ -83,9 +90,36 @@ _COPY_IGNORE = (".git", ".kriya", "target", "build", ".gradle", "node_modules")
 _FAILED_GOAL = re.compile(r"Failed to execute goal (\S+)")
 _STAGING_DIR = "acceptance-runs"
 
-RUNNER_SOURCE_DIGEST = hashlib.sha256(
-    f"jvm/{JVM_ACCEPTANCE_CONTRACT_VERSION}/{JVM_RUNNER}/ordinary-maven-test-gate/-Dtest=<Class>".encode()
-).hexdigest()
+_FAILED_TASK = re.compile(r"Task (:\S+) FAILED")
+
+
+def runner_source_digest(runner: str) -> str:
+    """The runner-contract digest a judgment and an approval bind: the
+    contract version, the runner and the exact gate shape it runs through."""
+    if runner not in _RUNNER_GATES:
+        raise ValueError(f"unsupported JVM acceptance runner {runner!r}")
+    return hashlib.sha256(f"jvm/{JVM_ACCEPTANCE_CONTRACT_VERSION}/{runner}/{_RUNNER_GATES[runner]}".encode()).hexdigest()
+
+
+RUNNER_SOURCE_DIGEST = runner_source_digest(JVM_RUNNER)  # Maven: byte-identical to the batch 003 value
+
+
+def detect_jvm_runner(root: str) -> Optional[str]:
+    """``maven`` for a root ``pom.xml``, ``gradle`` for a root Groovy or
+    Kotlin build script, None otherwise (never guessed from sources)."""
+    if os.path.isfile(os.path.join(root, "pom.xml")):
+        return "maven"
+    if any(os.path.isfile(os.path.join(root, script)) for script in _GRADLE_SCRIPTS):
+        return "gradle"
+    return None
+
+
+def _harness_compile_failed(runner: str, output: str, class_file: str) -> bool:
+    if class_file not in output:
+        return False
+    if runner == "gradle":
+        return "compileTestJava FAILED" in output or "Compilation failed" in output
+    return "COMPILATION ERROR" in output
 
 
 def parse_java_acceptance(source: bytes) -> Tuple[Tuple[Any, ...], Dict[str, str]]:
@@ -249,9 +283,11 @@ def run_java_acceptance(
     candidate_paths = list(candidate_paths)
     try:
         source = read_stored(artifact)
-        if not os.path.isfile(os.path.join(candidate_root, "pom.xml")):
+        run.runner = detect_jvm_runner(candidate_root)
+        if run.runner is None:
             raise AcceptanceError("ACCEPTANCE_RUNNER_UNSUPPORTED",
-                                  "JVM acceptance supports Maven projects (pom.xml at the root) only")
+                                  "JVM acceptance supports Maven (pom.xml) and Gradle (build.gradle[.kts]) projects "
+                                  "with the build script at the root only")
         if not base_revision:
             raise AcceptanceError(ACCEPTANCE_TRUST_SURFACE_UNAVAILABLE, "no authorized base revision")
         try:
@@ -337,8 +373,9 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
         AcceptanceJudgment,
     )
 
-    base = {**base, "runner": JVM_RUNNER, "contract": JVM_ACCEPTANCE_CONTRACT_VERSION,
-            "runner_contract_digest": RUNNER_SOURCE_DIGEST, "trust_surface_digest": run.trust_surface_digest,
+    runner = getattr(run, "runner", None) or JVM_RUNNER
+    base = {**base, "runner": runner, "contract": JVM_ACCEPTANCE_CONTRACT_VERSION,
+            "runner_contract_digest": runner_source_digest(runner), "trust_surface_digest": run.trust_surface_digest,
             "injection_path": artifact.java["injection_path"]}
 
     def every(code: str, reason: str) -> Dict[str, Any]:
@@ -350,15 +387,15 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
     if run.integrity_problem is not None:
         return every(*run.integrity_problem)
     report = run.report
-    if report is None or not report.complete or report.runner != JVM_RUNNER:
+    if report is None or not report.complete or report.runner != runner:
         output = str((run.result or {}).get("output") or "")
         class_file = os.path.basename(artifact.java["injection_path"])
-        if "COMPILATION ERROR" in output and class_file in output:
+        if _harness_compile_failed(runner, output, class_file):
             return every(ACCEPTANCE_HARNESS_COMPILE_FAILED,
                          "the operator acceptance class did not compile against the candidate (harness integration, "
                          "not a requirement violation)")
         reason = "no structured report" if report is None else (report.reason or f"runner {report.runner}")
-        rejected = _FAILED_GOAL.search(output)
+        rejected = _FAILED_GOAL.search(output) if runner == "maven" else _FAILED_TASK.search(output)
         if rejected:
             # e.g. a validate-phase check (Apache RAT license headers) rejected the
             # build before any test ran: the operator class must satisfy the
