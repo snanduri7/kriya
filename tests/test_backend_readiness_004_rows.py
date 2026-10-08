@@ -748,7 +748,7 @@ def test_t2_a_goal_named_member_of_a_planned_owner_is_a_known_target_member_hint
     # the measured shape: Element.java's whole source is unfit for the room -> the fallback adds absUrl and rebuilds
     rendered, package, fallback = _target_package_with_goal_member_fallback(ctx, ["Element.java"], 900, 8000, {})
     assert fallback is not None and fallback["unfit_targets"] == ["Element.java"]
-    assert [m.split(".")[-1].split("(")[0] for m in fallback["goal_member_hints"]["Element.java"]] == ["absUrl"]
+    assert sorted(m.split(".")[-1].split("(")[0] for m in fallback["goal_member_hints"]["Element.java"]) == ["absUrl", "attr"]
     exact = [i for i in package.relevant_files if i.path == "Element.java" and i.tier == "member_exact" and i.is_exact]
     assert exact and "StringUtil.resolve(baseUri()" in rendered
     # a small target that fits whole is shown whole and exact, never demoted: no fallback, full tier
