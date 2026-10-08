@@ -1,0 +1,675 @@
+"""VERIFICATION-CONTRACT-003: the sealed verification contract of a run.
+
+Before the first model call, every statement of the authoritative
+requirement set (PRD-020 derivation or the GR-R1A operator contract) is
+compiled into one immutable record that says what kind of claim it makes
+(kriya/workflow/requirement_scopes.py), which deterministic closer may close
+each claim, which authority supplies that closer's evidence, and - when none
+is bound - why and what authority would be acceptable. The contract composes
+what already exists: the requirement set, FS-1C1 claims and B2-COV strength,
+the B2 acceptance artifact, the B3 approval, the external authority bundle
+(kriya/workflow/authority_bundle.py), the goal's compiled examples
+(kriya/workflow/example_oracle.py), the repository's own facts (test files,
+tracked paths, the resolved migration, a documentation referent). It is one
+owner of the admission decision for both execution paths: the legacy
+``requirements.deterministic_closers`` / ``admission_gap`` read it.
+
+Hard rules kept: LLM output authorizes nothing (no model is consulted here
+or by any closer); MODEL_CLAIMED is advisory; finite examples never close a
+GENERAL statement (B2-COV); a residual mandatory claim blocks; a compound
+statement closes only when every claim it makes is closed; NON_CLAIM is
+structural, visible and never a proposition (owner decision D1).
+
+Admission (D3): a statement whose semantics are undecidable (mutation-scope
+roles that cannot be determined, "other" with no referent) makes the goal
+GOAL_INSUFFICIENT_FOR_VERIFICATION; otherwise a mandatory claim without a
+bound deterministic authority makes it VERIFICATION_AUTHORITY_REQUIRED; a
+goal whose every mandatory claim has a closer is admitted and the contract
+sealed: stored content-addressed under ``<state>/verification-contracts/``,
+its digest joining both resume identities, so a changed goal, requirement
+set, authority or closer map never reuses a candidate.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+from kriya.workflow.requirement_scopes import (
+    MIGRATION,
+    NON_CLAIM,
+    PROCEDURE,
+    SCOPE_RECOGNIZER_VERSION,
+    SUITE_PRESERVATION_SCOPE,
+    StatementScope,
+    statement_scope,
+)
+from kriya.workflow.requirements import (
+    API_PRESERVATION,
+    BEHAVIOR,
+    BEHAVIOR_EXACT,
+    BEHAVIOR_GENERAL,
+    CLOSER_ACCEPTANCE,
+    CLOSER_MIGRATION_GATE,
+    CLOSER_MUTATION_SCOPE,
+    CLOSER_NAMED_TESTS,
+    DOCUMENTATION_CLAIM,
+    MUTATION_SCOPE,
+    ORIGIN_SENTENCE,
+    REGRESSION_PRESERVATION,
+    REQUIREMENT_DERIVATION_VERSION,
+    SUITE_PRESERVATION,
+    TEST_ADDITION_CLAIM,
+    TEST_IMMUTABILITY,
+    TEST_IMMUTABILITY_CLAIM,
+    AdmissionRefusal,
+    GoalAdmissionError,
+    RequirementSet,
+    VerificationAuthorityRequired,
+    mutation_path_roles,
+    non_claim_record,
+    record_non_claim,
+)
+
+CONTRACT_FORMAT = "kriya.verification_contract/1"
+CONTRACT_COMPILER_VERSION = 1
+CONTRACT_STORE_DIR = "verification-contracts"
+
+# Entry statuses.
+STATUS_CLOSABLE = "CLOSABLE"
+STATUS_AUTHORITY_REQUIRED = "AUTHORITY_REQUIRED"
+STATUS_NOT_A_CLAIM = "NOT_A_CLAIM"
+STATUS_AMBIGUOUS = "AMBIGUOUS"
+
+# Closer ids beyond the existing ones (requirements.CLOSER_* / SUITE_PRESERVATION / TEST_IMMUTABILITY).
+CLOSER_ACCEPTANCE_APPROVAL = "acceptance_approval"
+CLOSER_DERIVED_EXAMPLES = "derived_examples"
+CLOSER_API_PRESERVATION = "api_preservation"
+CLOSER_DOCUMENTATION_NOT_APPLICABLE = "documentation_not_applicable"
+CLOSER_TEST_ADDITION = "test_addition"
+CLOSER_EXTERNAL_ACCEPTANCE = "external_acceptance_command"
+CLOSER_NOT_A_CLAIM = "not_a_claim"
+
+# Who created the evidence a closer judges.
+AUTHORITY_GOAL = "goal"  # the user's own words (examples, named tests, the statements themselves)
+AUTHORITY_REPOSITORY = "repository"  # deterministic repository facts (tests, tree, mutation record)
+AUTHORITY_ACCEPTANCE_FILE = "acceptance_file"  # B2 operator acceptance file
+AUTHORITY_ACCEPTANCE_APPROVAL = "acceptance_approval"  # B3 human-bound approval
+AUTHORITY_GOAL_EXAMPLES = "goal_examples"  # the goal's example lines compiled deterministically
+AUTHORITY_EXTERNAL_COMMAND = "external_acceptance_command"  # a sealed operator oracle bundle
+AUTHORITY_CONTRACT = "contract"  # the compiler's own structural decision
+
+VISIBILITY_HIDDEN = "hidden"  # never in a prompt, never in the workspace
+VISIBILITY_GOAL_TEXT = "goal_text"  # part of the goal the Developer reads anyway
+
+# What each closer closes, who authored its evidence, and what PASS / FAIL / UNKNOWN are. Closed table: a closer id
+# outside it is a programming error (``_closer_contract``).
+CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
+    CLOSER_NAMED_TESTS: {
+        "claim": REGRESSION_PRESERVATION, "authority": AUTHORITY_REPOSITORY,
+        "pass": "every named pre-existing test executed and passed on the candidate, trust surface unchanged (FS-1C0)",
+        "fail": "a named test failed (counter-evidence)", "unknown": "incomplete evidence, changed trust surface, "
+        "a test the candidate wrote or edited, an unreadable base"},
+    SUITE_PRESERVATION: {
+        "claim": REGRESSION_PRESERVATION, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the candidate's complete full suite ran green with the run's mutation record intact",
+        "fail": "the suite is green but an existing test changed or vanished under an 'unchanged' statement",
+        "unknown": "incomplete structured evidence, zero tests, a changed test trust surface, no mutation record"},
+    TEST_IMMUTABILITY: {
+        "claim": TEST_IMMUTABILITY_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "no test file that existed before the run changed or vanished (mutation record)",
+        "fail": "an existing test file changed or vanished", "unknown": "mutation record unavailable"},
+    CLOSER_MUTATION_SCOPE: {
+        "claim": MUTATION_SCOPE, "authority": AUTHORITY_REPOSITORY,
+        "pass": "every changed path is one the goal names as a change target, nothing foreign",
+        "fail": "a path outside the authorized set changed", "unknown": "mutation record unavailable"},
+    CLOSER_MIGRATION_GATE: {
+        "claim": MIGRATION, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the deterministic migration gate judged the resolved migration complete on the candidate",
+        "fail": "the migration gate found the source dependency still present or the target absent",
+        "unknown": "the migration could not be resolved or the gate did not run"},
+    CLOSER_ACCEPTANCE: {
+        "claim": BEHAVIOR, "authority": AUTHORITY_ACCEPTANCE_FILE,
+        "pass": "every acceptance case bound to the requirement executed and passed under Kriya's runner (B2)",
+        "fail": "a case contradicted the candidate (assertion after candidate code ran)",
+        "unknown": "no report, incomplete report, environment error, a foreign plugin, an unsupported layout"},
+    CLOSER_ACCEPTANCE_APPROVAL: {
+        "claim": BEHAVIOR, "authority": AUTHORITY_ACCEPTANCE_APPROVAL,
+        "pass": "the approved suite executed and passed in full; the operator accepted it as sufficient for this "
+                "general statement (HUMAN_ACCEPTED, never 'verified')",
+        "fail": "a case contradicted the candidate", "unknown": "any B2 INDETERMINATE outcome, or an approval that "
+        "does not bind this goal, requirement text, artifact, cases, runner contract and base revision"},
+    CLOSER_DERIVED_EXAMPLES: {
+        "claim": BEHAVIOR, "authority": AUTHORITY_GOAL_EXAMPLES,
+        "pass": "the goal's own example lines, compiled deterministically into an acceptance module, executed and "
+                "passed (EXACT statements only, B2-COV)",
+        "fail": "an example contradicted the candidate", "unknown": "any B2 INDETERMINATE outcome"},
+    CLOSER_API_PRESERVATION: {
+        "claim": API_PRESERVATION, "authority": AUTHORITY_REPOSITORY,
+        "pass": "every public module-level and class-level signature of the base is present and unchanged in the "
+                "candidate (Python AST)",
+        "fail": "a public symbol was removed or its signature changed", "unknown": "base unreadable, a file that "
+        "does not parse, a project language without a predicate"},
+    CLOSER_DOCUMENTATION_NOT_APPLICABLE: {
+        "claim": DOCUMENTATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the conditional documentation referent does not exist in the repository (nothing to document)",
+        "fail": "never (a present referent is a content claim, not a failure)", "unknown": "never"},
+    CLOSER_TEST_ADDITION: {
+        "claim": TEST_ADDITION_CLAIM, "authority": AUTHORITY_REPOSITORY,
+        "pass": "the candidate adds a runnable test file, or its complete structured suite report carries a test "
+                "identity the base's report does not",
+        "fail": "never (an absent test leaves the claim open)", "unknown": "no complete report on either side"},
+    CLOSER_EXTERNAL_ACCEPTANCE: {
+        "claim": "declared per coverage entry", "authority": AUTHORITY_EXTERNAL_COMMAND,
+        "pass": "the sealed operator command exited 0 under Kriya's containment, assets unchanged (operator "
+                "sufficiency: HUMAN_ACCEPTED, never 'verified')",
+        "fail": "the command exited 1 (the oracle contradicted the candidate)",
+        "unknown": "any other exit, a timeout, a changed asset, an unavailable toolchain or containment"},
+    CLOSER_NOT_A_CLAIM: {
+        "claim": NON_CLAIM, "authority": AUTHORITY_CONTRACT,
+        "pass": "the statement is a label or a bare code block with no expected value (structural)",
+        "fail": "never", "unknown": "never"},
+}
+
+# Acceptable authority types for a residual claim, by claim and strength.
+_ACCEPTABLE: Dict[Tuple[str, Optional[str]], Tuple[str, ...]] = {
+    (BEHAVIOR, BEHAVIOR_EXACT): (AUTHORITY_ACCEPTANCE_FILE, AUTHORITY_GOAL_EXAMPLES, AUTHORITY_EXTERNAL_COMMAND),
+    (BEHAVIOR, BEHAVIOR_GENERAL): (AUTHORITY_EXTERNAL_COMMAND + " (reference or property oracle)",
+                                   AUTHORITY_ACCEPTANCE_APPROVAL + " (B3: an operator-approved acceptance suite)",
+                                   "authoritative acceptance test (an acceptance file plus approval)"),
+    (API_PRESERVATION, None): (AUTHORITY_EXTERNAL_COMMAND + " (a signature baseline check)",),
+    (DOCUMENTATION_CLAIM, None): (AUTHORITY_EXTERNAL_COMMAND, AUTHORITY_ACCEPTANCE_FILE),
+    (REGRESSION_PRESERVATION, None): ("a statement naming the existing tests, or a whole-suite preservation statement",),
+}
+
+VERIFICATION_CONTRACT_EVENT_KINDS = frozenset({
+    "verification_contract.compiled",
+    "verification_contract.sealed",
+    "verification_contract.refused",
+    "verification_contract.baseline",
+    "verification_contract.no_mutation_required",
+    "verification_contract.invalidated",
+    "requirement.authority_required",
+})
+
+_README = re.compile(r"^readme(\.[\w.]+)?$", re.IGNORECASE)
+_CHANGELOG = re.compile(r"^(changelog|changes|history|news)(\.[\w.]+)?$", re.IGNORECASE)
+_MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(?P<title>.+?)\s*#*\s*$")
+_RST_UNDERLINE = re.compile(r"^\s*([=\-~^\"'`#*+_:.])\1{2,}\s*$")
+
+
+@dataclass(frozen=True)
+class ExternalAuthority:
+    """An authority bound to the run beside the goal: what it covers, by digest."""
+
+    kind: str
+    digest: str
+    coverage: Mapping[str, Mapping[str, Any]]  # requirement id -> {"claim": ..., "accepted_strength": ...}
+    visibility: str = VISIBILITY_HIDDEN
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+
+    def covers(self, requirement_id: str, claim: str, strength: Optional[str]) -> bool:
+        entry = self.coverage.get(requirement_id)
+        if not entry or entry.get("claim") != claim:
+            return False
+        accepted = entry.get("accepted_strength")
+        if claim != BEHAVIOR:
+            return True
+        return accepted == BEHAVIOR_GENERAL or (accepted == BEHAVIOR_EXACT and strength == BEHAVIOR_EXACT)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"kind": self.kind, "digest": self.digest, "visibility": self.visibility,
+                "coverage": {rid: dict(entry) for rid, entry in sorted(self.coverage.items())},
+                "provenance": dict(self.provenance)}
+
+
+@dataclass(frozen=True)
+class ClaimBinding:
+    claim: str
+    closer: str
+    authority_kind: str
+    authority_digest: Optional[str] = None
+    detail: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        contract = _closer_contract(self.closer)
+        return {"claim": self.claim, "closer": self.closer, "authority": self.authority_kind,
+                "authority_digest": self.authority_digest, "evidence_pass": contract["pass"],
+                "evidence_fail": contract["fail"], "evidence_unknown": contract["unknown"], **dict(self.detail)}
+
+
+@dataclass(frozen=True)
+class ResidualClaim:
+    claim: str
+    strength: Optional[str]
+    why: str
+    acceptable_authorities: Tuple[str, ...]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"claim": self.claim, "strength": self.strength, "why": self.why,
+                "acceptable_authorities": list(self.acceptable_authorities)}
+
+
+@dataclass(frozen=True)
+class ContractEntry:
+    requirement_id: str
+    text: str
+    kind: str
+    source: str
+    scope: StatementScope
+    status: str
+    bindings: Tuple[ClaimBinding, ...] = ()
+    residual: Tuple[ResidualClaim, ...] = ()
+    ambiguity: Optional[str] = None
+
+    @property
+    def closers(self) -> List[str]:
+        seen: List[str] = []
+        for binding in self.bindings:
+            if binding.closer not in seen:
+                seen.append(binding.closer)
+        return seen
+
+    @property
+    def required_claims(self) -> Tuple[str, ...]:
+        return self.scope.claims
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"requirement_id": self.requirement_id, "text": self.text, "kind": self.kind, "source": self.source,
+                "origin": self.scope.origin, "scopes": list(self.scope.scopes), "claims": list(self.scope.claims),
+                "strength": self.scope.strength, "strength_reasons": list(self.scope.strength_reasons),
+                "status": self.status, "closers": self.closers, "bindings": [b.to_dict() for b in self.bindings],
+                "residual": [r.to_dict() for r in self.residual], "ambiguity": self.ambiguity,
+                "non_claim": ({"kind": self.scope.non_claim_kind, "reason": self.scope.non_claim_reason}
+                              if self.scope.is_non_claim else None),
+                "named_tests": list(self.scope.named_tests),
+                "documentation": dict(self.scope.documentation) if self.scope.documentation else None}
+
+
+@dataclass(frozen=True)
+class VerificationContract:
+    goal_digest: str
+    requirement_set_digest: str
+    requirement_contract_digest: Optional[str]
+    base_revision: Optional[str]
+    project_language: Optional[str]
+    entries: Tuple[ContractEntry, ...]
+    authorities: Tuple[ExternalAuthority, ...]
+    derivation_version: int = REQUIREMENT_DERIVATION_VERSION
+    recognizer_version: int = SCOPE_RECOGNIZER_VERSION
+    compiler_version: int = CONTRACT_COMPILER_VERSION
+
+    # ---- identity
+    def identity_payload(self) -> Dict[str, Any]:
+        return {"format": CONTRACT_FORMAT, "compiler_version": self.compiler_version,
+                "recognizer_version": self.recognizer_version, "derivation_version": self.derivation_version,
+                "goal_digest": self.goal_digest, "requirement_set_digest": self.requirement_set_digest,
+                "requirement_contract_digest": self.requirement_contract_digest, "base_revision": self.base_revision,
+                "project_language": self.project_language,
+                "entries": [entry.to_dict() for entry in self.entries],
+                "authorities": [authority.to_dict() for authority in self.authorities]}
+
+    @property
+    def digest(self) -> str:
+        blob = json.dumps(self.identity_payload(), sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()
+
+    # ---- views
+    def entry(self, requirement_id: str) -> Optional[ContractEntry]:
+        return next((e for e in self.entries if e.requirement_id == requirement_id), None)
+
+    def closers_by_requirement(self) -> Dict[str, List[str]]:
+        return {entry.requirement_id: entry.closers for entry in self.entries}
+
+    def required_claims_by_requirement(self) -> Dict[str, Tuple[str, ...]]:
+        return {entry.requirement_id: entry.required_claims for entry in self.entries}
+
+    def residual_requirements(self) -> List[Dict[str, Any]]:
+        """Legacy shape (id, text, why): every requirement that cannot be admitted."""
+        rows: List[Dict[str, Any]] = []
+        for entry in self.entries:
+            if entry.status == STATUS_AMBIGUOUS:
+                rows.append({"id": entry.requirement_id, "text": entry.text, "why": entry.ambiguity or "undecidable"})
+            elif entry.status == STATUS_AUTHORITY_REQUIRED:
+                rows.append({"id": entry.requirement_id, "text": entry.text,
+                             "why": "; ".join(f"{r.claim}{' ' + r.strength if r.strength else ''}: {r.why}"
+                                              for r in entry.residual)})
+        return rows
+
+    def non_claim_ids(self) -> List[str]:
+        return [e.requirement_id for e in self.entries if e.status == STATUS_NOT_A_CLAIM]
+
+    def mandatory_entries(self) -> List[ContractEntry]:
+        return [e for e in self.entries if e.status != STATUS_NOT_A_CLAIM]
+
+    def visibility(self) -> Dict[str, str]:
+        return {authority.kind + ":" + authority.digest[:12]: authority.visibility for authority in self.authorities}
+
+    def binding_closers(self, closer: str) -> List[Tuple[str, ClaimBinding]]:
+        return [(e.requirement_id, b) for e in self.entries for b in e.bindings if b.closer == closer]
+
+    # ---- admission
+    def refusal(self) -> Optional[AdmissionRefusal]:
+        """GoalAdmissionError when any statement is undecidable (the goal must
+        be clarified first; every non-admissible statement is listed),
+        VerificationAuthorityRequired when every statement is determinate
+        but a mandatory claim lacks a bound authority, else None."""
+        closers = self.closers_by_requirement()
+        ambiguous = [e for e in self.entries if e.status == STATUS_AMBIGUOUS]
+        if ambiguous or not self.mandatory_entries():
+            residual = self.residual_requirements()
+            if not self.mandatory_entries():
+                residual = [{"id": e.requirement_id, "text": e.text,
+                             "why": "every statement of the goal is a label or a bare code block: nothing to verify"}
+                            for e in self.entries] or [{"id": "-", "text": "", "why": "the goal has no statement"}]
+            return GoalAdmissionError(residual, closers, report=self.report())
+        residual_entries = [e for e in self.entries if e.status == STATUS_AUTHORITY_REQUIRED]
+        if residual_entries:
+            rows = [{"id": e.requirement_id, "text": e.text, "claim": r.claim, "strength": r.strength,
+                     "scopes": list(e.scope.scopes), "why": r.why,
+                     "acceptable_authorities": list(r.acceptable_authorities)}
+                    for e in residual_entries for r in e.residual]
+            return VerificationAuthorityRequired(rows, closers, report=self.report())
+        return None
+
+    # ---- reporting
+    def report(self) -> Dict[str, Any]:
+        counts = {"requirements": len(self.entries), "non_claim": 0, "closable": 0, "authority_required": 0,
+                  "ambiguous": 0, "residual_claims": 0}
+        rows = []
+        for entry in self.entries:
+            key = {STATUS_NOT_A_CLAIM: "non_claim", STATUS_CLOSABLE: "closable",
+                   STATUS_AUTHORITY_REQUIRED: "authority_required", STATUS_AMBIGUOUS: "ambiguous"}[entry.status]
+            counts[key] += 1
+            counts["residual_claims"] += len(entry.residual)
+            rows.append({"id": entry.requirement_id, "text": entry.text, "origin": entry.scope.origin,
+                         "scopes": list(entry.scope.scopes), "claims": list(entry.scope.claims),
+                         "strength": entry.scope.strength, "closers": entry.closers,
+                         "authorities": sorted({b.authority_kind for b in entry.bindings}),
+                         "status": entry.status, "residual": [r.to_dict() for r in entry.residual],
+                         "ambiguity": entry.ambiguity})
+        return {"format": CONTRACT_FORMAT, "contract_digest": self.digest, "goal_digest": self.goal_digest,
+                "requirement_set_digest": self.requirement_set_digest, "base_revision": self.base_revision,
+                "project_language": self.project_language, "totals": counts, "requirements": rows,
+                "authorities": [a.to_dict() for a in self.authorities], "visibility": self.visibility(),
+                "admission": ("GOAL_INSUFFICIENT_FOR_VERIFICATION" if counts["ambiguous"] or not self.mandatory_entries()
+                              else "VERIFICATION_AUTHORITY_REQUIRED" if counts["authority_required"] else "ADMITTED")}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {**self.identity_payload(), "digest": self.digest, "report": self.report()}
+
+
+def _closer_contract(closer: str) -> Dict[str, str]:
+    try:
+        return CLOSER_CONTRACTS[closer]
+    except KeyError as error:  # a closer outside the closed table is a programming error
+        raise KeyError(f"unknown closer {closer!r}; register it in CLOSER_CONTRACTS") from error
+
+
+def _acceptable(claim: str, strength: Optional[str]) -> Tuple[str, ...]:
+    return _ACCEPTABLE.get((claim, strength)) or _ACCEPTABLE.get((claim, None)) or (AUTHORITY_EXTERNAL_COMMAND,)
+
+
+# ------------------------------------------------------------ repository facts
+
+def _documentation_referent_paths(referent: str, tracked_paths: Sequence[str]) -> List[str]:
+    """The tracked paths a documentation clause's referent names: README.* /
+    CHANGELOG.* by basename (case-insensitive), an explicit file by path or
+    basename, "the docs"/"the documentation" by a docs directory."""
+    lowered = referent.lower()
+    names = [(path, os.path.basename(path)) for path in tracked_paths]
+    if lowered.startswith("readme"):
+        return sorted(path for path, base in names if _README.match(base))
+    if lowered.startswith(("changelog", "changes")):
+        return sorted(path for path, base in names if _CHANGELOG.match(base))
+    if "doc" in lowered and "." not in lowered:
+        return sorted(path for path in tracked_paths if path.split("/")[0].lower() in ("docs", "doc"))
+    return sorted(path for path, base in names if path.lower() == lowered or base.lower() == lowered)
+
+
+def _headings(data: bytes) -> List[str]:
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    headings: List[str] = []
+    for index, line in enumerate(lines):
+        match = _MD_HEADING.match(line)
+        if match:
+            headings.append(match.group("title"))
+        elif index + 1 < len(lines) and _RST_UNDERLINE.match(lines[index + 1]) and line.strip() \
+                and len(lines[index + 1].strip()) >= len(line.strip()) - 1:
+            headings.append(line.strip())
+    return headings
+
+
+def _documentation_list_present(
+    clause: Mapping[str, Any], tracked_paths: Sequence[str], reader: Optional[Callable[[str], Optional[bytes]]],
+) -> Tuple[Optional[bool], Dict[str, Any]]:
+    """(present, evidence) for a documentation referent: None when it cannot
+    be decided (no reader), False when the referent - or the named list's
+    heading inside it - does not exist, True when it does."""
+    paths = _documentation_referent_paths(str(clause.get("referent") or ""), tracked_paths)
+    evidence: Dict[str, Any] = {"referent": clause.get("referent"), "paths": paths, "list_noun": clause.get("list_noun")}
+    if not paths:
+        return False, evidence
+    noun = clause.get("list_noun")
+    if not noun:
+        return True, evidence
+    if reader is None:
+        return None, {**evidence, "reason": "no tracked-file reader supplied"}
+    matched: List[str] = []
+    for path in paths:
+        data = reader(path)
+        if data is None:
+            return None, {**evidence, "reason": f"{path} unreadable"}
+        matched += [f"{path}: {heading}" for heading in _headings(data) if str(noun).lower() in heading.lower()]
+    evidence["matching_headings"] = matched
+    return bool(matched), evidence
+
+
+# ------------------------------------------------------------ compilation
+
+class _AcceptanceIds:
+    """A minimal stand-in for an acceptance artifact when a caller has only the covered ids (legacy API)."""
+
+    def __init__(self, ids: Iterable[str]) -> None:
+        self.requirement_ids = sorted(set(ids))
+        self.digest = "ids-only"
+
+
+def compile_verification_contract(
+    requirement_set: RequirementSet, *,
+    origins: Optional[Mapping[str, str]] = None,
+    test_files: Iterable[str] = (),
+    tracked_paths: Iterable[str] = (),
+    migration_identities: Iterable[Tuple[str, str]] = (),
+    acceptance: Any = None,
+    acceptance_ids: Iterable[str] = (),
+    approval: Any = None,
+    external_authorities: Iterable[ExternalAuthority] = (),
+    project_language: Optional[str] = None,
+    tracked_file_reader: Optional[Callable[[str], Optional[bytes]]] = None,
+    base_revision: Optional[str] = None,
+) -> VerificationContract:
+    """Compile the contract of ``requirement_set``. Pure given its inputs:
+    the statements and their origins, the repository's test files and
+    tracked paths, the resolved migration, the bound B2 artifact (or its
+    covered ids), the B3 approval, the external authorities, the project
+    language (for the API predicate) and a reader for documentation
+    referents. Never consults a model."""
+    files = sorted(set(test_files))
+    tracked = sorted(set(tracked_paths))
+    migrations = [tuple(pair) for pair in migration_identities]
+    authorities = tuple(external_authorities)
+    covered_ids = set(getattr(acceptance, "requirement_ids", ()) or ()) if acceptance is not None else set()
+    covered_ids |= set(acceptance_ids)
+    acceptance_digest = getattr(acceptance, "digest", None) if acceptance is not None else None
+    approval_ids = set(getattr(approval, "entries", {}) or {}) if approval is not None else set()
+    approval_digest = getattr(approval, "digest", None) if approval is not None else None
+    origins = dict(origins or {})
+    roles = None
+    if any(statement_scope(r.id, r.text, origin=origins.get(r.id, ORIGIN_SENTENCE), test_files=files).scopes == (MUTATION_SCOPE,)
+           for r in requirement_set.requirements):
+        roles = mutation_path_roles(requirement_set, tracked)
+
+    entries: List[ContractEntry] = []
+    for requirement in requirement_set.requirements:
+        origin = origins.get(requirement.id, ORIGIN_SENTENCE)
+        scope = statement_scope(requirement.id, requirement.text, origin=origin, test_files=files,
+                                migration_identities=migrations)
+        bindings: List[ClaimBinding] = []
+        residual: List[ResidualClaim] = []
+        ambiguity: Optional[str] = None
+        if scope.is_non_claim:
+            bindings.append(ClaimBinding(NON_CLAIM, CLOSER_NOT_A_CLAIM, AUTHORITY_CONTRACT,
+                                         detail={"non_claim_kind": scope.non_claim_kind,
+                                                 "reason": scope.non_claim_reason}))
+        elif scope.scopes == (MUTATION_SCOPE,):
+            if roles and roles["ambiguous"]:
+                ambiguity = "the goal names paths whose role (change target or reference) cannot be determined"
+            elif roles and roles["authorized"]:
+                bindings.append(ClaimBinding(MUTATION_SCOPE, CLOSER_MUTATION_SCOPE, AUTHORITY_REPOSITORY,
+                                             detail={"authorized_paths": sorted(roles["authorized"])}))
+            else:
+                ambiguity = "the goal names no tracked file to change, so 'other' has no referent"
+        elif scope.scopes == (MIGRATION,):
+            bindings.append(ClaimBinding(MIGRATION, CLOSER_MIGRATION_GATE, AUTHORITY_REPOSITORY,
+                                         detail={"migrations": [list(pair) for pair in migrations]}))
+            if scope.detail.get("compound"):
+                residual.append(ResidualClaim(
+                    BEHAVIOR, None, "a compound statement: the migration gate closes only the migration itself, "
+                    "the rest of the sentence has no closer", _acceptable(BEHAVIOR, BEHAVIOR_GENERAL)))
+        else:
+            for claim in scope.claims:
+                if claim == REGRESSION_PRESERVATION:
+                    if SUITE_PRESERVATION_SCOPE in scope.scopes:
+                        bindings.append(ClaimBinding(claim, SUITE_PRESERVATION, AUTHORITY_REPOSITORY))
+                    elif scope.named_tests:
+                        bindings.append(ClaimBinding(claim, CLOSER_NAMED_TESTS, AUTHORITY_GOAL,
+                                                     detail={"tests": list(scope.named_tests)}))
+                    else:  # unreachable by construction (requirement_claims); fail closed
+                        residual.append(ResidualClaim(claim, None, "no named test and no suite statement",
+                                                      _acceptable(claim, None)))
+                elif claim == TEST_IMMUTABILITY_CLAIM:
+                    bindings.append(ClaimBinding(claim, TEST_IMMUTABILITY, AUTHORITY_REPOSITORY))
+                elif claim == TEST_ADDITION_CLAIM:
+                    bindings.append(ClaimBinding(claim, CLOSER_TEST_ADDITION, AUTHORITY_REPOSITORY))
+                elif claim == API_PRESERVATION:
+                    external = next((a for a in authorities if a.covers(requirement.id, claim, None)), None)
+                    if project_language == "python":
+                        bindings.append(ClaimBinding(claim, CLOSER_API_PRESERVATION, AUTHORITY_REPOSITORY,
+                                                     detail={"language": "python"}))
+                    elif external is not None:
+                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
+                                                     detail=dict(external.coverage[requirement.id])))
+                    else:
+                        residual.append(ResidualClaim(
+                            claim, None, f"no deterministic public-API predicate for project language "
+                            f"{project_language or 'unknown'}", _acceptable(claim, None)))
+                elif claim == DOCUMENTATION_CLAIM:
+                    clause = scope.documentation or {}
+                    present, evidence = _documentation_list_present(clause, tracked, tracked_file_reader)
+                    external = next((a for a in authorities if a.covers(requirement.id, claim, None)), None)
+                    if clause.get("conditional") and present is False:
+                        bindings.append(ClaimBinding(claim, CLOSER_DOCUMENTATION_NOT_APPLICABLE, AUTHORITY_REPOSITORY,
+                                                     detail=evidence))
+                    elif external is not None:
+                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
+                                                     detail=dict(external.coverage[requirement.id])))
+                    else:
+                        why = ("the documentation referent exists; documenting it correctly is a content claim "
+                               "Kriya cannot verify deterministically" if present else
+                               "an unconditional documentation request is a content claim Kriya cannot verify "
+                               "deterministically" if present is False else
+                               f"the documentation referent could not be inspected: {evidence.get('reason')}")
+                        residual.append(ResidualClaim(claim, None, why, _acceptable(claim, None)))
+                elif claim == BEHAVIOR:
+                    strength = scope.strength
+                    external = next((a for a in authorities if a.covers(requirement.id, claim, strength)), None)
+                    examples = next((a for a in authorities if a.kind == AUTHORITY_GOAL_EXAMPLES
+                                     and requirement.id in a.coverage), None)
+                    if requirement.id in covered_ids and strength == BEHAVIOR_EXACT:
+                        bindings.append(ClaimBinding(claim, CLOSER_ACCEPTANCE, AUTHORITY_ACCEPTANCE_FILE, acceptance_digest))
+                    elif requirement.id in covered_ids and requirement.id in approval_ids:
+                        bindings.append(ClaimBinding(claim, CLOSER_ACCEPTANCE_APPROVAL, AUTHORITY_ACCEPTANCE_APPROVAL,
+                                                     approval_digest, detail={"acceptance_digest": acceptance_digest}))
+                    elif examples is not None and strength == BEHAVIOR_EXACT:
+                        bindings.append(ClaimBinding(claim, CLOSER_DERIVED_EXAMPLES, AUTHORITY_GOAL_EXAMPLES,
+                                                     examples.digest, detail=dict(examples.coverage[requirement.id])))
+                    elif external is not None and external.kind != AUTHORITY_GOAL_EXAMPLES:
+                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
+                                                     detail=dict(external.coverage[requirement.id])))
+                    else:
+                        if strength == BEHAVIOR_GENERAL:
+                            why = ("a general behaviour statement (" + "; ".join(scope.strength_reasons) + "): finite "
+                                   "cases never prove it (B2-COV), model judgment never closes it")
+                            if requirement.id in covered_ids or examples is not None:
+                                why += "; the bound finite cases are supporting evidence only, no approval binds them"
+                        elif PROCEDURE in scope.scopes:
+                            why = "a procedure only an external authority can execute; model judgment never closes it"
+                        else:
+                            why = ("an exact behaviour statement with no acceptance case, no compilable example and "
+                                   "no external authority; model judgment never closes it")
+                        residual.append(ResidualClaim(claim, strength, why, _acceptable(claim, strength)))
+            if not scope.claims and not bindings:  # a determinate statement with no claim at all cannot happen; fail closed
+                residual.append(ResidualClaim(BEHAVIOR, None, "no claim recognized", _acceptable(BEHAVIOR, None)))
+        # One status rule for every branch: undecidable first, then structural, then any residual claim.
+        status = (STATUS_AMBIGUOUS if ambiguity else STATUS_NOT_A_CLAIM if scope.is_non_claim
+                  else STATUS_AUTHORITY_REQUIRED if residual else STATUS_CLOSABLE)
+        entries.append(ContractEntry(requirement.id, requirement.text, requirement.kind, requirement.source, scope,
+                                     status, tuple(bindings), tuple(residual), ambiguity))
+    return VerificationContract(
+        goal_digest=requirement_set.goal_digest, requirement_set_digest=requirement_set.digest,
+        requirement_contract_digest=requirement_set.contract_digest, base_revision=base_revision,
+        project_language=project_language, entries=tuple(entries), authorities=authorities,
+    )
+
+
+# ------------------------------------------------------------ sealing and ledger
+
+def contract_store(state_root: str) -> str:
+    return os.path.join(state_root, CONTRACT_STORE_DIR)
+
+
+def seal_verification_contract(contract: VerificationContract, state_root: str) -> str:
+    """Store the contract content-addressed under Kriya's state directory
+    (never the workspace) and return the path; idempotent for the same digest."""
+    store = contract_store(state_root)
+    os.makedirs(store, exist_ok=True)
+    stored = os.path.join(store, f"{contract.digest}.json")
+    if not os.path.isfile(stored):
+        temporary = f"{stored}.{uuid.uuid4().hex}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(contract.to_dict(), handle, sort_keys=True, indent=1, default=str)
+        os.replace(temporary, stored)
+    return stored
+
+
+def record_contract_non_claims(ledger: Any, requirement_set: RequirementSet, contract: VerificationContract, *,
+                               source: str) -> List[str]:
+    """Record every NOT_A_CLAIM entry of ``contract`` in the ledger (idempotent)."""
+    recorded: List[str] = []
+    for entry in contract.entries:
+        if entry.status != STATUS_NOT_A_CLAIM or non_claim_record(ledger, entry.requirement_id) is not None:
+            continue
+        record_non_claim(ledger, requirement_set, entry.requirement_id, origin=entry.scope.origin,
+                         reason=entry.scope.non_claim_reason or "", source=source)
+        recorded.append(entry.requirement_id)
+    return recorded
+
+
+def bound_external_authorities(engine: Any) -> Tuple[ExternalAuthority, ...]:
+    """The external authorities bound to ``engine`` for this run (the CLI sets
+    ``WorkflowEngine.verification_authorities``: the sealed operator bundle,
+    the goal's compiled examples), or none - never anything that merely looks
+    like one."""
+    bound = getattr(engine, "verification_authorities", None) or ()
+    return tuple(authority for authority in bound if isinstance(authority, ExternalAuthority))
+
+
+def load_sealed_contract(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)

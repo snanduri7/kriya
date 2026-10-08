@@ -441,7 +441,13 @@ async def test_22_direct_workflow(tmp_path, approved):
     p1, p2 = _gates_pass()
     with p1, p2:
         res = await engine.run_generation_workflow(goal=GREETING_GENERAL, workspace_path=str(workspace))
-    assert res["requirements"]["outcomes"]["REQ-1"] == ("human_accepted" if approved else "unverified")
+    if approved:
+        assert res["requirements"]["outcomes"]["REQ-1"] == "human_accepted"
+    else:
+        # VERIFICATION-CONTRACT-003 (D3): a GENERAL statement with an acceptance file but no approval has no
+        # authority that could ever close it, so it is refused before any model call (it used to spend a
+        # Developer attempt and end UNVERIFIED at the terminal); the approval is the authority for it.
+        assert res["failure_category"] == "verification_authority_required" and "requirements" not in res
     assert res["quality_gates_passed"] is approved
     assert (workspace / "greeting.py").exists() is approved
 
@@ -508,6 +514,12 @@ async def test_23_enforce_terminal_workflow(tmp_path, monkeypatch, correct, appr
          patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
          patch.object(wc, "validate_plan", new=AsyncMock(return_value=valid(valid=True))):
         result = await wc.WorkflowController(we).execute(GENERAL_GOAL, str(workspace), migration_mode="enforce")
+    if not approved:
+        # VERIFICATION-CONTRACT-003 (D3): without the approval the GENERAL statement has no closing authority -
+        # refused before planning, no Planner call, nothing applied
+        assert result.legacy_result["failure_category"] == "verification_authority_required"
+        assert we.planner.run.await_count == 0 and (workspace / "calc" / "__init__.py").read_text().endswith("NotImplementedError\n")
+        return
     assert result.legacy_result["requirements"]["outcomes"] == {"REQ-1": outcome}
     assert bool(result.legacy_result.get("global_requirement_gap")) is (outcome != "human_accepted")
 

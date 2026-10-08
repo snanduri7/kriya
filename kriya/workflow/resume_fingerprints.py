@@ -812,6 +812,7 @@ def generation_resume_fingerprints(
     acceptance_digest: Optional[str] = None,
     approval_digest: Optional[str] = None,
     requirement_contract_digest: Optional[str] = None,
+    verification_contract_digest: Optional[str] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -852,6 +853,12 @@ def generation_resume_fingerprints(
             **({"acceptance_approval_digest": approval_digest} if approval_digest is not None else {}),
             **({"requirement_contract_digest": requirement_contract_digest}
                if requirement_contract_digest is not None else {}),
+            # VERIFICATION-CONTRACT-003: the sealed contract (scopes, closers,
+            # authorities) is authority the candidate was generated under; a
+            # changed contract regenerates it. Unset keeps every earlier
+            # fingerprint byte-identical.
+            **({"verification_contract_digest": verification_contract_digest}
+               if verification_contract_digest is not None else {}),
             "goal": goal,
             "error_context": error_context or "",
             "supplementary_context": supplementary_context,

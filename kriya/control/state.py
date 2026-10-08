@@ -144,6 +144,12 @@ class ControlState:
     # leaves earlier states' hashes unchanged.
     requirement_contract_digest: Optional[str] = None
 
+    # VERIFICATION-CONTRACT-003: the digest of the sealed verification contract
+    # the subtasks ran under (scopes, closers, bound authorities). Enforce
+    # resume reuses no subtask recorded under another one. Unset, it leaves
+    # earlier states' hashes unchanged.
+    verification_contract_digest: Optional[str] = None
+
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
 
@@ -187,6 +193,7 @@ class ControlState:
             "subtask_completion_scope": self.subtask_completion_scope,
             "acceptance_approval_digest": self.acceptance_approval_digest,
             "requirement_contract_digest": self.requirement_contract_digest,
+            "verification_contract_digest": self.verification_contract_digest,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -221,6 +228,7 @@ class ControlState:
             subtask_completion_scope=data.get("subtask_completion_scope"),
             acceptance_approval_digest=data.get("acceptance_approval_digest"),
             requirement_contract_digest=data.get("requirement_contract_digest"),
+            verification_contract_digest=data.get("verification_contract_digest"),
             created_at=data.get("created_at", _now_iso()),
             updated_at=data.get("updated_at", _now_iso()),
         )
@@ -243,6 +251,8 @@ class ControlState:
             hashable.pop("acceptance_approval_digest", None)
         if hashable.get("requirement_contract_digest") is None:
             hashable.pop("requirement_contract_digest", None)
+        if hashable.get("verification_contract_digest") is None:
+            hashable.pop("verification_contract_digest", None)
         blob = json.dumps(hashable, sort_keys=True, default=str)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 

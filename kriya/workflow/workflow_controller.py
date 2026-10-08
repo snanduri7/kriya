@@ -232,9 +232,8 @@ from kriya.workflow.recovery_plan import (
 )
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
-    GOAL_INSUFFICIENT_FOR_VERIFICATION,
-    GoalAdmissionError,
-    admission_gap,
+    AdmissionRefusal,
+    VerificationAuthorityRequired,
     blocking_requirements,
     requirement_evidence,
     requirement_outcomes,
@@ -3491,19 +3490,23 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
-            except GoalAdmissionError as e:
+            except AdmissionRefusal as e:
+                # VERIFICATION-CONTRACT-003 (D3): GoalAdmissionError or VerificationAuthorityRequired,
+                # both before any retrieval, planning or model call.
                 logger.error(f"WorkflowController enforce run {run_id!r}: goal refused before any model call: {e}")
                 legacy_result = {
                     "status": "failure",
                     "quality_gates_passed": False,
                     "files": [],
-                    "failure_type": "GOAL_ADMISSION",
-                    "failure_category": GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                    "failure_type": ("VERIFICATION_AUTHORITY" if isinstance(e, VerificationAuthorityRequired)
+                                     else "GOAL_ADMISSION"),
+                    "failure_category": e.failure_category,
                     "reason_codes": [e.reason_code],
                     "error": str(e),
                     "environment_failure": e.message,
                     "requirements_admission": e.to_dict(),
                     "run_id": run_id,
+                    **({"verification_contract": e.report} if e.report is not None else {}),
                 }
             except WorktreeSyncError as e:
                 logger.error(f"WorkflowController enforce run {run_id!r}: worktree sync refused: {e}")
@@ -4034,6 +4037,35 @@ class WorkflowController:
                 details={key: result[key] for key in ("reason_codes", "invalid_subtask_ids",
                                                      "plan_repair_attempts", "error") if key in result},
             ).to_dict())
+        contract = result.get("verification_contract") if isinstance(result.get("verification_contract"), dict) else None
+        if contract is not None:
+            # VERIFICATION-CONTRACT-003: compiled always; sealed when admitted, else
+            # the typed refusal (GOAL_INSUFFICIENT_FOR_VERIFICATION or
+            # VERIFICATION_AUTHORITY_REQUIRED) with its structured reason.
+            totals = ", ".join(f"{k}={v}" for k, v in (contract.get("totals") or {}).items())
+            events.append(RunEvent(
+                kind="verification_contract.compiled", attempt=0, source=source, authority=EventAuthority.AUXILIARY,
+                message=f"verification contract {str(contract.get('contract_digest'))[:12]}: {contract.get('admission')}; {totals}",
+                details=contract,
+            ).to_dict())
+            refusal = result.get("requirements_admission") if isinstance(result.get("requirements_admission"), dict) else None
+            if refusal is not None:
+                events.append(RunEvent(
+                    kind=("requirement.authority_required"
+                          if refusal.get("reason_code") == "VERIFICATION_AUTHORITY_REQUIRED"
+                          else "requirement.admission_refused"),
+                    attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                    message=str(result.get("error") or "")[:600], details=refusal,
+                ).to_dict())
+            else:
+                events.append(RunEvent(
+                    kind="verification_contract.sealed", attempt=0, source=source,
+                    authority=EventAuthority.AUTHORITATIVE,
+                    message=f"verification contract {str(contract.get('contract_digest'))[:12]} sealed before the first model call",
+                    details={"digest": contract.get("contract_digest"), "stored_path": contract.get("stored_path"),
+                             "admission": contract.get("admission"), "totals": contract.get("totals"),
+                             "authorities": contract.get("authorities"), "visibility": contract.get("visibility")},
+                ).to_dict())
         requirements = result.get("requirements") if isinstance(result.get("requirements"), dict) else {}
         if requirements.get("verdicts"):
             events.append(RunEvent(
@@ -4222,29 +4254,28 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # LR-R1-M1: structured planning runs before any work unit; open the
         # run's attempt-evidence store now (observational, never blocks).
         attempt_evidence_scope.ensure_store(getattr(kernel, "config", None))
-        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: right after the run's evidence
-        # store exists and before any retrieval or model call, every mandatory
-        # requirement must have a deterministic closer under the blocking
-        # policy; else the run is refused here, spending nothing (the direct
-        # path refuses at the same point) - the refusal is still recorded.
-        from kriya.workflow.workflow import (
-            _acceptance_requirement_ids,
-            _candidate_test_files,
-            _migration_identities,
-            _requirement_policy_blocks,
-            _tracked_workspace_paths,
+        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001 / VERIFICATION-CONTRACT-003: right
+        # after the run's evidence store exists and before any retrieval or
+        # model call, the run's verification contract is compiled from the
+        # authoritative requirement set and the repository; under the blocking
+        # policy a goal it cannot admit is refused here, spending nothing (the
+        # direct path refuses at the same point) - the refusal is still
+        # recorded. Admitted, the contract is sealed and its digest binds the
+        # enforce ControlState (no subtask recorded under another contract is
+        # ever reused).
+        from kriya.workflow.workflow import _requirement_policy_blocks, compile_run_contract, seal_run_contract
+
+        kernel_config = getattr(kernel, "config", None)
+        autonomy = getattr(kernel_config, "autonomy", None)
+        verification_contract = compile_run_contract(
+            self.workflow_engine, goal, goal, workspace_path,
+            requirement_set_for(goal, bound_requirement_contract(self.workflow_engine)),
         )
-        autonomy = getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
         if _requirement_policy_blocks(autonomy):
-            admission = admission_gap(
-                requirement_set_for(goal, bound_requirement_contract(self.workflow_engine)),
-                test_files=_candidate_test_files(workspace_path),
-                acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self.workflow_engine)),
-                tracked_paths=_tracked_workspace_paths(workspace_path),
-                migration_identities=_migration_identities(goal, workspace_path),
-            )
+            admission = verification_contract.refusal()
             if admission is not None:
                 raise admission
+        sealed_contract_path = seal_run_contract(kernel_config, verification_contract) if kernel_config is not None else None
         available_tool_names = None
         if kernel is not None:
             try:
@@ -4480,6 +4511,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # concrete run #8 defects this closes.
         obligation_ledger = ObligationLedger()
         seed_requirement_obligations(obligation_ledger, requirement_set)
+        # VERIFICATION-CONTRACT-003 (D1): structural non-claims need no closure.
+        from kriya.workflow.contract_compilation import record_contract_non_claims
+
+        record_contract_non_claims(obligation_ledger, requirement_set, verification_contract,
+                                   source="workflow_controller.verification_contract")
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. One store for the whole run,
         # deliberately separate from obligation_ledger above (see that
@@ -4993,6 +5029,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the acceptance "
                     "approval differs from the one the recorded subtasks ran under. Starting the plan fresh."
                 )
+            elif prior_control_state.verification_contract_digest != verification_contract.digest:
+                # VERIFICATION-CONTRACT-003: the sealed contract (scopes, closers,
+                # bound authorities) is authority the subtasks ran under; a state
+                # recorded under another one - or before contracts existed (None)
+                # - is never reused. Fail closed.
+                enforce_resume_decision["reason"] = "VERIFICATION_CONTRACT_CHANGED"
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the verification "
+                    "contract differs from the one the recorded subtasks ran under. Starting the plan fresh."
+                )
             elif prior_control_state.current_plan_hash != current_plan_hash:
                 enforce_resume_decision["reason"] = "PLAN_CHANGED"
                 logger.warning(
@@ -5135,6 +5181,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             subtask_completion_scope="workspace" if resumed_subtask_states else None,
             acceptance_approval_digest=getattr(bound_approval(self.workflow_engine), "digest", None),
             requirement_contract_digest=getattr(bound_requirement_contract(self.workflow_engine), "digest", None),
+            verification_contract_digest=verification_contract.digest,
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
             workspace_content_hash=compute_workspace_content_hash(workspace_path),
@@ -6998,6 +7045,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["post_commit_persistence_errors"] = post_commit_persistence_errors
         if enforce_resume_decision is not None:
             aggregated["resume_decision"] = enforce_resume_decision
+        # VERIFICATION-CONTRACT-003: the sealed contract this run executed under
+        # (its report; the trace row derives the contract events from it).
+        aggregated["verification_contract"] = {**verification_contract.report(), "stored_path": sealed_contract_path}
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state

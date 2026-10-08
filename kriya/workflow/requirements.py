@@ -135,6 +135,12 @@ class RequirementOutcome(str, Enum):
     # acceptance suite (kriya/workflow/acceptance_approval.py) - human
     # authority, never a proof. Derived only, like CLOSED_BY_EVIDENCE.
     HUMAN_ACCEPTED = "human_accepted"
+    # VERIFICATION-CONTRACT-003 (owner decision D1): the statement states no
+    # observable proposition (a heading, a bare reproducer block) - decided
+    # structurally by the contract compiler, recorded as a candidate-
+    # independent closure, visible everywhere, never a requirement needing
+    # closure, never derived from a verdict or from what Kriya can verify.
+    NOT_A_CLAIM = "not_a_claim"
 
 
 # MODEL-EVIDENCE-HARDENING-001: why a requirement has its verdict.
@@ -170,6 +176,7 @@ _OUTCOME_STATUS = {
     RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
     RequirementOutcome.CLOSED_BY_EVIDENCE: ObligationStatus.SATISFIED,
     RequirementOutcome.HUMAN_ACCEPTED: ObligationStatus.SATISFIED,
+    RequirementOutcome.NOT_A_CLAIM: ObligationStatus.SATISFIED,
 }
 
 
@@ -256,34 +263,65 @@ def _split_sentences(paragraph: str) -> List[str]:
     return [_restore(part) for part in parts]
 
 
-def _segments(goal: str) -> List[str]:
-    """The goal's explicit statements, in order: every list item is one
-    statement (its continuation lines included); text outside lists is split
-    into sentences; a fenced block belongs to the statement before it."""
-    segments: List[str] = []
+# VERIFICATION-CONTRACT-003: where a statement came from in the goal's own
+# structure. Decided by the segmenter itself (the one producer of statements),
+# never re-derived from the statement text, so the derivation is unchanged
+# (same ids, same texts, same digest) and the origin cannot disagree with it.
+ORIGIN_SENTENCE = "sentence"  # prose outside lists
+ORIGIN_LIST_ITEM = "list_item"  # one list item with its continuation lines
+ORIGIN_CODE_BLOCK = "code_block"  # a paragraph made only of indented lines (a reproducer, a snippet)
+ORIGIN_MIXED = "mixed"  # prose with a fenced block, or prose and indented lines in one paragraph
+ORIGIN_WHOLE_GOAL = "whole_goal"  # a goal with no separable statement
+ORIGIN_CLARIFICATION = "clarification"
+
+
+def _segments_with_origin(goal: str) -> List[Tuple[str, str]]:
+    """The goal's explicit statements with their structural origin, in order:
+    every list item is one statement (its continuation lines included); text
+    outside lists is split into sentences; a fenced block belongs to the
+    statement before it. A paragraph whose every line was indented (and that
+    holds no fence) is a code block; a paragraph mixing prose with indented
+    or fenced lines is mixed - a fence or one prose line is enough."""
+    segments: List[Tuple[str, str]] = []
     paragraph: List[str] = []
+    paragraph_kinds: List[str] = []  # "prose" | "indented" | "fence" per raw line
     item: Optional[List[str]] = None
     in_fence = False
 
+    def _paragraph_origin() -> str:
+        kinds = set(paragraph_kinds)
+        if kinds == {"indented"}:
+            return ORIGIN_CODE_BLOCK
+        return ORIGIN_SENTENCE if kinds == {"prose"} else ORIGIN_MIXED
+
     def _flush_paragraph() -> None:
         if paragraph:
-            segments.extend(_split_sentences(" ".join(paragraph)))
+            origin = _paragraph_origin()
+            segments.extend((text, origin) for text in _split_sentences(" ".join(paragraph)))
             paragraph.clear()
+            paragraph_kinds.clear()
 
     def _flush_item() -> None:
         nonlocal item
         if item is not None:
-            segments.append(" ".join(item))
+            segments.append((" ".join(item), ORIGIN_LIST_ITEM))
             item = None
 
     for line in goal.splitlines():
         if _FENCE.match(line):
             in_fence = not in_fence
-            target = item if item is not None else paragraph
-            target.append(line.strip())
+            if item is not None:
+                item.append(line.strip())
+            else:
+                paragraph.append(line.strip())
+                paragraph_kinds.append("fence")
             continue
         if in_fence:
-            (item if item is not None else paragraph).append(line.rstrip())
+            if item is not None:
+                item.append(line.rstrip())
+            else:
+                paragraph.append(line.rstrip())
+                paragraph_kinds.append("fence")
             continue
         match = _LIST_ITEM.match(line)
         if match:
@@ -298,9 +336,31 @@ def _segments(goal: str) -> List[str]:
         else:
             _flush_item()
             paragraph.append(line.strip())
+            paragraph_kinds.append("indented" if line[:1].isspace() else "prose")
     _flush_item()
     _flush_paragraph()
-    return [_clean(s) for s in segments if _meaningful(s)]
+    return [(_clean(text), origin) for text, origin in segments if _meaningful(text)]
+
+
+def _segments(goal: str) -> List[str]:
+    """The goal's explicit statements, in order (``_segments_with_origin``)."""
+    return [text for text, _origin in _segments_with_origin(goal)]
+
+
+def statement_origins(goal: str, clarifications: Sequence[str] = ()) -> Dict[str, str]:
+    """Requirement id -> structural origin, aligned with ``derive_requirements``
+    (the same segmenter, the same order): the input a structural NON_CLAIM
+    decision needs and the statement text alone cannot give."""
+    segments = _segments_with_origin(goal)
+    if not segments and _meaningful(goal):
+        segments = [(_clean(goal), ORIGIN_WHOLE_GOAL)]
+    origins = {f"REQ-{index}": origin for index, (_text, origin) in enumerate(segments, start=1)}
+    counter = 0
+    for raw in clarifications:
+        if _meaningful(_clean(raw)):
+            counter += 1
+            origins[f"REQ-C{counter}"] = ORIGIN_CLARIFICATION
+    return origins
 
 
 def derive_requirements(goal: str, clarifications: Sequence[str] = ()) -> RequirementSet:
@@ -455,6 +515,17 @@ def requirement_verdict_details(ledger: ObligationLedger, requirements: Requirem
 
 REGRESSION_PRESERVATION = "REGRESSION_PRESERVATION"
 BEHAVIOR = "BEHAVIOR"
+# VERIFICATION-CONTRACT-003: the claims a compound constraint can make beside
+# the two above ("Do not change the public API ... or existing tests; keep
+# the behaviour of all other classes unchanged"), each closed only by its own
+# deterministic producer (kriya/workflow/requirement_scopes.py decides which
+# claims a statement makes; the contract records them as ``required_claims``).
+API_PRESERVATION = "API_PRESERVATION"
+TEST_IMMUTABILITY_CLAIM = "TEST_IMMUTABILITY"
+TEST_ADDITION_CLAIM = "TEST_ADDITION"  # "add a test for it": the candidate's own test inventory versus the base
+DOCUMENTATION_CLAIM = "DOCUMENTATION"  # "document it in the README (if there is one)"
+CLAIM_KINDS = (BEHAVIOR, REGRESSION_PRESERVATION, API_PRESERVATION, TEST_IMMUTABILITY_CLAIM, TEST_ADDITION_CLAIM,
+               DOCUMENTATION_CLAIM)
 # Producers that may close each kind. Named-test closure (PRD-020 / FS-1C0) only
 # ever proves regression preservation. BEHAVIOR needs independent acceptance
 # evidence: the operator's executable acceptance file (FS-1C2 B2-a,
@@ -688,17 +759,23 @@ def _effective_closure(
         closure = None  # B3 closes only the BEHAVIOR claim, never a whole requirement
     if closure is not None:
         return closure
-    claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
-              for claim in (BEHAVIOR, REGRESSION_PRESERVATION)}
+    claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id) for claim in CLAIM_KINDS}
     behavior = claims[BEHAVIOR]
-    required = tuple((behavior or {}).get("required_claims") or (BEHAVIOR, REGRESSION_PRESERVATION))
+    # Which claims the statement makes: the BEHAVIOR producer's decision when
+    # it recorded one, else the first producer that recorded the contract's
+    # ``required_claims`` (VERIFICATION-CONTRACT-003, a compound constraint
+    # without a behaviour clause); without any, both FS-1C1 claims.
+    required = tuple((behavior or {}).get("required_claims") or ())
+    if not required:
+        required = next((tuple(record["required_claims"]) for record in claims.values()
+                         if record is not None and record.get("required_claims")), (BEHAVIOR, REGRESSION_PRESERVATION))
     if (behavior is not None and behavior.get("method") in FINITE_EVIDENCE_METHODS
             and not _finite_evidence_may_close(requirement, required)):
         return None  # B2-COV: finite cases never close a general rule, whatever a record says
     if (behavior is not None and behavior.get("method") == HUMAN_ACCEPTANCE_METHOD
             and not _human_acceptance_binds(requirement, behavior)):
         return None  # B3: the approval was for other words (a resumed or altered record)
-    if BEHAVIOR in required and all(claims.get(claim) for claim in required):
+    if required and all(claims.get(claim) for claim in required):
         return {"method": "claims", "claims": {claim: claims[claim] for claim in required}}
     return None
 
@@ -747,12 +824,47 @@ def record_requirement_closure(
     ))
 
 
+# VERIFICATION-CONTRACT-003 (D1): a structural non-claim is closed once, for
+# every candidate, under this evidence id; only ``record_non_claim`` writes it.
+NON_CLAIM_EVIDENCE_ID = "contract:non_claim"
+NON_CLAIM_METHOD = "structural_non_claim"
+STRUCTURAL_NON_CLAIM = "STRUCTURAL_NON_CLAIM"
+
+
+def record_non_claim(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, *,
+    origin: str, reason: str, source: str,
+) -> None:
+    """Record that ``requirement_id`` states no observable proposition (a
+    heading, a bare reproducer block), as the contract compiler decided
+    structurally. Candidate-independent; the statement stays in the set, in
+    lineage and in every report with its text, origin and reason."""
+    record_requirement_closure(
+        ledger, requirements, requirement_id, evidence_id=NON_CLAIM_EVIDENCE_ID, method=NON_CLAIM_METHOD,
+        detail={"reason_code": STRUCTURAL_NON_CLAIM, "origin": origin, "reason": reason,
+                "outcome": RequirementOutcome.NOT_A_CLAIM.value},
+        source=source, revision="contract",
+    )
+
+
+def non_claim_record(ledger: ObligationLedger, requirement_id: str) -> Optional[Dict[str, Any]]:
+    """The structural non-claim record of ``requirement_id``, if the contract
+    compiler recorded one (``record_non_claim``); None otherwise."""
+    for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
+        evidence = record.evidence or {}
+        if (record.status is ObligationStatus.SATISFIED and evidence.get("evidence_id") == NON_CLAIM_EVIDENCE_ID
+                and evidence.get("method") == NON_CLAIM_METHOD):
+            return evidence
+    return None
+
+
 def requirement_closure(
     ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
 ) -> Optional[Dict[str, Any]]:
     """The closure evidence recorded for ``requirement_id`` on the candidate
-    ``evidence_id``, if any (the most recent matching record)."""
-    if not evidence_id:
+    ``evidence_id``, if any (the most recent matching record). A structural
+    non-claim record is never a candidate's closure (``non_claim_record``)."""
+    if not evidence_id or evidence_id == NON_CLAIM_EVIDENCE_ID:
         return None
     for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
         evidence = record.evidence or {}
@@ -785,6 +897,11 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
     VIOLATED, UNKNOWN and PENDING verdicts are never closed."""
     outcomes: Dict[str, RequirementOutcome] = {}
     for requirement in requirements.requirements:
+        if non_claim_record(ledger, requirement.id) is not None:
+            # VERIFICATION-CONTRACT-003 (D1): nothing to verify, whatever any
+            # verifier said about it - decided structurally, before any model.
+            outcomes[requirement.id] = RequirementOutcome.NOT_A_CLAIM
+            continue
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence = (record.evidence or {}) if record is not None else {}
         raw = evidence.get("outcome")
@@ -792,7 +909,8 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
         except ValueError:
             outcome = RequirementOutcome.UNKNOWN
-        if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED):
+        if outcome in (RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED,
+                       RequirementOutcome.NOT_A_CLAIM):
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
         if outcome is RequirementOutcome.VIOLATED:
             # GR-R0: a verdict record is the verifier's MODEL_CLAIMED judgment
@@ -821,6 +939,10 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
     its verdict judged; requirements without any are left out."""
     found: Dict[str, Dict[str, Any]] = {}
     for requirement in requirements.requirements:
+        non_claim = non_claim_record(ledger, requirement.id)
+        if non_claim is not None:
+            found[requirement.id] = dict(non_claim)
+            continue
         record = ledger.current(requirement_obligation_id(requirement.id))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
         evidence = (requirement_counter_evidence(ledger, requirement.id, evidence_id)
@@ -830,7 +952,7 @@ def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet)
             # FS-1C1: an open requirement whose claims are partly proven shows
             # which (e.g. regression preserved, behaviour unverified).
             claims = {claim: requirement_claim(ledger, requirement.id, claim, evidence_id)
-                      for claim in (BEHAVIOR, BEHAVIOR_EXAMPLES, REGRESSION_PRESERVATION)}
+                      for claim in (BEHAVIOR, BEHAVIOR_EXAMPLES) + CLAIM_KINDS[1:]}
             if any(claims.values()):
                 evidence = {"method": "claims", "closed": False, "claims": claims}
         if evidence is not None:
@@ -1067,6 +1189,10 @@ def named_existing_tests(text: str, test_files: Iterable[str]) -> List[str]:
 # forms. Recognizers are closed vocabularies with full matches - an unknown
 # phrasing is residual, never guessed.
 GOAL_INSUFFICIENT_FOR_VERIFICATION = "GOAL_INSUFFICIENT_FOR_VERIFICATION"
+# VERIFICATION-CONTRACT-003 (D3): the goal is clear and every statement is
+# determinate, but a mandatory claim has no bound deterministic authority
+# (kriya/workflow/contract_compilation.py VerificationAuthorityRequired).
+VERIFICATION_AUTHORITY_REQUIRED = "VERIFICATION_AUTHORITY_REQUIRED"
 SUITE_PRESERVATION = "suite_preservation"
 TEST_IMMUTABILITY = "test_immutability"
 TEST_IMMUTABILITY_METHOD = "test_immutability"
@@ -1082,6 +1208,12 @@ ACCEPTED_GOAL_FORMS = (
     "a test-immutability constraint, e.g. 'Do not change any existing test.' (closed by the run's mutation record)",
     "the file-boundary constraint 'Do not modify any other file.' when the goal names the file(s) to change",
     "a behaviour statement covered by an operator acceptance file (--acceptance) or approval (--acceptance-approval)",
+    "an exact behaviour statement whose own example lines Kriya compiles deterministically (doctest '>>>', "
+    "'expression -> literal', 'expression -> raises Error')",
+    "a statement covered by a sealed operator verification authority (--verification-authority: an external "
+    "acceptance command run under Kriya's containment)",
+    "a public-API preservation constraint on a Python project (closed by the public-signature predicate)",
+    "a conditional documentation request whose referent the repository does not have ('... if there is one')",
 )
 
 _SUITE_NOUNS = frozenset({"test", "tests", "suite", "testsuite"})
@@ -1211,26 +1343,73 @@ def is_test_immutability_requirement(text: str) -> bool:
     return bool(_TEST_IMMUTABILITY_REQUIREMENT.fullmatch(_clean(text or "")))
 
 
-class GoalAdmissionError(Exception):
-    """GOAL_INSUFFICIENT_FOR_VERIFICATION: a mandatory requirement of the goal
-    has no deterministic closer; raised before any model call."""
+class AdmissionRefusal(Exception):
+    """A typed refusal of the goal before any model call (VERIFICATION-
+    CONTRACT-003, owner decision D3): either the goal itself is not
+    determinate enough to say what must be verified (``GoalAdmissionError``,
+    GOAL_INSUFFICIENT_FOR_VERIFICATION) or it is clear but a mandatory claim
+    has no bound deterministic authority (``VerificationAuthorityRequired``,
+    VERIFICATION_AUTHORITY_REQUIRED). Both: zero model calls, nothing
+    generated, a sealed trace, a structured result."""
 
-    def __init__(self, residual: Sequence[Mapping[str, Any]], closers: Mapping[str, Sequence[str]]) -> None:
-        self.reason_code = GOAL_INSUFFICIENT_FOR_VERIFICATION
+    reason_code: str = ""
+
+    def __init__(self, residual: Sequence[Mapping[str, Any]], closers: Mapping[str, Sequence[str]],
+                 report: Optional[Mapping[str, Any]] = None) -> None:
         self.residual = [dict(entry) for entry in residual]
         self.closers = {key: list(value) for key, value in closers.items()}
+        self.report = dict(report) if report is not None else None
         super().__init__(self.message)
+
+    @property
+    def failure_category(self) -> str:
+        return self.reason_code.lower()
+
+    @property
+    def message(self) -> str:  # pragma: no cover - subclasses define it
+        raise NotImplementedError
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"reason_code": self.reason_code, "residual": list(self.residual), "closers": dict(self.closers),
+                "accepted_forms": list(ACCEPTED_GOAL_FORMS),
+                **({"verification_contract": self.report} if self.report is not None else {})}
+
+
+class GoalAdmissionError(AdmissionRefusal):
+    """GOAL_INSUFFICIENT_FOR_VERIFICATION: the goal does not establish what
+    must be verified - a statement whose semantics are undecidable (a
+    mutation-scope statement whose path roles cannot be determined or that
+    names no file to change) or a goal with no determinate claim at all;
+    raised before any model call."""
+
+    reason_code = GOAL_INSUFFICIENT_FOR_VERIFICATION
 
     @property
     def message(self) -> str:
         listed = "; ".join(f"{entry['id']}: {entry['text']!r} ({entry['why']})" for entry in self.residual)
-        return (f"{GOAL_INSUFFICIENT_FOR_VERIFICATION}: {len(self.residual)} mandatory requirement(s) of the goal have "
-                f"no deterministic closer, so success could never be verified - {listed}. Accepted forms: "
+        return (f"{GOAL_INSUFFICIENT_FOR_VERIFICATION}: {len(self.residual)} requirement(s) of the goal do not "
+                f"establish what must be verified, so success could never be verified - {listed}. Accepted forms: "
                 + "; ".join(ACCEPTED_GOAL_FORMS))
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {"reason_code": self.reason_code, "residual": list(self.residual), "closers": dict(self.closers),
-                "accepted_forms": list(ACCEPTED_GOAL_FORMS)}
+
+class VerificationAuthorityRequired(AdmissionRefusal):
+    """VERIFICATION_AUTHORITY_REQUIRED: every statement is determinate, but a
+    mandatory claim has no bound deterministic authority; each residual
+    entry names the requirement, its text, the claim and its strength, why
+    the bound closers cannot close it and the acceptable authority types.
+    Raised before any model call."""
+
+    reason_code = VERIFICATION_AUTHORITY_REQUIRED
+
+    @property
+    def message(self) -> str:
+        listed = "; ".join(
+            f"{entry['id']}: {entry['text']!r} [{entry.get('claim')}{' ' + entry['strength'] if entry.get('strength') else ''}: "
+            f"{entry['why']}; acceptable authority: {', '.join(entry.get('acceptable_authorities') or ()) or 'none'}]"
+            for entry in self.residual)
+        return (f"{VERIFICATION_AUTHORITY_REQUIRED}: {len(self.residual)} mandatory requirement(s) of the goal are "
+                f"clear but have no bound deterministic authority to close them - {listed}. Accepted forms: "
+                + "; ".join(ACCEPTED_GOAL_FORMS))
 
 
 def _migration_terms(identity: str) -> set:
@@ -1253,72 +1432,41 @@ def names_migration(text: str, migration_identities: Iterable[Tuple[str, str]]) 
 def deterministic_closers(
     requirements: RequirementSet, *, test_files: Iterable[str], acceptance_ids: Iterable[str] = (),
     tracked_paths: Iterable[str] = (), migration_identities: Iterable[Tuple[str, str]] = (),
+    origins: Optional[Mapping[str, str]] = None, project_language: Optional[str] = None,
 ) -> Tuple[Dict[str, List[str]], List[Dict[str, Any]]]:
     """(closers per requirement id, residual requirements): which deterministic
     closer each requirement has, decided from its own words, the repository's
     test files, the operator acceptance file's covered ids and the tracked
     paths - never from a model. A requirement is residual when one of its
-    claims has no closer."""
-    files = sorted(set(test_files))
-    covered = set(acceptance_ids)
-    tracked = list(tracked_paths)
-    migrations = [tuple(pair) for pair in migration_identities]
-    closers: Dict[str, List[str]] = {}
-    residual: List[Dict[str, Any]] = []
-    roles = mutation_path_roles(requirements, tracked) if any(
-        is_mutation_scope_requirement(r.text) for r in requirements.requirements) else None
-    for requirement in requirements.requirements:
-        found: List[str] = []
-        why: Optional[str] = None
-        if is_mutation_scope_requirement(requirement.text):
-            if roles and roles["ambiguous"]:
-                why = "the goal names paths whose role (change target or reference) cannot be determined"
-            elif roles and roles["authorized"]:
-                found.append(CLOSER_MUTATION_SCOPE)
-            else:
-                why = "the goal names no tracked file to change, so 'other' has no referent"
-        elif is_test_immutability_requirement(requirement.text):
-            found.append(TEST_IMMUTABILITY)
-        elif migrations and names_migration(requirement.text, migrations):
-            if _CONJUNCTION.search(_STRIP_CODE_AND_PARENS.sub(" ", requirement.text.lower())):
-                why = ("a compound statement: the migration gate closes only the migration itself, the rest of the "
-                       "sentence has no closer")
-            else:
-                found.append(CLOSER_MIGRATION_GATE)
-        else:
-            named = named_existing_tests(requirement.text, files)
-            if not named and is_suite_preservation_requirement(requirement.text):
-                found.append(SUITE_PRESERVATION)
-                if suite_statement_requires_immutability(requirement.text):
-                    found.append(TEST_IMMUTABILITY)
-            else:
-                claims = requirement_claims(requirement.text, named)
-                if named and REGRESSION_PRESERVATION in claims:
-                    found.append(CLOSER_NAMED_TESTS)
-                if BEHAVIOR in claims:
-                    if requirement.id in covered:
-                        found.append(CLOSER_ACCEPTANCE)
-                    else:
-                        why = ("a behaviour statement without an acceptance case; model judgment never closes it"
-                               if named else "no existing test named, no acceptance case, not a preservation or "
-                                             "scope statement; model judgment never closes it")
-        closers[requirement.id] = found
-        if why is not None or not found:
-            residual.append({"id": requirement.id, "text": requirement.text,
-                             "why": why or "no deterministic closer recognized"})
-    return closers, residual
+    claims has no closer or its semantics are undecidable. VERIFICATION-
+    CONTRACT-003: one owner of that decision, the contract compiler
+    (kriya/workflow/contract_compilation.py); this is its legacy view."""
+    from kriya.workflow.contract_compilation import compile_verification_contract
+
+    contract = compile_verification_contract(
+        requirements, origins=origins, test_files=test_files, tracked_paths=tracked_paths,
+        migration_identities=migration_identities, acceptance_ids=acceptance_ids, project_language=project_language,
+    )
+    return contract.closers_by_requirement(), contract.residual_requirements()
 
 
 def admission_gap(
     requirements: RequirementSet, *, test_files: Iterable[str], acceptance_ids: Iterable[str] = (),
     tracked_paths: Iterable[str] = (), migration_identities: Iterable[Tuple[str, str]] = (),
-) -> Optional[GoalAdmissionError]:
-    """The typed refusal when a mandatory requirement has no deterministic
-    closer, else None. Decided from the authoritative set before any model
-    call; a run without a requirement set (``kriya fix``) is never refused."""
-    closers, residual = deterministic_closers(requirements, test_files=test_files, acceptance_ids=acceptance_ids,
-                                              tracked_paths=tracked_paths, migration_identities=migration_identities)
-    return GoalAdmissionError(residual, closers) if residual else None
+    origins: Optional[Mapping[str, str]] = None, project_language: Optional[str] = None,
+) -> Optional[AdmissionRefusal]:
+    """The typed refusal when the goal cannot be admitted, else None: a
+    GoalAdmissionError (GOAL_INSUFFICIENT_FOR_VERIFICATION) when a statement
+    is undecidable, a VerificationAuthorityRequired when a mandatory claim
+    has no bound deterministic authority. Decided from the authoritative set
+    before any model call; a run without a requirement set (``kriya fix``)
+    is never refused."""
+    from kriya.workflow.contract_compilation import compile_verification_contract
+
+    return compile_verification_contract(
+        requirements, origins=origins, test_files=test_files, tracked_paths=tracked_paths,
+        migration_identities=migration_identities, acceptance_ids=acceptance_ids, project_language=project_language,
+    ).refusal()
 
 
 def close_test_immutability_requirements(

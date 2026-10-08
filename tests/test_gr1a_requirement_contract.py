@@ -221,7 +221,9 @@ async def test_r5_enforce_resume_never_reuses_subtasks_recorded_under_another_co
     from kriya.control.state import CURRENT_SCHEMA_VERSION
 
     wc, we, workspace, plan, valid = _enforce(tmp_path, monkeypatch, correct=True, approved=False)
-    we.requirement_contract = _load(tmp_path, _contract_file(tmp_path, [{"id": "REQ-1", "text": CONTRACT_GENERAL,
+    # VERIFICATION-CONTRACT-003: an EXACT contract statement is admitted with the acceptance file alone (a GENERAL
+    # one would need the approval); the resume-identity rule under test is unchanged
+    we.requirement_contract = _load(tmp_path, _contract_file(tmp_path, [{"id": "REQ-1", "text": CONTRACT_EXACT,
                                                                          "kind": "requirement"}]),
                                     goal=GENERAL_GOAL, workspace=workspace)
     save_control_state(str(workspace), ControlState(

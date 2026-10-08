@@ -434,10 +434,18 @@ def test_missing_referenced_run_record_invalidates_everything():
 # ---------------------------------------------------------------- workflow integration
 
 def _seed(tmp_path, cfg, run_id, stage, fingerprint_inputs=None, goal=GOAL, **extra):
+    from types import SimpleNamespace
+
+    from kriya.workflow.requirements import derive_requirements
+    from kriya.workflow.workflow import compile_run_contract
+
+    # VERIFICATION-CONTRACT-003: a checkpoint carries the digest of the verification contract the run compiled
+    # (no acceptance, approval or authority bound: the same contract the workflow compiles for this goal).
+    contract = compile_run_contract(SimpleNamespace(), goal, goal, str(tmp_path), derive_requirements(goal))
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
         RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
-            cfg, str(tmp_path), goal=goal, **(fingerprint_inputs or {}),
+            cfg, str(tmp_path), goal=goal, verification_contract_digest=contract.digest, **(fingerprint_inputs or {}),
         )),
         **extra,
     })
@@ -775,7 +783,7 @@ def test_an_unset_completion_scope_leaves_the_control_state_hash_unchanged():
     # digest, GR-R1A requirement contract digest) are absent from the earlier
     # form when unset.
     for key in ("created_at", "updated_at", "subtask_completion_scope", "acceptance_approval_digest",
-                "requirement_contract_digest"):
+                "requirement_contract_digest", "verification_contract_digest"):  # the last: VERIFICATION-CONTRACT-003
         pre_prd008.pop(key)
     expected = hashlib.sha256(json.dumps(pre_prd008, sort_keys=True, default=str).encode("utf-8")).hexdigest()
     assert state.content_hash() == expected

@@ -32,8 +32,10 @@ from kriya.workflow.requirements import (
     REGRESSION_PRESERVATION,
     SUITE_PRESERVATION,
     TEST_IMMUTABILITY,
+    VERIFICATION_AUTHORITY_REQUIRED,
     GoalAdmissionError,
     RequirementOutcome,
+    VerificationAuthorityRequired,
     admission_gap,
     close_suite_preservation_requirements,
     close_test_immutability_requirements,
@@ -99,9 +101,11 @@ def test_04_admission_names_the_residual_requirement_and_the_accepted_forms():
     closers, residual = deterministic_closers(reqs, test_files=["tests/test_a.py"])
     assert closers == {"REQ-1": [], "REQ-2": [SUITE_PRESERVATION, TEST_IMMUTABILITY]}  # "unchanged": both closers
     assert [r["id"] for r in residual] == ["REQ-1"] and "model judgment never closes it" in residual[0]["why"]
+    # VERIFICATION-CONTRACT-003 (D3): a clear statement without a bound authority is VERIFICATION_AUTHORITY_REQUIRED
+    # (GOAL_INSUFFICIENT_FOR_VERIFICATION is now the undecidable-goal refusal, test_05); same invariants otherwise.
     refusal = admission_gap(reqs, test_files=["tests/test_a.py"])
-    assert isinstance(refusal, GoalAdmissionError) and refusal.reason_code == GOAL_INSUFFICIENT_FOR_VERIFICATION
-    assert refusal.message.startswith("GOAL_INSUFFICIENT_FOR_VERIFICATION: 1 mandatory requirement(s)")
+    assert isinstance(refusal, VerificationAuthorityRequired) and refusal.reason_code == VERIFICATION_AUTHORITY_REQUIRED
+    assert refusal.message.startswith("VERIFICATION_AUTHORITY_REQUIRED: 1 mandatory requirement(s)")
     assert "REQ-1: 'Make lower() lower-case its argument.'" in refusal.message
     assert all(form in refusal.message for form in ACCEPTED_GOAL_FORMS)
     assert refusal.to_dict()["residual"][0]["id"] == "REQ-1"
@@ -116,13 +120,21 @@ def test_05_a_goal_made_of_closable_statements_is_admitted():
     assert [r["id"] for r in residual] == ["REQ-1"]
     assert closers["REQ-2"] == [CLOSER_NAMED_TESTS] and closers["REQ-3"] == [SUITE_PRESERVATION, TEST_IMMUTABILITY]
     assert closers["REQ-4"] == [TEST_IMMUTABILITY] and closers["REQ-5"] == [CLOSER_MUTATION_SCOPE]
-    # with an acceptance case covering REQ-1 the goal is admitted; a scope statement without a named file is not
-    assert admission_gap(reqs, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"],
+    # VERIFICATION-CONTRACT-003: REQ-1 states no concrete case (GENERAL), so an acceptance file alone does not admit
+    # it (B2-COV would leave it REQUIREMENTS_UNRESOLVED after model calls); an EXACT statement with a case is admitted
+    assert isinstance(admission_gap(reqs, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"],
+                                    tracked_paths=["src/cache.py", "tests/test_a.py"]), VerificationAuthorityRequired)
+    exact = derive_requirements(goal.replace("Fix the expiry boundary in src/cache.py.", "Fix src/cache.py so that expire(3) -> [(1, 1)]."))
+    assert admission_gap(exact, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"],
                          tracked_paths=["src/cache.py", "tests/test_a.py"]) is None
-    assert deterministic_closers(reqs, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"])[0]["REQ-1"] == [CLOSER_ACCEPTANCE]
+    assert deterministic_closers(exact, test_files=["tests/test_a.py"], acceptance_ids=["REQ-1"])[0]["REQ-1"] == [CLOSER_ACCEPTANCE]
+    # a scope statement without a named file is undecidable: GOAL_INSUFFICIENT_FOR_VERIFICATION
     scope_only = derive_requirements("Keep things tidy.\n" + SCOPE)
     _, residual = deterministic_closers(scope_only, test_files=[], tracked_paths=["a.py"])
     assert {r["id"] for r in residual} == {"REQ-1", "REQ-2"} and "no referent" in residual[1]["why"]
+    refusal = admission_gap(scope_only, test_files=[], tracked_paths=["a.py"])
+    assert isinstance(refusal, GoalAdmissionError) and refusal.reason_code == GOAL_INSUFFICIENT_FOR_VERIFICATION
+    assert refusal.message.startswith("GOAL_INSUFFICIENT_FOR_VERIFICATION:")
 
 
 def test_06b_a_named_test_preservation_statement_may_start_with_every(workspace_files=("tests/test_a.py", "tests/test_b.py")):
@@ -136,7 +148,7 @@ def test_06b_a_named_test_preservation_statement_may_start_with_every(workspace_
 def test_06_a_named_test_with_a_behaviour_claim_still_needs_acceptance():
     reqs = derive_requirements("tests/test_legacy.py keeps passing with the new cache enabled")
     closers, residual = deterministic_closers(reqs, test_files=["tests/test_legacy.py"])
-    assert closers["REQ-1"] == [CLOSER_NAMED_TESTS] and residual and "without an acceptance case" in residual[0]["why"]
+    assert closers["REQ-1"] == [CLOSER_NAMED_TESTS] and residual and "model judgment never closes it" in residual[0]["why"]
 
 
 # ---------------------------------------------------------------- closers: the candidate's own full suite
@@ -240,20 +252,23 @@ def test_11_a_goal_that_could_never_verify_is_refused_before_the_first_model_cal
     monkeypatch.setattr(harness, "make_config", _blocking_config)
     run = run_edit_protocol(tmp_path, monkeypatch, ["unused"], probe=_probe, goal=UNLOCALIZED_GOAL)
     assert run.developer == []
-    assert run.result["failure_category"] == "goal_insufficient_for_verification"
-    assert run.result["reason_codes"] == [GOAL_INSUFFICIENT_FOR_VERIFICATION] and run.result["quality_gates_passed"] is False
+    # VERIFICATION-CONTRACT-003 (D3): the clear goal lacks authority - VERIFICATION_AUTHORITY_REQUIRED, same invariants
+    assert run.result["failure_category"] == "verification_authority_required"
+    assert run.result["reason_codes"] == [VERIFICATION_AUTHORITY_REQUIRED] and run.result["quality_gates_passed"] is False
     assert run.result["requirements_admission"]["residual"][0]["id"] == "REQ-1"
-    [event] = run.kinds("requirement.admission_refused")
-    assert event.details["reason_code"] == GOAL_INSUFFICIENT_FOR_VERIFICATION
-    assert run.result["environment_failure"].startswith("GOAL_INSUFFICIENT_FOR_VERIFICATION:")
+    assert run.result["verification_contract"]["admission"] == "VERIFICATION_AUTHORITY_REQUIRED"
+    [event] = run.kinds("requirement.authority_required")
+    assert event.details["reason_code"] == VERIFICATION_AUTHORITY_REQUIRED
+    assert not run.kinds("requirement.admission_refused")
+    assert run.result["environment_failure"].startswith("VERIFICATION_AUTHORITY_REQUIRED:")
 
 
 def test_12_under_a_recording_policy_the_same_goal_is_not_refused(tmp_path, monkeypatch):
     assert not wf._requirement_policy_blocks(AutonomyConfig())
     assert wf._requirement_policy_blocks(AutonomyConfig(requirement_unverified_policy="block"))
     run = run_edit_protocol(tmp_path, monkeypatch, ["unused"], probe=_probe, goal=UNLOCALIZED_GOAL)
-    assert run.result.get("failure_category") != "goal_insufficient_for_verification"
-    assert not run.kinds("requirement.admission_refused")
+    assert run.result.get("failure_category") not in ("goal_insufficient_for_verification", "verification_authority_required")
+    assert not run.kinds("requirement.admission_refused") and not run.kinds("requirement.authority_required")
 
 
 # ---------------------------------------------------------------- review reconciliation (2026-10-08)
@@ -322,8 +337,8 @@ async def test_15_the_enforce_path_refuses_before_planning_under_production(tmp_
     we.acceptance = None
     result = await wc.WorkflowController(we).execute("Add a run() entry point to `app.py`.\n", str(tmp_path), migration_mode="enforce")
     legacy = result.legacy_result
-    assert legacy["failure_type"] == "GOAL_ADMISSION" and legacy["failure_category"] == "goal_insufficient_for_verification"
-    assert legacy["reason_codes"] == [GOAL_INSUFFICIENT_FOR_VERIFICATION] and legacy["quality_gates_passed"] is False
+    assert legacy["failure_type"] == "VERIFICATION_AUTHORITY" and legacy["failure_category"] == "verification_authority_required"
+    assert legacy["reason_codes"] == [VERIFICATION_AUTHORITY_REQUIRED] and legacy["quality_gates_passed"] is False
     assert legacy["requirements_admission"]["residual"][0]["id"] == "REQ-1"
     assert we.planner.run.await_count == 0 and not we.run_generation_workflow.called
 
@@ -359,8 +374,11 @@ def test_16_an_admitted_goal_whose_closers_cannot_close_still_blocks_at_the_term
 def test_17_a_request_hidden_in_quotes_parentheses_or_a_fence_is_never_a_suite_statement(text):
     """Final review finding 1: stripped spans may only be commands or paths, never prose."""
     assert not is_suite_preservation_requirement(text)
-    _, residual = deterministic_closers(derive_requirements(text), test_files=["tests/test_a.py"])
-    assert residual
+    closers, residual = deterministic_closers(derive_requirements(text), test_files=["tests/test_a.py"])
+    # VERIFICATION-CONTRACT-003: the suite clause may still be recognized beside the hidden request (it only adds a
+    # claim), but the request itself keeps the statement residual: never admitted on the green suite alone
+    assert residual and "BEHAVIOR" in residual[0]["why"]
+    del closers
 
 
 @pytest.mark.parametrize("text", ["Every existing test must keep passing (./gradlew :json-path:test).",
@@ -374,7 +392,8 @@ def test_19_a_compound_migration_sentence_is_residual():
     """Final review finding 3: the migration gate closes the migration itself, nothing coordinated with it."""
     compound = derive_requirements("Replace requests with httpx in the client and also add exponential-backoff retries to every call.")
     closers, residual = deterministic_closers(compound, test_files=[], migration_identities=[("requests", "httpx")])
-    assert closers["REQ-1"] == [] and "compound" in residual[0]["why"]
+    # VERIFICATION-CONTRACT-003: the gate's binding for the migration clause is listed, the statement stays residual
+    assert closers["REQ-1"] == ["migration_gate"] and "compound" in residual[0]["why"]
     pure = derive_requirements("Replace requests with httpx in the client.")
     closers, residual = deterministic_closers(pure, test_files=[], migration_identities=[("requests", "httpx")])
     assert closers["REQ-1"] == ["migration_gate"] and residual == []

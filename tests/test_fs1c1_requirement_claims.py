@@ -215,6 +215,6 @@ async def test_end_to_end_a_passing_regression_oracle_never_carries_new_behaviou
         # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the new-behaviour claim has no closer (the named test proves only
         # preservation), so under the production policy the run is refused before any model call - the C0 oracle
         # can never be read as carrying the behaviour because it never has the chance to.
-        assert res["failure_category"] == "goal_insufficient_for_verification"
-        assert "without an acceptance case" in res["requirements_admission"]["residual"][0]["why"]
+        assert res["failure_category"] == "verification_authority_required"   # VERIFICATION-CONTRACT-003 (D3)
+        assert "model judgment never closes it" in res["requirements_admission"]["residual"][0]["why"]
         assert runs == [] and _events(cfg, "requirement.closure") == []

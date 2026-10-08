@@ -256,9 +256,8 @@ from kriya.workflow.pytest_stability import (
 from kriya.workflow.pytest_stability import decision_summary as pytest_decision_summary
 from kriya.workflow.requirement_contract import bound_requirement_contract, requirement_set_for
 from kriya.workflow.requirements import (
-    GOAL_INSUFFICIENT_FOR_VERIFICATION,
     REQUIREMENTS_UNRESOLVED,
-    admission_gap,
+    VerificationAuthorityRequired,
     blocking_requirements,
     cited_requirement_ids,
     requirement_evidence,
@@ -267,6 +266,7 @@ from kriya.workflow.requirements import (
     requirement_verdict_details,
     requirements_prompt_block,
     seed_requirement_obligations,
+    statement_origins,
 )
 from kriya.workflow.resume_fingerprints import (
     CANDIDATE_HASH_KEY,
@@ -1043,6 +1043,86 @@ def _tracked_workspace_paths(workspace_path: str) -> List[str]:
         return [path for path in git_read_lines(workspace_path, "ls-files") if path]
     except Exception:
         return []
+
+
+_PYTHON_MANIFESTS = frozenset({"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"})
+_JVM_MANIFESTS = frozenset({"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"})
+
+
+def _project_language(tracked_paths: Iterable[str]) -> Optional[str]:
+    """"python" / "java" / None from the repository's own manifests, else its
+    sources (VERIFICATION-CONTRACT-003: which API-preservation predicate, if
+    any, the contract may bind). Deterministic repository evidence only."""
+    paths = list(tracked_paths)
+    names = {path.rsplit("/", 1)[-1] for path in paths}
+    if names & _JVM_MANIFESTS:
+        return "java"
+    if names & _PYTHON_MANIFESTS:
+        return "python"
+    if any(path.endswith((".java", ".kt")) for path in paths):
+        return "java"
+    if any(path.endswith(".py") for path in paths):
+        return "python"
+    return None
+
+
+def _workspace_file_reader(workspace_path: str) -> Callable[[str], Optional[bytes]]:
+    """A reader of tracked files for the contract compiler's documentation
+    referent inspection; None for an unreadable path (fail closed there)."""
+
+    def read(path: str) -> Optional[bytes]:
+        try:
+            with open(os.path.join(workspace_path, path), "rb") as handle:
+                return handle.read()
+        except OSError:
+            return None
+
+    return read
+
+
+def _workspace_head(workspace_path: str) -> Optional[str]:
+    from kriya.workflow.worktree import git_read_lines
+
+    try:
+        return git_read_lines(workspace_path, "rev-parse", "HEAD")[0]
+    except Exception:
+        return None
+
+
+def compile_run_contract(engine: Any, requirement_goal: Optional[str], goal: str, workspace_path: str,
+                         requirement_set: Any) -> Any:
+    """VERIFICATION-CONTRACT-003: compile the run's verification contract
+    (kriya/workflow/contract_compilation.py) from the authoritative
+    requirement set, the goal's own structure (statement origins; an
+    operator contract's statements are sentences), the repository's test
+    files and tracked paths, the resolved migration, the bound B2 artifact,
+    B3 approval and external authorities, the project language and the
+    workspace's HEAD. Shared by the direct and the enforce path; pure given
+    the workspace, never a model call."""
+    from kriya.workflow.contract_compilation import bound_external_authorities, compile_verification_contract
+
+    tracked = _tracked_workspace_paths(workspace_path)
+    origins = statement_origins(requirement_goal) if (requirement_goal and requirement_set.contract_digest is None) else {}
+    return compile_verification_contract(
+        requirement_set, origins=origins, test_files=_candidate_test_files(workspace_path), tracked_paths=tracked,
+        migration_identities=_migration_identities(goal, workspace_path),
+        acceptance=bound_acceptance(engine), approval=bound_approval(engine),
+        external_authorities=bound_external_authorities(engine), project_language=_project_language(tracked),
+        tracked_file_reader=_workspace_file_reader(workspace_path), base_revision=_workspace_head(workspace_path),
+    )
+
+
+def seal_run_contract(config: Any, contract: Any) -> Optional[str]:
+    """Store the compiled contract content-addressed in Kriya's state directory
+    (never the workspace); None when no state directory can be resolved."""
+    from kriya.core.state_paths import resolve_state_directory
+    from kriya.workflow.contract_compilation import seal_verification_contract
+
+    try:
+        return seal_verification_contract(contract, resolve_state_directory(config)[0])
+    except Exception as exc:  # the contract still governs the run; the store is evidence
+        logger.warning(f"Verification contract could not be stored: {type(exc).__name__}: {exc}")
+        return None
 
 
 def close_requirements_by_test_immutability(
@@ -2134,6 +2214,11 @@ class WorkflowEngine:
         # is bound (never merged with requirements derived from the goal).
         requirement_set = (requirement_set_for(requirement_goal, bound_requirement_contract(self))
                            if requirement_goal else None)
+        # VERIFICATION-CONTRACT-003: the run's verification contract, compiled
+        # from the set and the repository before any model call; its digest
+        # joins the resume identity, its refusal is decided below.
+        verification_contract = (compile_run_contract(self, requirement_goal, goal, workspace_path, requirement_set)
+                                 if requirement_set is not None else None)
         if requirement_set is not None:
             state.record_event(RunEvent(
                 kind="requirement.derived", attempt=0, source="workflow.run_generation_workflow",
@@ -2141,6 +2226,14 @@ class WorkflowEngine:
                 message=f"{len(requirement_set.requirements)} original requirement(s): "
                         + ", ".join(requirement_set.ids),
                 details=requirement_set.to_dict(),
+            ))
+            contract_report = verification_contract.report()
+            state.record_event(RunEvent(
+                kind="verification_contract.compiled", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY,
+                message=(f"verification contract {verification_contract.digest[:12]}: {contract_report['admission']}; "
+                         + ", ".join(f"{k}={v}" for k, v in contract_report["totals"].items())),
+                details=contract_report,
             ))
 
         def _record_requirement_lineage(stage: str, text: Any) -> None:
@@ -2210,6 +2303,8 @@ class WorkflowEngine:
                 acceptance_digest=getattr(bound_acceptance(self), "digest", None),
                 approval_digest=getattr(bound_approval(self), "digest", None),
                 requirement_contract_digest=getattr(bound_requirement_contract(self), "digest", None),
+                verification_contract_digest=(verification_contract.digest if verification_contract is not None
+                                              else None),
             )
 
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
@@ -2364,19 +2459,20 @@ class WorkflowEngine:
         # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: before any model call, every
         # mandatory requirement must have a deterministic closer; a goal that
         # cannot be verified is refused here, naming what and why.
-        if requirement_set is not None and _requirement_policy_blocks(self.kernel.config.autonomy):
+        if verification_contract is not None and _requirement_policy_blocks(self.kernel.config.autonomy):
             from kriya.core.trace import TraceLogger
 
-            admission = admission_gap(
-                requirement_set, test_files=_candidate_test_files(workspace_path),
-                acceptance_ids=_acceptance_requirement_ids(bound_acceptance(self)),
-                tracked_paths=_tracked_workspace_paths(workspace_path),
-                migration_identities=_migration_identities(goal, workspace_path),
-            )
+            admission = verification_contract.refusal()
             if admission is not None:
+                # VERIFICATION-CONTRACT-003 (D3): GOAL_INSUFFICIENT_FOR_VERIFICATION (the
+                # goal does not establish what to verify) or VERIFICATION_AUTHORITY_REQUIRED
+                # (clear, but a mandatory claim has no bound authority) - both typed, both
+                # before any model call, nothing generated, a sealed trace.
                 logger.error(admission.message)
                 state.record_event(RunEvent(
-                    kind="requirement.admission_refused", attempt=0, source="workflow.run_generation_workflow",
+                    kind=("requirement.authority_required" if isinstance(admission, VerificationAuthorityRequired)
+                          else "requirement.admission_refused"),
+                    attempt=0, source="workflow.run_generation_workflow",
                     authority=EventAuthority.AUTHORITATIVE, message=admission.message[:600],
                     details=admission.to_dict(),
                 ))
@@ -2384,19 +2480,34 @@ class WorkflowEngine:
                     TraceLogger(trace_db_path(self.kernel.config)).log_run(
                         run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                         attempts=0, status="failure", files_modified=[],
-                        failure_category=GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                        failure_category=admission.failure_category,
                         milestone_group_id=milestone_group_id, milestone_index=milestone_index,
                         milestone_total=milestone_total, run_events=self._trace_run_events(state),
                     )
                 except Exception as trace_ex:
                     logger.warning(f"Failed to write run trace: {trace_ex}")
                 return {
-                    "status": "failure", "failure_category": GOAL_INSUFFICIENT_FOR_VERIFICATION.lower(),
+                    "status": "failure", "failure_category": admission.failure_category,
                     "reason_codes": [admission.reason_code], "error": admission.message,
                     "environment_failure": admission.message, "goal": goal, "workspace_path": workspace_path,
                     "run_id": trace_id, "files": [], "quality_gates_passed": False,
                     "requirements_admission": admission.to_dict(),
+                    **({"verification_contract": admission.report} if admission.report is not None else {}),
                 }
+        if verification_contract is not None:
+            # Admitted (or not blocking under the record policy): seal the
+            # contract - stored content-addressed, bound to this run's identity.
+            sealed_path = seal_run_contract(self.kernel.config, verification_contract)
+            state.record_event(RunEvent(
+                kind="verification_contract.sealed", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUTHORITATIVE,
+                message=f"verification contract {verification_contract.digest[:12]} sealed before the first model call",
+                details={"digest": verification_contract.digest, "stored_path": sealed_path,
+                         "admission": verification_contract.report()["admission"],
+                         "totals": verification_contract.report()["totals"],
+                         "authorities": [a.to_dict() for a in verification_contract.authorities],
+                         "visibility": verification_contract.visibility()},
+            ))
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
 
@@ -4238,6 +4349,13 @@ class WorkflowEngine:
             # PRD-020: every original requirement is tracked (PENDING until the
             # verifier records an outcome); idempotent over a restored ledger.
             seed_requirement_obligations(resolved_obligation_ledger, requirement_set)
+            if verification_contract is not None:
+                # VERIFICATION-CONTRACT-003 (D1): the contract's structural
+                # non-claims need no closure; recorded once, visible everywhere.
+                from kriya.workflow.contract_compilation import record_contract_non_claims
+
+                record_contract_non_claims(resolved_obligation_ledger, requirement_set, verification_contract,
+                                           source="workflow.verification_contract")
         if ownership_findings:
             record_findings(resolved_obligation_ledger, ownership_findings, revision=0,
                             source="workflow.architect_file_resolution")

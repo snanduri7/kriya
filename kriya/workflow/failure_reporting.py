@@ -107,6 +107,9 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: refused before any model call - a
     # requirement with no deterministic closer could never be verified.
     "goal_insufficient_for_verification": FailureCategory.VERIFICATION,
+    # VERIFICATION-CONTRACT-003: refused before any model call - the goal is clear
+    # but a mandatory claim has no bound deterministic authority.
+    "verification_authority_required": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
     # PRD-031A: the static-analysis gate did not permit the commit.
     "static_analysis_blocked": FailureCategory.VERIFICATION,

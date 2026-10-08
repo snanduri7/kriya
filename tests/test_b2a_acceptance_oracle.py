@@ -615,10 +615,17 @@ async def test_direct_path_the_acceptance_file_decides_the_behaviour_requirement
     p1, p2 = _gates_pass()
     with p1, p2:
         res = await engine.run_generation_workflow(goal=goal, workspace_path=str(workspace))
-    assert res["requirements"]["outcomes"]["REQ-1"] == outcome
     succeeded = outcome == "closed_by_evidence"
     assert res["quality_gates_passed"] is succeeded
     assert (workspace / "greeting.py").exists() is succeeded  # never applied without success
+    if outcome == "unverified":
+        # VERIFICATION-CONTRACT-003 (D3): B2-COV decided before any model call - finite cases can never close the
+        # general rule, so the goal is refused as VERIFICATION_AUTHORITY_REQUIRED (the approval is the authority)
+        assert res["failure_category"] == "verification_authority_required"
+        assert "B2-COV" in res["requirements_admission"]["residual"][0]["why"]
+        assert _events(cfg, "requirement.closure") == []
+        return
+    assert res["requirements"]["outcomes"]["REQ-1"] == outcome
     [closure] = [c for e in _events(cfg, "requirement.closure") for c in e["closures"]
                  if c.get("kind") == ao.ACCEPTANCE_METHOD][-1:]
     assert closure["reason_code"] == {"closed_by_evidence": ao.ACCEPTANCE_PASSED, "violated": ao.ACCEPTANCE_VIOLATED,

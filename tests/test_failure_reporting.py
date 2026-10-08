@@ -55,6 +55,8 @@ _REAL_FAILURE_TYPES = {
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
     "goal_insufficient_for_verification": FailureCategory.VERIFICATION,
+    # VERIFICATION-CONTRACT-003: refused before any model call, authority missing.
+    "verification_authority_required": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
     # PRD-031A: static-analysis gate stops.
     "static_analysis_blocked": FailureCategory.VERIFICATION,

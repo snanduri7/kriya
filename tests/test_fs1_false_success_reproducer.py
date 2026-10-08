@@ -163,7 +163,8 @@ def test_the_specimen_never_succeeds_under_the_production_policy(tmp_path, monke
     closer), so the false success can no longer even be attempted; the FS-1A path stays covered under RECORD."""
     observed = _run(tmp_path, monkeypatch, PRODUCTION)
     legacy = observed.result.legacy_result
-    assert legacy["status"] != "success" and legacy["failure_category"] == "goal_insufficient_for_verification"
+    # VERIFICATION-CONTRACT-003 (D3): the clear goal lacks a bound authority - VERIFICATION_AUTHORITY_REQUIRED
+    assert legacy["status"] != "success" and legacy["failure_category"] == "verification_authority_required"
     assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
     assert _test_delta_outcomes(observed) == [] and not observed.of("candidate.change")
 
@@ -197,6 +198,6 @@ def test_a_correct_candidate_with_only_model_judged_requirements_is_blocked_in_p
     assert (observed.workspace / MODULE).read_text() == BASE_MODULE   # nothing applied
     # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the specimen's requirements have no deterministic closer, so under the
     # production policy the run is refused before the first model call - no candidate, no verdict, no test delta.
-    assert legacy["failure_category"] == "goal_insufficient_for_verification"
+    assert legacy["failure_category"] == "verification_authority_required"
     assert legacy["requirements_admission"]["residual"] and _test_delta_outcomes(observed) == []
-    assert "GOAL_INSUFFICIENT_FOR_VERIFICATION" in json.dumps(legacy, default=str)
+    assert "VERIFICATION_AUTHORITY_REQUIRED" in json.dumps(legacy, default=str)

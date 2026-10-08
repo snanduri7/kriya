@@ -768,7 +768,7 @@ async def test_production_run_blocks_cannot_confirm_with_no_other_evidence(tmp_p
         res = await engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace))
 
     assert res["quality_gates_passed"] is False
-    assert res["failure_category"] == "goal_insufficient_for_verification"
+    assert res["failure_category"] == "verification_authority_required"  # VERIFICATION-CONTRACT-003 (D3)
     assert {r["id"] for r in res["requirements_admission"]["residual"]} >= {"REQ-2"}
     assert _events(cfg, "requirement.closure") == [] and _events(cfg, "requirement.verdicts") == []
     assert engine.developer.run_generation.await_count == 0 and calls["spec"] == []  # nothing was ever generated

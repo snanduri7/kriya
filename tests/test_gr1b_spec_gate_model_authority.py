@@ -70,7 +70,7 @@ async def test_3_no_closure_and_model_satisfied_is_unverified_and_blocks_under_p
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
     res = await _run(engine, _workspace(tmp_path))
-    assert res["quality_gates_passed"] is False and res["failure_category"] == "goal_insufficient_for_verification"
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "verification_authority_required"
     assert res["requirements_admission"]["residual"] and calls["spec"] == []
     assert engine.developer.run_generation.await_count == 0
 
@@ -80,7 +80,7 @@ async def test_4_no_closure_and_model_missing_is_unverified_and_blocks_under_pro
     cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt, missing=("REQ-3",)),
                                  requirement_unknown_policy="block", requirement_unverified_policy="block")
     res = await _run(engine, _workspace(tmp_path))
-    assert res["quality_gates_passed"] is False and res["failure_category"] == "goal_insufficient_for_verification"
+    assert res["quality_gates_passed"] is False and res["failure_category"] == "verification_authority_required"
     assert engine.developer.run_generation.await_count == 0 and calls["spec"] == []  # refused before any model call
 
 
