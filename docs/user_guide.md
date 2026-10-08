@@ -257,6 +257,7 @@ falls back to the host's tools.
 | Python | `pyproject.toml` `requires-python`, else `.python-version` (minor version) | `python:<3.10-3.14>-slim` |
 
 - **Defaults.** With no declared version: JDK 21 for Java and Python 3.12.
+- **Python dependencies.** The contained test gate installs a project's dependencies from `requirements.txt` or `pyproject.toml` (PEP 621) into an isolated virtualenv that is rebuilt whenever the declared set shrinks. Poetry (`[tool.poetry]`) and Pipenv (`Pipfile`) dependency declarations are not installed: such a project is outside the supported boundary and a missing third-party import fails its test gate as a typed failure, never a pass.
 - **Baseline and target toolchains.**
   - The repository's declaration is the *baseline*.
   - A toolchain change is a *migration*, and its candidate gates run under the *target*.
@@ -867,7 +868,7 @@ static_analysis:
 ```
 
 **What it checks.**
-- Kriya scans the files your change touches, before and after the change. A provider that needs more context scans more, such as the module or the repository.
+- Kriya scans the files your change touches, before and after the change (an in-place run uses the exact original bytes it captured as the before side). Semgrep's `ERROR`/`WARNING`/`INFO` and the newer `CRITICAL`/`HIGH`/`MEDIUM`/`LOW` rule severities map to Kriya's levels (severity map version 2; a rule with none of them is `unknown`, decided as high). A provider that needs more context scans more, such as the module or the repository.
 - Each finding is classified as introduced, unchanged, worsened or resolved, so existing debt is not blamed on the change.
 - The default policy blocks new or worsened critical and high findings, and warns on medium ones. Existing high findings only warn.
 - The policy is configurable under `static_analysis.policy`.
@@ -927,6 +928,7 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
     - LLM calls and tokens;
     - wall time and verification share;
     - static-analysis outcomes and waivers;
+    - per-enforce-run outcomes of the subtask rows (`by_enforce_run`: each enforce subtask's trace row names its `<run_id>.enforce` terminal row);
     - adjudicated false success and regression escape.
   - **Keys.** Model metrics are keyed by the exact runtime, the inference settings, the role and the task class.
   - **Missing evidence.** Anything without evidence reads UNAVAILABLE.
@@ -955,6 +957,8 @@ Every `generate`/`fix` run records what each attempt asked the model, what came 
 - **`kriya evidence explain RUN_ID [--json]`.** For each attempt: what the model was asked, what authority it had, what it returned, what candidate change resulted, which check failed, why Kriya retried, what changed in the next retry and why a fallback was selected or refused; and why the run finally succeeded or failed. An answer the run cannot give says `NOT RECORDED (<reason>)` or `NOT APPLICABLE (<reason>)`, never blank.
 - **`kriya evidence verify RUN_ID`.** Recomputes the hash chain, blobs and seal: exit 0 only for `VERIFIED`; 1 for `UNSEALED` (crashed or still running) or no store; 2 for a broken chain, corrupt blob or seal mismatch.
 - **`kriya evidence prune [--dry-run] [--workspace DIR] [--json]`.** Applies retention now (it also runs at the end of every run).
+- **`kriya evidence leak-check RUN_ID --hidden FILE... [--public FILE...] [--marker TEXT...] [--json]`.** Greps every model-facing blob of the run (prompts, tool results, context) for lines that exist only in the hidden files (an oracle script, a hidden test) and for authority markers; the public counterparts are the positive control (their shared lines must appear, or the check is INCONCLUSIVE). Verdicts: `CLEAN`, `LEAKED`, `INCONCLUSIVE`, `UNAVAILABLE`.
+- **`kriya evidence candidate RUN_ID --out DIR [--attempt N] [--json]`.** Reconstructs the staged candidate of an attempt (by default the last staged one) byte-for-byte from the sealed store into `DIR` (outside the workspace), with a `CANDIDATE_MANIFEST.json` naming every file's digests - so a rejected candidate can be judged independently after the run restored the workspace.
 - **Configuration.** `evidence.attempt_recorder.capture`: `full` (default), `full_with_reasoning`, `digest_only` or `off`; `evidence.attempt_recorder.retention.keep_runs` (200) and `.max_bytes` (5 GiB). The section is security-authority configuration: a repository cannot set it.
 - **Privacy.** In `full` mode the store holds prompts, model output and code. It stays on this machine, with owner-only file modes; use `digest_only` to keep digests without content.
 - **Doctor.** `kriya doctor --production` reports `evidence.attempt_recorder` (never required): capture mode, a writable store, the newest store's integrity, and the last run whose recorder was unavailable.
@@ -1113,7 +1117,7 @@ leaves it UNVERIFIED. Evidence counts only at the strength it shows: a requireme
 layout, with or without a `tests/` package); a `src/` layout, a namespace package, or importing test code is refused
 with `ACCEPTANCE_LAYOUT_UNSUPPORTED`. With `--from-milestones`, the ids come from the plan's original goal.
 
-For a Maven project with JUnit 5, the acceptance file can be one Java test class instead (`--acceptance KriyaAcceptanceTest.java`): one `package`, one class, and every `@Test` method preceded by a `// kriya_requirement: REQ-1` comment. Kriya runs it in a private copy of the candidate (never in your workspace), only when the candidate left the build and test configuration (poms, `.mvn`, `src/test`, ...) exactly as it was, and never overwrites an existing file at `src/test/java/<package>/<Class>.java`. Gradle projects are not supported yet.
+For a Maven project with JUnit 5, the acceptance file can be one Java test class instead (`--acceptance KriyaAcceptanceTest.java`): one `package`, one class, and every `@Test` method preceded by a `// kriya_requirement: REQ-1` comment. Kriya runs it in a private copy of the candidate (never in your workspace), only when the candidate left the build and test configuration (poms, `.mvn`, `src/test`, ...) exactly as it was, and never overwrites an existing file at `src/test/java/<package>/<Class>.java`. A Gradle project (Groovy or Kotlin DSL, JUnit 5) runs the same class through its contained Gradle gate; the runner Kriya detected is part of the acceptance's runner contract. For a Java project, a goal line of the form `expression -> literal` is compiled into a sealed JUnit 5 class the same way the Python forms are (other Java example forms are not claims).
 
 When the goal is written as an issue report (headings, a reproducer, version notes, a description of the current bug), every sentence of it would otherwise become a requirement the run must close. Name the requirements yourself instead with a requirement contract kept outside the repository (`--requirements requirements.json`):
 
@@ -1124,6 +1128,8 @@ When the goal is written as an issue report (headings, a reproducer, version not
 ```
 
 The contract is the complete set: nothing derived from the goal is added. The goal is still what the agents read and plan from. `kind` is `requirement` or `constraint`; an empty set, a duplicate id or another kind is refused before any model call. Acceptance files and approvals must name these ids; an approval for a contract run uses format `kriya.acceptance_approval/2` with the contract's `requirement_set_sha256`, so an approval made for another requirement set never applies. Changing the contract (or the goal it was bound to) on a resumed run regenerates the candidate.
+
+Some statements in a goal are not obligations at all - a reproducer that describes the old behaviour, a request that contradicts the project's documented behaviour, a note about an earlier version. Remove them from the obligation set yourself with a **requirement disposition** kept outside the repository (`--requirement-disposition disposition.json`, format `kriya.requirement_disposition/1`): each entry names one requirement id (or one claim of it), its exact text digest and a reason - `REJECTED_FALSE_PREMISE`, `HISTORICAL_CONTEXT`, `INFORMATIONAL_CONTEXT` or `OUT_OF_SCOPE` - with your evidence. It is bound to the goal, the requirement set and the starting revision and sealed before any model call; a dispositioned statement is reported as such, never satisfied, and a goal whose every statement is dispositioned is refused rather than succeeding with nothing to prove. When a run is refused because requirements lack a closer (`VERIFICATION_AUTHORITY_REQUIRED`), Kriya seals a typed **authority request** per requirement (`kriya.authority_request/1`, listed in the refusal and the run's events) saying which claim needs which kind of authority; the model proposes nothing here and authorizes nothing.
 
 A requirement stated as a general rule cannot be closed by any finite list of passing cases. If you decide that a specific acceptance suite is good enough evidence for such a requirement, say so explicitly with an approval file kept outside the repository (`--acceptance-approval approval.json`). Each approval names one requirement and binds the goal, that requirement's exact text, the acceptance file's digest, its exact cases, the runner contract and the starting revision, with `"accept_suite_as_sufficient": true`; any mismatch refuses it. The requirement is then reported `human_accepted` - your decision, recorded as such, not a proof. A failing case still makes it VIOLATED, and changing or dropping the approval on a resumed run regenerates the candidate.
 

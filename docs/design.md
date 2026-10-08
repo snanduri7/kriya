@@ -894,8 +894,8 @@ through the validator under containment, else an in-process `compile()`), the py
 tests = pass) and its output roots (`__pycache__/` of every source directory plus `.pytest_cache/`; `invokes` keeps
 the inline rule: any `python*` interpreter or pytest). Interpreter and virtualenv resolution stays on the validator
 (`_resolve_python_interpreter`, also used by runtime verification). Dependencies still install only from
-requirements.txt / pyproject.toml; Poetry and Pipenv dependency installation is a recorded later slice
-(PYTHON-POETRY-PIPENV-001). Java markers still outrank Python ones. Fourth slice, moved unchanged:
+requirements.txt / pyproject.toml; Poetry and Pipenv dependency declarations are a documented supported-backend
+boundary (PYTHON-POETRY-PIPENV-001, closed by design: a missing import is a typed gate failure, never a pass). Java markers still outrank Python ones. Fourth slice, moved unchanged:
 `JavacBuildAdapter` (`JAVAC`) owns the raw javac fallback compile gate (`javac -proc:none -d <workspace>/build`
 over the changed `.java` files that exist; no classpath, release flag or module path; a failure enriched by the
 resolver; a containment setup failure propagates, any other start failure is a decided failure), the absent test
