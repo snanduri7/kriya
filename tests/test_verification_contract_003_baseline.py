@@ -90,8 +90,10 @@ def test_02_an_artifact_claim_requires_a_mutation_even_when_behaviour_already_ho
     assert contract.refusal() is None
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc",
                                          judge_examples=lambda: {"REQ-1": SimpleNamespace(passed=True, violated=False)},
-                                         examples_digest="e" * 64)
-    assert report.no_mutation_required is False and report.mutation_required == {"REQ-3": ["TEST_ADDITION"]}
+                                         examples_digest="e" * 64, judge_suite=lambda: cb.BASELINE_PASS)
+    # every other claim holds at baseline: the artifact claim alone must forbid NO_MUTATION_REQUIRED
+    assert report.unsatisfied == {} and report.no_mutation_required is False
+    assert report.mutation_required == {"REQ-3": ["TEST_ADDITION"]}
     assert report.claims["REQ-1"][BEHAVIOR]["state"] == "PASS"
 
 
@@ -154,12 +156,19 @@ async def test_06_direct_path_still_runs_the_model_when_an_artifact_claim_remain
     workspace = _workspace(tmp_path, CALC_OK)
     engine.developer.run_generation = AsyncMock(return_value=[{"filepath": "tests/test_new.py",
                                                                "content": "import calc\n\n\ndef test_lower():\n    assert calc.lower('A') == 'a'\n"}])
-    p1, p2 = _gates_pass()
-    with p1, p2:
+    from kriya.tools import test_execution
+    green = {"success": True, "output": "", "test_execution": test_execution.TestExecutionReport(
+        gate_id="g", runner="pytest", workspace="", completeness="COMPLETE",
+        cases=[test_execution.TestCaseResult(identity="tests/test_calc.py::test_upper", classname="tests.test_calc",
+                                             name="test_upper", status="passed")]).to_dict()}
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", return_value={"success": True, "output": ""}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value=green):
         res = await engine.run_generation_workflow(goal=WITH_TEST_GOAL, workspace_path=str(workspace))
     assert not res.get("no_mutation_required") and engine.developer.run_generation.await_count >= 1
     [(details, _status)] = _events(cfg, "verification_contract.baseline")
+    # the baseline suite and the examples both PASS: only the artifact claim keeps the model in the loop
     assert details["mutation_required"] == {"REQ-3": ["TEST_ADDITION"]} and details["claims"]["REQ-1"]["BEHAVIOR"]["state"] == "PASS"
+    assert details["claims"]["REQ-2"]["REGRESSION_PRESERVATION"]["state"] == "PASS" and details["unsatisfied"] == {}
 
 
 # ---------------------------------------------------------------- the enforce path
