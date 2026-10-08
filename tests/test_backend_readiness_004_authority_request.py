@@ -42,7 +42,7 @@ GOAL = ("Entries must leave the cache at the expiry instant for every ttl; tests
         "lower('ABC') -> 'abc'\n")
 
 
-def _contract(goal=GOAL, language="java"):
+def _contract(goal=GOAL, language=None):  # an unknown language: no API predicate, the API claim stays residual
     reqs = derive_requirements(goal)
     return reqs, compile_verification_contract(reqs, origins=statement_origins(goal), test_files=["tests/test_a.py"],
                                                project_language=language)

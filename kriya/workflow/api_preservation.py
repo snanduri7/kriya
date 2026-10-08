@@ -20,13 +20,24 @@ presence and values, annotations). Compared base versus candidate:
 - a file that does not parse on either side, or an unreadable base, is
   UNAVAILABLE: the claim stays open (fail closed).
 
-Java and other languages have no predicate here: the contract leaves their
-API constraints authority-required (an external signature-baseline command
-may cover them).
+Java (JAVA-API-PRESERVATION-PREDICATE-001, BACKEND-READINESS-004): the same
+predicate from the code-intelligence structural parser (tree-sitter stays in
+kriya/code_intel/parsing.py): for every main-side ``.java`` compilation unit,
+the public surface is every ``public``/``protected`` type reachable through
+public/protected enclosing types (interface and annotation members are public
+unless ``private``), with its kind, API-relevant modifiers (``final``,
+``abstract``, ``static``, ``sealed``...), supertypes and, per member, the
+return type, parameter types (overloads are distinct keys), ``throws`` clause
+and field type. Parameter NAMES are not surface (Java has no named
+arguments); annotations are not surface. A narrowed visibility, a removed
+member, a changed signature, a class made ``final``/``abstract`` or a changed
+hierarchy is VIOLATED; a file the parser cannot parse cleanly on either side
+is UNAVAILABLE. Other languages stay authority-required.
 """
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -59,6 +70,77 @@ def _module_name(path: str) -> str:
     if parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(parts) or "__root__"
+
+
+# ------------------------------------------------------------ Java (code-intelligence structural model)
+
+_JAVA_API_MODIFIERS = frozenset({"public", "protected", "private", "static", "final", "abstract", "default",
+                                 "sealed", "non-sealed"})
+_JAVA_IMPLICIT_PUBLIC_OWNERS = frozenset({"interface", "annotation"})
+_JAVA_TYPE_KINDS = frozenset({"class", "interface", "enum", "record", "annotation"})
+_THROWS = re.compile(r"\bthrows\s+([^{;]+)$")
+
+
+def _public_java_unit(path: str) -> bool:
+    return path.endswith(".java") and not _is_test_side(path) and not path.endswith(("/package-info.java", "/module-info.java"))
+
+
+def _java_visible(symbol: Any, owner: Optional[Any]) -> bool:
+    """public/protected by modifier, or an implicitly public interface/annotation member, or an enum constant."""
+    modifiers = set(symbol.modifiers)
+    if "private" in modifiers:
+        return False
+    if "public" in modifiers or "protected" in modifiers:
+        return True
+    if symbol.kind == "enum_constant" or "record_component" in modifiers:
+        return True
+    return owner is not None and owner.kind in _JAVA_IMPLICIT_PUBLIC_OWNERS and symbol.kind != "field"
+
+
+def _java_signature(symbol: Any) -> str:
+    modifiers = " ".join(sorted(m for m in symbol.modifiers if m in _JAVA_API_MODIFIERS))
+    if symbol.kind in _JAVA_TYPE_KINDS:
+        # declaration order of supertypes is not surface
+        return (f"{symbol.kind}[{modifiers}] extends({', '.join(sorted(symbol.extends))}) "
+                f"implements({', '.join(sorted(symbol.implements))})")
+    if symbol.is_callable:
+        throws = _THROWS.search(symbol.signature_text or "")
+        clause = ", ".join(sorted(t.strip() for t in throws.group(1).split(","))) if throws else ""
+        return f"{symbol.kind}[{modifiers}] {symbol.return_type or ''} ({', '.join(symbol.parameter_types)}) throws({clause})"
+    return f"{symbol.kind}[{modifiers}] {symbol.return_type or ''}"
+
+
+def java_public_signatures(source: bytes, path: str) -> Dict[str, str]:
+    """``package.Type[.Member(params)]`` -> signature for the public/protected
+    surface of one compilation unit. Raises SyntaxError when the structural
+    parser cannot parse the file cleanly (fail closed, like a Python file
+    that does not parse)."""
+    from kriya.code_intel.model import ParseState
+    from kriya.code_intel.parsing import parse_file
+
+    structure = parse_file(path, source)
+    if structure.state is not ParseState.PARSED:
+        raise SyntaxError(f"{path}: {structure.state.value} {structure.detail}".strip())
+    by_id = {symbol.symbol_id: symbol for symbol in structure.symbols}
+    visible: Dict[str, bool] = {}
+
+    def reachable(symbol: Any) -> bool:
+        if symbol.symbol_id in visible:
+            return visible[symbol.symbol_id]
+        owner = by_id.get(symbol.parent_id) if symbol.parent_id else None
+        result = _java_visible(symbol, owner) and (owner is None or reachable(owner))
+        visible[symbol.symbol_id] = result
+        return result
+
+    surface: Dict[str, str] = {}
+    for symbol in structure.symbols:
+        if symbol.kind not in _JAVA_TYPE_KINDS and not symbol.is_callable and symbol.kind not in ("field", "enum_constant"):
+            continue
+        if not reachable(symbol):
+            continue
+        key = symbol.lookup_key + (f"({', '.join(symbol.parameter_types)})" if symbol.is_callable else "")
+        surface[key] = _java_signature(symbol)
+    return surface
 
 
 def _render_default(node: Optional[ast.AST]) -> str:
@@ -155,38 +237,51 @@ class ApiComparison:
                 "base_symbols": self.base_symbols, "predicate_version": API_PRESERVATION_VERSION, **self.detail}
 
 
+API_PREDICATE_LANGUAGES = frozenset({"python", "java"})
+
+
+def _surface(language: str, path: str, data: bytes) -> Dict[str, str]:
+    if language == "java":
+        return java_public_signatures(data, path)
+    return public_signatures(data, _module_name(path))
+
+
 def compare_public_api(
     candidate_root: str, base_revision: Optional[str], *, candidate_files: Iterable[str],
-    read_candidate: Any,
+    read_candidate: Any, language: str = "python",
 ) -> ApiComparison:
     """Base (git revision, read without checkout) versus candidate (bytes via
-    ``read_candidate(path)``, None when absent) over every public Python
-    module tracked at the base or present in the candidate."""
+    ``read_candidate(path)``, None when absent) over every public unit of
+    ``language`` (Python module / Java compilation unit) tracked at the base
+    or present in the candidate."""
+    if language not in API_PREDICATE_LANGUAGES:
+        return ApiComparison(False, f"no public-API predicate for language {language!r}")
     if not base_revision:
         return ApiComparison(False, "no authorized base revision")
     try:
         base = BaseTree(candidate_root, base_revision)
     except Exception as error:
         return ApiComparison(False, f"base revision unreadable: {type(error).__name__}")
-    paths = sorted({p for p in base.paths if _public_module(p)} | {p for p in candidate_files if _public_module(p)})
+    public = _public_java_unit if language == "java" else _public_module
+    paths = sorted({p for p in base.paths if public(p)} | {p for p in candidate_files if public(p)})
     base_bytes = base.read_many(paths)
     before: Dict[str, str] = {}
     after: Dict[str, str] = {}
     for path in paths:
-        module = _module_name(path)
         try:
             if base_bytes.get(path) is not None:
-                before.update(public_signatures(base_bytes[path], module))
+                before.update(_surface(language, path, base_bytes[path]))
             current = read_candidate(path)
             if current is not None:
-                after.update(public_signatures(current, module))
+                after.update(_surface(language, path, current))
         except (SyntaxError, UnicodeDecodeError) as error:
             return ApiComparison(False, f"{path} does not parse: {type(error).__name__}", compared_files=tuple(paths))
     removed = tuple(sorted(symbol for symbol in before if symbol not in after))
     changed = tuple(sorted(symbol for symbol in before if symbol in after and after[symbol] != before[symbol]))
     added = tuple(sorted(symbol for symbol in after if symbol not in before))
     return ApiComparison(True, None, removed, changed, added, tuple(paths), len(before),
-                         detail={"changed_signatures": {symbol: {"base": before[symbol], "candidate": after[symbol]}
+                         detail={"language": language,
+                                 "changed_signatures": {symbol: {"base": before[symbol], "candidate": after[symbol]}
                                                         for symbol in changed}})
 
 

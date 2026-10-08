@@ -287,10 +287,13 @@ def test_12_claim_strength_rules_hold_for_every_authority_kind():
     assert _compile(general, external_authorities=[other])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
     api_only = ExternalAuthority("external_acceptance_command", "8" * 64, {"REQ-1": {API_PRESERVATION: {}}})
     assert _compile(general, external_authorities=[api_only])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
-    # a Java API constraint needs an external authority; a Python one has the predicate
+    # an API constraint in a language without a predicate needs an external authority; Python and (BACKEND-
+    # READINESS-004) Java have the repository predicate, and a covering authority binds beside it
+    unknown = _compile("The public API must stay unchanged.\n", project_language=None)[1].entry("REQ-1")
+    assert unknown.status == STATUS_AUTHORITY_REQUIRED and "no deterministic public-API predicate" in unknown.residual[0].why
+    assert _compile("The public API must stay unchanged.\n", project_language=None, external_authorities=[api_only])[1].entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]
     java = _compile("The public API must stay unchanged.\n", project_language="java")[1].entry("REQ-1")
-    assert java.status == STATUS_AUTHORITY_REQUIRED and "no deterministic public-API predicate" in java.residual[0].why
-    assert _compile("The public API must stay unchanged.\n", project_language="java", external_authorities=[api_only])[1].entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]
+    assert java.status == STATUS_CLOSABLE and [b.detail.get("language") for b in java.bindings] == ["java"]
 
 
 def test_13_legacy_api_delegates_to_the_compiler():

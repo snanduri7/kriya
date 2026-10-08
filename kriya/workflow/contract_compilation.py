@@ -118,8 +118,9 @@ AUTHORITY_OPERATOR_DISPOSITION = "operator_disposition"  # a sealed operator dis
 VISIBILITY_HIDDEN = "hidden"  # never in a prompt, never in the workspace
 VISIBILITY_GOAL_TEXT = "goal_text"  # part of the goal the Developer reads anyway
 
-# Project languages with a deterministic public-API predicate (kriya/workflow/api_preservation.py).
-API_PREDICATE_LANGUAGES = frozenset({"python"})
+# Project languages with a deterministic public-API predicate (kriya/workflow/api_preservation.py):
+# Python (AST) and, since BACKEND-READINESS-004, Java (the code-intelligence structural model).
+API_PREDICATE_LANGUAGES = frozenset({"python", "java"})
 
 # What each closer closes, who authored its evidence, and what PASS / FAIL / UNKNOWN are. Closed table: a closer id
 # outside it is a programming error (``_closer_contract``).
@@ -166,9 +167,9 @@ CLOSER_CONTRACTS: Dict[str, Dict[str, str]] = {
     CLOSER_API_PRESERVATION: {
         "claim": API_PRESERVATION, "authority": AUTHORITY_REPOSITORY,
         "pass": "every public module-level and class-level signature of the base is present and unchanged in the "
-                "candidate (Python AST)",
-        "fail": "a public symbol was removed or its signature changed", "unknown": "base unreadable, a file that "
-        "does not parse, a project language without a predicate"},
+                "candidate (Python AST; Java public/protected surface from the structural parser)",
+        "fail": "a public symbol was removed, narrowed or its signature, modifiers or hierarchy changed",
+        "unknown": "base unreadable, a file that does not parse, a project language without a predicate"},
     CLOSER_DOCUMENTATION_NOT_APPLICABLE: {
         "claim": DOCUMENTATION_CLAIM, "authority": AUTHORITY_REPOSITORY,
         "pass": "the conditional documentation referent does not exist in the repository (nothing to document)",

@@ -84,7 +84,8 @@ def _run(verdict):
                                               (ab.VERDICT_FAIL, RequirementOutcome.VIOLATED),
                                               (ab.VERDICT_INDETERMINATE, RequirementOutcome.UNVERIFIED)])
 def test_01_two_claims_of_one_statement_covered_by_one_oracle_close_together(tmp_path, verdict, outcome):
-    """T3 shape: a Java compound API + behaviour constraint, one bundle entry per claim; no Java predicate yet."""
+    """T3 shape: a Java compound API + behaviour constraint, one bundle entry per claim; the Java predicate
+    (BACKEND-READINESS-004) binds beside the bundle on the API claim."""
     ws, reqs, bundle, _dir = _bundle(tmp_path, COMPOUND, [
         ("REQ-1", API_PRESERVATION, None, "compat_check.sh diffs the public/protected signatures"),
         ("REQ-1", BEHAVIOR, "GENERAL", "the full offline suite covers every other class")], language="java")
@@ -92,8 +93,9 @@ def test_01_two_claims_of_one_statement_covered_by_one_oracle_close_together(tmp
     contract = _compile(reqs, COMPOUND, bundle, language="java")
     entry = contract.entry("REQ-1")
     assert set(entry.required_claims) == {API_PRESERVATION, BEHAVIOR}
-    assert entry.status == STATUS_CLOSABLE and entry.closers == [CLOSER_EXTERNAL_ACCEPTANCE] and contract.refusal() is None
-    assert sorted(b.claim for b in entry.bindings) == [API_PRESERVATION, BEHAVIOR]
+    assert entry.status == STATUS_CLOSABLE and contract.refusal() is None
+    assert entry.closers == [CLOSER_API_PRESERVATION, CLOSER_EXTERNAL_ACCEPTANCE]
+    assert sorted(b.claim for b in entry.bindings) == [API_PRESERVATION, API_PRESERVATION, BEHAVIOR]
     ledger = _ledger(reqs)
     entries = ab.close_requirements_with_authority_bundle(ledger, reqs, bundle, contract, execute=_run(verdict),
                                                           source="t", revision=1)
@@ -137,11 +139,14 @@ def test_03_an_uncovered_mandatory_claim_leaves_the_requirement_open(tmp_path):
     assert only["claim"] == BEHAVIOR and only["closed"] is False
     assert requirement_outcomes(ledger, reqs)["REQ-1"] is RequirementOutcome.UNVERIFIED
     assert requirement_claim_record(ledger, "REQ-1", REGRESSION_PRESERVATION, "cand") is None
-    # a Java compound statement with only its behaviour clause covered is still authority-required
+    # a Java compound statement with only its behaviour clause covered: the API claim keeps the Java predicate
+    # (BACKEND-READINESS-004), the bundle never covers it
     ws2, reqs2, api_less, _d = _bundle(tmp_path / "j", COMPOUND, [("REQ-1", BEHAVIOR, "GENERAL", "suite")], language="java")
     contract2 = _compile(reqs2, COMPOUND, api_less, language="java")
-    assert contract2.entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
-    assert [r.claim for r in contract2.entry("REQ-1").residual] == [API_PRESERVATION] and contract2.refusal() is not None
+    assert contract2.entry("REQ-1").status == STATUS_CLOSABLE
+    assert sorted((b.claim, b.closer) for b in contract2.entry("REQ-1").bindings) == [
+        (API_PRESERVATION, CLOSER_API_PRESERVATION), (BEHAVIOR, CLOSER_EXTERNAL_ACCEPTANCE)]
+    assert STATUS_AUTHORITY_REQUIRED  # the uncovered case is the NAMED statement above
 
 
 # ---------------------------------------------------------------- one claim / several complementary authorities

@@ -1341,11 +1341,15 @@ def close_requirements_by_api_preservation(
     from kriya.workflow.contract_closers import contract_claims_map
     from kriya.workflow.contract_compilation import CLOSER_API_PRESERVATION
 
-    if contract is None or not contract.binding_closers(CLOSER_API_PRESERVATION):
+    bindings = contract.binding_closers(CLOSER_API_PRESERVATION) if contract is not None else []
+    if not bindings:
         return []
     candidate_files = sorted(set(_tracked_workspace_paths(candidate_root)) | set(candidate_paths))
+    # The contract sealed which predicate applies (the project language at compile time); never re-derived here.
+    language = str(bindings[0][1].detail.get("language") or "python")
     comparison = compare_public_api(candidate_root, _oracle_base_revision(candidate_root, workspace_path),
-                                    candidate_files=candidate_files, read_candidate=_workspace_file_reader(candidate_root))
+                                    candidate_files=candidate_files, read_candidate=_workspace_file_reader(candidate_root),
+                                    language=language)
     return close_api_preservation_requirements(
         ledger, requirement_set, contract_claims=contract_claims_map(contract), comparison=comparison,
         source="requirement_closure.api_preservation", revision=revision,
