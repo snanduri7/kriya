@@ -896,6 +896,7 @@ _AUDITED_WRITE_SITES = {
     "kriya/workflow/authority_bundle.py": 5,
     "kriya/workflow/contract_compilation.py": 2,
     "kriya/workflow/example_oracle.py": 2,
+    "kriya/workflow/example_oracle_java.py": 2,  # JAVA-EXAMPLE-COMPILER-001: the acceptance store, never the workspace
     # BACKEND-READINESS-004: Kriya state-directory stores only (sealed operator dispositions, sealed authority
     # requests) - never the workspace.
     "kriya/workflow/requirement_disposition.py": 2,
