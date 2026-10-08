@@ -468,9 +468,16 @@ def run_authority_bundle(
                     run.reason_code = AUTHORITY_PREPARE_FAILED
                     run.reason = "the acquisition phase did not complete (environment outcome, never a verdict)"
                     return run
+            # GRADLE-VERIFY-PHASE-CACHE-READONLY-001 (BACKEND-FINAL-CLOSURE-005, measured on the T3 baseline once
+            # OD-1 let Gradle configure): the Kriya-managed build cache is mounted the way the gates' own offline
+            # runs mount it - writable, network denied. The Gradle wrapper writes its distribution lock file and
+            # the daemon registry into the Gradle user home before any task runs; read-only, every `./gradlew` in
+            # the oracle died with "gradle-8.10.1-bin.zip.lck (Read-only file system)" and the verdict was never
+            # produced (ORACLE_ENVIRONMENT_PROBLEM). The cache is Kriya's per-workspace scratch, never the
+            # candidate, so writing to it grants the oracle nothing new; the network stays denied.
             run.verify_result = validator._run_cmd_with_timeout(  # pylint: disable=protected-access
                 _rewrite_argv(bundle.verify, bundle.assets), cwd=export, timeout=bundle.timeout_seconds,
-                network=NetworkAuthority.DENIED, dependency_cache_path=cache, dependency_cache_writable=False,
+                network=NetworkAuthority.DENIED, dependency_cache_path=cache, dependency_cache_writable=cache is not None,
                 workspace_path=export,
             )
         except ContainmentSetupError as error:

@@ -316,7 +316,18 @@ def test_07_maven_and_gradle_bundles_mount_the_managed_cache(tmp_path):
     assert ab.run_authority_bundle(bundle, str(ws), state_root=str(tmp_path / "state"), validator_factory=factory).verdict == "PASS"
     prepare, verify = recorder["v"].calls
     assert prepare["cache"] == "/cache/maven" and prepare["writable"] is True
-    assert verify["cache"] == "/cache/maven" and verify["writable"] is False
+    # GRADLE-VERIFY-PHASE-CACHE-READONLY-001 (BACKEND-FINAL-CLOSURE-005): the verify phase mounts the managed cache
+    # exactly as the gates' own offline runs do - writable, network denied - because the Gradle wrapper writes its
+    # distribution lock file into the Gradle user home before any task runs (measured on the T3 baseline: every
+    # ./gradlew died with "gradle-8.10.1-bin.zip.lck (Read-only file system)" and no verdict was produced).
+    assert verify["cache"] == "/cache/maven" and verify["writable"] is True
+    assert verify["network"] is NetworkAuthority.DENIED and verify["acquisition"] is False
+    # a bundle without a managed cache (pip) mounts none and asks for nothing writable
+    pip_dir = _bundle_dir(tmp_path / "pip", reqs, base, toolchain={"language": "java", "build_tool": "none"})
+    pip_bundle = _load(tmp_path / "pip", pip_dir, reqs, base, ws, language="java")
+    assert ab.run_authority_bundle(pip_bundle, str(ws), state_root=str(tmp_path / "state2"), validator_factory=factory).verdict == "PASS"
+    _prepare2, verify2 = recorder["v"].calls
+    assert verify2["cache"] is None and verify2["writable"] is False
 
 
 # ---------------------------------------------------------------- closure: operator sufficiency, never a proof

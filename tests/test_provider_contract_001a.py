@@ -154,7 +154,10 @@ def test_a_request_outliving_the_budget_is_a_typed_deadline_stop(fake, tmp_path)
     assert result.status is CompletionStatus.TIMEOUT and result.backend_status == "deadline"
     record = _deadline(llm)
     assert record["deadline_bound"] is True and record["timeout_reason"] == INFERENCE_DEADLINE_EXCEEDED
-    assert record["elapsed_request_ms"] >= 400
+    # The request ran until the deadline, not shorter: what was left of the budget at dispatch (not a fixed
+    # wall-clock figure - under an 8-worker load the time between claiming the clock and dispatching eats into
+    # the 500 ms left; BACKEND-READINESS-004 RC3 measured 311 ms once) and far less than the fake's 30 s delay.
+    assert record["remaining_budget_at_dispatch_ms"] - 100 <= record["elapsed_request_ms"] < 5_000
 
 
 def test_a_provider_timeout_unrelated_to_the_deadline_stays_a_provider_timeout(fake, tmp_path):

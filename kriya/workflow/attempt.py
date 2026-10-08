@@ -628,6 +628,23 @@ def _goal_named_member_hints(ctx: "AttemptContext", known_target_files: List[str
     return {path: members[:_GOAL_MEMBER_HINTS_MAX] for path, members in hints.items()}
 
 
+def _merge_goal_named_member_hints(
+    ctx: "AttemptContext", member_hints: Dict[str, List[str]], paths: List[str],
+) -> bool:
+    """RETRY-CONTEXT-GOAL-MEMBER-LOSS-001 (BACKEND-FINAL-CLOSURE-005): adds the
+    goal's own named members of ``paths`` (``_goal_named_member_hints``: the
+    same boundary validation and cap as attempt 1's capacity fallback) to
+    ``member_hints`` in place; True when a member was added."""
+    added = False
+    for path, members in _goal_named_member_hints(ctx, paths).items():
+        hinted = member_hints.setdefault(path, [])
+        for member in members:
+            if member not in hinted:
+                hinted.append(member)
+                added = True
+    return added
+
+
 def _validated_member_hints(ctx: "AttemptContext", candidates_by_path: Dict[str, List[str]]) -> Dict[str, List[str]]:
     if not candidates_by_path:
         return {}
@@ -1165,10 +1182,50 @@ def _prepare_retry_context(
     for path, member_ids in _resolve_known_target_member_hints(ctx, grounded_paths).items():
         hinted = retry_member_hints.setdefault(path, [])
         hinted.extend(member_id for member_id in member_ids if member_id not in hinted)
+    # RETRY-CONTEXT-GOAL-MEMBER-LOSS-001 (BACKEND-FINAL-CLOSURE-005, P4-T2-r3):
+    # attempt 1 showed the goal's own named members of an unfit target (the
+    # capacity fallback, KNOWN-TARGET-GOAL-NAMED-MEMBER-HINT-001); the retry's
+    # member set came only from the failure's loci and the model's rejected
+    # SEARCH text, so the causal member (Element.absUrl) vanished from every
+    # retry and the model could only fabricate anchors (ANCHOR_NOT_IN_FILE
+    # on five attempts, its own reasoning asking whether absUrl was hidden).
+    # The goal-named members a target defines stay in every retry's set: for a
+    # target already member-scoped, merged here; for a target the retry
+    # package must omit whole, added below and the package rebuilt. Same
+    # validation as attempt 1, never a new path, never a new authority.
+    goal_grounded = _merge_goal_named_member_hints(
+        ctx, retry_member_hints, [path for path in grounded_paths if path in retry_member_hints])
+    # A grounded target with no member yet: shown whole when it fits (never demoted), else - exactly attempt
+    # 1's capacity fallback - its goal-named members become its member set and the retry package excludes it
+    # (the member-exact rendering below supersedes the package's truncated excerpt of the same file).
+    unhinted = [path for path in grounded_paths if path not in retry_member_hints]
+    unfit: List[str] = []
+    if unhinted:
+        probe_limit = _reserve_graph_context_budget(
+            prompt_window, ctx.skills_prompt,
+            developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
+            ctx.design, ctx.plan, base_code_context,
+        )
+        _rendered, _package, fallback = _target_package_with_goal_member_fallback(
+            ctx, unhinted, probe_limit, prompt_window, {})
+        if fallback is not None:
+            unfit = list(fallback["unfit_targets"])
+            for path, members in fallback["goal_member_hints"].items():
+                hinted = retry_member_hints.setdefault(path, [])
+                hinted.extend(member for member in members if member not in hinted)
+            goal_grounded = True
     retry_package = _retry_package_for_attempt(
         state, ctx, target_files=target_files, prompt_window=prompt_window,
         exclude=retry_member_hints.keys(),
     )
+    if goal_grounded:
+        state.record_event(RunEvent(
+            kind="context.retry_goal_member_grounding", attempt=state.attempt_number,
+            source="attempt._prepare_retry_context", authority=EventAuthority.ADVISORY,
+            message="the goal's own named members of a member-scoped or unfit target were kept in the retry's member set",
+            details={"member_hints": {path: list(members) for path, members in retry_member_hints.items()},
+                     "unfit_targets": unfit},
+        ))
     retry_error_context = (
         retry_package.authoritative_error if retry_package else state.error_context
     )
