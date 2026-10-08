@@ -216,3 +216,29 @@ ATTRIBUTION-001 (P3, DEFERRED, owner decision) - accepting a plan-wide preservat
 plan-validation architecture extension (PRV-11), outside the one authorized repair cycle. T1 control GENUINE,
 unchanged. Final primary gate (best run per task): 4/6 genuine, 0 false success, 0 authority violation, 0 corruption,
 1 historical false negative (retired by measurement) -> PASS (`primary/PRIMARY_GATE.md`).
+
+## 10. Cohort-2 freeze review and remediation (Phase 15, 2026-10-08)
+
+The independent freeze reviewer returned NOT-READY (`reviews/COHORT2_FREEZE_REVIEW.md`): the cohort-2 assets prepared
+in Batch 004 had never been validated to the frozen state. Blockers, each MEASURED and TRACED by the reviewer and
+re-measured here: F1 the task workspaces carried the full upstream history with the fix commit directly beneath the
+import commit (`git log -n 5 --oneline`, which Kriya's GitTool runs, named the fix); F2 the S2_A bundle could not PASS
+on any candidate (toolz's git-derived version is 0.0.1 in the `.git`-less authority export, failing test_has_version);
+F3 the S3_A bundle ran four DNS/HTTP test classes under a denied network; F4/F5 the Gradle bundles had only
+environment-failed runs and no validation was bound to the frozen digests; F6 S3_A's API-preservation clause was not
+independently detectable by the external oracle; F7 two hidden oracles asserted less than the goals.
+
+Remediation is harness-only (no product change; the executable stays b185bd6), scripted and recorded under
+`~/kriya-m1-live/backend-final-closure-005/cohort-002/remediation/` (REMEDIATION.md, VALIDATION_SUMMARY.md):
+single-commit workspace snapshots with identical tree hashes; `.git_archival.txt` for the toolz version (the
+PRETEND env form does not exist in setuptools-git-versioning 3.2.0, measured); network-class exclusions; javap compat
+in both oracles with per-toolchain baselines (the T3 lesson: host and container javap differ on 926 of 1540 lines) and
+explicit status capture; goal-example hidden classes; S4_B's prepare resolving the test runtime classpath. Every
+bundle was then run base + fixed (+ S6_A tempting, + S3_A apibreak negative control) through Kriya's own authority
+runner under production containment in the images Kriya resolves, each record bound to the manifest digest: 13/13
+expectations met, and the frozen manifest now covers the external oracles' hidden copies and the shared run scripts.
+Found on the way: the frozen T3 v2 bundle's in-run COMPAT status was vacuous (POSIX `| tail -1; COMPAT=$?`), recorded
+as T3-ORACLE-COMPAT-PIPELINE-STATUS-001 (harness; the external bash oracle carried the real check; no primary
+classification depended on it). Run precondition: SEC-009 durable approval of the six cohort-2 configs (same security
+configuration as the approved primary config) under the cohort authority home. Cohort 2 runs only after the
+reviewer's FROZEN-OK on the remediated freeze (`reviews/COHORT2_FREEZE_REVIEW_R2.md`).
