@@ -113,7 +113,7 @@ def test_02_the_compiled_module_is_a_valid_b2a_artifact_that_judges_a_real_candi
     # the authority covers EXACT behaviour only, with provenance
     authority = ex.example_authority(artifact, report)
     assert authority.kind == "goal_examples" and authority.visibility == "goal_text"
-    assert authority.coverage["REQ-2"]["accepted_strength"] == "EXACT" and authority.provenance["compiler_version"] == 1
+    assert authority.coverage["REQ-2"][BEHAVIOR]["accepted_strength"] == "EXACT" and authority.provenance["compiler_version"] == 1
     assert authority.covers("REQ-2", BEHAVIOR, "EXACT") and not authority.covers("REQ-2", BEHAVIOR, "GENERAL")
     # the statement with the examples is EXACT -> closable by the derived module; the request sentence stays GENERAL
     contract = compile_verification_contract(reqs, origins=statement_origins(CALC_GOAL), test_files=[],

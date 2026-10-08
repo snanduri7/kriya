@@ -2774,7 +2774,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             output.fail(str(e))
             sys.exit(1)
         click.secho(f"Verification authority bound: {authority_bundle.authority_id} sha256 {authority_bundle.digest[:12]} "
-                    f"(covers {', '.join(sorted(authority_bundle.covers))}; operator sufficiency, not a proof; runs "
+                    f"(covers {', '.join(f'{rid}:{c.claim}' for rid in sorted(authority_bundle.covers) for c in authority_bundle.covers[rid])}; "
+                    "operator sufficiency, not a proof; runs "
                     "under containment only)", dim=True, err=True)
 
     llm = LLMClient(cfg)

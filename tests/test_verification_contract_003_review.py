@@ -145,7 +145,7 @@ def test_r7_an_added_test_file_must_contain_a_test():
 def test_r9_a_regression_claim_executes_the_suite_at_baseline():
     text = "Examples:\n  calc.lower('ABC') -> 'abc'\n\nEvery existing test must keep passing.\n"
     reqs = derive_requirements(text)
-    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}})
+    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT}}})
     contract = compile_verification_contract(reqs, origins=statement_origins(text), test_files=["tests/test_a.py"],
                                              external_authorities=[examples], project_language="python")
     passing = SimpleNamespace(passed=True, violated=False)
@@ -166,7 +166,7 @@ def test_r10_the_contract_digest_does_not_depend_on_where_the_state_directory_li
     text = "lower('ABC') -> 'abc'.\n"
     reqs = derive_requirements(text)
     def contract(stored):
-        authority = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}},
+        authority = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT}}},
                                       provenance={"compiler_version": 1, "stored_path": stored})
         return compile_verification_contract(reqs, origins=statement_origins(text), test_files=[], external_authorities=[authority])
     assert contract("/a/state/x.py").digest == contract("/b/state/x.py").digest

@@ -731,6 +731,7 @@ def close_requirements_with_acceptance(
         BEHAVIOR,
         BEHAVIOR_EXACT,
         BEHAVIOR_EXAMPLES,
+        CLAIM_REVOKES,
         REGRESSION_PRESERVATION,
         RequirementOutcome,
         behavior_strength,
@@ -751,6 +752,11 @@ def close_requirements_with_acceptance(
 
     def record(requirement: Any, evidence_id: str, status: Any, detail: Dict[str, Any], claim: str = BEHAVIOR,
                method: str = ACCEPTANCE_METHOD) -> None:
+        if status is ObligationStatus.INDETERMINATE:
+            # BACKEND-READINESS-004: B2 and B3 judge through one artifact, so an
+            # unobtainable or superseded run withdraws both; another producer's
+            # independent judgment of the same claim is untouched.
+            detail = {**detail, CLAIM_REVOKES: sorted((ACCEPTANCE_METHOD, HUMAN_ACCEPTANCE_METHOD))}
         record_requirement_claim(ledger, requirements, requirement.id, claim, evidence_id=evidence_id,
                                  method=method, detail=detail, source=source, revision=revision, status=status)
 

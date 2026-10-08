@@ -542,6 +542,11 @@ NAMED_TEST_CLOSURE_METHODS = frozenset({"named_test_run", "named_test_oracle", F
 # class, never "verified" - and may close the claims its coverage declares.
 EXTERNAL_ACCEPTANCE_METHOD = "external_acceptance_command"
 BEHAVIOR_CLOSURE_METHODS = frozenset({"acceptance_oracle", "human_bound_acceptance", EXTERNAL_ACCEPTANCE_METHOD})
+# BACKEND-READINESS-004 (AUTHORITY-REGRESSION-CLAIM-COVERAGE-001): the sealed
+# operator oracle may also judge regression preservation - it runs the named
+# tests in its own fresh environment, which the repository oracle (FS-1C0)
+# refuses by design when the candidate changes the test dependency declaration.
+REGRESSION_CLOSURE_METHODS = NAMED_TEST_CLOSURE_METHODS | frozenset({EXTERNAL_ACCEPTANCE_METHOD})
 # The producers of the other claim kinds (kriya/workflow/api_preservation.py,
 # the mutation record, kriya/workflow/contract_closers.py). Closed tables: a
 # producer outside them cannot record the claim (record_requirement_claim).
@@ -712,7 +717,7 @@ def record_requirement_claim(
     counter-evidence, INDETERMINATE closes nothing). Only the producer kinds
     allowed for that claim may record it: a regression oracle can never judge
     BEHAVIOR. The latest record for a candidate is its judgment."""
-    allowed = {REGRESSION_PRESERVATION: NAMED_TEST_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
+    allowed = {REGRESSION_PRESERVATION: REGRESSION_CLOSURE_METHODS, BEHAVIOR: BEHAVIOR_CLOSURE_METHODS,
                BEHAVIOR_EXAMPLES: BEHAVIOR_CLOSURE_METHODS, API_PRESERVATION: API_PRESERVATION_CLOSURE_METHODS,
                TEST_IMMUTABILITY_CLAIM: frozenset({TEST_IMMUTABILITY_METHOD}),
                TEST_ADDITION_CLAIM: TEST_ADDITION_CLOSURE_METHODS, DOCUMENTATION_CLAIM: DOCUMENTATION_CLOSURE_METHODS}
@@ -733,19 +738,56 @@ def record_requirement_claim(
     ))
 
 
+# BACKEND-READINESS-004: a producer's INDETERMINATE judgment may withdraw the
+# judgments of the producers it names (the acceptance family: one artifact,
+# two methods) - never, implicitly, another producer's independent evidence.
+CLAIM_REVOKES = "revokes_methods"
+
+
+def requirement_claim_records(
+    ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
+) -> List[ObligationRecord]:
+    """Every producer's latest judgment of ``claim`` of ``requirement_id`` on
+    the candidate ``evidence_id``, in ledger order. A producer's later
+    judgment of the same candidate replaces its own earlier one (a failed or
+    unobtainable re-run never leaves that producer's older closure standing);
+    an INDETERMINATE judgment that declares ``revokes_methods`` withdraws
+    those producers' judgments too. BACKEND-READINESS-004 (AUTHORITY-REGRESSION-
+    CLAIM-COVERAGE-001): one claim may be judged by several producers - the
+    repository oracle and the sealed operator oracle - and one producer's
+    inability to judge is not evidence against another's judgment."""
+    if not evidence_id:
+        return []
+    latest: Dict[str, Tuple[int, ObligationRecord]] = {}
+    for index, record in enumerate(ledger.history(requirement_claim_id(requirement_id, claim))):
+        evidence = record.evidence or {}
+        if evidence.get("evidence_id") != evidence_id:
+            continue
+        method = str(evidence.get("method") or "")
+        latest[method] = (index, record)
+        if record.status is ObligationStatus.INDETERMINATE:
+            for revoked in evidence.get(CLAIM_REVOKES) or ():
+                if str(revoked) != method:
+                    latest.pop(str(revoked), None)
+    return [record for _index, record in sorted(latest.values(), key=lambda pair: pair[0])]
+
+
 def requirement_claim_record(
     ledger: ObligationLedger, requirement_id: str, claim: str, evidence_id: Optional[str],
 ) -> Optional[ObligationRecord]:
-    """The latest judgment of ``claim`` of ``requirement_id`` on the candidate
-    ``evidence_id`` (any status), if any. A later judgment of the same
-    candidate replaces an earlier one: a failed or unobtainable re-run never
-    leaves an older closure standing."""
-    if not evidence_id:
+    """The effective judgment of ``claim`` of ``requirement_id`` on the
+    candidate ``evidence_id`` (any status), if any: deterministic
+    counter-evidence (VIOLATED) from any producer stands whatever another
+    producer recorded later; otherwise any producer's SATISFIED closes the
+    claim; otherwise the latest judgment (``requirement_claim_records``)."""
+    records = requirement_claim_records(ledger, requirement_id, claim, evidence_id)
+    if not records:
         return None
-    for record in reversed(ledger.history(requirement_claim_id(requirement_id, claim))):
-        if (record.evidence or {}).get("evidence_id") == evidence_id:
-            return record
-    return None
+    for wanted in (ObligationStatus.VIOLATED, ObligationStatus.SATISFIED):
+        matching = [record for record in records if record.status is wanted]
+        if matching:
+            return matching[-1]
+    return records[-1]
 
 
 def requirement_claim(

@@ -76,7 +76,8 @@ def test_01_a_valid_bundle_binds_and_is_stored_content_addressed_outside_the_wor
     ws, base = _workspace(tmp_path)
     reqs = derive_requirements(GOAL)
     bundle = _load(tmp_path, _bundle_dir(tmp_path, reqs, base), reqs, base, ws)
-    assert bundle.authority_id == "t1-oracle" and bundle.covers["REQ-1"].accepted_strength == "GENERAL"
+    assert bundle.authority_id == "t1-oracle" and bundle.covers["REQ-1"][0].accepted_strength == "GENERAL"
+    assert bundle.coverage_entry("REQ-1", BEHAVIOR).claim == BEHAVIOR and bundle.coverage_entry("REQ-1", API_PRESERVATION) is None
     assert os.path.isfile(os.path.join(bundle.stored_dir, "manifest.json"))
     assert os.path.isfile(os.path.join(bundle.stored_dir, "assets", "hidden", "test_hidden.py"))
     assert bundle.stored_dir.startswith(str(tmp_path / "state")) and bundle.digest == hashlib.sha256(
@@ -389,7 +390,7 @@ def test_11_a_contract_bound_to_another_bundle_never_consumes_this_bundles_run(t
     """m10: the closure keys on the contract's own bundle digest; another bundle's binding is never served."""
     ws, reqs, bundle = _loaded(tmp_path)
     other = ab.ExternalAuthority("external_acceptance_command", "f" * 64,
-                                 {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
+                                 {"REQ-1": {BEHAVIOR: {"accepted_strength": "GENERAL"}}})
     contract = compile_verification_contract(reqs, origins=statement_origins(GOAL), test_files=[],
                                              external_authorities=[other], project_language="python")
     assert contract.entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]

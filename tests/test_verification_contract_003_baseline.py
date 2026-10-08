@@ -57,7 +57,7 @@ def _contract(goal, authorities):
 
 
 def test_01_no_mutation_required_only_when_every_mandatory_claim_holds_at_baseline():
-    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "EXACT"}})
+    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": "EXACT"}}})
     reqs, contract = _contract(EXACT_GOAL, [examples])
     assert contract.refusal() is None
     passing = SimpleNamespace(passed=True, violated=False)
@@ -85,7 +85,7 @@ def test_01_no_mutation_required_only_when_every_mandatory_claim_holds_at_baseli
 
 
 def test_02_an_artifact_claim_requires_a_mutation_even_when_behaviour_already_holds():
-    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "EXACT"}})
+    examples = ExternalAuthority("goal_examples", "e" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": "EXACT"}}})
     reqs, contract = _contract(WITH_TEST_GOAL, [examples])
     assert contract.refusal() is None
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc",
@@ -98,7 +98,7 @@ def test_02_an_artifact_claim_requires_a_mutation_even_when_behaviour_already_ho
 
 
 def test_03_an_external_authority_pass_at_baseline_is_operator_sufficiency():
-    bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
+    bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": "GENERAL"}}})
     reqs, contract = _contract(EXACT_GOAL, [bundle])
     run = SimpleNamespace(verdict="PASS", evidence=lambda: {"verdict": "PASS"})
     report = cb.run_baseline_authorities(contract, reqs, base_revision="abc", run_bundle=lambda: run, bundle_digest="b" * 64,
@@ -207,7 +207,7 @@ async def test_07_enforce_path_returns_the_no_mutation_success_before_planning(t
 
 def test_08_an_unexecutable_bound_authority_stops_the_run_before_any_model_call():
     """Owner decision D2: AUTHORITY_EXECUTION_UNAVAILABLE at baseline is a typed stop, never an admission."""
-    bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": "GENERAL"}})
+    bundle = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": "GENERAL"}}})
     reqs, contract = _contract(EXACT_GOAL, [bundle])
     run = SimpleNamespace(verdict="INDETERMINATE", reason_code="AUTHORITY_EXECUTION_UNAVAILABLE", reason="no backend",
                           evidence=lambda: {"verdict": "INDETERMINATE", "reason_code": "AUTHORITY_EXECUTION_UNAVAILABLE", "reason": "no backend"})

@@ -200,7 +200,12 @@ def run_baseline_authorities(
             report.claims[rid] = claims
             continue
         for claim in entry.required_claims or ((MIGRATION,) if MIGRATION in entry.scope.scopes else ()):
-            binding = next((b for b in entry.bindings if b.claim == claim), None)
+            # BACKEND-READINESS-004: a claim may carry several bindings (the repository closer beside the sealed
+            # oracle); the closer-type checks read the first, the authority verdict considers every judged one.
+            claim_bindings = [b for b in entry.bindings if b.claim == claim]
+            binding = claim_bindings[0] if claim_bindings else None
+            judged = [(b, verdicts[b.authority_digest].get(rid, BASELINE_INDETERMINATE)) for b in claim_bindings
+                      if b.closer in _AUTHORITY_CLOSERS and b.authority_digest in verdicts]
             if claim in (TEST_ADDITION_CLAIM, MIGRATION) or (binding is not None and binding.closer in (CLOSER_TEST_ADDITION, CLOSER_MIGRATION_GATE)):
                 claims[claim] = {"state": BASELINE_MUTATION_REQUIRED, "authority": None,
                                  "why": "the claim asks for a change the baseline cannot carry"}
@@ -223,10 +228,17 @@ def run_baseline_authorities(
                                  "why": "a zero mutation preserves it by definition"}
             elif claim == DOCUMENTATION_CLAIM and binding is not None and binding.closer == CLOSER_DOCUMENTATION_NOT_APPLICABLE:
                 claims[claim] = {"state": BASELINE_PASS, "authority": "repository", "why": "the referent is absent"}
-            elif binding is not None and binding.closer in _AUTHORITY_CLOSERS and binding.authority_digest in verdicts:
-                verdict = verdicts[binding.authority_digest].get(rid, BASELINE_INDETERMINATE)
-                claims[claim] = {"state": verdict, "authority": binding.authority_kind, "digest": binding.authority_digest,
-                                 "why": f"the bound authority judged the baseline {verdict}"}
+            elif judged:
+                # One FAIL from any bound authority is the determinate signal (discriminating); PASS needs every
+                # judged authority to pass; anything else is INDETERMINATE.
+                states = [state for _b, state in judged]
+                verdict = (BASELINE_FAIL if BASELINE_FAIL in states
+                           else BASELINE_PASS if all(state == BASELINE_PASS for state in states) else BASELINE_INDETERMINATE)
+                claims[claim] = {"state": verdict, "authority": judged[0][0].authority_kind,
+                                 "digest": judged[0][0].authority_digest,
+                                 "authorities": [{"kind": b.authority_kind, "digest": b.authority_digest, "verdict": state}
+                                                 for b, state in judged],
+                                 "why": f"the bound authorities judged the baseline {verdict}"}
                 if verdict == BASELINE_FAIL:
                     report.discriminating = True
                 if verdict != BASELINE_PASS:

@@ -76,7 +76,9 @@ from kriya.workflow.requirements import (
 )
 
 CONTRACT_FORMAT = "kriya.verification_contract/1"
-CONTRACT_COMPILER_VERSION = 1
+# BACKEND-READINESS-004: /2 - one claim may carry several bindings (the repository closer beside the sealed
+# operator oracle); an authority's coverage is declared per (requirement, claim). Every contract sealed by /1 is STALE.
+CONTRACT_COMPILER_VERSION = 2
 CONTRACT_STORE_DIR = "verification-contracts"
 
 # Entry statuses.
@@ -105,6 +107,9 @@ AUTHORITY_CONTRACT = "contract"  # the compiler's own structural decision
 
 VISIBILITY_HIDDEN = "hidden"  # never in a prompt, never in the workspace
 VISIBILITY_GOAL_TEXT = "goal_text"  # part of the goal the Developer reads anyway
+
+# Project languages with a deterministic public-API predicate (kriya/workflow/api_preservation.py).
+API_PREDICATE_LANGUAGES = frozenset({"python"})
 
 # What each closer closes, who authored its evidence, and what PASS / FAIL / UNKNOWN are. Closed table: a closer id
 # outside it is a programming error (``_closer_contract``).
@@ -208,22 +213,25 @@ class ExternalAuthority:
 
     kind: str
     digest: str
-    coverage: Mapping[str, Mapping[str, Any]]  # requirement id -> {"claim": ..., "accepted_strength": ...}
+    # requirement id -> claim -> {"accepted_strength": ..., "why": ...}: one entry per (requirement, claim) the
+    # authority proves (BACKEND-READINESS-004: a compound statement may be covered claim by claim).
+    coverage: Mapping[str, Mapping[str, Mapping[str, Any]]]
     visibility: str = VISIBILITY_HIDDEN
     provenance: Mapping[str, Any] = field(default_factory=dict)
 
     def covers(self, requirement_id: str, claim: str, strength: Optional[str]) -> bool:
-        entry = self.coverage.get(requirement_id)
-        if not entry or entry.get("claim") != claim:
+        entries = self.coverage.get(requirement_id) or {}
+        if claim not in entries:
             return False
-        accepted = entry.get("accepted_strength")
+        accepted = (entries[claim] or {}).get("accepted_strength")
         if claim != BEHAVIOR:
             return True
         return accepted == BEHAVIOR_GENERAL or (accepted == BEHAVIOR_EXACT and strength == BEHAVIOR_EXACT)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "digest": self.digest, "visibility": self.visibility,
-                "coverage": {rid: dict(entry) for rid, entry in sorted(self.coverage.items())},
+                "coverage": {rid: {claim: dict(entry) for claim, entry in sorted(entries.items())}
+                             for rid, entries in sorted(self.coverage.items())},
                 "provenance": dict(self.provenance)}
 
     def identity(self) -> Dict[str, Any]:
@@ -417,6 +425,20 @@ def _closer_contract(closer: str) -> Dict[str, str]:
         raise KeyError(f"unknown closer {closer!r}; register it in CLOSER_CONTRACTS") from error
 
 
+def _covering(authorities: Sequence[ExternalAuthority], requirement_id: str, claim: str,
+              strength: Optional[str]) -> Optional[ExternalAuthority]:
+    """The first sealed operator authority declaring coverage of this exact
+    (requirement, claim) at a sufficient strength; the goal's own compiled
+    examples are a separate closer, never an operator authority."""
+    return next((a for a in authorities if a.kind != AUTHORITY_GOAL_EXAMPLES
+                 and a.covers(requirement_id, claim, strength)), None)
+
+
+def _external_binding(claim: str, external: ExternalAuthority, requirement_id: str) -> ClaimBinding:
+    return ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
+                        detail=dict(external.coverage[requirement_id][claim]))
+
+
 def _acceptable(claim: str, strength: Optional[str]) -> Tuple[str, ...]:
     return _ACCEPTABLE.get((claim, strength)) or _ACCEPTABLE.get((claim, None)) or (AUTHORITY_EXTERNAL_COMMAND,)
 
@@ -557,7 +579,14 @@ def compile_verification_contract(
                     elif scope.named_tests:
                         bindings.append(ClaimBinding(claim, CLOSER_NAMED_TESTS, AUTHORITY_GOAL,
                                                      detail={"tests": list(scope.named_tests)}))
-                    else:  # unreachable by construction (requirement_claims); fail closed
+                    external = _covering(authorities, requirement.id, claim, None)
+                    if external is not None:
+                        # BACKEND-READINESS-004 (AUTHORITY-REGRESSION-CLAIM-COVERAGE-001): the sealed oracle runs
+                        # the named tests in its own environment beside the repository oracle, which refuses by
+                        # design when the candidate changes the test dependency declaration; either producer's
+                        # PASS closes the claim, any producer's FAIL is counter-evidence.
+                        bindings.append(_external_binding(claim, external, requirement.id))
+                    if not any(b.claim == claim for b in bindings):  # unreachable by construction; fail closed
                         residual.append(ResidualClaim(claim, None, "no named test and no suite statement",
                                                       _acceptable(claim, None)))
                 elif claim == TEST_IMMUTABILITY_CLAIM:
@@ -565,28 +594,26 @@ def compile_verification_contract(
                 elif claim == TEST_ADDITION_CLAIM:
                     bindings.append(ClaimBinding(claim, CLOSER_TEST_ADDITION, AUTHORITY_REPOSITORY))
                 elif claim == API_PRESERVATION:
-                    external = next((a for a in authorities if a.covers(requirement.id, claim, None)), None)
-                    if project_language == "python":
+                    external = _covering(authorities, requirement.id, claim, None)
+                    if project_language in API_PREDICATE_LANGUAGES:
                         bindings.append(ClaimBinding(claim, CLOSER_API_PRESERVATION, AUTHORITY_REPOSITORY,
-                                                     detail={"language": "python"}))
-                    elif external is not None:
-                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
-                                                     detail=dict(external.coverage[requirement.id])))
-                    else:
+                                                     detail={"language": project_language}))
+                    if external is not None:
+                        bindings.append(_external_binding(claim, external, requirement.id))
+                    if not any(b.claim == claim for b in bindings):
                         residual.append(ResidualClaim(
                             claim, None, f"no deterministic public-API predicate for project language "
                             f"{project_language or 'unknown'}", _acceptable(claim, None)))
                 elif claim == DOCUMENTATION_CLAIM:
                     clause = scope.documentation or {}
                     present, evidence = _documentation_list_present(clause, tracked, tracked_file_reader)
-                    external = next((a for a in authorities if a.covers(requirement.id, claim, None)), None)
+                    external = _covering(authorities, requirement.id, claim, None)
                     if clause.get("conditional") and present is False:
                         bindings.append(ClaimBinding(claim, CLOSER_DOCUMENTATION_NOT_APPLICABLE, AUTHORITY_REPOSITORY,
                                                      detail=evidence))
-                    elif external is not None:
-                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
-                                                     detail=dict(external.coverage[requirement.id])))
-                    else:
+                    if external is not None:
+                        bindings.append(_external_binding(claim, external, requirement.id))
+                    if not any(b.claim == claim for b in bindings):
                         why = ("the documentation referent exists; documenting it correctly is a content claim "
                                "Kriya cannot verify deterministically" if present else
                                "an unconditional documentation request is a content claim Kriya cannot verify "
@@ -595,21 +622,22 @@ def compile_verification_contract(
                         residual.append(ResidualClaim(claim, None, why, _acceptable(claim, None)))
                 elif claim == BEHAVIOR:
                     strength = scope.strength
-                    external = next((a for a in authorities if a.covers(requirement.id, claim, strength)), None)
+                    external = _covering(authorities, requirement.id, claim, strength)
                     examples = next((a for a in authorities if a.kind == AUTHORITY_GOAL_EXAMPLES
                                      and requirement.id in a.coverage), None)
+                    # Every applicable authority binds (complementary producers: any PASS closes, any FAIL is
+                    # counter-evidence); the acceptance file and its approval are one artifact, one binding.
                     if requirement.id in covered_ids and strength == BEHAVIOR_EXACT:
                         bindings.append(ClaimBinding(claim, CLOSER_ACCEPTANCE, AUTHORITY_ACCEPTANCE_FILE, acceptance_digest))
                     elif requirement.id in covered_ids and requirement.id in approval_ids:
                         bindings.append(ClaimBinding(claim, CLOSER_ACCEPTANCE_APPROVAL, AUTHORITY_ACCEPTANCE_APPROVAL,
                                                      approval_digest, detail={"acceptance_digest": acceptance_digest}))
-                    elif examples is not None and strength == BEHAVIOR_EXACT:
+                    if examples is not None and strength == BEHAVIOR_EXACT:
                         bindings.append(ClaimBinding(claim, CLOSER_DERIVED_EXAMPLES, AUTHORITY_GOAL_EXAMPLES,
-                                                     examples.digest, detail=dict(examples.coverage[requirement.id])))
-                    elif external is not None and external.kind != AUTHORITY_GOAL_EXAMPLES:
-                        bindings.append(ClaimBinding(claim, CLOSER_EXTERNAL_ACCEPTANCE, external.kind, external.digest,
-                                                     detail=dict(external.coverage[requirement.id])))
-                    else:
+                                                     examples.digest, detail=dict(examples.coverage[requirement.id][BEHAVIOR])))
+                    if external is not None:
+                        bindings.append(_external_binding(claim, external, requirement.id))
+                    if not any(b.claim == claim for b in bindings):
                         if strength == BEHAVIOR_GENERAL:
                             why = ("a general behaviour statement (" + "; ".join(scope.strength_reasons) + "): finite "
                                    "cases never prove it (B2-COV), model judgment never closes it")

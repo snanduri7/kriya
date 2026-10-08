@@ -320,7 +320,7 @@ def derive_example_artifact(
 def example_authority(artifact: AcceptanceArtifact, compilation_report: Dict[str, Any]) -> ExternalAuthority:
     """The contract's view of the derived module: EXACT behaviour coverage of
     every requirement an example binds to (B2-COV: never GENERAL)."""
-    coverage = {rid: {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT, "cases": artifact.identities_for(rid)}
+    coverage = {rid: {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT, "cases": artifact.identities_for(rid)}}
                 for rid in artifact.requirement_ids}
     return ExternalAuthority(AUTHORITY_GOAL_EXAMPLES, artifact.digest, coverage, visibility=VISIBILITY_GOAL_TEXT,
                              provenance={"compiler_version": EXAMPLE_COMPILER_VERSION,

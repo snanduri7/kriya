@@ -226,7 +226,7 @@ def test_10_a_goal_of_closable_statements_is_admitted_and_sealed(tmp_path):
             "Every existing test must keep passing unchanged.\n\nDo not change any existing test.\n\n"
             "Do not modify any other file.\n\nThe public API must stay unchanged.\n\n"
             "Document it in the README's function list if there is one.\n\nAdd a regression test for it.\n")
-    acceptance = ExternalAuthority("acceptance_file", "a" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_GENERAL}})
+    acceptance = ExternalAuthority("acceptance_file", "a" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_GENERAL}}})
     reqs, contract = _compile(goal, tracked_paths=["src/cache.py", "tests/test_a.py", "README.md"],
                               project_language="python", external_authorities=[acceptance],
                               tracked_file_reader=lambda p: b"# Cache\n\nUsage.\n")
@@ -251,7 +251,7 @@ def test_11_digest_binds_every_input():
     goal = "Fix the expiry boundary in src/cache.py.\nEvery existing test must keep passing.\n"
     base = _compile(goal, tracked_paths=["src/cache.py"])[1]
     assert _compile(goal, tracked_paths=["src/cache.py"])[1].digest == base.digest
-    authority = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_GENERAL}})
+    authority = ExternalAuthority("external_acceptance_command", "b" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_GENERAL}}})
     assert _compile(goal, tracked_paths=["src/cache.py"], external_authorities=[authority])[1].digest != base.digest
     assert _compile(goal, tracked_paths=["src/cache.py"], base_revision="abc")[1].digest != base.digest
     assert _compile(goal + "Add logging.\n", tracked_paths=["src/cache.py"])[1].digest != base.digest
@@ -261,7 +261,7 @@ def test_11_digest_binds_every_input():
 def test_12_claim_strength_rules_hold_for_every_authority_kind():
     general = "Make lower() lower-case every string it is given, exactly as str.lower() does.\n"
     exact = "lower('ABC') -> 'abc'.\n"
-    examples = ExternalAuthority("goal_examples", "c" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}})
+    examples = ExternalAuthority("goal_examples", "c" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT}}})
     # finite examples never close a general rule (B2-COV)
     assert _compile(general, external_authorities=[examples])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
     assert "supporting evidence only" in _compile(general, external_authorities=[examples])[1].entry("REQ-1").residual[0].why
@@ -277,15 +277,15 @@ def test_12_claim_strength_rules_hold_for_every_authority_kind():
         entries = {"REQ-1": object()}
     assert _compile(general, acceptance_ids=["REQ-1"], approval=_Approval())[1].entry("REQ-1").closers == ["acceptance_approval"]
     # an external command declared for EXACT only never covers a GENERAL statement; GENERAL coverage covers both
-    weak = ExternalAuthority("external_acceptance_command", "e" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}})
-    strong = ExternalAuthority("external_acceptance_command", "f" * 64, {"REQ-1": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_GENERAL}})
+    weak = ExternalAuthority("external_acceptance_command", "e" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT}}})
+    strong = ExternalAuthority("external_acceptance_command", "f" * 64, {"REQ-1": {BEHAVIOR: {"accepted_strength": BEHAVIOR_GENERAL}}})
     assert _compile(general, external_authorities=[weak])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
     assert _compile(general, external_authorities=[strong])[1].entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]
     assert _compile(exact, external_authorities=[weak])[1].entry("REQ-1").closers == [CLOSER_EXTERNAL_ACCEPTANCE]
     # an authority never covers a requirement it does not declare, nor another claim kind
-    other = ExternalAuthority("external_acceptance_command", "9" * 64, {"REQ-9": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_GENERAL}})
+    other = ExternalAuthority("external_acceptance_command", "9" * 64, {"REQ-9": {BEHAVIOR: {"accepted_strength": BEHAVIOR_GENERAL}}})
     assert _compile(general, external_authorities=[other])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
-    api_only = ExternalAuthority("external_acceptance_command", "8" * 64, {"REQ-1": {"claim": API_PRESERVATION}})
+    api_only = ExternalAuthority("external_acceptance_command", "8" * 64, {"REQ-1": {API_PRESERVATION: {}}})
     assert _compile(general, external_authorities=[api_only])[1].entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED
     # a Java API constraint needs an external authority; a Python one has the predicate
     java = _compile("The public API must stay unchanged.\n", project_language="java")[1].entry("REQ-1")
@@ -378,5 +378,5 @@ def test_19_doctest_sessions_are_concrete_cases_for_the_strength_rule():
     assert strength == BEHAVIOR_GENERAL
     # and the S1_A/S6_A shapes: the doctest statement is EXACT so compiled examples may close it
     s6 = _compile("interpose() blows up on an empty sequence.\n\n>>> from toolz import interpose\n>>> list(interpose('a', []))\n[]\n",
-                  external_authorities=[ExternalAuthority("goal_examples", "c" * 64, {"REQ-2": {"claim": BEHAVIOR, "accepted_strength": BEHAVIOR_EXACT}})])[1]
+                  external_authorities=[ExternalAuthority("goal_examples", "c" * 64, {"REQ-2": {BEHAVIOR: {"accepted_strength": BEHAVIOR_EXACT}}})])[1]
     assert s6.entry("REQ-2").closers == [CLOSER_DERIVED_EXAMPLES] and s6.entry("REQ-1").status == STATUS_AUTHORITY_REQUIRED

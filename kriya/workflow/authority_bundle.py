@@ -67,6 +67,7 @@ from kriya.workflow.requirements import (
     BEHAVIOR_GENERAL,
     DOCUMENTATION_CLAIM,
     EXTERNAL_ACCEPTANCE_METHOD,
+    REGRESSION_PRESERVATION,
     RequirementOutcome,
     RequirementSet,
     goal_identity,
@@ -88,7 +89,10 @@ _MANIFEST_FIELDS = frozenset({"format", "authority_id", "type", "goal_sha256", "
 _OPTIONAL_FIELDS = frozenset({"original_oracle", "notes"})
 _COVER_FIELDS = frozenset({"requirement_id", "requirement_text_sha256", "claim", "accepted_strength",
                            "accept_as_sufficient", "why"})
-_COVERABLE_CLAIMS = frozenset({BEHAVIOR, API_PRESERVATION, DOCUMENTATION_CLAIM})
+# BACKEND-READINESS-004 (AUTHORITY-REGRESSION-CLAIM-COVERAGE-001): coverage is declared per (requirement, claim) -
+# several entries for one requirement, one per claim it proves - and REGRESSION_PRESERVATION is coverable (the oracle
+# executes the named tests in its own environment). A /1 manifest with one entry per requirement is the one-claim case.
+_COVERABLE_CLAIMS = frozenset({BEHAVIOR, API_PRESERVATION, DOCUMENTATION_CLAIM, REGRESSION_PRESERVATION})
 _LANGUAGES = frozenset({"python", "java"})
 _BUILD_TOOLS = frozenset({"maven", "gradle", "pip", "none"})
 _COPY_IGNORE = (".git", ".kriya", "target", "build", ".gradle", "node_modules", "__pycache__", ".pytest_cache")
@@ -149,12 +153,15 @@ class AuthorityBundle:
     language: str
     build_tool: str
     visibility: str
-    covers: Mapping[str, CoverageEntry]
+    covers: Mapping[str, Tuple[CoverageEntry, ...]]  # requirement id -> its coverage entries, one per claim
     original_oracle: Mapping[str, Any] = field(default_factory=dict)
 
+    def coverage_entry(self, requirement_id: str, claim: str) -> Optional[CoverageEntry]:
+        return next((c for c in self.covers.get(requirement_id, ()) if c.claim == claim), None)
+
     def authority(self) -> ExternalAuthority:
-        coverage = {rid: {"claim": c.claim, "accepted_strength": c.accepted_strength, "why": c.why}
-                    for rid, c in self.covers.items()}
+        coverage = {rid: {c.claim: {"accepted_strength": c.accepted_strength, "why": c.why} for c in entries}
+                    for rid, entries in self.covers.items()}
         return ExternalAuthority(AUTHORITY_EXTERNAL_COMMAND, self.digest, coverage, visibility=self.visibility,
                                  provenance={"authority_id": self.authority_id, "format": AUTHORITY_FORMAT,
                                              "assets": dict(self.assets), "stored_dir": self.stored_dir,
@@ -289,7 +296,7 @@ def load_authority_bundle(
     covers_raw = manifest["covers"]
     if not isinstance(covers_raw, list) or not covers_raw:
         raise _refuse(AUTHORITY_INVALID, "covers must list at least one requirement")
-    covers: Dict[str, CoverageEntry] = {}
+    covers: Dict[str, List[CoverageEntry]] = {}
     for raw in covers_raw:
         if not isinstance(raw, dict) or set(raw) != _COVER_FIELDS:
             raise _refuse(AUTHORITY_INVALID, f"every coverage entry has exactly the fields {sorted(_COVER_FIELDS)}")
@@ -297,12 +304,12 @@ def load_authority_bundle(
         requirement = requirement_set.get(rid) if isinstance(rid, str) else None
         if requirement is None:
             raise _refuse(AUTHORITY_INVALID, f"coverage names a requirement outside the set: {rid!r}")
-        if rid in covers:
-            raise _refuse(AUTHORITY_INVALID, f"duplicate coverage for {rid}")
         if raw["requirement_text_sha256"] != _text_sha256(requirement.text):
             raise _refuse(AUTHORITY_INVALID, f"{rid}: requirement_text_sha256 does not match the requirement's exact text")
         if raw["claim"] not in _COVERABLE_CLAIMS:
             raise _refuse(AUTHORITY_INVALID, f"{rid}: claim must be one of {sorted(_COVERABLE_CLAIMS)}")
+        if any(existing.claim == raw["claim"] for existing in covers.get(rid, ())):
+            raise _refuse(AUTHORITY_INVALID, f"duplicate coverage for {rid} claim {raw['claim']}")
         strength = raw["accepted_strength"]
         if raw["claim"] == BEHAVIOR and strength not in (BEHAVIOR_EXACT, BEHAVIOR_GENERAL):
             raise _refuse(AUTHORITY_INVALID, f"{rid}: accepted_strength must be EXACT or GENERAL for a behaviour claim")
@@ -312,7 +319,7 @@ def load_authority_bundle(
             raise _refuse(AUTHORITY_INVALID, f"{rid}: accept_as_sufficient must be the literal true")
         if not isinstance(raw["why"], str) or not raw["why"].strip():
             raise _refuse(AUTHORITY_INVALID, f"{rid}: why must say what the oracle proves for this requirement")
-        covers[rid] = CoverageEntry(rid, raw["requirement_text_sha256"], raw["claim"], strength, raw["why"])
+        covers.setdefault(rid, []).append(CoverageEntry(rid, raw["requirement_text_sha256"], raw["claim"], strength, raw["why"]))
     digest = _sha256(data)
     stored_dir = os.path.join(state_root, AUTHORITY_STORE_DIR, digest)
     if not os.path.isdir(stored_dir):
@@ -332,7 +339,8 @@ def load_authority_bundle(
         goal_sha256=manifest["goal_sha256"], requirement_set_sha256=manifest["requirement_set_sha256"],
         base_revision=manifest["base_revision"], assets=dict(assets), prepare=prepare, verify=verify,
         timeout_seconds=timeout, language=toolchain["language"], build_tool=toolchain["build_tool"],
-        visibility=manifest["visibility"], covers=covers, original_oracle=dict(original) if isinstance(original, dict) else {},
+        visibility=manifest["visibility"], covers={rid: tuple(entries) for rid, entries in covers.items()},
+        original_oracle=dict(original) if isinstance(original, dict) else {},
     )
 
 
@@ -532,16 +540,17 @@ def close_requirements_with_authority_bundle(
     run = execute()
     claims_map = contract.required_claims_by_requirement()
     attempts: List[Dict[str, Any]] = []
-    for rid, _binding in pending:
-        coverage = bundle.covers.get(rid)
+    for rid, binding in pending:
+        # One run, one verdict, applied to every (requirement, claim) the contract bound to this bundle.
+        coverage = bundle.coverage_entry(rid, binding.claim)
         requirement = requirements.get(rid)
         record = ledger.current(requirement_obligation_id(rid))
         evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
-        entry: Dict[str, Any] = {"requirement": rid, "kind": EXTERNAL_ACCEPTANCE_METHOD, "closed": False,
-                                 "authority_digest": bundle.digest, "authority_id": bundle.authority_id,
+        entry: Dict[str, Any] = {"requirement": rid, "claim": binding.claim, "kind": EXTERNAL_ACCEPTANCE_METHOD,
+                                 "closed": False, "authority_digest": bundle.digest, "authority_id": bundle.authority_id,
                                  **run.evidence()}
         if coverage is None or requirement is None:
-            entry["reason"] = "the bundle declares no coverage for this requirement"
+            entry["reason"] = "the bundle declares no coverage for this requirement and claim"
         elif not evidence_id:
             entry["reason"] = "the verdict has no evidence id to bind to"
         elif coverage.requirement_text_sha256 != _text_sha256(requirement.text):
@@ -557,11 +566,17 @@ def close_requirements_with_authority_bundle(
             record_requirement_claim(ledger, requirements, rid, coverage.claim, evidence_id=evidence_id,
                                      method=EXTERNAL_ACCEPTANCE_METHOD, detail=detail, source=source,
                                      revision=revision, status=status)
-            after = requirement_outcomes(ledger, requirements)[rid]
-            entry.update({"claim": coverage.claim, "status": status.value, "outcome": after.value,
+            entry.update({"status": status.value, "recorded": True})
+        attempts.append(entry)
+    # The requirement's outcome is read once every covered claim is recorded (a compound statement closes only
+    # when all of them are), then reported on each of its entries.
+    after_all = requirement_outcomes(ledger, requirements)
+    for entry in attempts:
+        if entry.pop("recorded", False):
+            after = after_all[entry["requirement"]]
+            entry.update({"outcome": after.value,
                           "closed": after in (RequirementOutcome.HUMAN_ACCEPTED, RequirementOutcome.CLOSED_BY_EVIDENCE),
                           "violated": after is RequirementOutcome.VIOLATED})
-        attempts.append(entry)
     return attempts
 
 
