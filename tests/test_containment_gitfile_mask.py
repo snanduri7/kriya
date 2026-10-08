@@ -33,7 +33,7 @@ def test_only_a_pointer_outside_the_mount_is_masked(tmp_path):
     assert dangling_gitfile_mask(str(repo)) == []  # a real .git directory
     worktree = tmp_path / "wt"
     _git(repo, "worktree", "add", "-q", "--detach", str(worktree))
-    assert dangling_gitfile_mask(str(worktree)) == ["-v", "/dev/null:/kriya/workspace/.git:ro"]
+    assert dangling_gitfile_mask(str(worktree)) == ["--mount", "type=bind,src=/dev/null,dst=/kriya/workspace/.git,readonly"]
     inside = tmp_path / "self"
     (inside / "meta").mkdir(parents=True)
     (inside / ".git").write_text("gitdir: meta\n")
@@ -88,3 +88,18 @@ def test_an_ordinary_repository_keeps_its_git_directory(tmp_path):
     result = ProcessController().run(["/bin/sh", "-c", "test -d .git && echo has-git-dir"], cwd=".", timeout=60,
                                      containment_profile=profile, containment_backend=OCIContainmentBackend())
     assert "has-git-dir" in result.stdout, result.stderr
+
+
+def test_bind_mounts_use_the_named_mount_syntax_so_colons_and_drive_letters_survive(tmp_path):
+    """PLAT-OCI-MOUNT-SYNTAX-001 (PLAT-013): a host path with ':' (a Windows drive letter, any colon) is not split
+    into host:container:mode; a path the CSV --mount syntax cannot carry (',') is refused, never mangled."""
+    import pytest
+
+    from kriya.tools.containment import BackendUnavailableError
+    from kriya.tools.containment_oci import bind_mount_args
+
+    assert bind_mount_args("/Users/me/ws", "/kriya/workspace", writable=True) == ["--mount", "type=bind,src=/Users/me/ws,dst=/kriya/workspace"]
+    assert bind_mount_args("/tmp/a:b", "/kriya/cache/0", writable=False) == ["--mount", "type=bind,src=/tmp/a:b,dst=/kriya/cache/0,readonly"]
+    assert bind_mount_args(r"C:\Users\me\ws", "/kriya/workspace", writable=True)[1] == r"type=bind,src=C:\Users\me\ws,dst=/kriya/workspace"
+    with pytest.raises(BackendUnavailableError, match="MOUNT_PATH_NOT_EXPRESSIBLE"):
+        bind_mount_args("/tmp/a,b", "/kriya/workspace", writable=True)

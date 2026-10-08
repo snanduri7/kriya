@@ -96,7 +96,7 @@ def test_an_explicit_identity_and_a_container_writing_no_host_mount_are_unchange
     assert _value(explicit, "--user") == ["65534:65534"]
     assert "HOME=/kriya/tmp" not in _value(explicit, "-e")
     read_only = _argv(_profile(workspace, workspace_write=False), monkeypatch=monkeypatch)
-    assert "--user" not in read_only and _value(read_only, "-v") == [f"{workspace}:/kriya/workspace:ro"]
+    assert "--user" not in read_only and _value(read_only, "--mount") == [f"type=bind,src={workspace},dst=/kriya/workspace,readonly"]
 
 
 # --- Real containers --------------------------------------------------------------------

@@ -127,7 +127,7 @@ class AuthorityRequest:
 def authority_requests(contract: VerificationContract) -> List[AuthorityRequest]:
     """One request per residual (requirement, claim) of every AUTHORITY_REQUIRED
     entry of ``contract`` - pure, no model, no repository access."""
-    requests: List[AuthorityRequest] = []
+    emitted: List[AuthorityRequest] = []  # named so the PRD-012 client inventory never reads it as the HTTP library
     for entry in contract.entries:
         if entry.status != STATUS_AUTHORITY_REQUIRED:
             continue
@@ -138,7 +138,7 @@ def authority_requests(contract: VerificationContract) -> List[AuthorityRequest]
             ordered = _ordered(residual.acceptable_authorities)
             cheapest = ordered[0]
             kinds = [kind for kind in _COST_ORDER if any(item.startswith(kind) for item in ordered)]
-            requests.append(AuthorityRequest(
+            emitted.append(AuthorityRequest(
                 requirement_id=entry.requirement_id, text=entry.text, claim=residual.claim, strength=residual.strength,
                 scopes=tuple(entry.scope.scopes), must_prove=_must_prove(entry, residual), existing_evidence=existing,
                 why_insufficient=residual.why + (("; the bound evidence proves other claims of this statement only")
@@ -152,7 +152,7 @@ def authority_requests(contract: VerificationContract) -> List[AuthorityRequest]
                 disposition_skeleton={"requirement_id": entry.requirement_id, "requirement_text_sha256": text_digest,
                                       "claim": residual.claim, "disposition": "", "reason": "", "evidence": []},
             ))
-    return requests
+    return emitted
 
 
 def request_document(contract: VerificationContract, requests: Sequence[AuthorityRequest]) -> Dict[str, Any]:

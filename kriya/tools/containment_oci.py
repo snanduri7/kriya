@@ -165,6 +165,22 @@ def _non_root_home_env(env: Dict[str, str]) -> Dict[str, str]:
     return {"HOME": _NON_ROOT_HOME, "MAVEN_CONFIG": f"{_NON_ROOT_HOME}/.m2", "JAVA_TOOL_OPTIONS": java_options}
 
 
+def bind_mount_args(host_path: str, container_path: str, *, writable: bool) -> List[str]:
+    """PLAT-OCI-MOUNT-SYNTAX-001 (PLAT-013, BACKEND-READINESS-004): one bind
+    mount as ``--mount type=bind,src=...,dst=...[,readonly]`` - the form whose
+    fields are named, so a host path carrying ``:`` (a Windows drive letter,
+    any colon on POSIX) is never split as ``-v host:container:mode`` would
+    split it. The ``--mount`` syntax is CSV, so a path carrying ``,`` cannot
+    be expressed at all: refused, typed, never mangled."""
+    for label, value in (("host", host_path), ("container", container_path)):
+        if "," in value:
+            raise BackendUnavailableError(
+                f"MOUNT_PATH_NOT_EXPRESSIBLE: the {label} path {value!r} contains ',' which the OCI --mount syntax "
+                "cannot carry; move the workspace or cache to a path without a comma")
+    spec = f"type=bind,src={host_path},dst={container_path}" + ("" if writable else ",readonly")
+    return ["--mount", spec]
+
+
 def dangling_gitfile_mask(workspace_host: str) -> List[str]:
     """Docker args hiding a git *file* at the workspace root whose ``gitdir:``
     resolves outside the workspace mount (a git worktree's pointer to its
@@ -190,7 +206,7 @@ def dangling_gitfile_mask(workspace_host: str) -> List[str]:
     root = os.path.realpath(workspace_host)
     if os.path.commonpath([resolved, root]) == root:
         return []
-    return ["-v", f"/dev/null:{_CONTAINER_WORKSPACE}/.git:ro"]
+    return bind_mount_args("/dev/null", f"{_CONTAINER_WORKSPACE}/.git", writable=False)
 
 
 def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str]]:
@@ -1110,8 +1126,8 @@ class OCIContainmentBackend:
                     "exist or is not a directory - refusing to start a container "
                     "with no valid workspace mount."
                 )
-            mode = "rw" if profile.workspace_write else "ro"
-            args += ["-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:{mode}", "-w", _CONTAINER_WORKSPACE]
+            args += bind_mount_args(workspace_host, _CONTAINER_WORKSPACE, writable=profile.workspace_write)
+            args += ["-w", _CONTAINER_WORKSPACE]
             args += dangling_gitfile_mask(workspace_host)
         else:
             args += ["-w", _CONTAINER_TEMP]
@@ -1126,8 +1142,7 @@ class OCIContainmentBackend:
                 raise BackendUnavailableError(
                     f"ContainmentProfile.additional_mounts[{i}] {mount_host!r} does not exist."
                 )
-            mode = "rw" if mount.writable else "ro"
-            args += ["-v", f"{mount_host}:{mount.container_path}:{mode}"]
+            args += bind_mount_args(mount_host, mount.container_path, writable=mount.writable)
 
         if profile.temp_path:
             temp_host = os.path.abspath(profile.temp_path)
@@ -1136,7 +1151,7 @@ class OCIContainmentBackend:
                     f"ContainmentProfile.temp_path {temp_host!r} does not exist "
                     "or is not a directory."
                 )
-            args += ["-v", f"{temp_host}:{_CONTAINER_TEMP}/host:rw"]
+            args += bind_mount_args(temp_host, f"{_CONTAINER_TEMP}/host", writable=True)
 
         for i, cache_path in enumerate(profile.dependency_cache_paths):
             cache_host = os.path.abspath(cache_path)
@@ -1145,11 +1160,10 @@ class OCIContainmentBackend:
                     f"ContainmentProfile.dependency_cache_paths[{i}] "
                     f"{cache_host!r} does not exist or is not a directory."
                 )
-            mode = "rw" if profile.dependency_cache_writable else "ro"
             container_path = (
                 cache_mount_point if i == 0 and cache_mount_point else f"{_CONTAINER_CACHE_PREFIX}/{i}"
             )
-            args += ["-v", f"{cache_host}:{container_path}:{mode}"]
+            args += bind_mount_args(cache_host, container_path, writable=profile.dependency_cache_writable)
 
         if profile.network is NetworkAuthority.DENIED:
             args += ["--network", "none"]
@@ -1454,7 +1468,7 @@ class OCIContainmentBackend:
             "--sysctl", "net.ipv6.conf.default.disable_ipv6=1",
             "--pids-limit", _PIDS_LIMIT,
             "--tmpfs", f"{_CONTAINER_TEMP}:rw,size={_TMPFS_SIZE}",
-            "-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:rw",
+            *bind_mount_args(workspace_host, _CONTAINER_WORKSPACE, writable=True),
             "-w", _CONTAINER_WORKSPACE,
             *dangling_gitfile_mask(workspace_host),
         ]
@@ -1468,11 +1482,10 @@ class OCIContainmentBackend:
                     f"ContainmentProfile.dependency_cache_paths[{i}] {cache_host!r} does not "
                     "exist or is not a directory."
                 )
-            mode = "rw" if profile.dependency_cache_writable else "ro"
             container_path = (
                 cache_mount_point if i == 0 and cache_mount_point else f"{_CONTAINER_CACHE_PREFIX}/{i}"
             )
-            args += ["-v", f"{cache_host}:{container_path}:{mode}"]
+            args += bind_mount_args(cache_host, container_path, writable=profile.dependency_cache_writable)
 
         for key, value in build_restricted_env(profile.env_allowlist).items():
             if key in _HOST_ONLY_ENV_VARS:

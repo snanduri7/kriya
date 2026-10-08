@@ -279,8 +279,9 @@ def test_oci_contained_scan_matches_host_with_no_network(pinned_image, workspace
 
     argv = backend.prepared[-1].command_prefix
     assert argv[argv.index("--network") + 1] == "none"
-    assert f"{os.path.realpath(snapshot)}:/kriya/workspace:ro" in argv or f"{snapshot}:/kriya/workspace:ro" in argv
-    assert f"{os.path.realpath(RULES)}:/kriya/rules/0:ro" in argv
+    assert (f"type=bind,src={os.path.realpath(snapshot)},dst=/kriya/workspace,readonly" in argv
+            or f"type=bind,src={snapshot},dst=/kriya/workspace,readonly" in argv)
+    assert f"type=bind,src={os.path.realpath(RULES)},dst=/kriya/rules/0,readonly" in argv
     assert argv[argv.index("--user") + 1] == "65534:65534"
     assert argv[argv.index("--pull") + 1] == "never"
     assert "TMPDIR=/kriya/tmp" in argv
