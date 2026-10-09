@@ -61,7 +61,6 @@ from kriya.workflow.milestone_completion import (
     LEGACY_STATE_UNVERIFIED,
     MILESTONE_DEFINITION_CHANGED,
     MODE_CHANGED,
-    NO_COMMITTED_OUTPUT,
     OUTPUT_CHANGED,
     OUTPUT_MISSING,
     PROOF_EVIDENCE_MISMATCH,
@@ -386,13 +385,19 @@ def test_milestones_modifying_each_others_files_stay_valid_when_nothing_changed(
     }
 
 
-def test_a_milestone_that_committed_nothing_is_unverified(tmp_path):
+def test_a_milestone_that_committed_nothing_is_not_complete_and_never_reusable(tmp_path):
+    """MILESTONE-ZERO-COMMIT-COMPLETION-001 (owner decision 2026-10-09): a milestone that committed no effective output
+    and has no deterministic no-change proof (free-text criteria) fails typed NO_CHANGE_UNVERIFIED - it is neither
+    completed nor reusable, and a rerun fails the same way. (Superseded S4c-1 shape: completed, reuse UNVERIFIED /
+    NO_COMMITTED_OUTPUT.)"""
     outputs = {"M1": {}, "M2": {"m2.py": b"M2 = 1\n"}}
-    workspace = _completed_chain(tmp_path, outputs)
-    result, _ = _run(workspace, CHAIN, FakeEngine(CHAIN, outputs))
-    assert _decisions(result) == {
-        "M1": ("UNVERIFIED", [NO_COMMITTED_OUTPUT]), "M2": ("CHANGED", [UPSTREAM_INVALIDATED]),
-    }
+    workspace = _workspace(tmp_path)
+    for _ in range(2):
+        result, state = _run(workspace, CHAIN, FakeEngine(CHAIN, outputs))
+        assert result["status"] == "no_change_unverified" and result["milestone_id"] == "M1", result
+        assert result["reason_codes"] == ["NO_CHANGE_UNVERIFIED"]
+        assert state.completed_milestone_ids == [] and "M1" not in state.completion_proofs
+        assert "milestone_reuse" not in result or "M1" not in [d["milestone_id"] for d in result["milestone_reuse"]["decisions"]]
 
 
 # ---------------------------------------------------------------- L: byte exactness
@@ -494,3 +499,31 @@ def test_a_hand_edited_milestone_definition_reruns_with_its_dependents(tmp_path)
         "M1": ("CHANGED", [MILESTONE_DEFINITION_CHANGED]), "M2": ("CHANGED", [UPSTREAM_INVALIDATED]),
     }
     assert engine.calls == ["M1", "M2", "INTEGRATION"]
+
+
+# ---------------------------------------------------------------- MILESTONE-ZERO-COMMIT-COMPLETION-001 (the completion step itself)
+
+def test_the_completion_step_never_persists_a_zero_commit_milestone_whose_no_change_verification_refused(tmp_path):
+    """Direct control on `_complete_milestone`: with zero committed cycles, no reported files and a refused
+    deterministic no-change verification, it returns the typed NO_CHANGE_UNVERIFIED error carrying the refusal and
+    persists nothing (no proof, not completed); with a deterministic proof it completes as VERIFIED_NO_CHANGE; a
+    milestone with committed cycles completes as before. No path turns a refusal into a completion."""
+    from unittest.mock import patch
+
+    from kriya.workflow import milestones as m
+    from kriya.workflow.milestone_completion import ACCEPTANCE_COVERAGE_UNAVAILABLE, VERIFIED_NO_CHANGE
+    from kriya.workflow.verified_no_change import NO_CHANGE_UNVERIFIED
+
+    workspace = _workspace(tmp_path)
+    state = m.load_or_resume_milestone_run_state(str(workspace), _plan(CHAIN))
+    registry = m.load_artifact_registry(str(workspace))
+    result = {"quality_gates_passed": True, "files": [], "deterministic_gate_evidence": [], "acceptance_coverage": []}
+
+    error = m._complete_milestone(str(workspace), state, CHAIN[0], [], [], registry, result=result)
+    assert error["code"] == NO_CHANGE_UNVERIFIED and error["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
+    assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
+
+    # the positive no-change control: a deterministic proof completes as VERIFIED_NO_CHANGE
+    with patch.object(m, "no_change_verification", return_value=({"acceptance_coverage": [], "kind": VERIFIED_NO_CHANGE}, None)):
+        assert m._complete_milestone(str(workspace), state, CHAIN[0], [], [], registry, result=result) is None
+    assert state.completed_milestone_ids == ["M1"] and state.completion_proofs["M1"]["kind"] == VERIFIED_NO_CHANGE

@@ -86,7 +86,11 @@ from kriya.workflow.plan_executor import PlanDriver, WorkUnitInvocation, execute
 from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
 from kriya.workflow.resume_fingerprints import FingerprintStatus
 from kriya.workflow.verification_contract import extract_contract_verdict
+from kriya.workflow.verified_no_change import NO_CHANGE_UNVERIFIED
 from kriya.workflow.workflow import _log_phase_banner
+
+# Typed codes of a milestone completion step that did not complete (MILESTONE-ZERO-COMMIT-COMPLETION-001).
+ARTIFACT_REGISTRY_FAILED = "ARTIFACT_REGISTRY_FAILED"
 
 logger = logging.getLogger(__name__)
 
@@ -574,7 +578,7 @@ def _reconstruct_completions(
                 completion_origin=candidate.origin,
             )
             if error is not None:
-                candidate.failure = {"code": COMPLETION_RECONSTRUCTION_UNVERIFIED, "detail": error}
+                candidate.failure = {"code": COMPLETION_RECONSTRUCTION_UNVERIFIED, "detail": error["detail"]}
         event = candidate.event()
         events.append(event)
         if candidate.failure is None:
@@ -607,11 +611,13 @@ def _complete_milestone(
     config: Any = None,
     reconstructed_from: Optional[Dict[str, Any]] = None,
     completion_origin: str = ORIGIN_RUN,
-) -> Optional[str]:
+) -> Optional[Dict[str, Any]]:
     """The deterministic post-success steps, shared by a normal completion
     and a reconstructed one: refresh established dependencies and file
-    context, derive artifacts, then persist the completion proof. Returns an
-    error string (nothing persisted as complete) when a step fails."""
+    context, derive artifacts, then persist the completion proof. Returns a
+    typed error ``{"code", "detail", ...}`` (nothing persisted as complete)
+    when a step fails, or when a zero-commit milestone's deterministic
+    no-change verification refused (NO_CHANGE_UNVERIFIED)."""
     try:
         from kriya.tools.validate import get_pom_dependencies
         pom_path = os.path.join(workspace_path, "pom.xml")
@@ -647,7 +653,7 @@ def _complete_milestone(
             save_artifact_registry(workspace_path, artifact_registry)
     except Exception as e:
         logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
-        return f"artifact registry: {e}"
+        return {"code": ARTIFACT_REGISTRY_FAILED, "detail": f"artifact registry: {e}"}
 
     owned = owning_run_commits(workspace_path)
     run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
@@ -656,18 +662,23 @@ def _complete_milestone(
         # S4c-1: a milestone that committed nothing is reusable only when
         # deterministic evidence covers every acceptance criterion, never
         # on a model's "no change" or a generic passing test.
-        # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (second review F2, 2026-10-09):
-        # this decider governs REUSE, not completion - a zero-commit milestone
-        # whose criteria are free text completes (nothing is written, applied
-        # or committed) with the typed refusal recorded on its proof, and is
-        # never reused on that basis (NO_COMMITTED_OUTPUT). Whether such a
-        # milestone should instead FAIL typed, as the direct and enforce paths
-        # now do, is the owner's decision: registry row
-        # MILESTONE-ZERO-COMMIT-COMPLETION-001 (P2, DEFERRED, owner decision).
         verification, refusal = no_change_verification(
             workspace_path, milestone, result, run_id=run_id, config=config,
             proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
         )
+        if refusal is not None and not files:
+            # MILESTONE-ZERO-COMMIT-COMPLETION-001 (owner decision 2026-10-09, option ii; supersedes the
+            # S4c-1 "complete, never reused" contract): a milestone that committed no effective output and whose
+            # deterministic no-change verification refused to prove the goal already satisfied is NOT complete -
+            # Developer/model output alone never establishes completion. Nothing is persisted as complete (no
+            # proof, not in completed_milestone_ids, hence never reusable); the refusal names what was missing.
+            # Milestone criteria are free text today, so an already-satisfied real-engine milestone fails here:
+            # the correct fail-closed behaviour until criteria gain deterministic verification contracts.
+            # (A result that REPORTS files but recorded no commit cycle is a different, pre-existing corner -
+            # a mocked or broken commit; it keeps S4c's shape: a proof without transaction ids, never reused.)
+            return {"code": NO_CHANGE_UNVERIFIED, "no_change_refusal": refusal, "detail": (
+                "the milestone committed no effective output and deterministic no-change verification refused to "
+                f"prove the goal already satisfied ({refusal.get('code')}: {refusal.get('detail')})")}
     run_state.completion_proofs[milestone.id] = completion_proof_for(
         milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
         completion_origin=completion_origin, no_change_refusal=refusal,
@@ -1352,12 +1363,23 @@ class _MilestonePlanDriver(PlanDriver):
             self.artifact_registry, result=result, config=self.engine_config,
         )
         if completion_error is not None:
+            if completion_error["code"] == NO_CHANGE_UNVERIFIED:
+                logger.error("Milestone '%s' NOT complete - %s", milestone.id, completion_error["detail"])
+                return {
+                    "status": "no_change_unverified",
+                    "group_id": self.run_state.group_id,
+                    "milestone_id": milestone.id,
+                    "quality_gates_passed": False,
+                    "reason_codes": [NO_CHANGE_UNVERIFIED],
+                    "error": completion_error["detail"],
+                    "no_change_refusal": completion_error.get("no_change_refusal"),
+                }
             return {
                 "status": "artifact_registry_failed",
                 "group_id": self.run_state.group_id,
                 "milestone_id": milestone.id,
                 "quality_gates_passed": False,
-                "artifact_error": completion_error,
+                "artifact_error": completion_error["detail"],
             }
         _update_milestone_control_state(
             self.workspace_path,

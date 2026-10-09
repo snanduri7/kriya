@@ -918,6 +918,8 @@ async def test_authoritative_milestones_stop_when_contract_registry_cannot_persi
 
 
 @pytest.mark.asyncio
+# MILESTONE-ZERO-COMMIT-COMPLETION-001: the mocked engine reports an effective mutation (a milestone that changes
+# nothing without a deterministic no-change proof is a typed NO_CHANGE_UNVERIFIED failure, not this test's subject).
 async def test_authoritative_milestone_crash_leaves_m1_done_and_m2_current(tmp_path):
     milestones = [
         mkv2("M1", goal="g1", success_criterion="c1"),
@@ -932,7 +934,7 @@ async def test_authoritative_milestone_crash_leaves_m1_done_and_m2_current(tmp_p
     ))
     we = strict_engine()
     we.run_generation_workflow = AsyncMock(side_effect=[
-        {"quality_gates_passed": True, "design": "d", "files": []},
+        {"quality_gates_passed": True, "design": "d", "files": ["a.py"]},
         RuntimeError("process interrupted during M2"),
     ])
     we.run_verifier.judge = AsyncMock(return_value={
@@ -1228,6 +1230,8 @@ async def test_run_milestones_failure_callback_abandon_stops_sequence():
 
 
 @pytest.mark.asyncio
+# MILESTONE-ZERO-COMMIT-COMPLETION-001: the mocked engine reports an effective mutation (a milestone that changes
+# nothing without a deterministic no-change proof is a typed NO_CHANGE_UNVERIFIED failure, not this test's subject).
 async def test_run_milestones_failure_callback_retry_then_succeeds():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
@@ -1235,7 +1239,7 @@ async def test_run_milestones_failure_callback_retry_then_succeeds():
         we = strict_engine()
         we.run_generation_workflow = AsyncMock(side_effect=[
             {"quality_gates_passed": False},
-            {"quality_gates_passed": True, "design": "d", "files": []},
+            {"quality_gates_passed": True, "design": "d", "files": ["a.py"]},
             {"quality_gates_passed": True},
         ])
         we.run_verifier = MagicMock()
@@ -1285,6 +1289,8 @@ async def test_run_milestones_dependency_regression_routes_through_failure_callb
 
 
 @pytest.mark.asyncio
+# MILESTONE-ZERO-COMMIT-COMPLETION-001: the mocked engine reports an effective mutation (a milestone that changes
+# nothing without a deterministic no-change proof is a typed NO_CHANGE_UNVERIFIED failure, not this test's subject).
 async def test_run_milestones_dependency_regression_retry_recovers():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
@@ -1296,7 +1302,7 @@ async def test_run_milestones_dependency_regression_retry_recovers():
         )
         we = strict_engine()
         we.run_generation_workflow = AsyncMock(
-            return_value={"quality_gates_passed": True, "design": "d", "files": []}
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
         we.run_verifier = MagicMock()
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
@@ -1318,6 +1324,8 @@ async def test_run_milestones_dependency_regression_retry_recovers():
 
 
 @pytest.mark.asyncio
+# MILESTONE-ZERO-COMMIT-COMPLETION-001: the mocked engine reports an effective mutation (a milestone that changes
+# nothing without a deterministic no-change proof is a typed NO_CHANGE_UNVERIFIED failure, not this test's subject).
 async def test_run_milestones_never_skips_a_completed_milestone_without_proof():
     """PRD-008 S4b: before S4b this skipped M1 on completed_milestone_ids
     alone. A completion with no durable proof is UNVERIFIED and reruns; a
@@ -1333,7 +1341,7 @@ async def test_run_milestones_never_skips_a_completed_milestone_without_proof():
         )
         we = strict_engine()
         we.run_generation_workflow = AsyncMock(
-            return_value={"quality_gates_passed": True, "design": "d", "files": []}
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
         we.run_verifier = MagicMock()
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
@@ -1421,13 +1429,15 @@ def test_replay_timeout_is_reported_as_a_failure():
 
 
 @pytest.mark.asyncio
+# MILESTONE-ZERO-COMMIT-COMPLETION-001: the mocked engine reports an effective mutation (a milestone that changes
+# nothing without a deterministic no-change proof is a typed NO_CHANGE_UNVERIFIED failure, not this test's subject).
 async def test_run_milestones_stops_before_integration_call_on_replay_failure():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
         we = strict_engine()
         we.run_generation_workflow = AsyncMock(
-            return_value={"quality_gates_passed": True, "design": "d", "files": []}
+            return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
         we.run_verifier = MagicMock()
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})

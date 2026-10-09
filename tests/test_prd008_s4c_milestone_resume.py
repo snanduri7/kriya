@@ -65,7 +65,6 @@ from kriya.workflow.milestone_completion import (
     COMPLETION_RECONSTRUCTION_UNVERIFIED,
     CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE,
     MILESTONE_CHECKPOINT_SELECTED,
-    NO_COMMITTED_OUTPUT,
     NO_COMPATIBLE_MILESTONE_CHECKPOINT,
     ORIGIN_RECOVERY,
     OUTPUT_CHANGED,
@@ -185,45 +184,33 @@ def test_no_change_reuse_is_unverified_while_the_toolchain_identity_is_unavailab
     assert engine.calls == ["M1", "M2", "INTEGRATION"]
 
 
-def test_a_real_engine_no_change_milestone_completes_without_a_commit_and_is_not_reused_without_proof(git_workspace):  # noqa: F811
+def test_a_real_engine_milestone_that_changes_nothing_without_a_deterministic_proof_fails_typed(git_workspace):  # noqa: F811
     """A real-engine milestone whose Developer returns its file byte-identical. Since
     ENFORCE-IDENTICAL-WRITE-COMPLETION-001 an identical rewrite is not a mutation: nothing is written or committed and
-    no Reviewer call is made (three scripted answers per unit: Planner, Architect, Developer); the milestone still
-    completes (the plan succeeds). Its completion proof carries no transaction and - the milestone's criteria being
-    free text, which deterministic evidence never covers (milestone_completion.acceptance_coverage) - the typed
-    no-change refusal, so on resume S4c does NOT reuse it (NO_COMMITTED_OUTPUT): the milestone runs again and
-    converges to the same no change. Before the identical-write contract the identical bytes were COMMITTED and the
-    milestone was reused on that commit alone - a model answer deciding completion, which S4c-1 forbids."""
+    no Reviewer call is made (three scripted answers: Planner, Architect, Developer). The milestone's criteria are
+    free text, which deterministic evidence never covers (milestone_completion.acceptance_coverage), so there is no
+    no-change proof - and a milestone that committed nothing without one is NOT complete
+    (MILESTONE-ZERO-COMMIT-COMPLETION-001: NO_CHANGE_UNVERIFIED, like the direct and enforce paths; Developer output
+    alone never completes a unit; no deterministic authority is invented for free text). Before the identical-write
+    contract the identical bytes were COMMITTED and the milestone completed - and was reused on resume on that commit
+    alone. A verifiable no-change milestone (deterministic coverage) is test_c's VERIFIED_NO_CHANGE positive control."""
     (git_workspace / "calc.py").write_text("def add(a, b):\n    return a + b\n")
     subprocess.run(["git", "add", "calc.py"], cwd=git_workspace, check=True)
     subprocess.run(["git", "commit", "-qm", "calc"], cwd=git_workspace, check=True)
     milestones = [_milestone("M1")]
     same = '[{"filepath": "calc.py", "content": "def add(a, b):\\n    return a + b\\n"}]'
     m1 = ["Step 1", "Design: calc.py already has add", same]
-    integration = ["Step 1: integrate", "Design: calc.py", same]
-    engine, llm = _engine(_config(), m1 + integration)
-    result, _ = _run(git_workspace, milestones, engine)
-    assert result["status"] == "success", result
-    assert llm.complete.await_count == len(m1) + len(integration)
-    proof = _proof(git_workspace, "M1")
-    assert proof["kind"] != VERIFIED_NO_CHANGE and not proof.get("transaction_ids")
-    assert proof["no_change_refusal"] is not None
-    tracked = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=git_workspace,
-                             capture_output=True, text=True).stdout
-    assert tracked == "", tracked  # nothing written, nothing committed (only Kriya's untracked .kriya/ control state)
-
-    engine, llm = _engine(_config(), m1 + integration)
-    result, _ = _run(git_workspace, milestones, engine)
-    assert result["status"] == "success", result
-    assert _decisions(result) == {"M1": ("UNVERIFIED", ["NO_COMMITTED_OUTPUT"])}, _decisions(result)
-    assert llm.complete.await_count == len(m1) + len(integration)  # M1 ran again: no deterministic no-change proof
-    # The real workflow reports its deterministic gates; this repository has
-    # no tests, so the "no tests ran" regression pass is NO_TESTS_EXECUTED,
-    # never positive evidence.
-    assert result["integration_result"]["deterministic_gate_evidence"] == [
-        {"type": "compile", "passed": True, "status": "PASSED", "attempt": 1},
-        {"type": "regression_test", "passed": None, "status": "NO_TESTS_EXECUTED", "attempt": 1},
-    ]
+    for attempt in (1, 2):  # the rerun fails the same typed way: nothing changed, nothing to reuse
+        engine, llm = _engine(_config(), m1)
+        result, state = _run(git_workspace, milestones, engine)
+        assert result["status"] == "no_change_unverified", (attempt, result)
+        assert result["reason_codes"] == ["NO_CHANGE_UNVERIFIED"] and result["milestone_id"] == "M1"
+        assert result["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
+        assert llm.complete.await_count == len(m1)  # no Reviewer call: there was no candidate to review
+        assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
+        tracked = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=git_workspace,
+                                 capture_output=True, text=True).stdout
+        assert tracked == "", tracked  # nothing written, nothing committed
 
 
 @pytest.mark.parametrize("change", ["verification_policy", "workspace_edit", "upstream_recompleted", "toolchain"])
@@ -254,20 +241,24 @@ def test_b_a_changed_dependency_invalidates_verified_no_change(git_workspace, to
 
 
 def _assert_not_issued(workspace, engine_factory, code, criteria=None):
-    """M1 committed nothing and got no VERIFIED_NO_CHANGE proof, for
-    ``code``; the next run says why and M1 reruns."""
-    _run(workspace, ACCEPTED_CHAIN, engine_factory())
-    proof = _proof(workspace, "M1")
-    assert proof["kind"] != VERIFIED_NO_CHANGE and proof["verification"] is None
-    assert proof["no_change_refusal"]["code"] == code
+    """M1 committed nothing and the deterministic no-change verification refused (``code``): the milestone is NOT
+    complete (MILESTONE-ZERO-COMMIT-COMPLETION-001, owner decision 2026-10-09) - a typed NO_CHANGE_UNVERIFIED failure
+    carrying the refusal, nothing persisted as complete (no proof, not reusable), and a rerun fails the same typed way
+    while nothing changed (M1 runs again; it is never offered as reused). Before the decision the milestone
+    completed with the refusal recorded on its proof and only reuse was refused (S4c-1, superseded)."""
+    result, state = _run(workspace, ACCEPTED_CHAIN, engine_factory())
+    assert result["status"] == "no_change_unverified" and result["milestone_id"] == "M1", result
+    assert result["reason_codes"] == ["NO_CHANGE_UNVERIFIED"] and result["quality_gates_passed"] is False
+    assert result["no_change_refusal"]["code"] == code
     if criteria is not None:
-        assert proof["no_change_refusal"]["criteria"] == criteria
+        assert result["no_change_refusal"]["criteria"] == criteria
+    assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
     engine = engine_factory()
-    result, _ = _run(workspace, ACCEPTED_CHAIN, engine)
-    assert _decisions(result)["M1"] == ("UNVERIFIED", [NO_COMMITTED_OUTPUT])
-    [decision] = [d for d in result["milestone_reuse"]["decisions"] if d["milestone_id"] == "M1"]
-    assert decision["reasons"][0]["cause"]["code"] == code
-    assert engine.calls[0] == "M1"
+    result, state = _run(workspace, ACCEPTED_CHAIN, engine)
+    assert result["status"] == "no_change_unverified" and result["no_change_refusal"]["code"] == code
+    assert "M1" not in [d["milestone_id"] for d in result.get("milestone_reuse", {}).get("decisions", [])]
+    assert engine.calls[0] == "M1"  # ran again: nothing to reuse
+    assert "M1" not in state.completed_milestone_ids
 
 
 UNRELATED_TEST = [dict(COVERS_A[0], criterion_id="Z", selector="tests/test_other.py::test_unrelated")]
@@ -310,18 +301,17 @@ def test_b_zero_executed_tests_are_never_positive_evidence(git_workspace, claime
 
 
 @pytest.mark.parametrize("gates", [[], [{"type": "compile", "passed": True, "status": "PASSED", "attempt": 1}]])
-def test_c_a_model_only_no_change_never_becomes_reusable(git_workspace, gates):  # noqa: F811
-    # quality gates "passed", the milestone's criteria are free text only
-    # (no structured acceptance): the model's no-change verdict is all
-    # there is.
-    _run(git_workspace, CHAIN, GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates}, coverage={"M1": COVERS_A}))
-    proof = load_milestone_run_state(str(git_workspace), GROUP).completion_proofs["M1"]
-    assert proof["kind"] != VERIFIED_NO_CHANGE and proof["verification"] is None
-    assert proof["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
+def test_c_a_model_only_no_change_never_completes_nor_becomes_reusable(git_workspace, gates):  # noqa: F811
+    # quality gates "passed", the milestone's criteria are free text only (no structured acceptance): the model's
+    # no-change verdict is all there is - a typed NO_CHANGE_UNVERIFIED failure, never a completion, never reusable.
+    result, state = _run(git_workspace, CHAIN, GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates}, coverage={"M1": COVERS_A}))
+    assert result["status"] == "no_change_unverified" and result["milestone_id"] == "M1"
+    assert result["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
+    assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
     engine = GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates})
     result, _ = _run(git_workspace, CHAIN, engine)
-    assert _decisions(result)["M1"] == ("UNVERIFIED", [NO_COMMITTED_OUTPUT])
-    assert engine.calls[0] == "M1"
+    assert result["status"] == "no_change_unverified"
+    assert engine.calls[0] == "M1"  # never skipped: there is nothing to reuse
 
 
 def test_d_generated_output_never_invalidates_verified_no_change(git_workspace, toolchain_bound):  # noqa: F811
@@ -575,7 +565,7 @@ def test_h_no_compatible_checkpoint_means_a_fresh_start_never_another_units(tmp_
     m1, m2 = CHAIN
     _checkpoint(workspace, "ckpt-m2", m2)
     save_checkpoint(str(workspace), "legacy-no-identity", {"stage": "plan", "milestone_group_id": GROUP})
-    engine = GatedEngine(CHAIN, {})
+    engine = GatedEngine(CHAIN, CHAIN_OUTPUTS)  # committing milestones: this test is about the checkpoint offer
     result, _ = _run(workspace, CHAIN, engine, resume=True)
     offered = dict(engine.kwargs)
     assert offered["M1"] == {"resume": False, "resume_id": None}
@@ -586,7 +576,7 @@ def test_h_no_compatible_checkpoint_means_a_fresh_start_never_another_units(tmp_
 def test_h_an_explicit_resume_id_is_offered_only_to_its_own_milestone(tmp_path):
     workspace = _workspace(tmp_path)
     _checkpoint(workspace, "ckpt-m2", CHAIN[1])
-    engine = GatedEngine(CHAIN, {})
+    engine = GatedEngine(CHAIN, CHAIN_OUTPUTS)  # committing milestones: this test is about the checkpoint offer
     result, _ = _run(workspace, CHAIN, engine, resume_id="ckpt-m2")
     offered = dict(engine.kwargs)
     assert offered["M1"] == {"resume": False, "resume_id": None}
