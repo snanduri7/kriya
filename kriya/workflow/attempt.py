@@ -276,9 +276,6 @@ from kriya.workflow.worktree import clean_untracked_files_since, repository_cont
 
 logger = logging.getLogger(__name__)
 
-# ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1): a direct goal that changed nothing and has no decider.
-NO_CHANGE_UNVERIFIED = "NO_CHANGE_UNVERIFIED"
-
 # GR-R1B: the attempt-level Goal Spec Compliance gate's model-only outcomes -
 # advisory diagnostic evidence, never an attempt failure, retry or fallback.
 SPEC_MODEL_REPORTED_MISSING = "model_reported_missing"
@@ -9220,27 +9217,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     + "You must generate ALL files listed in the Architect Design Guidelines, "
                     "not just a subset."
                 )
-            if not state.all_files_written and state.identical_rewrites and not ctx.no_change_verifier_downstream:
-                # Review F1 (second repair cycle): a direct goal whose every
-                # file came back byte-identical has no decider for "already
-                # satisfied" - the enforce contract (above) and the milestone
-                # driver (no_change_verification) judge that from
-                # deterministic evidence; here nothing would. Model content
-                # alone never completes a run: a typed stop through the
-                # ordinary repair path, never PASSED.
-                unchanged = sorted(state.identical_rewrites)
-                message = (f"{NO_CHANGE_UNVERIFIED}: the Developer returned {', '.join(unchanged)} byte-identical to "
-                           "the baseline (an identical rewrite is not a change) and nothing verifies that the goal is "
-                           "already satisfied. Make the change the goal requires.")
-                failure = Failure(
-                    type="unverified_no_change", message=message,
-                    raw_output=message, source="completeness", authority="deterministic",
-                    file_locations=[FileLocation(filepath=path) for path in unchanged], likely_files=unchanged,
-                    diagnostics={"reason_code": NO_CHANGE_UNVERIFIED, "identical_rewrites": unchanged},
-                    attempt=state.attempt_number,
-                )
-                state.record_gate_outcome(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
 
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,

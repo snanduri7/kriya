@@ -608,6 +608,32 @@ def deterministic_gate_evidence(
     return evidence
 
 
+def _stop_unverified_no_change(state: GenerationState) -> None:
+    """ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1, second repair cycle):
+    a direct goal whose every file came back byte-identical passed every
+    deterministic gate on an unchanged tree, and nothing decides "already
+    satisfied" - the enforce contract (the no-change proposal above) and the
+    milestone driver (no_change_verification) judge that from deterministic
+    evidence; here nothing would. Model content alone never completes a run:
+    a typed stop through the ordinary repair path, after the gates (a more
+    specific deterministic failure - migration, compile, test - speaks first)."""
+    from kriya.workflow.verified_no_change import NO_CHANGE_UNVERIFIED
+
+    unchanged = sorted(state.identical_rewrites)
+    message = (f"{NO_CHANGE_UNVERIFIED}: the Developer returned {', '.join(unchanged)} byte-identical to the "
+               "baseline (an identical rewrite is not a change) and nothing verifies that the goal is already "
+               "satisfied. Make the change the goal requires.")
+    failure = Failure(
+        type="unverified_no_change", message=message, raw_output=message, source="completeness",
+        authority="deterministic", file_locations=[FileLocation(filepath=path) for path in unchanged],
+        likely_files=unchanged,
+        diagnostics={"reason_code": NO_CHANGE_UNVERIFIED, "identical_rewrites": unchanged},
+        attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _settle_no_change_proposal(
     state: GenerationState, structured_plan: Any, subtask_id: Optional[str], worktree_path: str, *,
     reopened_owner: bool = False,
@@ -2742,7 +2768,7 @@ class WorkflowEngine:
                 goal=goal, error_context=state.error_context,
                 supplementary_context=supplementary_context,
                 recovery_contract_block=recovery_contract_block,
-                execution_scope=execution_scope, grounding_goal=grounding_goal, reopened_owner=reopened_owner,
+                execution_scope=execution_scope, grounding_goal=grounding_goal,
                 established_files=established_files,
                 predetermined_plan=predetermined_plan, predetermined_design=predetermined_design,
                 predetermined_architect_files=predetermined_architect_files,
@@ -6398,6 +6424,9 @@ class WorkflowEngine:
                 if state.no_change_proposal:
                     _settle_no_change_proposal(state, structured_plan, current_subtask_id, worktree_path,
                                                reopened_owner=attempt_ctx.reopened_owner)
+                elif (state.identical_rewrites and not state.all_files_written
+                      and not attempt_ctx.no_change_verifier_downstream):
+                    _stop_unverified_no_change(state)
                 state.terminal_regression_succeeded = True
                 if obligation_ledger is not None and current_subtask_id:
                     # This subtask's own full regression genuinely passed
@@ -7111,6 +7140,10 @@ class WorkflowEngine:
             "plan": plan,
             "design": design,
             "files": list(state.all_files_written),
+            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: planned files the candidate returned byte-identical to the
+            # baseline - not a mutation (never applied), but examined, verified-unchanged source a later unit may
+            # treat as established (the milestone driver's established file context).
+            "unchanged_files": sorted(state.identical_rewrites) if quality_passed else [],
             "quality_gates_passed": quality_passed,
             "candidate_gates_passed": state.candidate_gates_succeeded,
             "terminal_regression_passed": state.terminal_regression_succeeded,

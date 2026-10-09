@@ -622,7 +622,11 @@ def _complete_milestone(
     except Exception as e:
         logger.warning(f"Could not refresh established dependencies after milestone '{milestone.id}': {e}")
 
-    for path in files:
+    # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: a milestone's planned files it returned byte-identical were not
+    # written, but they are examined, verified-unchanged current source - established for the later units exactly
+    # like the files it changed (before the identical-write contract they were "written" and established that way).
+    unchanged = [path for path in ((result or {}).get("unchanged_files") or []) if path not in files]
+    for path in [*files, *unchanged]:
         try:
             with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()

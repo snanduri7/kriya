@@ -27,6 +27,9 @@ from kriya.workflow.plan_schema import EngineeringPlan
 
 VERIFIED_NO_CHANGE = mc.VERIFIED_NO_CHANGE
 VERIFIED_NO_CHANGE_REFUSED = "VERIFIED_NO_CHANGE_REFUSED"
+# ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1): a direct goal whose every
+# file came back byte-identical, with no decider for "already satisfied".
+NO_CHANGE_UNVERIFIED = "NO_CHANGE_UNVERIFIED"
 
 # A criterion's tool -> the coverage kind milestone_completion's rule knows.
 _TOOL_COVERAGE_KIND = {

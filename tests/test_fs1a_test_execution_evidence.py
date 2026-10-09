@@ -286,6 +286,13 @@ class _State:
         self.all_files_written = list(files)
         self.attempt_number = 2
         self.outcomes = []
+        # CANDIDATE-GATE-BASELINE-POLICY-001: the covering run is attributed against the PRE baseline when one was
+        # captured; this double has none, so the raw rule applies (the real GenerationState fields, explicitly unset).
+        self.validation_baseline_full_regression = None
+        self.pytest_stability_cache = {}
+
+    def record_event(self, event):
+        pass
 
     def record_gate_outcome(self, outcome):
         self.outcomes.append(outcome)

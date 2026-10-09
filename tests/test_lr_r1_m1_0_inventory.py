@@ -153,6 +153,8 @@ def test_inventory_counts_the_design_relies_on():
     # 85 at M1.3b; FS-1A added three (the test-delta verdict and its two failures); GR-R1B removed two (the
     # model-only goal_spec_compliance and spec_compliance_indeterminate failures, now advisory);
     # GRADLE-WRAPPER-CONTAINMENT-001 added one (attempt._stop_on_environment_gate_result: the typed
-    # verification_infrastructure_failure for a gate whose tool could not start).
-    assert records == 87, records
+    # verification_infrastructure_failure for a gate whose tool could not start); ENFORCE-IDENTICAL-WRITE-COMPLETION-001
+    # (second repair cycle) added two typed stops: the direct goal's NO_CHANGE_UNVERIFIED (workflow.py, after the gates)
+    # and the reopened owner's VERIFICATION_RETRY_NO_CHANGE_POSSIBLE refusal (workflow.py no-change settlement).
+    assert records == 89, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

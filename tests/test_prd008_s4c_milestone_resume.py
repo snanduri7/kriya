@@ -185,23 +185,38 @@ def test_no_change_reuse_is_unverified_while_the_toolchain_identity_is_unavailab
     assert engine.calls == ["M1", "M2", "INTEGRATION"]
 
 
-def test_a_real_engine_no_change_milestone_converges(git_workspace):  # noqa: F811
-    # In the real engine a "nothing to change" milestone commits its file
-    # with identical bytes: a COMMITTED cycle that S4b proves byte-exactly.
+def test_a_real_engine_no_change_milestone_completes_without_a_commit_and_is_not_reused_without_proof(git_workspace):  # noqa: F811
+    """A real-engine milestone whose Developer returns its file byte-identical. Since
+    ENFORCE-IDENTICAL-WRITE-COMPLETION-001 an identical rewrite is not a mutation: nothing is written or committed and
+    no Reviewer call is made (three scripted answers per unit: Planner, Architect, Developer); the milestone still
+    completes (the plan succeeds). Its completion proof carries no transaction and - the milestone's criteria being
+    free text, which deterministic evidence never covers (milestone_completion.acceptance_coverage) - the typed
+    no-change refusal, so on resume S4c does NOT reuse it (NO_COMMITTED_OUTPUT): the milestone runs again and
+    converges to the same no change. Before the identical-write contract the identical bytes were COMMITTED and the
+    milestone was reused on that commit alone - a model answer deciding completion, which S4c-1 forbids."""
     (git_workspace / "calc.py").write_text("def add(a, b):\n    return a + b\n")
     subprocess.run(["git", "add", "calc.py"], cwd=git_workspace, check=True)
     subprocess.run(["git", "commit", "-qm", "calc"], cwd=git_workspace, check=True)
     milestones = [_milestone("M1")]
     same = '[{"filepath": "calc.py", "content": "def add(a, b):\\n    return a + b\\n"}]'
-    integration = ["Step 1: integrate", "Design: calc.py", same, "Review: Approved"]
-    engine, _ = _engine(_config(), ["Step 1", "Design: calc.py already has add", same, "Review: Approved"]
-                        + integration)
+    m1 = ["Step 1", "Design: calc.py already has add", same]
+    integration = ["Step 1: integrate", "Design: calc.py", same]
+    engine, llm = _engine(_config(), m1 + integration)
     result, _ = _run(git_workspace, milestones, engine)
     assert result["status"] == "success", result
-    engine, llm = _engine(_config(), list(integration))
+    assert llm.complete.await_count == len(m1) + len(integration)
+    proof = _proof(git_workspace, "M1")
+    assert proof["kind"] != VERIFIED_NO_CHANGE and not proof.get("transaction_ids")
+    assert proof["no_change_refusal"] is not None
+    tracked = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=git_workspace,
+                             capture_output=True, text=True).stdout
+    assert tracked == "", tracked  # nothing written, nothing committed (only Kriya's untracked .kriya/ control state)
+
+    engine, llm = _engine(_config(), m1 + integration)
     result, _ = _run(git_workspace, milestones, engine)
-    assert _decisions(result) == {"M1": ("MATCH", [])}
-    assert llm.complete.await_count == len(integration)  # only the integration pass ran
+    assert result["status"] == "success", result
+    assert _decisions(result) == {"M1": ("UNVERIFIED", ["NO_COMMITTED_OUTPUT"])}, _decisions(result)
+    assert llm.complete.await_count == len(m1) + len(integration)  # M1 ran again: no deterministic no-change proof
     # The real workflow reports its deterministic gates; this repository has
     # no tests, so the "no tests ran" regression pass is NO_TESTS_EXECUTED,
     # never positive evidence.
