@@ -473,3 +473,23 @@ independent reviews reconciled. Models, qualification, budgets and the frozen ta
 (`git diff 08a57e6..557035d` touches kriya/, tests/ and handover/ only). FINAL_EXECUTABLE_SHA = 557035d. The complete
 frozen primary six and cohort-2 six are rerun from it (repair-002/run_final_12.sh, `-final` output directories; the
 earlier evidence is never touched); their classification and the final readiness verdict follow in 12.9. Not pushed.
+
+## 12.9 The final twelve from 557035d and the final readiness verdict (2026-10-09)
+
+Run 11:58-14:36 local by repair-002/run_final_12.sh (serial, one run per task, `-final` directories, false-success guard
+never fired); classification by hand under cohort-002/CLASSIFICATION_RULES.md with the exported candidates judged by the
+frozen external oracles (repair-002/final_candidate_judge.sh). Table, tally and gate: repair-002/FINAL_GATE.md.
+GENUINE 6/12 (primary T1, T4, T5, T6 = 4/6; cohort 2 S1_A, S6_A = 2/6), SAFE_FAILURE 5 (T2, T3, S3_A, S4_A, S4_B - every
+staged candidate wrong or none produced; refusals correct), FALSE_NEGATIVE 1 (S2_A), FALSE_SUCCESS 0, authority 0,
+corruption 0, leaks 0. **BACKEND READINESS: NO** (cohort 2 2/6, combined 6/12, two unresolved P1 defects).
+Live confirmation of the repair cycle: D1 attributed the pre-existing failure non-blocking at seven gate sites of S2_A;
+D1b made NO_MUTATION_REQUIRED reachable (S6_A GENUINE); D2 let S3_A's plan validate (no MISWIRED edge); D4 typed-refused
+the identical rewrites of S4_B and T2; D3's live symptom was not reached (S4_A died in planning - its closure rests on the
+deterministic reproducer and frozen-workspace remeasurement).
+New defects (recorded, not repaired - the authorized cycle is spent): ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001
+(P1 OPEN: D4 made an identical planned file a no-change proposal, and OD-3 demands deterministic coverage of the unit's
+free-text criteria for it even though the unit's other file carries a gate-verified mutation; S2_A's correct attempt-1
+candidate was refused) and SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001 (P1 OPEN: third baseline-attribution
+site, requirements.py close_requirements_by_suite_preservation). Observations REGRESSION-ATTRIBUTION-UNAVAILABLE-DETAIL-001
+and VERIFICATION-UNIT-ENV-FALLBACK-001 (P2 DEFERRED, owner decisions). The registry tripwire is RED on this records commit
+by design while P1 rows are OPEN; the certified executable 557035d is unchanged and green.
