@@ -628,10 +628,17 @@ def _settle_no_change_proposal(
     }
     binding, refusal = verify_no_change_unit(structured_plan, subtask_id, result)
     if refusal is not None:
+        identical = sorted(set(state.no_change_proposal) & state.identical_rewrites)
+        answered = [path for path in state.no_change_proposal if path not in state.identical_rewrites]
+        proposed = "; ".join(filter(None, (
+            f"the Developer proposed NO CHANGE for {', '.join(answered)}" if answered else "",
+            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: an identical rewrite is the same proposal, said as such.
+            f"the Developer returned {', '.join(identical)} byte-identical to the baseline (an identical rewrite "
+            "is not a change)" if identical else "",
+        )))
         failure = Failure(
             type="verified_no_change_refused",
-            message=(f"{VERIFIED_NO_CHANGE_REFUSED}: the Developer proposed NO CHANGE for "
-                     f"{', '.join(state.no_change_proposal)}, but {refusal['detail']} ({refusal['code']}). "
+            message=(f"{VERIFIED_NO_CHANGE_REFUSED}: {proposed}, but {refusal['detail']} ({refusal['code']}). "
                      "A planned file completes without a change only when every acceptance criterion of the "
                      "unit is verified by deterministic evidence; otherwise make the change the unit requires."),
             raw_output=str(refusal), source="verified_no_change", authority="deterministic",

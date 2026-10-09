@@ -188,7 +188,7 @@ def _answer_attempt(key: AttemptKey, records: List[Mapping[str, Any]],
     if changes:
         answers["Q4"] = _recorded([_brief(r, "decision", "path", "candidate_staged", "before_digest", "after_digest",
                                           "diff", "proposed_digest", "proposal_kind", "parse_reason_code", "parse_seq",
-                                          "reason_code",
+                                          "reason_code", "unchanged",
                                           "lines_added", "lines_removed") for r in changes])
     elif parses and parse_kinds == {"no_change"}:
         answers["Q4"] = _absent(NOT_APPLICABLE, "model_proposed_no_change")

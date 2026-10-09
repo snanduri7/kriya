@@ -388,9 +388,11 @@ def _record_candidate_change(state: GenerationState, ctx: "AttemptContext") -> N
             diff_lines = (diff or "").splitlines()
             added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
             removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
-            payload = {"decision": "STAGED", "path": relpath,
-                       "before_digest": raw_digest(before) if before is not None else None,
+            before_digest = raw_digest(before) if before is not None else None
+            payload = {"decision": "STAGED", "path": relpath, "before_digest": before_digest,
                        "after_digest": after_digest, "created": before is None, "deleted": after_digest is None,
+                       # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: the candidate equals the base - no change.
+                       "unchanged": before_digest is not None and before_digest == after_digest,
                        "lines_added": added, "lines_removed": removed, "text_diff": diff is not None}
         except Exception as error:  # observational: never alters the attempt
             logger.warning("Attempt evidence: candidate.change for %s not built (%s)", relpath, error)
@@ -6810,11 +6812,15 @@ def _verified_no_change_proposal(
     attempt's deterministic gate evidence."""
     if not missing_files or ctx.structured_plan is None or not ctx.current_subtask_id:
         return []
+    # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: a planned file the unit returned
+    # byte-identical to the baseline (state.identical_rewrites) is the same
+    # assessment of the base as a NO CHANGE answer - and is decided the same
+    # way, by deterministic evidence, never by the write.
     no_change = sorted({
         f["filepath"] for f in files
         if f.get("filepath") and not f.get("protocol_error")
         and classify_result_operation(f) is CodeOperation.NO_CHANGE_ASSESSMENT
-    })
+    } | set(state.identical_rewrites))
     if not no_change or any(path in state.all_files_written for path in no_change):
         return []
     if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in no_change):
@@ -8955,8 +8961,23 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # PRD-022: an abandoned run-created parallel file is gone from
             # the candidate, so no later gate reads it.
             state.all_files_written.discard(filepath)
+            state.identical_rewrites.discard(filepath)
             logger.info(f"Removed abandoned candidate from sandbox: {filepath}")
             continue
+        staged_bytes = staged.content_bytes if staged.content_bytes is not None else staged.content.encode("utf-8")
+        if staged_bytes == state.all_original_raw.get(filepath):
+            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (BACKEND-FINAL-CLOSURE-005
+            # cohort 2, C2-S4_B): the bytes equal the captured baseline bytes
+            # (an identical rewrite, or this attempt restoring an earlier
+            # attempt's change) - not a change. The path is not written for
+            # this unit: nothing to apply, no gate reads it as the candidate's
+            # own, and a planned one is settled by the verified no-change
+            # contract from deterministic evidence (never by the write).
+            state.all_files_written.discard(filepath)
+            state.identical_rewrites.add(filepath)
+            logger.info(f"Candidate for {filepath} is byte-identical to the baseline: not a change.")
+            continue
+        state.identical_rewrites.discard(filepath)
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
         logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
@@ -9098,15 +9119,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 attempt=state.attempt_number,
                 source="developer",
                 authority=EventAuthority.ADVISORY,
-                details={"subtask": ctx.current_subtask_id, "paths": no_change_proposal},
+                details={"subtask": ctx.current_subtask_id, "paths": no_change_proposal,
+                         "identical_rewrites": sorted(set(no_change_proposal) & state.identical_rewrites)},
             ))
         elif missing_files:
+            identical = sorted(
+                path for path in state.identical_rewrites if os.path.basename(path) in set(missing_files))
             raise IncompleteGenerationError(
                 missing_files,
                 "INCOMPLETE GENERATION: The design called for the following files, but "
                 f"they were never written: {', '.join(missing_files)}. "
-                f"You must generate ALL files listed in the Architect Design Guidelines, "
-                f"not just a subset."
+                + (f"{', '.join(identical)}: returned byte-identical to the baseline - an identical rewrite "
+                   "is not a change; make the change the design requires. " if identical else "")
+                + "You must generate ALL files listed in the Architect Design Guidelines, "
+                "not just a subset."
             )
 
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already

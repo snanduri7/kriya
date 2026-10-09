@@ -263,7 +263,7 @@ NO_CHANGE = {"filepath": CONTROLLER, "content": None, "no_change": True}
 
 
 def test_the_proposal_needs_an_enforce_unit_an_existing_file_and_no_earlier_write(tmp_path):
-    state = SimpleNamespace(all_files_written=set())
+    state = SimpleNamespace(all_files_written=set(), identical_rewrites=set())
     ctx = _ctx(tmp_path)
     from kriya.workflow.operations import all_results_are_no_change
     assert all_results_are_no_change([NO_CHANGE]), "fixture must be the real NO CHANGE result shape"
@@ -274,7 +274,7 @@ def test_the_proposal_needs_an_enforce_unit_an_existing_file_and_no_earlier_writ
     missing = {**NO_CHANGE, "filepath": "shop/new_view.py"}
     assert _verified_no_change_proposal(state, ctx, [missing], ["new_view.py"]) == []
     # The unit already wrote in an earlier attempt.
-    assert _verified_no_change_proposal(SimpleNamespace(all_files_written={CONTROLLER}), ctx, [NO_CHANGE],
+    assert _verified_no_change_proposal(SimpleNamespace(all_files_written={CONTROLLER}, identical_rewrites=set()), ctx, [NO_CHANGE],
                                         ["controller.py"]) == []
     # Another expected file is still missing: incomplete, not a no-change.
     assert _verified_no_change_proposal(state, ctx, [NO_CHANGE], ["controller.py", "service.py"]) == []

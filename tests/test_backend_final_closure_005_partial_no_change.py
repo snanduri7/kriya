@@ -455,12 +455,12 @@ def test_n6_the_partial_proposal_covers_only_planned_files_the_unit_never_wrote(
     ctx = SimpleNamespace(structured_plan=_plan(TOOL_CRITERION), current_subtask_id="s1", worktree_path=str(tmp_path))
     written_a = {"filepath": A, "content": A_FIXED}
     no_change_b = {"filepath": B, "content": None, "no_change": True}
-    fresh = SimpleNamespace(all_files_written={A})  # A was staged this attempt
+    fresh = SimpleNamespace(all_files_written={A}, identical_rewrites=set())  # A was staged this attempt
     assert _verified_no_change_proposal(fresh, ctx, [written_a, no_change_b], ["controller.py"]) == [B]
     # the whole-unit shape is unchanged
-    assert _verified_no_change_proposal(SimpleNamespace(all_files_written=set()), ctx, [no_change_b], ["controller.py"]) == [B]
+    assert _verified_no_change_proposal(SimpleNamespace(all_files_written=set(), identical_rewrites=set()), ctx, [no_change_b], ["controller.py"]) == [B]
     # a file the unit wrote earlier and now calls unchanged is not an assessment of the base
-    assert _verified_no_change_proposal(SimpleNamespace(all_files_written={A, B}), ctx, [no_change_b], ["controller.py"]) == []
+    assert _verified_no_change_proposal(SimpleNamespace(all_files_written={A, B}, identical_rewrites=set()), ctx, [no_change_b], ["controller.py"]) == []
     # a protocol error is a rejected response, never a no-change
     assert _verified_no_change_proposal(fresh, ctx, [{**no_change_b, "protocol_error": "x"}], ["controller.py"]) == []
     # a missing file no answer explains stays missing: incomplete, not a proposal
