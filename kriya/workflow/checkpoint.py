@@ -103,7 +103,7 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     inventing a second ignore policy - target/build/dist/node_modules/
     venvs/caches already excluded by any real project's own `.gitignore`,
     exactly the existing exclusion this function reuses, never
-    re-implements), and `git rm -r --cached -- .kriya` then drops the ROOT
+    re-implements), and `git rm -r -f --cached -- .kriya` then drops the ROOT
     Kriya runtime directory from that scratch index. Contract
     (WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR, 2026-10-09): the root
     `.kriya/` is ALWAYS excluded from the identity - absent, present and
@@ -111,7 +111,10 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     below keeps tracked `.kriya` content at HEAD bound) - so Kriya's own
     runtime writes (checkpoints, test reports, worktrees) never change the
     identity and never make it unavailable (the module docstring's
-    "checkpoint write must not self-invalidate" requirement). It used to be
+    "checkpoint write must not self-invalidate" requirement) - including the
+    candidate worktree under `.kriya/worktrees`, an embedded repository with
+    the Developer's edits, whose index entry only a forced cached removal
+    drops. It used to be
     excluded through the pathspec `':!.kriya'`, which git rejects (exit 1:
     "paths are ignored by one of your .gitignore files") the moment
     `.kriya` exists on disk in a repository that ignores it - measured on
@@ -170,9 +173,13 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
         if add.returncode != 0:
             return None
         # The root Kriya runtime directory is never part of the identity (see the docstring's contract);
-        # --ignore-unmatch: nothing to drop when .kriya is absent or ignored (git never staged it).
+        # --ignore-unmatch: nothing to drop when .kriya is absent or ignored (git never staged it); -f: the
+        # candidate worktree under .kriya/worktrees is an embedded repository the Developer edits, and git refuses to
+        # drop a MODIFIED embedded repository's index entry without force ("staged content different from both the
+        # file and the HEAD") - measured 2026-10-09 (REG-R1/R2/PRD-024 reproducers: None after the first candidate
+        # edit). --cached keeps the working tree untouched; only the scratch index entry goes.
         drop_runtime_dir = subprocess.run(
-            ["git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".kriya"],
+            ["git", "rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ".kriya"],
             cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if drop_runtime_dir.returncode != 0:

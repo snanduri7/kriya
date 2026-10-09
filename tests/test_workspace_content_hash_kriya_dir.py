@@ -101,6 +101,30 @@ def test_every_shape_of_the_root_kriya_dir_is_excluded_from_the_identity(tmp_pat
     assert _status(root) == status_before, shape  # the repository content as git sees it did not move
 
 
+@pytest.mark.parametrize("ignored", [True, False])
+def test_a_dirty_candidate_worktree_under_kriya_never_makes_the_identity_unavailable(tmp_path, ignored):
+    """The measured full-suite shape (REG-R1/REG-R2/PRD-024 reproducers, 2026-10-09): Kriya's candidate worktree
+    lives under .kriya/worktrees and the Developer edits files inside it. An embedded repository with modifications
+    is what `git rm --cached` refuses to drop without force ("staged content different from both the file and the
+    HEAD"), so the identity became None after the first candidate edit - the stability guard then read
+    BASELINE_REVISION_CHANGED and reuse could not match. The identity must stay available and unchanged through the
+    worktree's creation and its edits, whether or not the repository ignores .kriya/."""
+    root = _workspace(tmp_path, gitignore=KRIYA_IGNORED if ignored else KRIYA_NOT_IGNORED)
+    before = compute_workspace_content_hash(str(root))
+    assert before is not None
+    _git(root, "worktree", "add", "-q", ".kriya/worktrees/candidate", "-b", "candidate")
+    assert compute_workspace_content_hash(str(root)) == before  # a clean worktree
+    (root / ".kriya" / "worktrees" / "candidate" / "a.txt").write_text("alpha edited by the Developer\n")
+    (root / ".kriya" / "worktrees" / "candidate" / "new.py").write_text("x = 1\n")
+    after = compute_workspace_content_hash(str(root))
+    assert after is not None, "the identity became unavailable once the candidate worktree had edits"
+    assert after == before
+    # the real repository's own content is what the identity follows
+    (root / "a.txt").write_text("alpha changed in the real workspace\n")
+    changed = compute_workspace_content_hash(str(root))
+    assert changed is not None and changed != before
+
+
 def test_a_nested_directory_named_kriya_is_repository_content_as_before(tmp_path):
     """Only the ROOT .kriya is Kriya's runtime directory; sub/.kriya is a path like any other (top-anchored exclusion)."""
     root = _workspace(tmp_path, gitignore=KRIYA_NOT_IGNORED)

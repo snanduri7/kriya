@@ -654,6 +654,16 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   3 failed / 5 passed, checkpoint.py restored byte-identical; adjacent checkpoint / workspace-identity / resume /
   subtask-checkpoint / validation-baseline / analyzer-cache / proposal-promotion / REG-R1 / workflow modules: 1134
   passed. Registry row CLOSED. Then back to P1-2 case 3 (13.2).
+- Own defect found by the canonical full suite (2026-10-09, 4 failed / 9846 passed: REG-R1 and REG-R2 workflow
+  reproducers, two PRD-024 reuse tests): `git rm -r --cached -- .kriya` refuses to drop a MODIFIED embedded
+  repository's index entry ("staged content different from both the file and the HEAD", measured on git 2.54.0),
+  and the candidate worktree under .kriya/worktrees is exactly that once the Developer edits a file in it - so in a
+  repository that does NOT ignore .kriya/ the identity returned None after the first candidate edit (stability
+  guard BASELINE_REVISION_CHANGED, reuse never matching). A clean worktree, runtime files or an ignored .kriya were
+  fine, which is why the 9bc06d2 reproducer and 1134 adjacent tests missed it. Fix: `-f` on the cached removal
+  (index entry only, working tree untouched); reproducer extended with a real dirty worktree in both ignore shapes
+  (pre-fix: the not-ignored case fails, the ignored case never did), 10/10 post-fix; mutants H1 (old pathspec)
+  and H2 (force dropped) in repair-003/mutations; REG-R1 / REG-R2 / PRD-024 / checkpoint consumers 122 passed.
 
 ### 13.4 P2-1 REGRESSION-ATTRIBUTION-UNAVAILABLE-DETAIL-001 - investigation, disposition BY_DESIGN (records only)
 
