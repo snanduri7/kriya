@@ -83,6 +83,7 @@ def reset_state_for_independent_candidate(state) -> None:
     state.last_missing_files = None
     state.last_error_source_context = {}
     state.all_files_written = set()
+    state.identical_rewrites = set()  # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: reset with the candidate it describes
     state.all_original_contents = {}
     state.all_original_raw = {}
     state.candidate_digests = {}

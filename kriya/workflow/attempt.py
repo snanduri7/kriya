@@ -9122,18 +9122,29 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 details={"subtask": ctx.current_subtask_id, "paths": no_change_proposal,
                          "identical_rewrites": sorted(set(no_change_proposal) & state.identical_rewrites)},
             ))
-        elif missing_files:
-            identical = sorted(
+        else:
+            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: outside the enforce
+            # no-change contract (no structured plan, or another expected
+            # file is genuinely missing) an identical rewrite is DELIVERED,
+            # unchanged - never "never written". It is still not a mutation
+            # (not in all_files_written, nothing to apply): a milestone or
+            # direct run that changes nothing completes through its own
+            # no-change verification (kriya/workflow/milestone_completion.py),
+            # never through the write.
+            delivered_unchanged = sorted(
                 path for path in state.identical_rewrites if os.path.basename(path) in set(missing_files))
-            raise IncompleteGenerationError(
-                missing_files,
-                "INCOMPLETE GENERATION: The design called for the following files, but "
-                f"they were never written: {', '.join(missing_files)}. "
-                + (f"{', '.join(identical)}: returned byte-identical to the baseline - an identical rewrite "
-                   "is not a change; make the change the design requires. " if identical else "")
-                + "You must generate ALL files listed in the Architect Design Guidelines, "
-                "not just a subset."
-            )
+            missing_files = find_missing_expected_files(
+                expected_files, state.all_files_written | state.identical_rewrites, goal=ctx.goal)
+            if missing_files:
+                raise IncompleteGenerationError(
+                    missing_files,
+                    "INCOMPLETE GENERATION: The design called for the following files, but "
+                    f"they were never written: {', '.join(missing_files)}. "
+                    + (f"({', '.join(delivered_unchanged)}: returned byte-identical to the baseline - delivered, "
+                       "not a change.) " if delivered_unchanged else "")
+                    + "You must generate ALL files listed in the Architect Design Guidelines, "
+                    "not just a subset."
+                )
 
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,

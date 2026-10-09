@@ -6235,10 +6235,14 @@ public class AppTest {
     # Record the exact production return values that were empty in share(10).
     requirements = _runtime_contract_requirements(ctx)
     assert _required_process_terminating_cases(requirements) == ["invalid"]
-    (tmp_path / test_path).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / test_path).write_text(app_test, encoding="utf-8")
+    # The direct scan reads the candidate from a scratch copy: the workspace itself stays pristine, so the
+    # Developer's write below is a real new file (an identical rewrite of a pre-existing file is not a change -
+    # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 - and would not be the candidate's own test).
+    scratch = tmp_path / "_direct_scan"
+    (scratch / test_path).parent.mkdir(parents=True, exist_ok=True)
+    (scratch / test_path).write_text(app_test, encoding="utf-8")
     findings = find_in_process_terminating_test_invocations(
-        requirements, str(tmp_path), [test_path], ["com.example.App"],
+        requirements, str(scratch), [test_path], ["com.example.App"],
     )
     assert [(item["test_method"], item["terminating_case"]) for item in findings] == [
         ("testInvalidInput", "invalid input"),
@@ -18007,12 +18011,14 @@ async def test_future_owner_verification_end_to_end_through_real_run_generation_
             ),
         }]),
         "Review: Approved",
-        # s2
+        # s2 - a real (behaviour-neutral) change: an identical rewrite is not a mutation
+        # (ENFORCE-IDENTICAL-WRITE-COMPLETION-001) and a unit without acceptance criteria cannot verify a no-change.
         json.dumps([{
             "filepath": "src/main/java/com/example/customer/CustomerService.java",
             "content": (
                 "package com.example.customer;\n"
                 "public class CustomerService {\n"
+                "    // displayName is computed by Customer from first and last name\n"
                 "    public Customer find(long id) { return new Customer(id, \"John\", \"Smith\"); }\n"
                 "}\n"
             ),

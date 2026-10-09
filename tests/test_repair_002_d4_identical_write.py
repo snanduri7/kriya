@@ -75,6 +75,7 @@ def _run_unit(tmp_path, answers, *, criterion=TOOL_CRITERION, test_results=None)
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-qm", "base")
     developer = []
+    prompts = []
     suite = list(test_results or [TESTS_PASS])
 
     async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
@@ -85,6 +86,7 @@ def _run_unit(tmp_path, answers, *, criterion=TOOL_CRITERION, test_results=None)
         elif "Developer Agent" in first:
             assert wants_structured(system_prompt)
             developer.append(system_prompt)
+            prompts.append((system_prompt or "") + "\n" + (user_prompt or ""))
             content = "".join(answers(len(developer), path) for path in dict.fromkeys(_PATH_IN_PROMPT.findall(system_prompt)))
         else:
             content = "Review: Approved"
@@ -102,9 +104,17 @@ def _run_unit(tmp_path, answers, *, criterion=TOOL_CRITERION, test_results=None)
         events.append(event)
         return real_record(state, event)
 
+    gate_outcomes = []
+    real_gate = GenerationState.record_gate_outcome
+
+    def gate(state, outcome):
+        gate_outcomes.append(outcome)
+        return real_gate(state, outcome)
+
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
+         patch.object(GenerationState, "record_gate_outcome", new=gate), \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests):
         result = asyncio.run(engine.run_generation_workflow(
@@ -113,6 +123,8 @@ def _run_unit(tmp_path, answers, *, criterion=TOOL_CRITERION, test_results=None)
             structured_plan=_plan(criterion), current_subtask_id="s1",
             required_verification=[{"type": "tool", "tool_name": "test", "description": "run the tests"}],
             approval_callback=AsyncMock(return_value=True)))
+    result["_test_gate_outcomes"] = gate_outcomes
+    result["_test_prompts"] = prompts
     return workspace, developer, events, result
 
 
@@ -220,3 +232,124 @@ def test_t5_a_retry_that_restores_a_file_to_its_baseline_bytes_withdraws_it_from
     assert _bytes(workspace) == {A: A_FIXED.encode(), B: B_SRC.encode()}
     [verified] = [e for e in events if e.kind == "unit.verified_no_change"]
     assert verified.details["paths"] == [B] and verified.details["written_paths"] == [A]
+
+
+def test_t6_outside_the_enforce_contract_an_identical_rewrite_is_delivered_unchanged_never_never_written(tmp_path):
+    """The milestone / direct path (no structured plan): an integration-style unit that returns both expected files
+    byte-identical is complete (nothing was left unwritten) but mutates nothing - result files are empty and the
+    completion is decided downstream by the milestone no-change verification, never by the write. Found by the
+    PRD-024 milestone-reuse test after the first D4 change called this shape INCOMPLETE GENERATION."""
+    model_runtime.clear_model_runtime_cache()
+    cfg = AppConfig()
+    cfg.llm.model = "dev-model"
+    cfg.llm.context_window = 32768
+    cfg.llm.extra_body = {}
+    cfg.llm_chain = []
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    workspace = tmp_path / "ws"
+    (workspace / "shop").mkdir(parents=True)
+    (workspace / "shop/__init__.py").write_text("")
+    (workspace / A).write_text(A_SRC)
+    (workspace / B).write_text(B_SRC)
+    _git(workspace, "init", "-q")
+    _git(workspace, "add", "-A")
+    _git(workspace, "commit", "-qm", "base")
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    engine.developer.run_generation = AsyncMock(return_value=[{"filepath": A, "content": A_SRC}, {"filepath": B, "content": B_SRC}])
+
+    async def complete(system_prompt, user_prompt, *args, **kwargs):
+        del user_prompt, args, kwargs
+        system = system_prompt or ""
+        if "Kriya Planner Agent" in system:
+            return "Step 1: review the shop files"
+        if "Kriya Architect Agent" in system:
+            return "Design: shop/service.py and shop/controller.py stay consistent"
+        if "File List Planner" in system:
+            return json.dumps({"files": [A, B]})
+        return "Review: Approved"
+
+    engine.llm.complete = complete
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: TESTS_PASS):
+        result = asyncio.run(engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace),
+                                                            approval_callback=AsyncMock(return_value=True)))
+
+    assert result.get("failure_category") != "quality_gates_exhausted", result.get("failure_category")
+    assert result["files"] == [], result["files"]
+    assert _bytes(workspace) == {A: A_SRC.encode(), B: B_SRC.encode()}
+    assert not any("incomplete_generation" == (o.get("failure_type") or o.get("type")) for o in result.get("deterministic_gate_evidence") or [])
+
+
+def _legacy_engine(tmp_path, developer_files):
+    """The direct (legacy) path: no structured plan; the Developer's result list may omit an expected file."""
+    model_runtime.clear_model_runtime_cache()
+    cfg = AppConfig()
+    cfg.llm.model = "dev-model"
+    cfg.llm.context_window = 32768
+    cfg.llm.extra_body = {}
+    cfg.llm_chain = []
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    workspace = tmp_path / "ws"
+    (workspace / "shop").mkdir(parents=True)
+    (workspace / "shop/__init__.py").write_text("")
+    (workspace / A).write_text(A_SRC)
+    (workspace / B).write_text(B_SRC)
+    _git(workspace, "init", "-q")
+    _git(workspace, "add", "-A")
+    _git(workspace, "commit", "-qm", "base")
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    engine.developer.run_generation = AsyncMock(return_value=developer_files)
+
+    async def complete(system_prompt, user_prompt, *args, **kwargs):
+        del user_prompt, args, kwargs
+        system = system_prompt or ""
+        if "Kriya Planner Agent" in system:
+            return "Step 1: review the shop files"
+        if "Kriya Architect Agent" in system:
+            return "Design: shop/service.py and shop/controller.py stay consistent"
+        if "File List Planner" in system:
+            return json.dumps({"files": [A, B]})
+        return "Review: Approved"
+
+    engine.llm.complete = complete
+    return engine, workspace
+
+
+def test_t7_an_identical_rewrite_beside_a_genuinely_missing_file_names_only_the_missing_file(tmp_path):
+    """Direct path: the Developer returns A byte-identical and omits B on every attempt. The completeness failure
+    names B as never written and A as delivered unchanged - never A as 'never written'. (In the structured
+    protocol a planned file cannot be silently omitted - that is a protocol error - so the shape is the legacy one.)"""
+    engine, workspace = _legacy_engine(tmp_path, [{"filepath": A, "content": A_SRC}])
+    gate_outcomes = []
+    real_gate = GenerationState.record_gate_outcome
+
+    def gate(state, outcome):
+        gate_outcomes.append(outcome)
+        return real_gate(state, outcome)
+
+    with patch.object(GenerationState, "record_gate_outcome", new=gate), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: TESTS_PASS):
+        result = asyncio.run(engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace),
+                                                            approval_callback=AsyncMock(return_value=True)))
+
+    assert result["quality_gates_passed"] is False
+    incomplete = [o for o in gate_outcomes if (o.get("failure_type") or o.get("type")) == "incomplete_generation"]
+    assert incomplete, [(o.get("type"), o.get("failure_type")) for o in gate_outcomes][:10]
+    message = str(incomplete[0].get("output", ""))
+    missing_clause = message.split("never written:")[1].split(". ")[0]
+    assert "controller.py" in missing_clause and "service.py" not in missing_clause, message
+    assert "shop/service.py: returned byte-identical to the baseline - delivered, not a change" in message, message
+    assert _bytes(workspace) == {A: A_SRC.encode(), B: B_SRC.encode()}
