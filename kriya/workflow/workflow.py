@@ -5086,8 +5086,9 @@ class WorkflowEngine:
             # Review F1 / MILESTONE-ZERO-COMMIT-COMPLETION-001: a milestone's zero-change result is decided by the
             # milestone driver (kriya/workflow/milestones.py _complete_milestone: a deterministic no-change proof
             # completes it, a refusal fails it typed); the integration pass is decided by the plan-level original-
-            # requirement verification and its gates (PRD-020 - blocking only under the "block" requirement
-            # policies the production profile seals; INTEGRATION-PASS-REQUIREMENT-POLICY-001). A direct goal has no
+            # requirement verification and its gates (PRD-020 - a VIOLATED requirement always blocks; an unverified
+            # one blocks under the "block" requirement policies the production profile seals or, whatever the policy,
+            # when the verifier reported it missing - GR-R0; INTEGRATION-PASS-REQUIREMENT-POLICY-001). A direct goal has no
             # such decider: the typed stop below is its own.
             no_change_verifier_downstream=milestone_group_id is not None,
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own

@@ -1593,21 +1593,27 @@ async def test_run_milestones_fails_typed_when_a_unit_reports_files_it_never_com
     """MILESTONE-ZERO-COMMIT-COMPLETION-001 (fourth review F1 - the exact shape the dropped `files` guard admitted): a
     unit whose result REPORTS files while the run recorded no committed cycle is neither a committed verified
     mutation nor a proven no-change - typed REPORTED_OUTPUT_UNCOMMITTED, nothing completed, nothing established, and
-    a rerun fails the same way."""
+    a rerun on the SAME workspace (state reloaded through the resume path) fails the same way. The reported file
+    exists uncommitted in the workspace, so "nothing established" discriminates the decision's position (fifth
+    review F2/F3)."""
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
-    for _ in range(2):
-        with tempfile.TemporaryDirectory() as tmp:
-            state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-            we = strict_engine()
-            we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]})
-            we.run_verifier = MagicMock()
-            we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+    plan_data = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones).to_dict()
+    we = strict_engine()
+    we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]})
+    we.run_verifier = MagicMock()
+    we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "a.py"), "w", encoding="utf-8") as fh:
+            fh.write("A = 1\n")
+        for run_number in (1, 2):
+            state = load_or_resume_milestone_run_state(tmp, plan_data)
+            assert state.completed_milestone_ids == []  # the rerun resumes nothing: the first run completed nothing
 
             result = await run_milestones(we, state, tmp)
 
-        assert result["status"] == "reported_output_uncommitted" and result["milestone_id"] == "M1", result
-        assert result["reason_codes"] == ["REPORTED_OUTPUT_UNCOMMITTED"] and result["quality_gates_passed"] is False
-        assert result["no_change_refusal"]["code"]
-        assert state.completed_milestone_ids == [] and state.completion_proofs == {}
-        assert state.established_file_context == {}
-        assert we.run_generation_workflow.await_count == 1  # the plan stopped typed at M1
+            assert result["status"] == "reported_output_uncommitted" and result["milestone_id"] == "M1", result
+            assert result["reason_codes"] == ["REPORTED_OUTPUT_UNCOMMITTED"] and result["quality_gates_passed"] is False
+            assert result["no_change_refusal"]["code"]
+            assert state.completed_milestone_ids == [] and state.completion_proofs == {}
+            assert state.established_file_context == {}
+            assert we.run_generation_workflow.await_count == run_number  # each run stopped typed at M1

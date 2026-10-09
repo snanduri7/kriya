@@ -148,14 +148,15 @@ Both crash windows are closed and tested:
 > contract; the proof requirements, bindings and reuse rules for a DETERMINISTICALLY verified no-change remain in
 > force unchanged.
 > Two boundaries of the invariant, recorded with it: a result that REPORTS files but recorded no committed cycle is
-> `REPORTED_OUTPUT_UNCOMMITTED` (typed failure; the RunRecord is the only authority for committed output); the
+> `REPORTED_OUTPUT_UNCOMMITTED` (typed failure, renamed from the colliding COMMIT_EVIDENCE_MISSING, which stays the
+> reuse reason; the RunRecord is the only authority for committed output); the
 > INTEGRATION PASS is not a mutation unit - its completion authority is the plan-level original-requirement
 > verification (PRD-020) plus its deterministic gates, so a zero-change integration pass completes when the plan's
 > requirements verify (the normal shape when the milestones did the work).
-> That authority blocks an unverified/unknown original requirement only under the `block` requirement policies the
-> production runtime profile seals; under the default `record` policies a plan can succeed with unverified requirements
-> (owner decision INTEGRATION-PASS-REQUIREMENT-POLICY-001). A result that reports files without a committed cycle is
-> `REPORTED_OUTPUT_UNCOMMITTED` (renamed from the colliding COMMIT_EVIDENCE_MISSING, which stays the reuse reason).
+> That authority always blocks a VIOLATED original requirement; it blocks an unverified/unknown one under the `block`
+> requirement policies the production runtime profile seals or, whatever the policy, when the verifier reported it
+> missing (GR-R0); under the default `record` policies a plan can otherwise succeed with unverified requirements
+> (owner decision INTEGRATION-PASS-REQUIREMENT-POLICY-001).
 
 **What I found first.** In the real engine, a "nothing to change" milestone rewrites its target file with identical bytes. That produces a COMMITTED cycle, so S4b already proves it byte-exactly and it converges. The test `test_a_real_engine_no_change_milestone_converges` covers this.
 - The zero-cycle path only exists when the candidate is empty. My probes could not get a real engine run to succeed that way: a "No change needed" developer answer goes through repair retries and fails.

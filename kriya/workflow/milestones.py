@@ -1353,10 +1353,11 @@ class _MilestonePlanDriver(PlanDriver):
         if milestone is None:
             # The integration pass is not a mutation unit: it verifies the plan, and its completion authority is
             # the plan-level ORIGINAL-REQUIREMENT verification (PRD-020) plus its own deterministic gates. CAVEAT
-            # (fourth review): PRD-020 blocks an unverified/unknown original requirement only under
-            # autonomy.requirement_unverified_policy / requirement_unknown_policy = "block" - sealed by the
-            # production runtime profile (the frozen readiness tasks run under it); under the default "record"
-            # policies a milestone plan can end success with every original requirement UNVERIFIED. Whether
+            # (fourth review): PRD-020 always blocks a VIOLATED original requirement; it blocks an unverified/
+            # unknown one under autonomy.requirement_unverified_policy / requirement_unknown_policy = "block"
+            # (sealed by the production runtime profile, which the frozen readiness tasks run under) or, whatever
+            # the policy, when the verifier reported it missing (GR-R0); under the default "record" policies a
+            # milestone plan can otherwise end success with every original requirement UNVERIFIED. Whether
             # non-production profiles accept that is the owner's decision (INTEGRATION-PASS-REQUIREMENT-POLICY-001).
             # A zero-change integration pass is the normal shape when the milestones did the work, so the
             # zero-commit milestone rule above does not apply to it (MILESTONE-ZERO-COMMIT-COMPLETION-001, disposition b).

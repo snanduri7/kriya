@@ -523,7 +523,10 @@ def test_the_completion_step_never_persists_a_zero_commit_milestone_whose_no_cha
     assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
 
     # fourth review F1: files REPORTED without a committed cycle - its own typed code, the refusal carried, and no
-    # side effect of the completion step (established context/dependencies untouched, no artifact registry record)
+    # side effect of the completion step (established context/dependencies untouched, no artifact registry record).
+    # Fifth review F2: the reported file EXISTS, uncommitted, so the established-context assertion below fails if the
+    # decision ever moves behind the context loop (which would establish a.py from the workspace).
+    (workspace / "a.py").write_text("A = 1\n", encoding="utf-8")
     reported = dict(result, files=["a.py"])
     error = m._complete_milestone(str(workspace), state, CHAIN[0], [], ["a.py"], registry, result=reported)
     assert error["code"] == m.REPORTED_OUTPUT_UNCOMMITTED and error["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE

@@ -433,7 +433,7 @@ Third scoped independent review of the option-(ii) commit 42b59a9 (verbatim repa
 APPROVE WITH CHANGES, reconciled (repair-002/REVIEW_RECONCILIATION.md, third table). F1 FIXED: the decision runs
 before any side effect and without a `files` guard - zero committed cycles plus a refused verification fail typed
 whatever the result reported; a result that reports files without a committed cycle is its own typed code
-COMMIT_EVIDENCE_MISSING (the RunRecord is the only authority for committed output); ten mocked driver call sites now commit
+COMMIT_EVIDENCE_MISSING (since renamed REPORTED_OUTPUT_UNCOMMITTED; the RunRecord is the only authority for committed output); ten mocked driver call sites now commit
 a real cycle through the terminal-commit seam (two capability-bookkeeping tests are re-pinned to the typed stop). F2 DISPOSITION (b): the integration pass is not a mutation unit - its
 completion authority is the plan-level original-requirement verification (PRD-020) plus its gates; a zero-change
 integration pass is the normal shape when the milestones did the work (documented at the decider and the
@@ -455,3 +455,11 @@ INTEGRATION-PASS-REQUIREMENT-POLICY-001, P2, DEFERRED, owner decision). F4 FIXED
 capabilities (PRD-029 bookkeeping test extended to two committing milestones). F5/F6/F7 FIXED (helper cleanup; "ten
 call sites"; the handover records committed with the slice). The full suite on eecb6f3: 9822 passed / 0 failed; the
 certifying run is the one on the reconciled commit.
+Fifth scoped independent review (commit 4f593fe; verbatim repair-002/INDEPENDENT_REVIEW_5.md): APPROVE WITH CHANGES,
+all MINOR/NOTE, reconciled in the next commit (fifth table in repair-002/REVIEW_RECONCILIATION.md): the two "no side
+effect" controls now hold an uncommitted copy of the reported file, so they discriminate the decision's position (mutation
+D5-M3: the decision moved behind the established-context loop establishes it; both tests fail there); the driver test
+reruns on one workspace through the resume path; the PRD-020 caveat states the full rule (VIOLATED always blocks; an
+unverified requirement blocks under the "block" policies or, whatever the policy, when the verifier reported it missing -
+GR-R0, TRACED); registry/record wording. The full suite on 4f593fe: 9823 passed / 0 failed; the certifying run is the
+one on this reconciled commit, re-run with the mutation controls re-recorded on it.
