@@ -282,3 +282,18 @@ def test_a_developer_invented_path_resolving_to_an_out_of_scope_owner_is_refused
     assert result["quality_gates_passed"] is False  # the invented path is outside the scope: the write authority refused it
     assert (workspace / other).read_text() == "def compile_path(text):\n    return text\n"  # never redirected into the other module
     assert (workspace / planned).read_text() == "def compile_path(text):\n    return text.strip()\n"
+
+
+def test_the_scope_helper_reads_the_scope_exactly_as_the_write_authority_does():
+    """Second review F4: one reading for both resolver sites. An explicit UNRESTRICTED mode is unrestricted even
+    beside a non-empty list (AuthorizedFileWriter ignores the allowlist in that mode); no mode with no list is the
+    legacy unrestricted inference; otherwise the allowlist, empty for DENY_ALL."""
+    from kriya.policy.filesystem import WriteScopeMode
+    from kriya.workflow.file_resolution import artifact_resolution_scope
+
+    assert artifact_resolution_scope(None, None) is None
+    assert artifact_resolution_scope(None, []) is None
+    assert artifact_resolution_scope(None, ["a.py"]) == ["a.py"]
+    assert artifact_resolution_scope(WriteScopeMode.UNRESTRICTED, ["a.py"]) is None
+    assert artifact_resolution_scope(WriteScopeMode.ALLOWLIST, ["a.py"]) == ["a.py"]
+    assert artifact_resolution_scope(WriteScopeMode.DENY_ALL, []) == []

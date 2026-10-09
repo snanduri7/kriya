@@ -202,9 +202,13 @@ class ArtifactOwnerResolution:
 
 def artifact_resolution_scope(write_scope_mode: Any, allowed_write_relpaths: Optional[Iterable[str]]) -> Optional[List[str]]:
     """The one reading of (write scope mode, allowed paths) as the resolver's
-    ``authorized_paths`` (review F4): None - unrestricted - only for an explicit
-    UNRESTRICTED mode or no mode with no allowlist (the legacy inference);
-    otherwise the allowlist (empty for DENY_ALL: nothing may be redirected to)."""
+    ``authorized_paths`` (review F4): None - unrestricted - for an explicit
+    UNRESTRICTED mode (even beside a non-empty list: the write authority,
+    AuthorizedFileWriter, ignores the allowlist in that mode, and the resolver
+    reads the scope exactly as the authority does) or no mode with no
+    allowlist (the legacy inference); otherwise the allowlist (empty for
+    DENY_ALL: nothing may be redirected to). No production caller passes an
+    explicit UNRESTRICTED mode with an allowlist today."""
     mode = getattr(write_scope_mode, "value", write_scope_mode)
     paths = list(allowed_write_relpaths or [])
     if mode == "unrestricted" or (mode is None and not paths):

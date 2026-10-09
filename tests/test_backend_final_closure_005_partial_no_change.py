@@ -452,7 +452,7 @@ def test_n6_the_partial_proposal_covers_only_planned_files_the_unit_never_wrote(
     (tmp_path / "shop").mkdir()
     (tmp_path / A).write_text(A_SRC)
     (tmp_path / B).write_text(B_SRC)
-    ctx = SimpleNamespace(structured_plan=_plan(TOOL_CRITERION), current_subtask_id="s1", worktree_path=str(tmp_path))
+    ctx = SimpleNamespace(structured_plan=_plan(TOOL_CRITERION), current_subtask_id="s1", worktree_path=str(tmp_path), reopened_owner=False)
     written_a = {"filepath": A, "content": A_FIXED}
     no_change_b = {"filepath": B, "content": None, "no_change": True}
     fresh = SimpleNamespace(all_files_written={A}, identical_rewrites=set())  # A was staged this attempt

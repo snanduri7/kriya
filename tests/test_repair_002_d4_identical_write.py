@@ -277,7 +277,7 @@ def test_t6b_a_restored_unplanned_path_is_never_a_no_change_proposal():
         for rel in (A, B, "lib/helper.py"):
             os.makedirs(os.path.join(root, os.path.dirname(rel)), exist_ok=True)
             open(os.path.join(root, rel), "w").write("x\n")
-        ctx = SimpleNamespace(structured_plan=plan, current_subtask_id="s1", worktree_path=root)
+        ctx = SimpleNamespace(structured_plan=plan, current_subtask_id="s1", worktree_path=root, reopened_owner=False)
         state = SimpleNamespace(all_files_written={A}, identical_rewrites={B, "lib/helper.py"})
         assert _verified_no_change_proposal(state, ctx, [], ["controller.py"]) == [B]
         state = SimpleNamespace(all_files_written={A}, identical_rewrites={"lib/helper.py"})
@@ -351,3 +351,36 @@ def test_t7_an_identical_rewrite_beside_a_genuinely_missing_file_names_only_the_
     assert "controller.py" in missing_clause and "service.py" not in missing_clause, message
     assert "shop/service.py: returned byte-identical to the baseline - delivered, not a change" in message, message
     assert _bytes(workspace) == {A: A_SRC.encode(), B: B_SRC.encode()}
+
+
+def test_t8_a_gate_declared_no_progress_stop_is_applied_by_the_retry_strategy_with_its_guards():
+    """Second review F5: the retry strategy owns the no-progress terminal. A failure declaring a typed stop under
+    NO_PROGRESS_STOP_KEY terminates the loop with that reason and a terminal event; an environment stop, a
+    plan-scope conflict or an already reached terminal take precedence; a failure without the key changes nothing.
+    (The ordering after the workspace-progress classification is covered by the reopened-owner reproducers:
+    an inverted order retries and breaks their two-Developer-call assertions.)"""
+    from kriya.workflow.failure import Failure
+    from kriya.workflow.retry_strategy import NO_PROGRESS_STOP_KEY, _apply_declared_no_progress_stop
+
+    def failure(**diag):
+        return Failure(type="verified_no_change_refused", message="m", raw_output="m", diagnostics=diag or None)
+
+    state = GenerationState()
+    _apply_declared_no_progress_stop(state, failure())
+    assert state.no_progress_terminated is False and state.no_progress_reason is None
+
+    state = GenerationState()
+    _apply_declared_no_progress_stop(state, failure(**{NO_PROGRESS_STOP_KEY: "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"}))
+    assert state.no_progress_terminated is True and state.no_progress_reason == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+    [terminal] = [e for e in state.run_events if e.kind == "retry.no_progress_terminal"]
+    assert terminal.details["reason_code"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+    assert terminal.details["declared_by"] == "verified_no_change_refused"
+
+    for guard in ({"environment_failure": "containment unavailable"}, {"plan_scope_conflict": {"reason": "x"}},
+                  {"no_progress_terminated": True, "no_progress_reason": "NO_PROGRESS_TERMINAL"}):
+        state = GenerationState()
+        for key, value in guard.items():
+            setattr(state, key, value)
+        _apply_declared_no_progress_stop(state, failure(**{NO_PROGRESS_STOP_KEY: "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"}))
+        assert state.no_progress_reason == guard.get("no_progress_reason"), guard
+        assert not [e for e in state.run_events if e.kind == "retry.no_progress_terminal"], guard

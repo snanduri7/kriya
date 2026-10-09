@@ -63,8 +63,22 @@ def _git(repo, *args):
                    capture_output=True)
 
 
+HELPER = "shop/helper.py"
+HELPER_SOURCE = "def helper():\n    return 1\n"
+
+
+def _two_file_plan():
+    """The owner s1 plans two files and carries a compile criterion (so its planned HELPER, returned unchanged on
+    the planned run, settles as a verified partial no-change - OD-3); the reopen keeps HELPER byte-identical."""
+    plan = _plan().model_dump()
+    plan["acceptance_criteria"] = [{"id": "ac1", "description": "compiles", "method": "tool", "tool_name": "compile"}]
+    plan["subtasks"][0]["planned_files"].append({"path": HELPER, "action": "modify"})
+    plan["subtasks"][0]["acceptance_criteria_ids"] = ["ac1"]
+    return EngineeringPlan.model_validate(plan)
+
+
 def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = False, owner_escapes: bool = False,
-             owner_review_refused: bool = False):
+             owner_review_refused: bool = False, two_file_owner: bool = False):
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -84,6 +98,8 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = Fal
     (workspace / "shop").mkdir(parents=True)
     (workspace / "shop/__init__.py").write_text("")
     (workspace / SERVICE).write_text(BASE_SOURCE)
+    if two_file_owner:
+        (workspace / HELPER).write_text(HELPER_SOURCE)
     _git(workspace, "init", "-q")
     _git(workspace, "add", "-A")
     _git(workspace, "commit", "-qm", "base")
@@ -103,7 +119,10 @@ def _enforce(tmp_path, *, owner_fixes: bool, plan=None, owner_breaks: bool = Fal
             developer_prompts.append((system_prompt or "") + "\n" + (user_prompt or ""))
             reopened = "VERIFICATION FAILURE RECOVERY" in developer_prompts[-1]
             source = BROKEN_SOURCE if (reopened and owner_breaks) else FIXED_SOURCE if (reopened and owner_fixes) else WRONG_SOURCE
-            content = sentinel(SERVICE, analysis="introduce PAGE_SIZE.", content=source)
+            if two_file_owner and f'path="{HELPER}"' in (system_prompt or ""):
+                content = sentinel(HELPER, analysis="helper is fine.", content=HELPER_SOURCE)  # byte-identical, per-file prompt
+            else:
+                content = sentinel(SERVICE, analysis="introduce PAGE_SIZE.", content=source)
         else:
             content = "Review: Approved"
         tokens = len(((system_prompt or "") + (user_prompt or "")).encode()) * 2 // 7
@@ -291,3 +310,25 @@ def test_the_owner_resolver_walks_declared_dependencies_only():
     assert "VIOLATED" not in sealed and "hidden" not in sealed and "requirements_unresolved" in sealed
     text = verification_owner_recovery_context(verification_subtask_id="v2", owner_id="a", owner_files=["a.py"], evidence=evidence)
     assert "Reopened owner: a" in text and '["a.py"]' in text and "assert 5 == 10" in text
+
+
+def test_a_reopened_owner_that_changes_one_planned_file_and_returns_another_identical_is_accepted(tmp_path):
+    """Second review F1 of the second repair cycle: the owner plans two files; reopened, it fixes SERVICE and returns
+    HELPER byte-identical. The byte change is the controller's own acceptance criterion, so the identical planned
+    file is delivered unchanged (never a no-change claim to verify, never the typed identical-regeneration stop):
+    the owner is accepted, the verification unit reruns and passes."""
+    workspace, events, result, model_calls, _prompts, test_gate_runs = _enforce(
+        tmp_path, owner_fixes=True, plan=_two_file_plan(), two_file_owner=True)
+    status = {r.subtask_id: r.status.value for r in result.subtask_results}
+    assert status == {"s1": "completed", "s2": "completed"}, status
+    assert result.legacy_result["status"] == "success"
+    assert (workspace / SERVICE).read_text() == FIXED_SOURCE
+    assert (workspace / HELPER).read_text() == HELPER_SOURCE
+    assert test_gate_runs == ["s1", "s2", "s1", "s2", "s2"]  # the reopened owner's gates, then the verification rerun (same shape as the single-file reopen)
+    # the planned run settled HELPER as a verified partial no-change (OD-3); the reopened run proposed nothing:
+    # its byte change in SERVICE is the controller's acceptance criterion, and no typed identical-regeneration stop
+    proposed = [e for e in events if e.kind == "unit.no_change_proposed"]
+    assert [e.details["paths"] for e in proposed] == [[HELPER]], proposed
+    assert not any(e.kind == "unit.verified_no_change_refused" for e in events)
+    assert [e.details.get("reason_code") for e in events if e.kind == "retry.no_progress_terminal"] == [
+        "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"]  # s2's first failure only

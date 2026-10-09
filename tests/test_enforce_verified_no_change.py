@@ -256,7 +256,8 @@ def _ctx(tmp_path, *, structured=True):
     (tmp_path / "shop").mkdir(exist_ok=True)
     (tmp_path / CONTROLLER).write_text(CONTROLLER_SRC)
     return SimpleNamespace(structured_plan=_plan(TOOL_CRITERION) if structured else None,
-                           current_subtask_id="s2" if structured else None, worktree_path=str(tmp_path))
+                           current_subtask_id="s2" if structured else None, worktree_path=str(tmp_path),
+                           reopened_owner=False)
 
 
 NO_CHANGE = {"filepath": CONTROLLER, "content": None, "no_change": True}

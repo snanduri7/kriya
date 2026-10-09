@@ -656,6 +656,14 @@ def _complete_milestone(
         # S4c-1: a milestone that committed nothing is reusable only when
         # deterministic evidence covers every acceptance criterion, never
         # on a model's "no change" or a generic passing test.
+        # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (second review F2, 2026-10-09):
+        # this decider governs REUSE, not completion - a zero-commit milestone
+        # whose criteria are free text completes (nothing is written, applied
+        # or committed) with the typed refusal recorded on its proof, and is
+        # never reused on that basis (NO_COMMITTED_OUTPUT). Whether such a
+        # milestone should instead FAIL typed, as the direct and enforce paths
+        # now do, is the owner's decision: registry row
+        # MILESTONE-ZERO-COMMIT-COMPLETION-001 (P2, DEFERRED, owner decision).
         verification, refusal = no_change_verification(
             workspace_path, milestone, result, run_id=run_id, config=config,
             proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),

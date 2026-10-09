@@ -125,6 +125,10 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "structural_corruption": FailureCategory.GENERATION_COMPLETENESS,
     "duplicate_type_across_files": FailureCategory.GENERATION_COMPLETENESS,
     "operation_contract": FailureCategory.GENERATION_COMPLETENESS,
+    # ENFORCE-VERIFIED-NO-CHANGE-001 / ENFORCE-IDENTICAL-WRITE-COMPLETION-001: the unit produced no change it could
+    # verify (a NO CHANGE answer or an identical rewrite without deterministic coverage).
+    "verified_no_change_refused": FailureCategory.GENERATION_COMPLETENESS,
+    "unverified_no_change": FailureCategory.GENERATION_COMPLETENESS,
 
     # EDIT_TARGETING - aimed at, or applied to, the wrong place
     "anchored_edit": FailureCategory.EDIT_TARGETING,

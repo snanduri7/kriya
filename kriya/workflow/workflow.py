@@ -657,11 +657,14 @@ def _settle_no_change_proposal(
 
     attempt = state.attempt_number
     identical = sorted(set(state.no_change_proposal) & state.identical_rewrites)
-    if reopened_owner and identical:
+    if reopened_owner and identical and not state.all_files_written:
         # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 x the owner reopen: the
         # controller accepts a reopened owner only on a byte change, so a
-        # regeneration identical to the current content can never be the
-        # repair - the typed no-progress stop the verification-only
+        # regeneration that changed NOTHING can never be the repair (a mixed
+        # regeneration - one file changed, one identical - never reaches
+        # here: attempt.py proposes no identical path for a reopened owner
+        # that wrote, and the controller's own rule decides it) - the typed
+        # no-progress stop the verification-only
         # admission already uses (one attempt, the verification failure
         # stands), never repair retries on the same identical answer.
         from kriya.workflow.retry_progress import VERIFICATION_RETRY_NO_CHANGE_POSSIBLE

@@ -34,6 +34,8 @@ _REAL_FAILURE_TYPES = {
     "structural_corruption": FailureCategory.GENERATION_COMPLETENESS,
     "duplicate_type_across_files": FailureCategory.GENERATION_COMPLETENESS,
     "operation_contract": FailureCategory.GENERATION_COMPLETENESS,
+    "verified_no_change_refused": FailureCategory.GENERATION_COMPLETENESS,
+    "unverified_no_change": FailureCategory.GENERATION_COMPLETENESS,
     "anchored_edit": FailureCategory.EDIT_TARGETING,
     "attribution_rejected": FailureCategory.EDIT_TARGETING,
     "unaddressed_error_location": FailureCategory.EDIT_TARGETING,

@@ -6889,11 +6889,17 @@ def _verified_no_change_proposal(
     # way, by deterministic evidence, never by the write.
     subtask = ctx.structured_plan.subtask_by_id(ctx.current_subtask_id)
     planned_paths = {pf.path for pf in (subtask.planned_files if subtask is not None else [])}
+    # Review F3: a restored unplanned path is no proposal. Second review F1: a reopened owner that DID change
+    # bytes is judged by the controller's own acceptance (a byte change, gates, scope) - its identical planned
+    # files are delivered unchanged, not a no-change claim to verify; only a regeneration that changed NOTHING
+    # is proposed (and then stopped typed by the settlement).
+    identical_proposals = (set() if ctx.reopened_owner and state.all_files_written
+                           else set(state.identical_rewrites) & planned_paths)
     no_change = sorted({
         f["filepath"] for f in files
         if f.get("filepath") and not f.get("protocol_error")
         and classify_result_operation(f) is CodeOperation.NO_CHANGE_ASSESSMENT
-    } | (set(state.identical_rewrites) & planned_paths))  # review F3: a restored unplanned path is no proposal
+    } | identical_proposals)
     if not no_change or any(path in state.all_files_written for path in no_change):
         return []
     if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in no_change):
