@@ -360,6 +360,7 @@ from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriag
 from kriya.workflow.untrusted_context import fence_untrusted_reference, outside_untrusted_reference
 from kriya.workflow.validation_baseline import (
     DeltaClassification,
+    _capture_single_baseline,
     build_validation_outcome,
     capture_brownfield_baselines,
     regression_unattributed_diagnosis,
@@ -1590,17 +1591,39 @@ def close_requirements_by_documentation(
     )
 
 
+SCOPE_SUITE_PRESERVATION = "suite_preservation"
+
+
 def close_requirements_by_suite_preservation(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     revision: Any, toolchain_declaration_mutable: bool, candidate_paths: Iterable[str] = (),
     java_home_override: Optional[str] = None, tree_binding: Any = None, contract: Any = None,
+    goal: str = "", suite_baseline: Any = None, stability_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    baseline_suite_run: Optional[Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
     preservation requirement ("every existing test must keep passing") from
     the candidate's own full test run under the production test gate, with
     the run's toolchain authority (as the named-test closer): COMPLETE
-    structured evidence, the gate passed, tests executed, no executed case
-    failed. The suite runs once, only when such a requirement is open."""
+    structured evidence, tests executed, the suite green. The suite runs
+    once, only when such a requirement is open.
+
+    SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: a failing candidate
+    suite is judged against the frozen PRE-mutation baseline by the one
+    attribution owner (kriya/workflow/suite_attribution.py, the decision the
+    terminal regression check and the candidate gates make). The direct
+    boundary passes the run's captured full-regression baseline, its
+    stability cache and its baseline replay (``suite_baseline``,
+    ``stability_cache``, ``baseline_suite_run``: nothing runs twice); the
+    enforce terminal gate passes none, and the baseline is then captured
+    lazily on the untouched real workspace (immutable until commit,
+    PRD-004) through the same capture the run start uses - once per
+    closure, only when the candidate suite failed, never for a green suite
+    - under the same validator and toolchain identity as the candidate run.
+    An indeterminate run baseline, a baseline that cannot be captured or an
+    attribution that cannot be made is reported as unavailable, and the
+    closer fails closed (REGRESSION_UNATTRIBUTED)."""
+    from kriya.workflow.baseline_policy import baseline_environment_identity
     from kriya.workflow.contract_closers import contract_claims_map
     from kriya.workflow.requirements import (
         SUITE_PRESERVATION,
@@ -1609,13 +1632,58 @@ def close_requirements_by_suite_preservation(
         test_immutability_evidence,
     )
 
+    candidate_paths = list(candidate_paths)
+    cache: Dict[str, Dict[str, Any]] = stability_cache if stability_cache is not None else {}
+
+    def untouched_workspace_run(target_test: Optional[Tuple[str, ...]]) -> Dict[str, Any]:
+        # The run start's own baseline call (run_generation_workflow's baseline_suite_run): the same validator and
+        # config on the untouched workspace, for the capture and for the owner's bounded stability replay.
+        return PolymorphicValidator(
+            workspace_path, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+        ).run_tests(target_test=target_test)
+
+    baseline_run = baseline_suite_run or untouched_workspace_run
+
+    def attribute_suite(result: Dict[str, Any]) -> Tuple[Optional[Any], Optional[str]]:
+        # The closer asks exactly once per closure attempt (one candidate run, one decision for every pending
+        # requirement), so the lazy capture below runs at most once per closure.
+        baseline = captured_baseline(suite_baseline)
+        if baseline is None and suite_baseline is not None:
+            return None, ("the run's PRE-mutation baseline is indeterminate: "
+                          f"{getattr(suite_baseline, 'indeterminate_reason', None)}")
+        if baseline is None:
+            try:
+                environment = baseline_environment_identity(workspace_path, autonomy_cfg, goal=goal)
+            except Exception as exc:
+                logger.warning(f"Suite-preservation baseline environment identity unavailable: {exc}")
+                environment = None
+            lazily_captured = _capture_single_baseline(
+                run_id=f"{SCOPE_SUITE_PRESERVATION}:{revision}", target_test=None, run_validator=baseline_run,
+                compute_revision=lambda: compute_workspace_content_hash(workspace_path),
+                environment_identity=environment)
+            baseline = captured_baseline(lazily_captured)
+            if baseline is None:
+                return None, ("the untouched workspace's PRE-mutation baseline could not be captured: "
+                              f"{lazily_captured.indeterminate_reason}")
+        try:
+            return attribute_suite_result(
+                scope=SCOPE_SUITE_PRESERVATION, baseline=baseline, result=result,
+                post_environment=post_environment_identity(
+                    baseline=baseline, workspace_path=workspace_path, worktree_path=candidate_root,
+                    autonomy_cfg=autonomy_cfg, goal=goal, written_files=candidate_paths),
+                stability_cache=cache, replay=baseline_run, workspace_path=workspace_path,
+            ), None
+        except Exception as exc:
+            logger.warning(f"Suite-preservation baseline attribution unavailable: {type(exc).__name__}: {exc}")
+            return None, f"the PRE/POST attribution could not be made ({type(exc).__name__}: {exc})"
+
     suite_ids = None
     if contract is not None:
         suite_ids = sorted({rid for rid, _b in contract.binding_closers(SUITE_PRESERVATION)})
     immutability = None
     if (suite_ids if suite_ids is not None else
             any(is_suite_preservation_requirement(r.text) for r in requirement_set.requirements)):
-        _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=list(candidate_paths))
+        _tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
         immutability = test_immutability_evidence(
             _reference_test_files(candidate_root, workspace_path), _candidate_test_files(candidate_root), evidence)
 
@@ -1632,6 +1700,7 @@ def close_requirements_by_suite_preservation(
         ledger, requirement_set, test_files=_candidate_test_files(candidate_root), run_suite=run_suite,
         source="requirement_closure.suite_preservation", revision=revision, test_immutability=immutability,
         contract_claims=contract_claims_map(contract), suite_requirement_ids=suite_ids,
+        attribute_suite=attribute_suite,
     )
 
 
@@ -5327,6 +5396,10 @@ class WorkflowEngine:
                                 write_scope_mode, allowed_write_relpaths, structured_plan,
                             ),
                             java_home_override=state.java_home_override, contract=verification_contract,
+                            # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
+                            # baseline, stability cache and replay - no second baseline run on this path.
+                            goal=goal, suite_baseline=state.validation_baseline_full_regression,
+                            stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
                         )
                     except Exception as exc:
                         suite_closures = []

@@ -556,6 +556,64 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   D4 t1/t2, owner-reopen no-change case); M3 drops the delivered event -> KILLED, 6 failed (the same six as M1).
   Registry row ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 -> CLOSED with this slice.
 
+### 13.2 SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001 (P1) - owner decision and fix
+
+- Observation (MEASURED, C2-S2_A-final generate.log 13:54:25): the terminal suite-preservation entry for REQ-9 - 193
+  cases, 191 passed / 1 skipped / 1 failed, COMPLETE report, closed False, "the full suite did not pass on this
+  candidate" - in a run that attributed the same failure PRE_EXISTING_FAILURE at twelve gate sites (13:34:57-13:53:31).
+- Producer (TRACED): `requirements.close_suite_preservation_requirements` judges `result["success"]` and the failing
+  case list raw; its wrapper `workflow.close_requirements_by_suite_preservation` (the direct boundary's and the enforce
+  terminal gate's one entry point) hands it only the candidate's own suite - no baseline, no stability cache, no replay.
+  The D1 owner `suite_attribution.attribute_suite_result` is consumed by the terminal regression check, the candidate
+  gates and the verification coordinator, never by this closer. The enforce terminal gate request carries no baseline.
+- Root cause (CONFIRMED by the trace and the twelve-vs-one contrast in one run): third site of the D1 family - the
+  closer has no attribution input, so a stable pre-existing failure can never close a REGRESSION_PRESERVATION
+  requirement, whatever the candidate. Not model behaviour. The D1b contract-baseline verdict (per-case identities, no
+  fingerprints, no stability envelope) is deliberately NOT used: it cannot tell "stable pre-existing" from "worsened".
+- Owner decision (2026-10-09, P1-2 semantics + guardrails): the closure compares the candidate suite with the frozen
+  baseline through the one attribution owner (PRE_EXISTING / CHANGED / NEW / REGRESSION_UNATTRIBUTED semantics
+  unchanged, bounded stability replay reused); a stable pre-existing failure never violates preservation; a
+  candidate-introduced or worsened failure does; an unavailable / indeterminate baseline, replay or attribution fails
+  closed as REGRESSION_UNATTRIBUTED; the baseline is captured lazily, once per closure attempt, never for a green
+  suite; raw suite result and attribution decision both preserved; no D1b plumbing in this slice.
+- Fix (two files). `requirements.py`: the closer takes `attribute_suite(result) -> (SuiteAttribution | None, why)`,
+  computed once per closure for the one candidate run (shared by every pending requirement) only when the suite failed
+  with a COMPLETE, non-empty report; green: unchanged; failed + owner non-blocking: closes, entry and closure detail
+  carry `suite_success`, the status counts and the owner's `gate_evidence()` / `event_details()`; failed + owner
+  blocking: open, reason names the owner's confirmed regressions or its `regression_unattributed_diagnosis`; failed +
+  unavailable: open, reason `REGRESSION_UNATTRIBUTED: ...` (typed, fail closed). The closer reinterprets nothing.
+  `workflow.py`: the wrapper gains `goal`, `suite_baseline`, `stability_cache`, `baseline_suite_run`; the direct call
+  site passes the run's captured full-regression baseline, its stability cache and its `baseline_suite_run` (nothing
+  runs twice); the enforce terminal gate passes none and the wrapper captures the untouched real workspace lazily
+  through the existing `_capture_single_baseline` (same validator class, same original workspace, same autonomy config
+  and toolchain identity as the run start's baseline call), once per closure, then `attribute_suite_result(scope=
+  "suite_preservation", ...)` with the same replay. An indeterminate run baseline is reported unavailable, never
+  re-captured. `suite_attribution.py`, `validation_baseline.py`, `terminal_gate_service.py` and its request unchanged.
+- Reproducer first (`tests/test_repair_003_p1_2_suite_preservation_attribution.py`: the real wrapper on a real git
+  workspace, production pytest gate in host mode, candidate copy at the same HEAD, real PRE/POST attribution, every
+  suite run accounted by tree), MEASURED pre-fix by the operator (repair-003/prefix/P1-2_reproducer_before.txt): 5
+  failed / 1 passed - the stable-pre-existing case, the new-failure naming, the changed-failure attribution, the typed
+  unattributed refusal and the one-capture-two-statements case all at the predicted assertion with the raw reason
+  "the full suite did not pass on this candidate"; the green-suite control passed (closes, no baseline run).
+- Predicted post-fix: 6/6; existing closer tests unchanged in outcome (test_08's failing project now reads
+  "REGRESSION_UNATTRIBUTED: the full suite did not pass on this candidate and no PRE-mutation baseline attribution is
+  available ..." - still "did not pass"); D1 / REG-R1 / unattributed-prose / contract-closer modules unchanged. S2_A
+  shape: REQ-9 closes by evidence on a candidate carrying the stable pre-existing failure.
+- Found on the way: case 3 first blocked STABILITY_UNRESOLVED with ONE base run - the owner's revision guard, not the
+  closer: WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR (13.3), fixed first. The wrapper's once-per-closure memo was
+  redundant (the closer asks once; case 6 measures one base run) and was removed (rule 8). The direct-path test
+  first failed on a harness artifact: a candidate copied AFTER the baseline run carried the workspace's
+  tests/__pycache__ (workspace path embedded, mtimes equal, reused) so its traceback named ../ws/... and the
+  owner saw a stable body changed; a production candidate (worktree / export) never inherits bytecode; the
+  harness copy now ignores __pycache__ / .pytest_cache / .kriya like the contract-baseline export.
+- Verification (2026-10-09): reproducer 8/8 (the six cases + the direct boundary reusing the run's captured
+  baseline and replay with no wrapper-side base run + an indeterminate run baseline reported unavailable, never
+  re-captured); mutants P1 unavailable-closes, P2 blocking-ignored, P3 pre-existing-blocks, P4 green-asks-baseline,
+  P6 indeterminate-recaptured all KILLED (repair-003/mutations/P*.txt), files restored byte-identical; adjacent
+  stage (closer / D1 / REG-R1 / unattributed prose / contract closers-baseline-scopes-review / terminal services /
+  D8 / LR-R1-M1 candidate gates / verification binding / partial no-change / registry): 333 passed, the one failure
+  the registry tripwire on this row while still OPEN. Registry row CLOSED.
+
 ### 13.3 WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR (P1, found by the P1-2 reproducer) - fix
 
 - Observation (MEASURED, 2026-10-09): P1-2 reproducer case 3 (a pre-existing failure whose text the candidate changed)

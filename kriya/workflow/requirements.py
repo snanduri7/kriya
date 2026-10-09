@@ -69,7 +69,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -1858,12 +1858,26 @@ def close_suite_preservation_requirements(
     ledger: ObligationLedger, requirements: RequirementSet, *, test_files: Iterable[str],
     run_suite: Any, source: str, revision: Any, test_immutability: Optional[Mapping[str, Any]] = None,
     contract_claims: Optional[Mapping[str, Sequence[str]]] = None, suite_requirement_ids: Optional[Iterable[str]] = None,
+    attribute_suite: Optional[Callable[[Dict[str, Any]], Tuple[Optional[Any], Optional[str]]]] = None,
 ) -> List[Dict[str, Any]]:
     """Close every UNVERIFIED whole-suite preservation requirement from the
     candidate's own full test run (``run_suite()``: the production test gate
     result, run once, lazily). Closes only when the structured evidence of
-    that run is COMPLETE, the gate passed, at least one test executed and no
-    executed case failed; anything else leaves it as it is, with why. A
+    that run is COMPLETE, at least one test executed and the suite is green -
+    or, SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001 (BACKEND-FINAL-
+    CLOSURE-005 third repair cycle, C2-S2_A-final), the suite failed and the
+    one attribution owner (kriya/workflow/suite_attribution.py, through
+    ``attribute_suite(result)`` -> (SuiteAttribution, None) or (None, why))
+    attributes every failure to the frozen PRE-mutation baseline: a stable
+    pre-existing failure never violates preservation. A failure the owner
+    attributes to the candidate (NEW / CHANGED, or a blocking delta no test
+    explains) leaves the requirement open with the owner's own reason; an
+    unavailable or indeterminate attribution fails closed as
+    REGRESSION_UNATTRIBUTED. Nothing here re-reads fingerprints, stability
+    or failure identity: the owner decided, this records. The raw suite
+    result and the attribution decision are both kept in the entry and the
+    closure detail. A green suite never asks for attribution. Anything else
+    leaves the requirement as it is, with why. A
     closure needs the run's mutation record (``test_immutability``,
     test_immutability_evidence): a candidate that changed the test trust
     surface (conftest, pytest/tox configuration, build declarations - the
@@ -1895,6 +1909,21 @@ def close_suite_preservation_requirements(
     report = test_execution.report_from_result(result)
     summary = report.summary() if report is not None else None
     failing = sorted(case.identity for case in report.cases if case.status not in (test_execution.PASSED, test_execution.SKIPPED))         if report is not None else []
+    suite_success = bool(result.get("success")) if isinstance(result, dict) else False
+    suite_failed = not suite_success or bool(failing)
+    # One attribution per closure attempt (one candidate run, one baseline), shared by every pending requirement;
+    # a green suite never asks for it (no baseline suite runs for a green candidate).
+    attribution, attribution_unavailable = None, None
+    if suite_failed and report is not None and report.complete and report.cases:
+        if attribute_suite is None:
+            attribution_unavailable = "no PRE-mutation baseline attribution is available to this closure"
+        else:
+            try:
+                attribution, attribution_unavailable = attribute_suite(dict(result))
+            except Exception as exc:  # the owner's own refusal path: never a closure, never a crash of the gate
+                attribution, attribution_unavailable = None, f"baseline attribution raised {type(exc).__name__}: {exc}"
+            if attribution is None and attribution_unavailable is None:
+                attribution_unavailable = "the PRE-mutation baseline is unavailable"
     attempts: List[Dict[str, Any]] = []
     for requirement in pending:
         record = ledger.current(requirement_obligation_id(requirement.id))
@@ -1907,16 +1936,33 @@ def close_suite_preservation_requirements(
         elif report is None or not report.complete:
             entry["reason"] = "the suite's structured evidence is not COMPLETE: " + str(
                 report.reason if report is not None else "no test execution report")
-        elif not result.get("success"):
-            entry["reason"] = "the full suite did not pass on this candidate"
         elif not report.cases:
             entry["reason"] = "the full suite executed zero tests"
-        elif failing:
-            entry["reason"] = "executed case(s) did not pass: " + ", ".join(failing[:5])
+        elif suite_failed and attribution is None:
+            # Fail closed: nothing is excused as pre-existing without the owner's decision.
+            entry["regression_attribution"] = {"available": False, "reason": attribution_unavailable}
+            entry["reason"] = ("REGRESSION_UNATTRIBUTED: the full suite did not pass on this candidate and "
+                               f"{attribution_unavailable}; no failure can be attributed to this candidate or excused "
+                               "as pre-existing, so the requirement stays open (fail closed)")
+        elif suite_failed and attribution.blocking:
+            entry["regression_attribution"] = attribution.gate_evidence()
+            confirmed = attribution.confirmed_regressions()
+            if confirmed:
+                entry["reason"] = ("the full suite did not pass on this candidate: failure(s) the PRE/POST attribution "
+                                   "confirms as the candidate's: " + ", ".join(confirmed[:5]))
+            else:
+                from kriya.workflow.validation_baseline import regression_unattributed_diagnosis
+                entry["reason"] = regression_unattributed_diagnosis(attribution.delta)[1]
         else:
             detail = {"kind": SUITE_PRESERVATION, "claim": REGRESSION_PRESERVATION, "cases": len(report.cases),
                       "status_counts": summary["status_counts"], "report_files": list(report.report_files),
-                      "gate_id": report.gate_id, "runner": report.runner}
+                      "gate_id": report.gate_id, "runner": report.runner, "suite_success": suite_success}
+            if attribution is not None:
+                # The suite failed and every failure is the baseline's (pre-existing only): the closure records the
+                # raw result above and the owner's decision here, so it stays reconstructable.
+                entry["regression_attribution"] = attribution.gate_evidence()
+                detail["regression_attribution"] = attribution.gate_evidence()
+                detail["regression_decision"] = attribution.event_details()
             immutability = test_immutability if test_immutability is not None else {
                 "available": False, "reason": "no mutation record was supplied"}
             detail["test_immutability"] = dict(immutability)
