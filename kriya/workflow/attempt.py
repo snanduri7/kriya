@@ -159,10 +159,11 @@ from kriya.workflow.file_resolution import (
     ground_python_runtime_target,
     is_runnable_test_file,
     normalize_written_filepath,
-    prefer_existing_artifact_owners,
+    planned_new_artifact_paths,
     python_command_targets_test_path,
     python_file_is_runnable_script,
     python_target_path_is_test_shaped,
+    resolve_planned_artifact_owners,
 )
 from kriya.workflow.migration import (
     MigrationResolution,
@@ -7748,11 +7749,28 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     already_established = set(state.all_files_written) | set(ctx.established_files)
     candidate_paths = [file_obj["filepath"] for file_obj in files]
     paths_to_resolve = [path for path in candidate_paths if path not in already_established]
-    resolution = dict(zip(
-        paths_to_resolve,
-        prefer_existing_artifact_owners(paths_to_resolve, ctx.goal, ctx.workspace_path),
-        strict=False,  # unresolved paths fall back to themselves via .get() below
-    )) if paths_to_resolve else {}
+    resolution: Dict[str, str] = {}
+    if paths_to_resolve:
+        # FILE-RESOLUTION-SCOPE-ESCAPE-001: the unit's authorized files and
+        # its planned new artifacts, read from THIS attempt's context (a
+        # revised scope is honoured; a retry decides identically). An owner
+        # outside the scope is refused and recorded - the write authority
+        # decides the Developer's own path as it always has.
+        artifact_resolution = resolve_planned_artifact_owners(
+            paths_to_resolve, ctx.goal, ctx.workspace_path,
+            authorized_paths=(None if ctx.write_scope_mode is WriteScopeMode.UNRESTRICTED
+                              else list(ctx.allowed_write_relpaths)),
+            new_artifact_paths=planned_new_artifact_paths(ctx.structured_plan, ctx.current_subtask_id),
+        )
+        resolution = dict(zip(paths_to_resolve, artifact_resolution.resolved, strict=True))  # one per path
+        for refusal in artifact_resolution.refused_redirects:
+            state.record_event(RunEvent(
+                kind="file_resolution.redirect_refused", attempt=state.attempt_number,
+                source="attempt.developer_file_resolution", authority=EventAuthority.AUTHORITATIVE,
+                message=(f"{refusal['reason_code']}: Developer path '{refusal['planned']}' resolves to "
+                         f"'{refusal['owner']}' outside this unit's authorized files; the path is kept"),
+                details={**refusal, "authorized_paths": list(ctx.allowed_write_relpaths), "stage": "developer"},
+            ))
     resolved_paths = [resolution.get(path, path) for path in candidate_paths]
     if resolved_paths != candidate_paths:
         for file_obj, resolved_path in zip(files, resolved_paths, strict=True):  # one path per file

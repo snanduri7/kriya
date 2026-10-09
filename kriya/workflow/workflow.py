@@ -187,7 +187,8 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     identify_redirected_test_obligations,
     include_response_construction_owners,
-    prefer_existing_artifact_owners,
+    planned_new_artifact_paths,
+    resolve_planned_artifact_owners,
 )
 from kriya.workflow.file_resolution import (
     _resolve_maven_main_class as _resolve_maven_main_class,
@@ -4248,9 +4249,39 @@ class WorkflowEngine:
             and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
         ):
             _pre_redirect_architect_files = list(architect_files)
-            architect_files = prefer_existing_artifact_owners(
-                architect_files, goal, workspace_path,
+            # FILE-RESOLUTION-SCOPE-ESCAPE-001 (BACKEND-FINAL-CLOSURE-005
+            # cohort 2, C2-S4_A): a bounded unit's redirect may never leave
+            # its validated write scope (the write authority would refuse
+            # the resolver's own target and end the run), and a planned
+            # file the validated plan creates is never an "invented
+            # duplicate". Both are decided by the resolver from the scope
+            # passed HERE, per call - a legacy direct run (no scope) keeps
+            # its unrestricted behaviour; a refusal is recorded, never silent.
+            _artifact_scope = (
+                None if not allowed_write_relpaths and write_scope_mode in (None, WriteScopeMode.UNRESTRICTED)
+                else list(allowed_write_relpaths or [])
             )
+            _artifact_resolution = resolve_planned_artifact_owners(
+                architect_files, goal, workspace_path, authorized_paths=_artifact_scope,
+                new_artifact_paths=planned_new_artifact_paths(structured_plan, current_subtask_id),
+            )
+            architect_files = _artifact_resolution.resolved
+            if _artifact_resolution.new_artifacts_kept:
+                state.record_event(RunEvent(
+                    kind="file_resolution.new_artifact_kept", attempt=0, source="workflow.architect_file_resolution",
+                    authority=EventAuthority.ADVISORY,
+                    message="planned new artifact(s) kept as planned (validated action=create): "
+                            + ", ".join(_artifact_resolution.new_artifacts_kept),
+                    details={"paths": list(_artifact_resolution.new_artifacts_kept), "stage": "architect"},
+                ))
+            for _refusal in _artifact_resolution.refused_redirects:
+                state.record_event(RunEvent(
+                    kind="file_resolution.redirect_refused", attempt=0, source="workflow.architect_file_resolution",
+                    authority=EventAuthority.AUTHORITATIVE,
+                    message=(f"{_refusal['reason_code']}: planned '{_refusal['planned']}' resolves to "
+                             f"'{_refusal['owner']}' outside this unit's authorized files; the planned path is kept"),
+                    details={**_refusal, "authorized_paths": list(_artifact_scope or []), "stage": "architect"},
+                ))
             # Test-obligation preservation (2026-09-20): captured HERE,
             # before include_response_construction_owners() below can add
             # further entries unrelated to this specific redirect - a

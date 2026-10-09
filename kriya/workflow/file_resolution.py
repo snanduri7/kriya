@@ -180,8 +180,156 @@ def _explicitly_requests_new_artifact(path: str, goal: str) -> bool:
     return False
 
 
+FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE = "FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE"
+_RESOLUTION_TIER_MESSAGES = {
+    "exact_name": "Resolved nonexistent planned artifact '%s' to unique exact-name existing owner '%s'.",
+    "token_containment": "Resolved renamed planned artifact '%s' to unique token-containing existing owner '%s'.",
+    "scored": "Resolved planned artifact '%s' to existing owner '%s'.",
+}
+
+
+@dataclass(frozen=True)
+class ArtifactOwnerResolution:
+    """FILE-RESOLUTION-SCOPE-ESCAPE-001: ``resolved`` has one entry per planned
+    path, in order; ``refused_redirects`` lists every owner the authorized scope
+    refused (planned, owner, tier, reason_code - the planned path was kept);
+    ``new_artifacts_kept`` the planned paths an explicit create action exempted."""
+
+    resolved: List[str]
+    refused_redirects: List[Dict[str, Any]]
+    new_artifacts_kept: List[str]
+
+
+def planned_new_artifact_paths(plan: Any, subtask_id: Optional[str]) -> List[str]:
+    """The planned files of ``subtask_id`` whose validated action is ``create``
+    (kriya/workflow/plan_validation.py canonicalizes the action against the
+    baseline tree) - never redirected to an existing owner."""
+    if plan is None or not subtask_id:
+        return []
+    subtask = plan.subtask_by_id(subtask_id)
+    if subtask is None:
+        return []
+    return [pf.path for pf in subtask.planned_files if getattr(pf.action, "value", pf.action) == "create"]
+
+
+def _existing_owner_for(
+    path: str, existing: List[str], claimed: set, goal_tokens: set,
+) -> Optional[Tuple[str, str]]:
+    """The unique existing owner a nonexistent planned ``path`` resolves to, with
+    its tier name - or None. The three tiers, in order (each fires only when its
+    evidence is unique):
+    exact basename (a basename of at least 2 meaningful tokens - see
+    prefer_existing_artifact_owners), strict basename-token containment, then
+    filename tokens plus goal vocabulary (scored)."""
+    extension = os.path.splitext(path)[1].lower()
+    planned_tokens = _artifact_name_tokens(path)
+    planned_is_test = is_runnable_test_file(path)
+    peers = [
+        candidate for candidate in existing
+        if candidate not in claimed
+        and os.path.splitext(candidate)[1].lower() == extension
+        and is_runnable_test_file(candidate) == planned_is_test
+    ]
+    if len(planned_tokens) >= 2:
+        exact_name_candidates = [c for c in peers if os.path.basename(c) == os.path.basename(path)]
+        if len(exact_name_candidates) == 1:
+            return exact_name_candidates[0], "exact_name"
+        containment_candidates = []
+        for candidate in peers:
+            candidate_tokens = _artifact_name_tokens(candidate)
+            if len(candidate_tokens) >= 2 and (planned_tokens < candidate_tokens or candidate_tokens < planned_tokens):
+                containment_candidates.append(candidate)
+        if len(containment_candidates) == 1:
+            return containment_candidates[0], "token_containment"
+    scored = []
+    for candidate in peers:
+        candidate_tokens = _artifact_name_tokens(candidate)
+        name_overlap = len(planned_tokens & candidate_tokens)
+        goal_overlap = len(goal_tokens & candidate_tokens)
+        if name_overlap == 0 or goal_overlap < 2:
+            continue
+        scored.append((name_overlap * 3 + goal_overlap, candidate))
+    scored.sort(reverse=True)
+    if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+        return scored[0][1], "scored"
+    return None
+
+
+def resolve_planned_artifact_owners(
+    planned_files: Iterable[str], goal: str, workspace_path: str, *,
+    authorized_paths: Optional[Iterable[str]] = None, new_artifact_paths: Iterable[str] = (),
+) -> ArtifactOwnerResolution:
+    """prefer_existing_artifact_owners with its decisions reported.
+
+    FILE-RESOLUTION-SCOPE-ESCAPE-001 (BACKEND-FINAL-CLOSURE-005 cohort 2,
+    C2-S4_A): a planned NEW test file of an enforce unit was redirected
+    (scored tier, on the controller-built goal vocabulary) to an existing
+    test in another module - outside the unit's validated write scope - and
+    the write authority then refused the resolver's own target; the run
+    ended PLAN_SCOPE_REVISION_REQUIRED and discarded an earlier unit's
+    correct, applied fix. Two rules close it, both decided here and reported
+    to the caller (never silently):
+    - ``authorized_paths`` (the unit's validated write scope; None means the
+      caller is unrestricted, the legacy direct path): an owner outside it is
+      REFUSED - the planned path is kept and the refusal is returned with
+      reason_code FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE. The scope is read
+      per call, never cached: a revised plan scope is honoured on the next
+      call and a retry with the same scope decides identically (never widened).
+    - ``new_artifact_paths`` (the unit's planned files with a validated
+      ``create`` action): an explicit new artifact is never redirected, the
+      way an explicit "create a new ..." goal phrase already exempts one."""
+    planned = list(planned_files)
+    scope = None if authorized_paths is None else {os.path.normpath(p) for p in authorized_paths}
+    explicit_new = {os.path.normpath(p) for p in new_artifact_paths}
+
+    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
+    existing: List[str] = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [name for name in dirs if name not in ignored]
+        for filename in filenames:
+            existing.append(os.path.relpath(os.path.join(root, filename), workspace_path))
+
+    goal_tokens = _semantic_tokens(goal or "")
+    resolved: List[str] = []
+    refused: List[Dict[str, Any]] = []
+    new_kept: List[str] = []
+    claimed = {path for path in planned if os.path.exists(os.path.join(workspace_path, path))}
+    for path in planned:
+        if os.path.exists(os.path.join(workspace_path, path)):
+            resolved.append(path)
+            continue
+        if os.path.normpath(path) in explicit_new:
+            new_kept.append(path)
+            resolved.append(path)
+            logger.info("Planned artifact '%s' is an explicit new artifact (action=create): kept as planned.", path)
+            continue
+        if _explicitly_requests_new_artifact(path, goal):
+            resolved.append(path)
+            continue
+        found = _existing_owner_for(path, existing, claimed, goal_tokens)
+        if found is None:
+            resolved.append(path)
+            continue
+        owner, tier = found
+        if scope is not None and os.path.normpath(owner) not in scope:
+            refused.append({"planned": path, "owner": owner, "tier": tier,
+                            "reason_code": FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE})
+            logger.warning(
+                "%s: planned artifact '%s' resolves (%s tier) to existing owner '%s', outside this unit's "
+                "authorized files - redirect refused, the planned path is kept.",
+                FILE_RESOLUTION_REDIRECT_OUT_OF_SCOPE, path, tier, owner,
+            )
+            resolved.append(path)
+            continue
+        resolved.append(owner)
+        claimed.add(owner)
+        logger.info(_RESOLUTION_TIER_MESSAGES[tier], path, owner)
+    return ArtifactOwnerResolution(resolved=resolved, refused_redirects=refused, new_artifacts_kept=new_kept)
+
+
 def prefer_existing_artifact_owners(
-    planned_files: Iterable[str], goal: str, workspace_path: str,
+    planned_files: Iterable[str], goal: str, workspace_path: str, *,
+    authorized_paths: Optional[Iterable[str]] = None, new_artifact_paths: Iterable[str] = (),
 ) -> List[str]:
     """Resolve invented parallel artifact names back to a unique brownfield owner.
 
@@ -191,6 +339,9 @@ def prefer_existing_artifact_owners(
     vocabulary provide the semantic score.
     An existing owner replaces a nonexistent planned path only when that
     evidence is unique and the request does not explicitly ask for a new artifact.
+    FILE-RESOLUTION-SCOPE-ESCAPE-001: an owner outside ``authorized_paths`` is
+    never chosen and a planned ``new_artifact_paths`` entry is never redirected
+    (see resolve_planned_artifact_owners, which also reports the decisions).
 
     PRV-17 Run 12 fix (2026-09-04): a bare basename match is NOT sufficient
     identity evidence on its own for a directory-scoped artifact whose own
@@ -202,104 +353,21 @@ def prefer_existing_artifact_owners(
     `customers_project/__init__.py` purely because both share the basename
     "__init__.py" - two genuinely different, both-legitimate package
     markers in a real Django project, not a Developer-invented duplicate.
-    The exact-basename tier below now requires the basename (stripped of
-    extension) to tokenize into at least 2 meaningful tokens before it may
-    fire at all - the SAME threshold the containment tier immediately below
-    it already requires for its own match (`len(planned_tokens) >= 2`), not
-    a new one invented for this fix. A thin/generic name (one token or
-    fewer) is exactly the case where path context is semantically
-    significant and basename equality alone must not decide identity; it
-    falls through to the containment/scored tiers below (which themselves
-    already guard on multi-token names) and, finding no match there either,
-    is correctly left as its own genuinely new path rather than merged into
-    an unrelated existing file that happens to share a generic name.
+    The exact-basename tier requires the basename (stripped of extension)
+    to tokenize into at least 2 meaningful tokens before it may fire at all
+    - the SAME threshold the containment tier immediately below it already
+    requires for its own match, not a new one invented for this fix. A
+    thin/generic name (one token or fewer) is exactly the case where path
+    context is semantically significant and basename equality alone must
+    not decide identity; it falls through to the containment/scored tiers
+    (which themselves already guard on multi-token names) and, finding no
+    match there either, is correctly left as its own genuinely new path
+    rather than merged into an unrelated existing file that happens to
+    share a generic name.
     """
-    planned = list(planned_files)
-
-    ignored = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
-    existing: List[str] = []
-    for root, dirs, filenames in os.walk(workspace_path):
-        dirs[:] = [name for name in dirs if name not in ignored]
-        for filename in filenames:
-            existing.append(os.path.relpath(os.path.join(root, filename), workspace_path))
-
-    goal_tokens = _semantic_tokens(goal or "")
-    resolved: List[str] = []
-    claimed = {path for path in planned if os.path.exists(os.path.join(workspace_path, path))}
-    for path in planned:
-        if os.path.exists(os.path.join(workspace_path, path)):
-            resolved.append(path)
-            continue
-        if _explicitly_requests_new_artifact(path, goal):
-            resolved.append(path)
-            continue
-        extension = os.path.splitext(path)[1].lower()
-        planned_tokens = _artifact_name_tokens(path)
-        planned_is_test = is_runnable_test_file(path)
-        exact_name_candidates = [
-            candidate for candidate in existing
-            if candidate not in claimed
-            and os.path.splitext(candidate)[1].lower() == extension
-            and is_runnable_test_file(candidate) == planned_is_test
-            and os.path.basename(candidate) == os.path.basename(path)
-        ] if len(planned_tokens) >= 2 else []
-        if len(exact_name_candidates) == 1:
-            owner = exact_name_candidates[0]
-            resolved.append(owner)
-            claimed.add(owner)
-            logger.info(
-                "Resolved nonexistent planned artifact '%s' to unique exact-name "
-                "existing owner '%s'.",
-                path, owner,
-            )
-            continue
-        containment_candidates = []
-        if len(planned_tokens) >= 2:
-            for candidate in existing:
-                if candidate in claimed or os.path.splitext(candidate)[1].lower() != extension:
-                    continue
-                if is_runnable_test_file(candidate) != planned_is_test:
-                    continue
-                candidate_tokens = _artifact_name_tokens(candidate)
-                if (
-                    len(candidate_tokens) >= 2
-                    and (
-                        planned_tokens < candidate_tokens
-                        or candidate_tokens < planned_tokens
-                    )
-                ):
-                    containment_candidates.append(candidate)
-        if len(containment_candidates) == 1:
-            owner = containment_candidates[0]
-            resolved.append(owner)
-            claimed.add(owner)
-            logger.info(
-                "Resolved renamed planned artifact '%s' to unique token-containing "
-                "existing owner '%s'.",
-                path, owner,
-            )
-            continue
-        scored = []
-        for candidate in existing:
-            if candidate in claimed or os.path.splitext(candidate)[1].lower() != extension:
-                continue
-            if is_runnable_test_file(candidate) != planned_is_test:
-                continue
-            candidate_tokens = _artifact_name_tokens(candidate)
-            name_overlap = len(planned_tokens & candidate_tokens)
-            goal_overlap = len(goal_tokens & candidate_tokens)
-            if name_overlap == 0 or goal_overlap < 2:
-                continue
-            scored.append((name_overlap * 3 + goal_overlap, candidate))
-        scored.sort(reverse=True)
-        if scored and (len(scored) == 1 or scored[0][0] > scored[1][0]):
-            owner = scored[0][1]
-            resolved.append(owner)
-            claimed.add(owner)
-            logger.info("Resolved planned artifact '%s' to existing owner '%s'.", path, owner)
-        else:
-            resolved.append(path)
-    return resolved
+    return resolve_planned_artifact_owners(
+        planned_files, goal, workspace_path, authorized_paths=authorized_paths, new_artifact_paths=new_artifact_paths,
+    ).resolved
 
 
 def identify_redirected_test_obligations(
