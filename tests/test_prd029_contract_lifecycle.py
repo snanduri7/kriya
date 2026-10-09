@@ -694,9 +694,13 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
     async def unit_commits_a_contract(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            # What the commit seam promotes: ONE transition from the live
-            # registry carrying both the API contract and the capabilities
-            # this milestone unit provides.
+            # The unit's committed cycle, through the real terminal-commit seam (MILESTONE-ZERO-COMMIT-
+            # COMPLETION-001: a milestone completes on a committed verified mutation, never on a reported file
+            # list), then what that commit promotes: ONE transition from the live registry carrying both the API
+            # contract and the capabilities this milestone unit provides.
+            from _milestone_proof_harness import _apply
+
+            _apply(str(workspace), {OWNER: OWNER_V2.encode()})
             transition = cl.derive_contract_transition(
                 workspace_path=workspace, registry=None, original_contents={OWNER: OWNER_V1},
                 final_contents={OWNER: OWNER_V2}, authorizations=[_auth()], transaction_id="tx1",

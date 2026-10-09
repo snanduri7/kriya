@@ -412,7 +412,7 @@ class _MilestoneTransport:
     async def __call__(self, client, model, system_prompt, user_prompt, *args, **kwargs):
         first = (system_prompt or "").splitlines()[0] if system_prompt else ""
         prompt = user_prompt or ""
-        target = next((path for key, path in self.targets.items() if key in prompt), "m1.py")
+        key, target = next(((key, path) for key, path in self.targets.items() if key in prompt), ("integration", "m1.py"))
         if "Goal Spec Compliance Checker" in first:
             ids = re.findall(r"^(REQ-\d+):", prompt, flags=re.MULTILINE)
             content = json.dumps({"compliant": True, "reasoning": "ok", "missing_requirements": [],
@@ -423,7 +423,9 @@ class _MilestoneTransport:
         elif "Planner Agent" in first:
             content = f"Step 1: update {target}"
         elif model == "dev-model":
-            content = f"VALUE = 'final {target}'\n"
+            # Each unit's write is a real change (a byte-identical rewrite is not a mutation and a milestone that
+            # commits nothing fails typed - MILESTONE-ZERO-COMMIT-COMPLETION-001): the content names the writer.
+            content = f"VALUE = 'final {target} ({key})'\n"
         else:
             content = "Review: Approved"
         # A realistic prompt count: the runtime is exact, so usage is evidence (PROVIDER-CONTRACT-001).

@@ -238,9 +238,9 @@ def test_t6_a_direct_goal_whose_every_file_came_back_identical_is_a_typed_stop_n
     """Direct path (no structured plan, no milestone driver): both expected files byte-identical. Nothing downstream
     judges "already satisfied", so the run never reports PASSED on the Developer's identical bytes alone (review F1 of
     the second repair cycle): a typed NO_CHANGE_UNVERIFIED stop through the repair path, nothing applied, tree
-    unchanged. The milestone path keeps its own decider (no_change_verification) - exercised by
-    tests/test_prd024_baseline_auto_policy.py's milestone-reuse test, whose integration unit returns the committed
-    files unchanged and completes."""
+    unchanged. A MILESTONE's zero-change result is decided by the milestone driver (a deterministic no-change proof
+    completes it, a refusal fails it typed - MILESTONE-ZERO-COMMIT-COMPLETION-001, tests/test_prd008_s4c_*); the
+    integration pass is decided by the plan-level original-requirement verification (PRD-020)."""
     engine, workspace = _legacy_engine(tmp_path, [{"filepath": A, "content": A_SRC}, {"filepath": B, "content": B_SRC}])
     gate_outcomes = []
     real_gate = GenerationState.record_gate_outcome

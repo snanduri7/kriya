@@ -91,6 +91,7 @@ from kriya.workflow.workflow import _log_phase_banner
 
 # Typed codes of a milestone completion step that did not complete (MILESTONE-ZERO-COMMIT-COMPLETION-001).
 ARTIFACT_REGISTRY_FAILED = "ARTIFACT_REGISTRY_FAILED"
+COMMIT_EVIDENCE_MISSING = "COMMIT_EVIDENCE_MISSING"  # files reported, no committed cycle recorded, no no-change proof
 
 logger = logging.getLogger(__name__)
 
@@ -618,6 +619,36 @@ def _complete_milestone(
     typed error ``{"code", "detail", ...}`` (nothing persisted as complete)
     when a step fails, or when a zero-commit milestone's deterministic
     no-change verification refused (NO_CHANGE_UNVERIFIED)."""
+    owned = owning_run_commits(workspace_path)
+    run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
+    verification = refusal = None
+    if not entries and result is not None:
+        # S4c-1 (superseded in part, see below): a milestone that committed nothing needs deterministic evidence
+        # covering every acceptance criterion - never a model's "no change" or a generic passing test.
+        verification, refusal = no_change_verification(
+            workspace_path, milestone, result, run_id=run_id, config=config,
+            proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
+        )
+        if refusal is not None:
+            # MILESTONE-ZERO-COMMIT-COMPLETION-001 (owner decision 2026-10-09, option ii; supersedes the S4c-1
+            # "complete, never reused" contract): a milestone that committed no effective output and whose
+            # deterministic no-change verification refused to prove the goal already satisfied is NOT complete -
+            # Developer/model output alone never establishes completion. Decided BEFORE any side effect (no
+            # established dependencies/context, no artifact records, no proof, not in completed_milestone_ids,
+            # hence never reusable); the refusal names what was missing. Milestone criteria are free text today,
+            # so an already-satisfied real-engine milestone fails here: the correct fail-closed behaviour until
+            # criteria gain deterministic verification contracts.
+            if files:
+                # The result REPORTS files but the run recorded no committed cycle (the RunRecord is the only
+                # authority for committed output - never a workflow's reported file list): neither a committed
+                # verified mutation nor a proven no-change. Its own typed code, never a completion.
+                return {"code": COMMIT_EVIDENCE_MISSING, "no_change_refusal": refusal, "detail": (
+                    f"the milestone reported {', '.join(sorted(files))} but the run recorded no committed cycle, and "
+                    "deterministic no-change verification refused to prove the goal already satisfied "
+                    f"({refusal.get('code')}: {refusal.get('detail')})")}
+            return {"code": NO_CHANGE_UNVERIFIED, "no_change_refusal": refusal, "detail": (
+                "the milestone committed no effective output and deterministic no-change verification refused to "
+                f"prove the goal already satisfied ({refusal.get('code')}: {refusal.get('detail')})")}
     try:
         from kriya.tools.validate import get_pom_dependencies
         pom_path = os.path.join(workspace_path, "pom.xml")
@@ -655,30 +686,6 @@ def _complete_milestone(
         logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
         return {"code": ARTIFACT_REGISTRY_FAILED, "detail": f"artifact registry: {e}"}
 
-    owned = owning_run_commits(workspace_path)
-    run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
-    verification = refusal = None
-    if not entries and result is not None:
-        # S4c-1: a milestone that committed nothing is reusable only when
-        # deterministic evidence covers every acceptance criterion, never
-        # on a model's "no change" or a generic passing test.
-        verification, refusal = no_change_verification(
-            workspace_path, milestone, result, run_id=run_id, config=config,
-            proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
-        )
-        if refusal is not None and not files:
-            # MILESTONE-ZERO-COMMIT-COMPLETION-001 (owner decision 2026-10-09, option ii; supersedes the
-            # S4c-1 "complete, never reused" contract): a milestone that committed no effective output and whose
-            # deterministic no-change verification refused to prove the goal already satisfied is NOT complete -
-            # Developer/model output alone never establishes completion. Nothing is persisted as complete (no
-            # proof, not in completed_milestone_ids, hence never reusable); the refusal names what was missing.
-            # Milestone criteria are free text today, so an already-satisfied real-engine milestone fails here:
-            # the correct fail-closed behaviour until criteria gain deterministic verification contracts.
-            # (A result that REPORTS files but recorded no commit cycle is a different, pre-existing corner -
-            # a mocked or broken commit; it keeps S4c's shape: a proof without transaction ids, never reused.)
-            return {"code": NO_CHANGE_UNVERIFIED, "no_change_refusal": refusal, "detail": (
-                "the milestone committed no effective output and deterministic no-change verification refused to "
-                f"prove the goal already satisfied ({refusal.get('code')}: {refusal.get('detail')})")}
     run_state.completion_proofs[milestone.id] = completion_proof_for(
         milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
         completion_origin=completion_origin, no_change_refusal=refusal,
@@ -1344,6 +1351,11 @@ class _MilestonePlanDriver(PlanDriver):
     async def complete_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         milestone = self._milestone(unit)
         if milestone is None:
+            # The integration pass is not a mutation unit: it verifies the plan, and its completion authority is
+            # the plan-level ORIGINAL-REQUIREMENT verification (PRD-020: a plan with an unverified original
+            # requirement is not successful) plus its own deterministic gates. A zero-change integration pass is
+            # the normal shape when the milestones did the work, so the zero-commit milestone rule above does not
+            # apply to it (MILESTONE-ZERO-COMMIT-COMPLETION-001, third review F2, disposition b).
             if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
                 save_milestone_run_state(self.workspace_path, self.run_state)
             return None
@@ -1363,14 +1375,14 @@ class _MilestonePlanDriver(PlanDriver):
             self.artifact_registry, result=result, config=self.engine_config,
         )
         if completion_error is not None:
-            if completion_error["code"] == NO_CHANGE_UNVERIFIED:
+            if completion_error["code"] in (NO_CHANGE_UNVERIFIED, COMMIT_EVIDENCE_MISSING):
                 logger.error("Milestone '%s' NOT complete - %s", milestone.id, completion_error["detail"])
                 return {
-                    "status": "no_change_unverified",
+                    "status": completion_error["code"].lower(),
                     "group_id": self.run_state.group_id,
                     "milestone_id": milestone.id,
                     "quality_gates_passed": False,
-                    "reason_codes": [NO_CHANGE_UNVERIFIED],
+                    "reason_codes": [completion_error["code"]],
                     "error": completion_error["detail"],
                     "no_change_refusal": completion_error.get("no_change_refusal"),
                 }

@@ -5083,8 +5083,11 @@ class WorkflowEngine:
             # CANDIDATE-GATE-BASELINE-POLICY-001: the baseline's own
             # verification call, for the candidate gates' attribution.
             baseline_suite_replay=baseline_suite_run,
-            # Review F1: the milestone driver judges a zero-change result itself
-            # (kriya/workflow/milestones.py no_change_verification); a direct goal has no such decider.
+            # Review F1 / MILESTONE-ZERO-COMMIT-COMPLETION-001: a milestone's zero-change result is decided by the
+            # milestone driver (kriya/workflow/milestones.py _complete_milestone: a deterministic no-change proof
+            # completes it, a refusal fails it typed); the integration pass is decided by the plan-level original-
+            # requirement verification and its gates (PRD-020). A direct goal has no such decider: the typed stop
+            # below is its own.
             no_change_verifier_downstream=milestone_group_id is not None,
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so

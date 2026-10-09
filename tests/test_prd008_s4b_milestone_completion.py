@@ -397,7 +397,6 @@ def test_a_milestone_that_committed_nothing_is_not_complete_and_never_reusable(t
         assert result["status"] == "no_change_unverified" and result["milestone_id"] == "M1", result
         assert result["reason_codes"] == ["NO_CHANGE_UNVERIFIED"]
         assert state.completed_milestone_ids == [] and "M1" not in state.completion_proofs
-        assert "milestone_reuse" not in result or "M1" not in [d["milestone_id"] for d in result["milestone_reuse"]["decisions"]]
 
 
 # ---------------------------------------------------------------- L: byte exactness

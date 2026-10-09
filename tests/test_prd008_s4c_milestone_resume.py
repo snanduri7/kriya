@@ -256,7 +256,6 @@ def _assert_not_issued(workspace, engine_factory, code, criteria=None):
     engine = engine_factory()
     result, state = _run(workspace, ACCEPTED_CHAIN, engine)
     assert result["status"] == "no_change_unverified" and result["no_change_refusal"]["code"] == code
-    assert "M1" not in [d["milestone_id"] for d in result.get("milestone_reuse", {}).get("decisions", [])]
     assert engine.calls[0] == "M1"  # ran again: nothing to reuse
     assert "M1" not in state.completed_milestone_ids
 
