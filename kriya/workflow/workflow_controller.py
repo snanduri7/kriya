@@ -166,6 +166,7 @@ from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
     read_file_revision,
+    strip_java_comments_and_strings,
 )
 from kriya.workflow.execution_plan import PlanSourceKind
 from kriya.workflow.file_resolution import is_runnable_test_file
@@ -1083,6 +1084,9 @@ def build_authoritative_planner_request(
 
 
 _JAVA_CONSTRUCTOR_INSTANTIATION_RE = re.compile(r"\bnew\s+(\w+)\s*\(")
+# A Java type mention: a capitalized identifier in code (comments and string
+# literals blanked first) - the evidence a bare cross-file call needs.
+_JAVA_TYPE_MENTION_RE = re.compile(r"\b([A-Z]\w*)\b")
 
 
 def build_planning_structural_evidence(
@@ -1112,9 +1116,11 @@ def build_planning_structural_evidence(
        simple-name index the duplicate-type Quality Gate already trusts).
     2. calls: bare method-name invocations, resolved to an owning candidate
        file ONLY when that method name is uniquely declared by exactly one
-       OTHER candidate in this bounded set - deliberately conservative
-       (ambiguous/duplicate method names resolve to nothing) to avoid a
-       false relationship in a small-candidate-set name collision. Needed
+       OTHER candidate in this bounded set and NOT by the calling file
+       itself (a self-declared callee resolves to the caller: no edge) -
+       deliberately conservative (ambiguous/duplicate method names resolve
+       to nothing) to avoid a false relationship in a small-candidate-set
+       name collision. Needed
        because Java same-package references (the common brownfield shape -
        Customer/CustomerService/CustomerController/CustomerControllerTest
        all in one package) never produce an `import` statement at all;
@@ -1151,10 +1157,26 @@ def build_planning_structural_evidence(
                 method_owners.setdefault(symbol_name, [])
                 if rel_path not in method_owners[symbol_name]:
                     method_owners[symbol_name].append(rel_path)
+        # STRUCTURAL-EVIDENCE-SELF-CALL-EDGE-001: the simple type names each
+        # Java candidate declares (the same class-name index imports use),
+        # and each Java candidate's code with comments and string literals
+        # blanked - the text a structural claim about it may be read from.
+        declared_types: Dict[str, set] = {}
+        for key, declaring_files in class_locations.items():
+            _ext, _, simple_name = key.partition(":")
+            for declaring in declaring_files:
+                declared_types.setdefault(declaring, set()).add(simple_name)
+        code_text = {
+            rel_path: (strip_java_comments_and_strings(contents[rel_path])
+                       if rel_path.lower().endswith(".java") else contents[rel_path])
+            for rel_path in indexed_paths
+        }
 
         for rel_path in indexed_paths:
             ext = os.path.splitext(rel_path)[1].lower()
             targets: List[str] = []
+            mentioned_types = (set(_JAVA_TYPE_MENTION_RE.findall(code_text[rel_path]))
+                               if ext == ".java" else None)
             for imp in graph.get_imports(rel_path):
                 simple = imp.rsplit(".", 1)[-1]
                 if simple == "*":
@@ -1164,9 +1186,27 @@ def build_planning_structural_evidence(
                         targets.append(owner)
             for callee in graph.get_callees(rel_path):
                 owners = method_owners.get(callee["target"], [])
-                unique_owners = [o for o in owners if o != rel_path]
-                if len(unique_owners) == 1 and unique_owners[0] not in targets:
-                    targets.append(unique_owners[0])
+                # STRUCTURAL-EVIDENCE-SELF-CALL-EDGE-001 (BACKEND-FINAL-CLOSURE-005
+                # cohort 2, C2-S3_A): a callee this file itself declares
+                # resolves to this file - a class's calls to its own methods
+                # are never an edge to another candidate. Before this check
+                # the lookup excluded the calling file and kept "the unique
+                # OTHER owner", so two same-package classes declaring the
+                # same method names (a class and its deprecated twin) each
+                # referenced the other through their own self-calls: a false
+                # mutual edge no plan could order (MISWIRED cycle, planner
+                # exhausted). Symbol evidence that is ambiguous (several
+                # other declarers) still resolves to nothing, as before.
+                if rel_path in owners or len(owners) != 1 or owners[0] in targets:
+                    continue
+                # A bare name alone is weak evidence (C2-S3_A, same incident:
+                # CharBuffer.wrap(...) - a JDK static call - resolved to a
+                # candidate declaring its own wrap()). A Java caller references
+                # another candidate only when its code (comments and strings
+                # blanked) names a type that candidate declares.
+                if mentioned_types is not None and not (declared_types.get(owners[0], set()) & mentioned_types):
+                    continue
+                targets.append(owners[0])
             # Constructor instantiation ("new ClassName(") - deliberately a
             # SEPARATE, narrow regex scan here, not a _parse_java()/"calls"
             # relation (that regex requires a preceding "." and never
@@ -1184,7 +1224,10 @@ def build_planning_structural_evidence(
             # Java test conventions ("ClassUnderTest x = new ClassUnderTest()")
             # and far more robust for "this test exercises that class" than
             # depending on a single uniquely-named method resolving cleanly.
-            for class_name in _JAVA_CONSTRUCTOR_INSTANTIATION_RE.findall(contents.get(rel_path, "")):
+            # Scanned over the comment- and string-blanked code
+            # (STRUCTURAL-EVIDENCE-SELF-CALL-EDGE-001): a Javadoc example
+            # such as "StrBuilder b = new StrBuilder();" is not an instantiation.
+            for class_name in _JAVA_CONSTRUCTOR_INSTANTIATION_RE.findall(code_text.get(rel_path, "")):
                 for owner in class_locations.get(f"{ext}:{class_name}", []):
                     if owner != rel_path and owner not in targets:
                         targets.append(owner)

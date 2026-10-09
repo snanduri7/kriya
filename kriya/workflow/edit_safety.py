@@ -824,7 +824,7 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
     return apply_line_block_edits(original_content, anchored_replaces(edits)).text
 
 
-def _strip_java_comments_and_strings(code: str) -> str:
+def strip_java_comments_and_strings(code: str) -> str:
     """Best-effort removal of Java string/char literals and // and /* */
     comments, replacing each with equal-length whitespace (blank, not deleted,
     so a caller relying on absolute character positions for anything else
@@ -885,6 +885,9 @@ def _find_duplicate_top_level_type(stripped: str) -> Optional[str]:
             return name
         seen.add(name)
     return None
+
+
+_strip_java_comments_and_strings = strip_java_comments_and_strings  # private alias kept for existing callers
 
 
 def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
