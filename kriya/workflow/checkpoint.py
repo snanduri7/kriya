@@ -97,15 +97,28 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
     `git status`/`git add`/`git commit` run by a human or a concurrent
     process against the REAL index are structurally unaffected, since git's
     own index locking is per-index-file, not global), seeded from HEAD
-    (`git read-tree HEAD`), then `git add -A -- . ':!.kriya'` stages the
-    CURRENT on-disk content of every tracked-or-untracked-and-not-ignored
-    path (deliberately excluding `.kriya/` - see the module docstring's own
-    "checkpoint write must not self-invalidate" requirement; reusing the
-    workspace's own real `.gitignore` semantics for everything else, rather
-    than inventing a second ignore policy - target/build/dist/node_modules/
+    (`git read-tree HEAD`), then `git add -A -- .` stages the CURRENT
+    on-disk content of every tracked-or-untracked-and-not-ignored path
+    (reusing the workspace's own real `.gitignore` semantics rather than
+    inventing a second ignore policy - target/build/dist/node_modules/
     venvs/caches already excluded by any real project's own `.gitignore`,
     exactly the existing exclusion this function reuses, never
-    re-implements). `git write-tree` then produces a real, canonical,
+    re-implements), and `git rm -r --cached -- .kriya` then drops the ROOT
+    Kriya runtime directory from that scratch index. Contract
+    (WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR, 2026-10-09): the root
+    `.kriya/` is ALWAYS excluded from the identity - absent, present and
+    ignored, present and untracked, or tracked (the base commit folded in
+    below keeps tracked `.kriya` content at HEAD bound) - so Kriya's own
+    runtime writes (checkpoints, test reports, worktrees) never change the
+    identity and never make it unavailable (the module docstring's
+    "checkpoint write must not self-invalidate" requirement). It used to be
+    excluded through the pathspec `':!.kriya'`, which git rejects (exit 1:
+    "paths are ignored by one of your .gitignore files") the moment
+    `.kriya` exists on disk in a repository that ignores it - measured on
+    git 2.54.0 - so every identity read after the first gate run returned
+    None there. A nested directory named `.kriya` is repository content
+    (the removal is top-anchored, as the pathspec was). `git write-tree`
+    then produces a real, canonical,
     content-addressed git tree object hash of that scratch index - stable
     under whitespace-only path reformatting, immune to mtime (git blobs are
     pure content hashes), correct for renames/deletions (a real git tree
@@ -151,10 +164,18 @@ def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
         if seed.returncode != 0:
             return None
         add = subprocess.run(
-            ["git", "add", "-A", "--", ".", ":!.kriya"],
+            ["git", "add", "-A", "--", "."],
             cwd=workspace_path, env=env, capture_output=True, text=True,
         )
         if add.returncode != 0:
+            return None
+        # The root Kriya runtime directory is never part of the identity (see the docstring's contract);
+        # --ignore-unmatch: nothing to drop when .kriya is absent or ignored (git never staged it).
+        drop_runtime_dir = subprocess.run(
+            ["git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".kriya"],
+            cwd=workspace_path, env=env, capture_output=True, text=True,
+        )
+        if drop_runtime_dir.returncode != 0:
             return None
         write = subprocess.run(
             ["git", "write-tree"], cwd=workspace_path, env=env, capture_output=True, text=True,

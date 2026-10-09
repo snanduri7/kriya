@@ -555,3 +555,44 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   (p1 x2, r2 delivered, D4 t3/t5, owner-reopen two-file); M2 never proposes -> KILLED, 4 failed (zero-mutation control,
   D4 t1/t2, owner-reopen no-change case); M3 drops the delivered event -> KILLED, 6 failed (the same six as M1).
   Registry row ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 -> CLOSED with this slice.
+
+### 13.3 WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR (P1, found by the P1-2 reproducer) - fix
+
+- Observation (MEASURED, 2026-10-09): P1-2 reproducer case 3 (a pre-existing failure whose text the candidate changed)
+  blocked STABILITY_UNRESOLVED with level1 CHANGED_FAILURE, no confirmed regression and exactly ONE base run - the
+  owner's two bounded stability replays never ran. Probe 1 (operator, repair-003/scratch/p1_2_revision_probe.py): the
+  toy workspace's content hash is a value before one gate run and None after it, git status clean both times. Probe 2
+  (Claude, p1_2_revision_probe2.py): cwd, tempdir and os.environ unchanged; of the hash's four git steps only
+  `git add -A -- . ':!.kriya'` fails (rc=1, "The following paths are ignored by one of your .gitignore files: .kriya").
+- Producer (TRACED + MEASURED on git 2.54.0, repair-003/prefix/WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR_measurements.txt):
+  `kriya/workflow/checkpoint.py::compute_workspace_content_hash` names `.kriya` in its exclusion pathspec; git rejects a
+  pathspec naming an ignored path that exists on disk, whatever the staged set (correct in every variant);
+  `advice.addIgnoredFile=false`, `--ignore-errors` and `:(exclude)` all still exit 1. `.kriya` does not exist before the
+  first gate run, so the first identity read works and every later one returns None. The sibling dirty check in
+  `compute_workspace_fingerprint` (git status with the same pathspec) exits 0 and is unaffected.
+- Root cause: CONFIRMED. Classification: KRIYA_PRODUCT, supported-backend correctness, brownfield-configuration shape
+  (a repository that ignores Kriya's runtime directory - the natural thing to do). The twelve frozen repositories do
+  not ignore .kriya/ (C2-S2_A: untracked in git status), so the final twelve never reached it. Blast radius: every
+  consumer of the identity fails closed - checkpoint identity, PRD-024 baseline capture (indeterminate -> hard stop
+  under `required`), REG-R1 stability guard (BASELINE_REVISION_CHANGED -> STABILITY_UNRESOLVED, no replay), the
+  attribution owner's `current_revision`.
+- Owner decision (2026-10-09): fix now as its own slice (it blocks the P1-2 attribution/stability validation); never
+  work around it by un-ignoring .kriya/ in the P1-2 toy workspace; contract: the root `.kriya/` is ALWAYS excluded
+  from the identity (absent, present and ignored, present and untracked, tracked - the folded-in base commit keeps
+  tracked `.kriya` content at HEAD bound); a nested directory named `.kriya` stays repository content; unrelated
+  ignored files keep their semantics; real content changes still change the hash.
+- Fix (one function): stage `git add -A -- .`, then `git rm -r -q --cached --ignore-unmatch -- .kriya` drops the root
+  runtime directory from the scratch index (top-anchored like the pathspec was); the docstring states the contract.
+  Measured equivalent on the throwaway repository: rc=0 and the identical tree with .kriya ignored, present-not-
+  ignored and absent.
+- Reproducer first (`tests/test_workspace_content_hash_kriya_dir.py`), MEASURED pre-fix by the operator
+  (repair-003/prefix/WORKSPACE-CONTENT-HASH_reproducer_before.txt): the three None-hash cases failed exactly as
+  predicted (measured shape, present_ignored, real-content); two further failures (present_not_ignored, tracked) were
+  a status-filter bug in the test helper (column of the path in porcelain output), fixed with the fix stage, not the
+  product; absent / nested / non-git controls passed.
+- Mutation control: repair-003/mutations/run_hash_mutation.sh restores the old pathspec (no removal step) - the
+  reproducer must fail on the three None-hash cases.
+- Verification (operator runs, 2026-10-09): reproducer 8 passed; mutant H1 (old exclusion pathspec restored) KILLED -
+  3 failed / 5 passed, checkpoint.py restored byte-identical; adjacent checkpoint / workspace-identity / resume /
+  subtask-checkpoint / validation-baseline / analyzer-cache / proposal-promotion / REG-R1 / workflow modules: 1134
+  passed. Registry row CLOSED. Then back to P1-2 case 3 (13.2).
