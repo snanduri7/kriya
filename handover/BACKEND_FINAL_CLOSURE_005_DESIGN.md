@@ -738,3 +738,68 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   invariant unchanged).
 - Verification (operator rerun, 2026-10-09): reproducer, capability adapters, PRD-011 toolchain evidence, contained
   Python test gate, Linux OCI venv interpreter and the registry tripwire all green. Registry row CLOSED.
+
+### 13.6 RUNTIME-VERIFICATION-ENV-STOP-001 (P2, independent review of 6d97558, finding F1) - fix
+
+- Review (2026-10-10, repair-003/reviews/REVIEW_RESULT_c3.md, verdict APPROVE WITH CHANGES; dispositions in
+  reviews/REVIEW_DISPOSITION_c3.md): F1 CONFIRMED - `run_app` / `run_app_sequence` return the typed
+  `environment_reason_code = PYTHON_ENVIRONMENT_UNAVAILABLE` (13.5) when the REQUIRED environment cannot be created,
+  nothing launched, but the runtime-verification consumer never reads it.
+- Observation (MEASURED, repair-003/scratch/f1_runtime_probe_output.txt, this session's own probe on a throwaway
+  workspace with a real dependency declaration and only `python -m venv` stubbed to exit 1): both runners return
+  success False, returncode None, `environment_reason_code` set, `steps` None; `acceptance.
+  runtime_verification_infrastructure_reason(result)` is None for both; the application never launched.
+- Producer (TRACED): `attempt._raise_runtime_verification_infrastructure_failure` (one consumer: the verification-only
+  path `_execute_runtime_verification_directly` and the mutating inline runtime block of `run_attempt`) returns early
+  for a deterministic sequence, else asks `runtime_verification_infrastructure_reason`, which keys on output text
+  (entrypoint / acquisition / prerequisite markers) and on steps with no exit code - never on the structured code; the
+  typed-stop helper `_stop_on_environment_gate_result` is called for compile, test and targeted_test results only. The
+  result then grades as the candidate's runtime behaviour (gate type `run_verification`): in a verification-only unit
+  the LR-R1-P4 admission ends it VERIFICATION_RETRY_NO_CHANGE_POSSIBLE (verification-owner recovery, the C2-S2_A-final
+  lineage shape); in a mutating unit a Developer retry. The managed-service admission
+  (`_validate_and_convert_managed_service_contract`) grounds `service_command` through the same resolver and refuses
+  to start, but as MANAGED_SERVICE_CONTRACT_INVALID with no reason code. Other consumers of `run_app_sequence`
+  results, not in scope: the self-correction re-run (attempt.py, reachable only after a first run that the fixed
+  consumer admitted) and the milestone drift replay (milestones.py, advisory). `run_app` has no production caller.
+- Root cause: CONFIRMED (probe + trace + the pre-fix reproducer). Classification: KRIYA_PRODUCT, supported-backend
+  correctness (Python host and contained), same class as 13.5 on a different gate. Not model behaviour.
+- Owner decision (2026-10-10): FIX NOW. Invariant: when interpreter/venv preparation failed and the structured
+  environment reason code is present, runtime verification stops as an ENVIRONMENT failure (the existing
+  `verification_infrastructure_failure` / STOP_ENVIRONMENT path, `diagnostics.reason_code` carrying the code)
+  before grading candidate runtime behaviour, before Developer retry and before owner recovery; keyed on structured
+  fields only, never output text; the deterministic-sequence early return stays for commands that actually executed
+  with process authority; `run_app_sequence` callers and the managed-service admission covered. No false-success
+  semantics change: failure typing and retry suppression only.
+- Fix (`kriya/workflow/attempt.py` only, two sites): (1) `_raise_runtime_verification_infrastructure_failure` calls
+  `_stop_on_environment_gate_result(state, run_result, "runtime")` FIRST - before the deterministic early return (a
+  sequence that never executed has no process authority) - reusing the compile/test gates' typed stop unchanged;
+  (2) `_execute_managed_service_verification`, on an admission refusal, consults the validator's structured
+  `python_environment_error` (code, message) - reset and set by every resolution, so it is the grounding step's own
+  record - and raises the same typed stop (gate `managed_service`) before the MANAGED_SERVICE_CONTRACT_INVALID
+  failure. `acceptance.py`, `validate.py`, `verification_coordinator.py`, `retry_strategy.py` unchanged.
+- Reproducer first (`tests/test_repair_003_f1_runtime_environment_stop.py`): (1) the measured shape through the real
+  path - `run_attempt` -> verification-only path -> VerificationCoordinator -> `_execute_runtime_verification_directly`
+  -> the REAL `run_app_sequence` with only `python -m venv` stubbed -> the consumer, asserting the typed stop, grader
+  never awaited, Developer never called, nothing launched, STOP_ENVIRONMENT with no owner-recovery trigger; (2) the
+  shared consumer fed the real producer result, an application command and a `python -m pytest` sequence that never
+  executed; (3) the managed-service admission with the service runner patched to fail if called; controls: an
+  application that really ran and exited 3 is graded and keeps its run_verification routing, and a deterministic
+  sequence that really executed keeps the early return. MEASURED pre-fix by the operator (repair-003/prefix/
+  F1_reproducer_before.txt): 5 failed / 1 passed - the four defect cases exactly as predicted (type `run_verification`
+  with the grader's reasoning and the captured PYTHON_ENVIRONMENT_UNAVAILABLE output; DID NOT RAISE twice;
+  MANAGED_SERVICE_CONTRACT_INVALID with diagnostics None) plus the application control at its LAST assertion: it
+  expected a Developer retry, but a verification-only unit's genuine runtime failure ends on the PRD-026 no-progress
+  terminal (LR-R1-P4 admission, retry_strategy) - a wrong expectation in the control, corrected to assert that
+  terminal (not the environment stop); production code was not changed for it.
+- Predicted post-fix: 6/6; mutants F1-M1 (structured check removed) kills the real-path case and both shared-consumer
+  cases, F1-M2 (check moved after the deterministic return) kills only the deterministic case, F1-M3 (managed-service
+  check removed) kills only the managed-service case (repair-003/mutations/run_f1_mutations.sh); adjacent
+  runtime-verification / managed-service / typed-stop / admission modules unchanged in outcome.
+- Verification (operator runs, 2026-10-10): reproducer 6/6 (repair-003/prefix/F1_reproducer_after.txt); mutants
+  F1-M1 KILLED 3 failed / 3 passed (the real-path case and both shared-consumer cases), F1-M2 KILLED 1 failed / 5
+  passed (the deterministic case only), F1-M3 KILLED 1 failed / 5 passed (the managed-service case only), attempt.py
+  restored byte-identical (repair-003/mutations/F1-M*.txt) - every prediction matched; adjacent 23 modules (runtime
+  verification, managed service, typed stop, admission, LR-R1-P4, milestones, agents, workflow, registry): 1469
+  passed, the one failure the registry tripwire on this slice's own row (closure_evidence must be non-empty on
+  every row, including OPEN; a harness contract missed when the row was added, filled with the closure). Registry
+  row CLOSED.

@@ -4503,7 +4503,18 @@ def _raise_runtime_verification_infrastructure_failure(
     already the deterministic verdict.  Entrypoint-shaped text in their
     output therefore belongs to test/build execution and must never be
     reinterpreted by application-runtime infrastructure handling.
+
+    RUNTIME-VERIFICATION-ENV-STOP-001 (third repair cycle review F1,
+    2026-10-10): the structured ``environment_reason_code`` is consulted
+    first - the validator could not prepare the environment the command
+    needs (VERIFICATION-UNIT-ENV-FALLBACK-001's typed result), so nothing
+    ran: there is no process authority for the deterministic early return
+    below and no behaviour to grade. Keyed on the structured field only,
+    never on output text; the same typed stop the compile and test gates
+    take (STOP_ENVIRONMENT: no grading, no Developer retry, no owner
+    recovery).
     """
+    _stop_on_environment_gate_result(state, run_result, "runtime")
     if deterministic_sequence_kind(commands) is not None:
         return
     # D4: a missing entrypoint is owned by whoever chose it (the validator's
@@ -5591,6 +5602,17 @@ async def _execute_managed_service_verification(
         judgment.get("managed_service"), ctx.worktree_path, validator,
     )
     if invalid_reason:
+        # RUNTIME-VERIFICATION-ENV-STOP-001 (review F1, 2026-10-10): the
+        # admission grounds service_command through the interpreter
+        # resolver, which records on the validator - structured, (code,
+        # message) - that the REQUIRED environment could not be prepared.
+        # That is the environment stop, never a verdict on the judgment's
+        # contract: the service cannot start whatever the contract says.
+        environment = validator.python_environment_error
+        if environment is not None:
+            _stop_on_environment_gate_result(
+                state, {"environment_reason_code": environment[0], "output": environment[1]}, "managed_service",
+            )
         message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
         logger.warning(message)
         failure = Failure(
