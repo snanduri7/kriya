@@ -86,7 +86,9 @@ class BaselineSuiteVerdict:
 
 def suite_verdict_from_report(result: Mapping[str, Any], report: Any) -> BaselineSuiteVerdict:
     """The baseline suite verdict from one validator result and its structured test report
-    (kriya/tools/test_execution.py): complete per-case evidence decides; anything less is INDETERMINATE."""
+    (kriya/tools/test_execution.py): complete per-case evidence decides; anything less is INDETERMINATE.
+    Known limit: a failed run whose complete report names failing cases is PRE_EXISTING even when a failure
+    outside the cases (a collection error) also contributed - the report cannot tell them apart."""
     from kriya.tools import test_execution
 
     if report is None or not report.complete or not report.cases:

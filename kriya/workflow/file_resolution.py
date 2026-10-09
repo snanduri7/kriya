@@ -200,6 +200,18 @@ class ArtifactOwnerResolution:
     new_artifacts_kept: List[str]
 
 
+def artifact_resolution_scope(write_scope_mode: Any, allowed_write_relpaths: Optional[Iterable[str]]) -> Optional[List[str]]:
+    """The one reading of (write scope mode, allowed paths) as the resolver's
+    ``authorized_paths`` (review F4): None - unrestricted - only for an explicit
+    UNRESTRICTED mode or no mode with no allowlist (the legacy inference);
+    otherwise the allowlist (empty for DENY_ALL: nothing may be redirected to)."""
+    mode = getattr(write_scope_mode, "value", write_scope_mode)
+    paths = list(allowed_write_relpaths or [])
+    if mode == "unrestricted" or (mode is None and not paths):
+        return None
+    return paths
+
+
 def planned_new_artifact_paths(plan: Any, subtask_id: Optional[str]) -> List[str]:
     """The planned files of ``subtask_id`` whose validated action is ``create``
     (kriya/workflow/plan_validation.py canonicalizes the action against the

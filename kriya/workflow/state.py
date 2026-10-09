@@ -363,9 +363,10 @@ class GenerationState:
     all_files_written: Set[str] = field(default_factory=set)
     # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: candidate paths whose latest
     # staged bytes equal the captured original bytes (an identical rewrite,
-    # or a later attempt restoring the baseline). Not a mutation: never in
-    # all_files_written, nothing to apply; a planned one settles through the
-    # verified no-change contract (kriya/workflow/verified_no_change.py).
+    # or a later attempt restoring the baseline). The bytes reach the sandbox
+    # through the same commit batch, but the path is not a mutation: never
+    # in all_files_written, nothing to apply; a planned one settles through
+    # the verified no-change contract (kriya/workflow/verified_no_change.py).
     identical_rewrites: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
     # FILE-INTEGRITY-CONTRACT-001: the exact workspace bytes behind each

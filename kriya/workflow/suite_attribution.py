@@ -87,7 +87,8 @@ class SuiteAttribution:
 
     def gate_evidence(self) -> Dict[str, Any]:
         """What a gate outcome records about this decision (content-free)."""
-        return {"scope": self.scope, "blocking": self.blocking, "pre_existing_only": self.pre_existing_only,
+        return {"scope": self.scope, "suite_success": self.suite_success,  # the raw verdict stays readable (review F2)
+                "blocking": self.blocking, "pre_existing_only": self.pre_existing_only,
                 "level1_classification": self.delta.level1.classification.value,
                 "confirmed_regressions": self.confirmed_regressions(),
                 "blocking_reasons": list(self.delta.blocking_reasons)}

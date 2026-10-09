@@ -194,3 +194,91 @@ def test_end_to_end_the_planned_new_test_is_written_at_its_planned_path_and_the_
     assert f'path="{OTHER_MODULE_TEST}"' not in observed.runtime.transcript()
     assert f'path="{PLANNED_NEW_TEST}"' in observed.runtime.transcript()
     assert not any("outside_authorized_scope" in str(r.get("payload")) for r in observed.of("recovery.decision"))
+
+
+# ------------------------------------------------------------------ the Developer-path call site (review F5)
+
+def test_a_developer_invented_path_resolving_to_an_out_of_scope_owner_is_refused_at_the_developer_path(tmp_path):
+    """The attempt-stage resolver (kriya/workflow/attempt.py): the Developer's result names an invented parallel path
+    whose unique exact-name owner exists OUTSIDE the unit's scope. The redirect is refused and recorded (stage
+    developer); the Developer's own path is not rewritten to the out-of-scope owner, so the write authority decides
+    it as it always has (a policy denial, never a redirected write into the other module). The structured protocol
+    rejects an answer naming a path other than the requested one before resolution (measured: INVALID_EDIT_PROTOCOL),
+    so the invented path enters through the Developer's result list, the legacy-shaped answer this site still serves."""
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from kriya.config import AppConfig
+    from kriya.core import model_runtime
+    from kriya.core.kernel import Kernel
+    from kriya.core.llm import LLMClient
+    from kriya.workflow.state import GenerationState
+    from kriya.workflow.workflow import WorkflowEngine
+
+    planned = "core/compiler.py"          # the unit's own file (a different basename: the invented name is unique)
+    other = "legacy/path_compiler.py"      # the only existing file with the invented basename - outside the scope
+    invented = "src/path_compiler.py"
+    model_runtime.clear_model_runtime_cache()
+    cfg = AppConfig()
+    cfg.llm.model = "dev-model"
+    cfg.llm.context_window = 32768
+    cfg.llm.extra_body = {}
+    cfg.llm_chain = []
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    workspace = tmp_path / "ws"
+    for rel, text in {"core/__init__.py": "", planned: "def compile_path(text):\n    return text.strip()\n",
+                      "legacy/__init__.py": "", other: "def compile_path(text):\n    return text\n"}.items():
+        (workspace / rel).parent.mkdir(parents=True, exist_ok=True)
+        (workspace / rel).write_text(text)
+    import subprocess
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"]):
+        subprocess.run(["git", *args], cwd=workspace, check=True, capture_output=True)
+    plan = EngineeringPlan.model_validate({
+        "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}],
+        "acceptance_criteria": [{"id": "ac1", "description": "compiles", "method": "tool", "tool_name": "compile"}],
+        "subtasks": [{"id": "s1", "description": "reject an empty path", "execution_method": "model",
+                      "planned_files": [{"path": planned, "action": "modify"}], "relevant_global_invariant_ids": ["gi1"],
+                      "acceptance_criteria_ids": ["ac1"],
+                      "verification": [{"type": "tool", "tool_name": "compile", "description": "compile"}]}]})
+    events = []
+    real_record = GenerationState.record_event
+
+    def record(state, event):
+        events.append(event)
+        return real_record(state, event)
+
+    async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
+        del llm, client, model, user_prompt, args, kwargs
+        first = (system_prompt or "").splitlines()[0] if system_prompt else ""
+        content = json.dumps({"files": [planned]}) if "File List Planner" in first else "Review: Approved"
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 100, "completion_tokens": 5,
+                "finish_reason": "stop", "provider_metadata": {}}
+
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    engine.developer.run_generation = AsyncMock(return_value=[
+        {"filepath": invented, "content": "def compile_path(text):\n    raise ValueError\n"}])
+    with patch.object(LLMClient, "_request_once", new=transport), \
+         patch.object(GenerationState, "record_event", new=record), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: {"success": True, "output": "1 passed"}):
+        result = asyncio.run(engine.run_generation_workflow(
+            goal="Make compile_path reject an empty path.", workspace_path=str(workspace), predetermined_plan="p",
+            predetermined_design="", predetermined_architect_files=[planned], allowed_write_relpaths=[planned],
+            structured_plan=plan, current_subtask_id="s1",
+            required_verification=[{"type": "tool", "tool_name": "compile", "description": "compile"}],
+            approval_callback=AsyncMock(return_value=True)))
+
+    refused = [e for e in events if e.kind == "file_resolution.redirect_refused"]
+    assert refused and refused[0].details["stage"] == "developer", [e.kind for e in events][:30]
+    assert refused[0].details["planned"] == invented and refused[0].details["owner"] == other
+    assert refused[0].details["tier"] == "exact_name" and refused[0].details["authorized_paths"] == [planned]
+    assert result["quality_gates_passed"] is False  # the invented path is outside the scope: the write authority refused it
+    assert (workspace / other).read_text() == "def compile_path(text):\n    return text\n"  # never redirected into the other module
+    assert (workspace / planned).read_text() == "def compile_path(text):\n    return text.strip()\n"

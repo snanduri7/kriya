@@ -234,56 +234,54 @@ def test_t5_a_retry_that_restores_a_file_to_its_baseline_bytes_withdraws_it_from
     assert verified.details["paths"] == [B] and verified.details["written_paths"] == [A]
 
 
-def test_t6_outside_the_enforce_contract_an_identical_rewrite_is_delivered_unchanged_never_never_written(tmp_path):
-    """The milestone / direct path (no structured plan): an integration-style unit that returns both expected files
-    byte-identical is complete (nothing was left unwritten) but mutates nothing - result files are empty and the
-    completion is decided downstream by the milestone no-change verification, never by the write. Found by the
-    PRD-024 milestone-reuse test after the first D4 change called this shape INCOMPLETE GENERATION."""
-    model_runtime.clear_model_runtime_cache()
-    cfg = AppConfig()
-    cfg.llm.model = "dev-model"
-    cfg.llm.context_window = 32768
-    cfg.llm.extra_body = {}
-    cfg.llm_chain = []
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    cfg.autonomy.spec_compliance_enabled = False
-    cfg.paths.skills = str(tmp_path / "skills")
-    cfg.paths.memory = str(tmp_path / "memory")
-    cfg.logging.file_enabled = False
-    cfg.logging.run_file_enabled = False
-    workspace = tmp_path / "ws"
-    (workspace / "shop").mkdir(parents=True)
-    (workspace / "shop/__init__.py").write_text("")
-    (workspace / A).write_text(A_SRC)
-    (workspace / B).write_text(B_SRC)
-    _git(workspace, "init", "-q")
-    _git(workspace, "add", "-A")
-    _git(workspace, "commit", "-qm", "base")
-    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
-    engine.developer.run_generation = AsyncMock(return_value=[{"filepath": A, "content": A_SRC}, {"filepath": B, "content": B_SRC}])
+def test_t6_a_direct_goal_whose_every_file_came_back_identical_is_a_typed_stop_never_passed(tmp_path):
+    """Direct path (no structured plan, no milestone driver): both expected files byte-identical. Nothing downstream
+    judges "already satisfied", so the run never reports PASSED on the Developer's identical bytes alone (review F1 of
+    the second repair cycle): a typed NO_CHANGE_UNVERIFIED stop through the repair path, nothing applied, tree
+    unchanged. The milestone path keeps its own decider (no_change_verification) - exercised by
+    tests/test_prd024_baseline_auto_policy.py's milestone-reuse test, whose integration unit returns the committed
+    files unchanged and completes."""
+    engine, workspace = _legacy_engine(tmp_path, [{"filepath": A, "content": A_SRC}, {"filepath": B, "content": B_SRC}])
+    gate_outcomes = []
+    real_gate = GenerationState.record_gate_outcome
 
-    async def complete(system_prompt, user_prompt, *args, **kwargs):
-        del user_prompt, args, kwargs
-        system = system_prompt or ""
-        if "Kriya Planner Agent" in system:
-            return "Step 1: review the shop files"
-        if "Kriya Architect Agent" in system:
-            return "Design: shop/service.py and shop/controller.py stay consistent"
-        if "File List Planner" in system:
-            return json.dumps({"files": [A, B]})
-        return "Review: Approved"
+    def gate(state, outcome):
+        gate_outcomes.append(outcome)
+        return real_gate(state, outcome)
 
-    engine.llm.complete = complete
-    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+    with patch.object(GenerationState, "record_gate_outcome", new=gate), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: TESTS_PASS):
         result = asyncio.run(engine.run_generation_workflow(goal=GOAL, workspace_path=str(workspace),
                                                             approval_callback=AsyncMock(return_value=True)))
 
-    assert result.get("failure_category") != "quality_gates_exhausted", result.get("failure_category")
-    assert result["files"] == [], result["files"]
+    assert result["quality_gates_passed"] is False
+    assert result["files"] == []
     assert _bytes(workspace) == {A: A_SRC.encode(), B: B_SRC.encode()}
-    assert not any("incomplete_generation" == (o.get("failure_type") or o.get("type")) for o in result.get("deterministic_gate_evidence") or [])
+    stops = [o for o in gate_outcomes if (o.get("failure_type") or o.get("type")) == "unverified_no_change"]
+    assert stops and "NO_CHANGE_UNVERIFIED" in str(stops[0].get("output", "")) and "byte-identical" in str(stops[0].get("output", ""))
+    assert not any((o.get("failure_type") or o.get("type")) == "incomplete_generation" for o in gate_outcomes)
+
+
+def test_t6b_a_restored_unplanned_path_is_never_a_no_change_proposal():
+    """Review F3: the identical set may hold a restoration of a file the unit never planned (a protected caller
+    restored to its baseline bytes); only the unit's planned paths join the no-change proposal."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.attempt import _verified_no_change_proposal
+
+    plan = _plan(TOOL_CRITERION)
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        for rel in (A, B, "lib/helper.py"):
+            os.makedirs(os.path.join(root, os.path.dirname(rel)), exist_ok=True)
+            open(os.path.join(root, rel), "w").write("x\n")
+        ctx = SimpleNamespace(structured_plan=plan, current_subtask_id="s1", worktree_path=root)
+        state = SimpleNamespace(all_files_written={A}, identical_rewrites={B, "lib/helper.py"})
+        assert _verified_no_change_proposal(state, ctx, [], ["controller.py"]) == [B]
+        state = SimpleNamespace(all_files_written={A}, identical_rewrites={"lib/helper.py"})
+        assert _verified_no_change_proposal(state, ctx, [], ["controller.py"]) == []
 
 
 def _legacy_engine(tmp_path, developer_files):

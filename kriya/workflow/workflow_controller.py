@@ -1117,10 +1117,12 @@ def build_planning_structural_evidence(
     2. calls: bare method-name invocations, resolved to an owning candidate
        file ONLY when that method name is uniquely declared by exactly one
        OTHER candidate in this bounded set and NOT by the calling file
-       itself (a self-declared callee resolves to the caller: no edge) -
+       itself (a self-declared callee resolves to the caller: no edge), and
+       only when the caller's code names a type the callee's file declares -
        deliberately conservative (ambiguous/duplicate method names resolve
-       to nothing) to avoid a false relationship in a small-candidate-set
-       name collision. Needed
+       to nothing; a chained call on a factory result or a var-typed local
+       that never names the type yields no edge) to avoid a false
+       relationship in a small-candidate-set name collision. Needed
        because Java same-package references (the common brownfield shape -
        Customer/CustomerService/CustomerController/CustomerControllerTest
        all in one package) never produce an `import` statement at all;
@@ -5690,6 +5692,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 ),
                 strict_spec_compliance=True,
                 execution_scope=f"subtask={target.id} role={execution_role}",
+                reopened_owner=execution_role == "verification_owner_recovery",
                 grounding_goal=goal,
                 migration_resolution=migration_resolution,
                 strict_dependency_index=bool(

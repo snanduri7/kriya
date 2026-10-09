@@ -181,6 +181,7 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.file_resolution import (
     _resolve_file_paths_from_design,
+    artifact_resolution_scope,
     classify_plan_completeness,
     extract_expected_files,
     find_brownfield_public_api_changes,
@@ -608,7 +609,8 @@ def deterministic_gate_evidence(
 
 
 def _settle_no_change_proposal(
-    state: GenerationState, structured_plan: Any, subtask_id: Optional[str], worktree_path: str,
+    state: GenerationState, structured_plan: Any, subtask_id: Optional[str], worktree_path: str, *,
+    reopened_owner: bool = False,
 ) -> None:
     """ENFORCE-VERIFIED-NO-CHANGE-001: decide a unit's NO CHANGE proposal
     from the final attempt's deterministic evidence, after every normal gate
@@ -628,6 +630,38 @@ def _settle_no_change_proposal(
     )
 
     attempt = state.attempt_number
+    identical = sorted(set(state.no_change_proposal) & state.identical_rewrites)
+    if reopened_owner and identical:
+        # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 x the owner reopen: the
+        # controller accepts a reopened owner only on a byte change, so a
+        # regeneration identical to the current content can never be the
+        # repair - the typed no-progress stop the verification-only
+        # admission already uses (one attempt, the verification failure
+        # stands), never repair retries on the same identical answer.
+        from kriya.workflow.retry_progress import VERIFICATION_RETRY_NO_CHANGE_POSSIBLE
+        from kriya.workflow.retry_strategy import NO_PROGRESS_STOP_KEY
+
+        message = (f"{VERIFICATION_RETRY_NO_CHANGE_POSSIBLE}: the reopened owner regenerated {', '.join(identical)} "
+                   "byte-identical to the current content - not a repair; the verification failure stands.")
+        failure = Failure(
+            type="verified_no_change_refused", message=message, raw_output=message, source="verified_no_change",
+            authority="deterministic", file_locations=[FileLocation(filepath=path) for path in identical],
+            likely_files=identical,
+            # The retry strategy owns the no-progress terminal; this failure declares it (applied after the
+            # workspace-progress classification, which would otherwise reset the flag).
+            diagnostics={"reason_code": VERIFICATION_RETRY_NO_CHANGE_POSSIBLE, "identical_rewrites": identical,
+                         NO_PROGRESS_STOP_KEY: VERIFICATION_RETRY_NO_CHANGE_POSSIBLE},
+            attempt=attempt,
+        )
+        state.record_gate_outcome(failure.to_gate_outcome())
+        state.record_event(RunEvent(
+            kind="unit.verified_no_change_refused", attempt=attempt, source="workflow",
+            authority=EventAuthority.AUTHORITATIVE,
+            details={"subtask": subtask_id, "paths": list(state.no_change_proposal),
+                     "refusal": {"code": VERIFICATION_RETRY_NO_CHANGE_POSSIBLE, "detail": message,
+                                 "identical_rewrites": identical, "reopened_owner": True}},
+        ))
+        raise QualityGateFailure(failure)
     result = {
         "deterministic_gate_evidence": deterministic_gate_evidence(state.gate_outcomes, attempt),
         "acceptance_coverage": unit_coverage_items(structured_plan, subtask_id, state.gate_outcomes, attempt),
@@ -2279,6 +2313,12 @@ class WorkflowEngine:
         skill_engine_override: Optional[Any] = None,
         execution_scope: str = "",
         grounding_goal: str = "",
+        # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: True for an upstream owner the
+        # enforce controller reopened for a failed verification unit; its
+        # acceptance needs a byte change (workflow_controller.py owner_accepted),
+        # so an identical regeneration is a typed no-progress stop, never a
+        # repairable no-change refusal.
+        reopened_owner: bool = False,
         migration_resolution: Optional["MigrationResolution"] = None,
         structured_plan: Optional["EngineeringPlan"] = None,
         current_subtask_id: Optional[str] = None,
@@ -2702,7 +2742,7 @@ class WorkflowEngine:
                 goal=goal, error_context=state.error_context,
                 supplementary_context=supplementary_context,
                 recovery_contract_block=recovery_contract_block,
-                execution_scope=execution_scope, grounding_goal=grounding_goal,
+                execution_scope=execution_scope, grounding_goal=grounding_goal, reopened_owner=reopened_owner,
                 established_files=established_files,
                 predetermined_plan=predetermined_plan, predetermined_design=predetermined_design,
                 predetermined_architect_files=predetermined_architect_files,
@@ -4262,10 +4302,7 @@ class WorkflowEngine:
             # duplicate". Both are decided by the resolver from the scope
             # passed HERE, per call - a legacy direct run (no scope) keeps
             # its unrestricted behaviour; a refusal is recorded, never silent.
-            _artifact_scope = (
-                None if not allowed_write_relpaths and write_scope_mode in (None, WriteScopeMode.UNRESTRICTED)
-                else list(allowed_write_relpaths or [])
-            )
+            _artifact_scope = artifact_resolution_scope(write_scope_mode, allowed_write_relpaths)
             _artifact_resolution = resolve_planned_artifact_owners(
                 architect_files, goal, workspace_path, authorized_paths=_artifact_scope,
                 new_artifact_paths=planned_new_artifact_paths(structured_plan, current_subtask_id),
@@ -5017,6 +5054,9 @@ class WorkflowEngine:
             # CANDIDATE-GATE-BASELINE-POLICY-001: the baseline's own
             # verification call, for the candidate gates' attribution.
             baseline_suite_replay=baseline_suite_run,
+            # Review F1: the milestone driver judges a zero-change result itself
+            # (kriya/workflow/milestones.py no_change_verification); a direct goal has no such decider.
+            no_change_verifier_downstream=milestone_group_id is not None,
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so
             # every write-gate call site downstream (kriya/workflow/
@@ -5038,6 +5078,7 @@ class WorkflowEngine:
             ),
             strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope,
+            reopened_owner=reopened_owner,
             grounding_goal=grounding_goal,
             exit_authority_goal=(
                 (work_unit.authoritative_goal if work_unit is not None else None) or grounding_goal or ""
@@ -6355,7 +6396,8 @@ class WorkflowEngine:
                     **execution_evidence(full_test_res),
                 })
                 if state.no_change_proposal:
-                    _settle_no_change_proposal(state, structured_plan, current_subtask_id, worktree_path)
+                    _settle_no_change_proposal(state, structured_plan, current_subtask_id, worktree_path,
+                                               reopened_owner=attempt_ctx.reopened_owner)
                 state.terminal_regression_succeeded = True
                 if obligation_ledger is not None and current_subtask_id:
                     # This subtask's own full regression genuinely passed

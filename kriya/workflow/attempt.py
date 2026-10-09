@@ -141,6 +141,7 @@ from kriya.workflow.file_integrity import (
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError,
     _resolve_run_command,
+    artifact_resolution_scope,
     build_grounded_java_launch_command,
     correct_exec_main_class_property,
     downgrade_ungrounded_goal_explicit_commands,
@@ -274,6 +275,9 @@ from kriya.workflow.verifier_evidence import (
 from kriya.workflow.worktree import clean_untracked_files_since, repository_content_paths, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+# ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1): a direct goal that changed nothing and has no decider.
+NO_CHANGE_UNVERIFIED = "NO_CHANGE_UNVERIFIED"
 
 # GR-R1B: the attempt-level Goal Spec Compliance gate's model-only outcomes -
 # advisory diagnostic evidence, never an attempt failure, retry or fallback.
@@ -3302,6 +3306,15 @@ class AttemptContext:
     # untouched baseline when a disputed test's stability must be measured.
     # None (a caller without a baseline) keeps every suite gate's raw rule.
     baseline_suite_replay: Optional[Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]]] = None
+    # ENFORCE-IDENTICAL-WRITE-COMPLETION-001 (review F1): True when the caller
+    # decides a zero-change result itself from deterministic evidence (the
+    # milestone driver's no_change_verification). False - a direct goal -
+    # means nothing downstream judges "changed nothing", so an attempt whose
+    # every written file equals the baseline is a typed stop here.
+    no_change_verifier_downstream: bool = False
+    # The enforce controller's owner reopen (verification_owner_recovery): read by
+    # workflow.py's no-change settlement (an identical regeneration is a stop).
+    reopened_owner: bool = False
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Human-readable identity for nested structured executions. Attempt
@@ -4298,14 +4311,15 @@ def _raise_unexecuted_test_delta(
         _stop_on_environment_gate_result(state, result, "test")
         # A targeted run executes only the changed tests - its failures are the candidate's own; a full-suite
         # run is attributed against the frozen baseline (CANDIDATE-GATE-BASELINE-POLICY-001).
-        blocking, evidence, _extra = ((not result.get("success"), result.get("output", ""), {}) if targeted
-                                      else _judge_candidate_suite(state, ctx, result, SCOPE_TEST_DELTA_COVERING_RUN))
+        blocking, evidence, extra = ((not result.get("success"), result.get("output", ""), {}) if targeted
+                                     else _judge_candidate_suite(state, ctx, result, SCOPE_TEST_DELTA_COVERING_RUN))
         if blocking:
             failure = _build_test_quality_gate_failure(
                 "test", f"TEST FAILURE:\n{evidence}",
                 evidence, ctx.worktree_path, state.all_files_written, state.attempt_number,
             )
-            state.record_gate_outcome(failure.to_gate_outcome())
+            failure.diagnostics = {**(failure.diagnostics or {}), **extra}
+            state.record_gate_outcome({**failure.to_gate_outcome(), **extra})
             raise QualityGateFailure(failure)
     report = test_execution.report_from_result(result)
     verdict = judge_test_delta(changed, report)
@@ -6876,11 +6890,13 @@ def _verified_no_change_proposal(
     # byte-identical to the baseline (state.identical_rewrites) is the same
     # assessment of the base as a NO CHANGE answer - and is decided the same
     # way, by deterministic evidence, never by the write.
+    subtask = ctx.structured_plan.subtask_by_id(ctx.current_subtask_id)
+    planned_paths = {pf.path for pf in (subtask.planned_files if subtask is not None else [])}
     no_change = sorted({
         f["filepath"] for f in files
         if f.get("filepath") and not f.get("protocol_error")
         and classify_result_operation(f) is CodeOperation.NO_CHANGE_ASSESSMENT
-    } | set(state.identical_rewrites))
+    } | (set(state.identical_rewrites) & planned_paths))  # review F3: a restored unplanned path is no proposal
     if not no_change or any(path in state.all_files_written for path in no_change):
         return []
     if not all(os.path.isfile(os.path.join(ctx.worktree_path, path)) for path in no_change):
@@ -7824,8 +7840,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # decides the Developer's own path as it always has.
         artifact_resolution = resolve_planned_artifact_owners(
             paths_to_resolve, ctx.goal, ctx.workspace_path,
-            authorized_paths=(None if ctx.write_scope_mode is WriteScopeMode.UNRESTRICTED
-                              else list(ctx.allowed_write_relpaths)),
+            authorized_paths=artifact_resolution_scope(ctx.write_scope_mode, ctx.allowed_write_relpaths),
             new_artifact_paths=planned_new_artifact_paths(ctx.structured_plan, ctx.current_subtask_id),
         )
         resolution = dict(zip(paths_to_resolve, artifact_resolution.resolved, strict=True))  # one per path
@@ -9205,6 +9220,27 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     + "You must generate ALL files listed in the Architect Design Guidelines, "
                     "not just a subset."
                 )
+            if not state.all_files_written and state.identical_rewrites and not ctx.no_change_verifier_downstream:
+                # Review F1 (second repair cycle): a direct goal whose every
+                # file came back byte-identical has no decider for "already
+                # satisfied" - the enforce contract (above) and the milestone
+                # driver (no_change_verification) judge that from
+                # deterministic evidence; here nothing would. Model content
+                # alone never completes a run: a typed stop through the
+                # ordinary repair path, never PASSED.
+                unchanged = sorted(state.identical_rewrites)
+                message = (f"{NO_CHANGE_UNVERIFIED}: the Developer returned {', '.join(unchanged)} byte-identical to "
+                           "the baseline (an identical rewrite is not a change) and nothing verifies that the goal is "
+                           "already satisfied. Make the change the goal requires.")
+                failure = Failure(
+                    type="unverified_no_change", message=message,
+                    raw_output=message, source="completeness", authority="deterministic",
+                    file_locations=[FileLocation(filepath=path) for path in unchanged], likely_files=unchanged,
+                    diagnostics={"reason_code": NO_CHANGE_UNVERIFIED, "identical_rewrites": unchanged},
+                    attempt=state.attempt_number,
+                )
+                state.record_gate_outcome(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
 
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,
@@ -9611,7 +9647,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "test_selection_fallback", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.record_gate_outcome(failure.to_gate_outcome())
+                    failure.diagnostics = {**(failure.diagnostics or {}), **suite_gate_evidence}
+                    state.record_gate_outcome({**failure.to_gate_outcome(), **suite_gate_evidence})
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.record_gate_outcome({
@@ -9727,7 +9764,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             evidence={"detected_via": "full_suite", "raw_output": failure.raw_output},
                         ):
                             failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
-                    state.record_gate_outcome(failure.to_gate_outcome())
+                    failure.diagnostics = {**(failure.diagnostics or {}), **suite_gate_evidence}
+                    state.record_gate_outcome({**failure.to_gate_outcome(), **suite_gate_evidence})
                     raise QualityGateFailure(failure)
                 _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.record_gate_outcome({

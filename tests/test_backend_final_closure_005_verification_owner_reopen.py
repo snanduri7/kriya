@@ -197,8 +197,11 @@ def test_an_owner_that_does_not_change_its_files_leaves_the_failure_standing(tmp
     assert test_gate_runs == ["s1", "s2", "s1"]  # the owner's gates ran; s2 was not verified a second time
     assert sum(1 for _unit, first in model_calls if "Developer Agent" in first) == 2  # exactly one reopen
     assert "VERIFICATION FAILURE RECOVERY" in prompts[1]
-    [terminal] = [e.details for e in events if e.kind == "retry.no_progress_terminal"]
-    assert terminal["reason_code"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+    # s2's typed stop, then the reopened owner's own: an identical regeneration is a typed refusal at the unit
+    # (ENFORCE-IDENTICAL-WRITE-COMPLETION-001), one attempt, never repair retries on the same bytes.
+    terminals = [e.details for e in events if e.kind == "retry.no_progress_terminal"]
+    assert [t["reason_code"] for t in terminals] == ["VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"] * 2
+    assert terminals[1]["declared_by"] == "verified_no_change_refused"
 
 
 def test_an_owner_candidate_that_changed_but_failed_its_own_gates_is_not_folded(tmp_path):

@@ -130,8 +130,10 @@ class VerificationCoordinator:
         })
         return [outcome_type]
 
-    def _raise(self, failure: Failure) -> None:
-        self._record(failure.to_gate_outcome())
+    def _raise(self, failure: Failure, extra: Optional[Dict[str, Any]] = None) -> None:
+        if extra:
+            failure.diagnostics = {**(failure.diagnostics or {}), **extra}
+        self._record({**failure.to_gate_outcome(), **(extra or {})})
         raise QualityGateFailure(failure)
 
     async def verify(self, request: VerificationRequest) -> VerificationResult:
@@ -169,7 +171,7 @@ class VerificationCoordinator:
                         f"{evidence}"
                     ),
                     raw_output=evidence, attempt=attempt,
-                ))
+                ), extra)
 
         runtime_verified = bool(_directly_executable_runtime_verifiers(list(request.required_verification)))
         if runtime_verified:

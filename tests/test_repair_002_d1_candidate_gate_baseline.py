@@ -167,6 +167,7 @@ def test_t1_the_measured_shape_a_pre_existing_failure_never_blocks_the_candidate
     assert test_gates and test_gates[-1]["success"] is True
     assert test_gates[-1]["regression_attribution"]["blocking"] is False
     assert test_gates[-1]["regression_attribution"]["pre_existing_only"] is True
+    assert test_gates[-1]["regression_attribution"]["suite_success"] is False  # the raw verdict stays readable
 
 
 def test_t2_a_new_failure_still_blocks_the_candidate_gate_with_per_test_evidence(tmp_path):
@@ -179,8 +180,12 @@ def test_t2_a_new_failure_still_blocks_the_candidate_gate_with_per_test_evidence
     assert candidate and all(d["blocking"] is True for d in candidate)
     failed = [o for o in run.gate_outcomes if o.get("type") == "test" and o.get("success") is False]
     assert failed and "test_price" in failed[0].get("message", "") + failed[0].get("output", "")
-    assert all(o["regression_attribution"]["confirmed_regressions"] == ["tests/test_pricing.py::test_price"]
-               for o in failed if "regression_attribution" in o)
+    attributed = [o["regression_attribution"] for o in failed if "regression_attribution" in o]
+    assert attributed, failed[:1]
+    # With FAILED-line-only pytest text (no structured per-case report) the new test is NOT_COMPARABLE, which blocks
+    # conservatively (PRD-024); the raw output then names it. A structured report would confirm it per test.
+    assert all(a["blocking"] is True and a["suite_success"] is False and a["pre_existing_only"] is False
+               and a["confirmed_regressions"] in ([], ["tests/test_pricing.py::test_price"]) for a in attributed), attributed
 
 
 def test_t3_without_a_captured_baseline_the_raw_rule_is_unchanged(tmp_path):

@@ -359,6 +359,39 @@ def verification_inputs_digest(state: GenerationState, ctx) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# A deterministic gate that has established that no further attempt can change
+# its outcome declares the typed no-progress terminal on its Failure under this
+# diagnostics key; the handler applies it (after the workspace-progress
+# classification, the flag's other owner). Introduced for the enforce owner
+# reopen whose regeneration is byte-identical (ENFORCE-IDENTICAL-WRITE-COMPLETION-001).
+NO_PROGRESS_STOP_KEY = "no_progress_stop"
+
+
+def _apply_declared_no_progress_stop(state: GenerationState, failure: Failure) -> None:
+    """Honour a failure's declared typed no-progress terminal (see
+    NO_PROGRESS_STOP_KEY): the same stop _admit_verification_only_retry makes
+    for a verification-only unit, from the same precedence (an environment
+    stop, a plan-scope conflict or an already-reached terminal is left alone)."""
+    reason = (failure.diagnostics or {}).get(NO_PROGRESS_STOP_KEY)
+    if not reason or state.environment_failure or state.plan_scope_conflict is not None or state.no_progress_terminated:
+        return
+    state.no_progress_terminated = True
+    state.no_progress_reason = reason
+    state.record_event(RunEvent(
+        kind="retry.no_progress_terminal",
+        attempt=state.attempt_number,
+        source="retry_strategy._apply_declared_no_progress_stop",
+        authority=EventAuthority.ADVISORY,
+        message=f"{reason}: declared by the {failure.type} gate - another attempt cannot change its outcome.",
+        details={"reason_code": reason, "classification": state.last_progress_classification, "limit": None,
+                 "last_vector_digest": (state.last_progress_vector.digest()
+                                        if state.last_progress_vector is not None else None),
+                 "declared_by": failure.type},
+    ))
+    logger.error("Quality Gates stopped - %s (declared by the %s gate, attempt %s).", reason, failure.type,
+                 state.attempt_number)
+
+
 def _admit_verification_only_retry(state: GenerationState, ctx, failure: Failure) -> None:
     """LR-R1-P4: a failed verification-only attempt earns another attempt only
     when something can change what the next verification sees. Its next
@@ -1541,3 +1574,4 @@ async def _record_attempt_failure(
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.record_gate_outcome(failure.to_gate_outcome())
     _admit_verification_only_retry(state, ctx, failure)
+    _apply_declared_no_progress_stop(state, failure)

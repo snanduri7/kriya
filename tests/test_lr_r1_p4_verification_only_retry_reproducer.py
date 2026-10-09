@@ -167,14 +167,18 @@ def test_a_failing_verification_only_unit_with_no_change_mechanism_is_not_retrie
     assert [c for c in model_calls if c[0] == "s2"] == []
     assert sum(1 for _unit, first in model_calls if "Developer Agent" in first) == 2   # s1 planned + s1 reopened
 
-    assert [(e.attempt, e.details.get("failure_type")) for e in events if e.kind == "attempt.failed"] == [(1, "test")]
+    # s2's verification failed once; the reopened s1 regenerated identical bytes, which is a typed refusal at the
+    # unit (ENFORCE-IDENTICAL-WRITE-COMPLETION-001: an identical rewrite is not a repair) - one attempt each.
+    assert [(e.attempt, e.details.get("failure_type")) for e in events if e.kind == "attempt.failed"] == [
+        (1, "test"), (1, "verified_no_change_refused")]
     [admission] = [e.details for e in events if e.kind == "retry.verification_admission"]
     assert admission["verification_only"] is True and admission["mutation_possible"] is False
     assert admission["workspace_changed"] is False and admission["recovery_route"] is None
     assert admission["inputs_digest_at_verification"] == admission["inputs_digest_now"]
     assert admission["retryable"] is False and admission["reason_code"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
-    [terminal] = [e.details for e in events if e.kind == "retry.no_progress_terminal"]
-    assert terminal["reason_code"] == "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"
+    terminals = [e.details for e in events if e.kind == "retry.no_progress_terminal"]
+    assert [t["reason_code"] for t in terminals] == ["VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"] * 2  # s2, then the reopened s1
+    assert terminals[1]["declared_by"] == "verified_no_change_refused"
 
     # M1: the deciding recovery record and the run's terminal say why (Q6 / Q9).
     state_dir = os.environ[ENV_STATE_DIR]
