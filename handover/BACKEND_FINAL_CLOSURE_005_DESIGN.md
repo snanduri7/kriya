@@ -463,3 +463,13 @@ reruns on one workspace through the resume path; the PRD-020 caveat states the f
 unverified requirement blocks under the "block" policies or, whatever the policy, when the verifier reported it missing -
 GR-R0, TRACED); registry/record wording. The full suite on 4f593fe: 9823 passed / 0 failed; the certifying run is the
 one on this reconciled commit, re-run with the mutation controls re-recorded on it.
+
+## 12.8 Certification of the second repair cycle and the final executable
+
+Certified on 557035d (branch repair/c2-d1-d4 fast-forwarded into main 2026-10-09, branch deleted): full suite 9823
+passed / 0 failed / 0 errors, root pollution none, exit 0 (certification/full_suite_run6_557035d.log); mutation controls
+re-recorded on the same commit, 15/15 killed (repair-002/MUTATION_CONTROLS.md); ruff 0, pylint exit 0; five scoped
+independent reviews reconciled. Models, qualification, budgets and the frozen task/oracle content are unchanged
+(`git diff 08a57e6..557035d` touches kriya/, tests/ and handover/ only). FINAL_EXECUTABLE_SHA = 557035d. The complete
+frozen primary six and cohort-2 six are rerun from it (repair-002/run_final_12.sh, `-final` output directories; the
+earlier evidence is never touched); their classification and the final readiness verdict follow in 12.9. Not pushed.
