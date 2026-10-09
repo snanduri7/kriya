@@ -274,3 +274,184 @@ awaiting the owner's authorization of a second cycle, which turns `tests/test_ba
 is_never_parked_in_the_backlog` red by design on the records commit. The certified executable b185bd6 (9785/0) is
 unchanged. Recommendation: authorize the second cycle; its fixes are local and reproducible, and the shared-pattern rule
 would have made both false negatives safe failures with a preserved candidate.
+
+## 12. Second repair cycle: D1-D4 (owner-authorized 2026-10-09, branch repair/c2-d1-d4 off main 08a57e6)
+
+Pre-fix records (ENGINEERING_RULES section 3), written before any production change. Evidence of the live
+symptoms: `~/kriya-m1-live/backend-final-closure-005/cohort-002/C2-*/CLASSIFICATION.md`; deterministic pre-fix
+remeasurements on the frozen workspaces: `~/kriya-m1-live/backend-final-closure-005/repair-002/prefix/`.
+
+### 12.1 D1 CANDIDATE-GATE-BASELINE-POLICY-001 (+ D1b)
+- Observation (MEASURED, C2-S2_A generate.log): one pre-existing failing test is PRE_EXISTING_FAILURE / not blocking
+  for unit s1's terminal full-regression check and blocks all five attempts of unit s2's candidate gate in the same
+  run; C2-S6_A: the same failure blocks a verification unit's declared test gate and, at the contract baseline, leaves
+  REQ-5 REGRESSION_PRESERVATION unsatisfied so NO_MUTATION_REQUIRED is unreachable (D1b).
+- Producer (TRACED): `kriya/workflow/attempt.py` candidate gate (`validator.run_tests()["success"]` judged raw at the
+  full-suite branch, the test-selection fallback and the FS-1A covering run), `kriya/workflow/verification_coordinator.py`
+  (`result["success"]` raw), `kriya/workflow/workflow.py::run_contract_baseline.judge_suite` (any failing case -> FAIL).
+  The PRD-024 attribution (`classify_with_baseline_stability`) is consumed only by the terminal check in workflow.py.
+- Alternatives considered: the candidate caused the failure (no: attempt 1 fails before any effective change, and the
+  terminal check of the previous unit attributed the identical failure PRE_EXISTING); environment drift (no: same
+  container, same test, same run).
+- Root cause: CONFIRMED (one failure, two verdicts in one run; the two gates read different deciders).
+- Fix: one attribution owner (`kriya/workflow/suite_attribution.py`) consumed by the terminal check, every candidate-gate
+  full-suite run and the verification coordinator; the contract baseline records per-case pre-existing failures of the
+  untouched base as pre-existing (a zero mutation introduces none) instead of FAIL, while an aggregate/indeterminate
+  suite result stays FAIL/INDETERMINATE (VC3-R9 preserved).
+- Predicted result: a brownfield repository with one pre-existing failing test and a unit with a declared test
+  verification passes its candidate gate when its own change introduces no new failure; a NEW/CHANGED failure still
+  blocks; mutation (judge raw again) -> the reproducer fails again.
+
+### 12.2 D2 STRUCTURAL-EVIDENCE-SELF-CALL-EDGE-001
+- Observation (MEASURED, repair-002/prefix/D2_structural_evidence_before.txt, executable 08a57e6 == b185bd6 product
+  tree, frozen S3_A workspace 0234610): `build_planning_structural_evidence` on exactly TextStringBuilder.java and
+  StrBuilder.java returns the mutual edge although neither file imports, constructs or references the other.
+- Producer (TRACED): `kriya/workflow/workflow_controller.py` calls relation: `unique_owners = [o for o in owners if o != rel_path]`
+  resolves a bare call to the only OTHER definer, so a file's calls to its own methods resolve to a twin class.
+- Root cause: CONFIRMED by the discriminating run above (no textual reference; the function still emits the edge).
+- Fix: a callee the calling file itself defines resolves to that file (no edge); otherwise the existing unique-other-owner
+  rule. Predicted: the same call returns no edge for the twin pair; a real cross-class unique call keeps its edge; an
+  ambiguous name (two other definers) keeps resolving to nothing; mutation (drop the self-definition check) -> the
+  twin edge returns.
+
+### 12.3 D3 FILE-RESOLUTION-SCOPE-ESCAPE-001
+- Observation (MEASURED, repair-002/prefix/D3_file_resolution_before.txt, frozen S4_A workspace b39727b): with the
+  controller-built s2 goal text, `prefer_existing_artifact_owners` redirects the planned, action=create
+  MalformedPathTest.java to json-path-assert/.../HasNoJsonPathTest.java (scored tier); with the raw goal it does not.
+- Producer (TRACED): `kriya/workflow/workflow.py` Architect-stage call (no check against the unit's validated scope,
+  the plan's action=create ignored) and `kriya/workflow/attempt.py` Developer-path call (same resolver, same gap).
+- Root cause: CONFIRMED by the reproduction (the redirect target is outside the unit's write scope by construction;
+  the write authority then refuses the resolver's own choice).
+- Fix: the resolver takes the unit's authorized scope and its explicit new-artifact paths; a redirect whose target is
+  outside the scope is refused (planned path kept, authoritative event recorded); an action=create path is never
+  redirected. Scope is passed at call time (never cached), so a revised scope is honoured and a retry never widens it.
+  Predicted: the reproducer keeps the planned path; a redirect to an in-scope existing owner still happens;
+  mutation (remove the scope check) -> the reproducer redirects again.
+
+### 12.4 D4 ENFORCE-IDENTICAL-WRITE-COMPLETION-001
+- Observation (MEASURED, C2-S4_B sealed store seq 62/63): both candidate.change records of s1 attempt 1 carry identical
+  before/after digests; the unit completed quality_gates_passed=true and was "applied".
+- Producer (TRACED): `kriya/workflow/attempt.py` commit batch adds every staged non-delete path to
+  `state.all_files_written` regardless of content; the completeness check, the partial no-change contract (OD-3) and the
+  apply step all read that set, so an identical rewrite discharges the unit's obligation.
+- Root cause: CONFIRMED (the write path never compares the staged bytes with the captured baseline bytes).
+- Fix: a staged write whose bytes equal the captured original bytes of that path is recorded as unchanged
+  (`candidate.change` unchanged=true), never enters `all_files_written`, and the planned file is settled through the
+  verified no-change contract (deterministic evidence or a typed refusal naming the identical rewrite). Byte authority
+  only: a line-ending change is a change. Predicted: the S4_B shape ends VERIFIED_NO_CHANGE or VERIFIED_NO_CHANGE_REFUSED,
+  never "applied"; mutation (count the write) -> the unit is applied again.
+
+### 12.5 Outcome of the repair cycle (branch repair/c2-d1-d4, commits 51390e0, 3d9f2c3, 6fc8d71, 6650611, b7824e6)
+
+Correction to 12.2 (ENGINEERING_RULES section 5 applied): the first D2 fix (self-declared callee only) left the
+frozen pair's mutual edge in place. The discriminating check (repair-002/prefix/D2_discriminating_check.txt) found
+three producers, not one: self-calls resolving to the only other declarer; the constructor regex matching
+`new StrBuilder()` inside Javadoc examples; the JDK static call `CharBuffer.wrap(...)` resolving by bare name to the
+twin's own `wrap()`. The frozen classification's mechanism was INFERRED, not CONFIRMED; the record is corrected in
+repair-002/D2_ROOT_CAUSE_CORRECTION.md (the frozen files are untouched). The shipped D2 fix removes all three.
+
+| Defect | Commit | Reproducer (pre-fix failure recorded) | Post-fix remeasurement | Mutation controls |
+|---|---|---|---|---|
+| D2 | 51390e0 | tests/test_repair_002_d2_structural_evidence.py (8) | frozen S3_A pair: EDGES {} (repair-002/D2_structural_evidence_after.txt) | self-declared check, type-mention requirement, raw constructor scan: each fails 2 tests |
+| D3 | 3d9f2c3 | tests/test_repair_002_d3_file_resolution_scope.py (7, incl. the enforce loop end to end) | frozen S4_A: planned path kept under the scope rule and under the create rule (repair-002/D3_file_resolution_after.txt) | scope check, create exemption, cached scope: 2 / 1 / 2 failures |
+| D4 | 6fc8d71 + 6650611 | tests/test_repair_002_d4_identical_write.py (7; prefix/D4_reproducer_before.txt: 5/5 failed pre-fix) | S4_B shape ends VERIFIED_NO_CHANGE (tool coverage) or VERIFIED_NO_CHANGE_REFUSED naming the identical rewrite; nothing applied | count the write / drop the proposal: 5 / 5 failures |
+| D1 | b7824e6 | tests/test_repair_002_d1_candidate_gate_baseline.py (7; prefix/D1_reproducer_before.txt: the S2_A shape dies no_progress pre-fix) | S2_A shape: candidate gate PRE_EXISTING not blocking, unit passes; S6_A shape (verification unit) same; D1b NO_MUTATION_REQUIRED reachable with recorded pre-existing failures | raw gate / never-blocking attribution / unsatisfied pre-existing / FAIL for failing cases: 3 / 2 / 1 / 1 failures |
+
+D4 follow-up (6650611, own defect, reported): the first D4 change made the legacy/milestone path call an identical
+rewrite "never written" (INCOMPLETE GENERATION) - found by tests/test_prd024_baseline_auto_policy.py's milestone-reuse
+test (the integration unit returns the committed files unchanged). Outside the enforce no-change contract an identical
+rewrite is now delivered unchanged and never a mutation; the completion is decided by the milestone no-change
+verification. Two existing fixtures that pre-wrote the Developer's candidate into the pristine workspace (making it an
+identical rewrite by construction) were changed to real writes: tests/test_workflow.py prv12_share10 (scratch copy
+for the direct scan) and the future-owner end-to-end s2 answer (a behaviour-neutral comment line).
+Adjacent suites run during the cycle: 17 test files touching the attribution / coordinator / contract-baseline
+paths (1289 passed before the last fixture corrections), the no-change / candidate-gate / file-integrity / ownership
+suites (419), the attempt-evidence explain and T6 suites (59). Targeted certification @ b7824e6: 145 passed, ruff
+clean, pylint exit 0 (repair-002/TARGETED_CERTIFICATION.txt). Independent review, full suite, merge, certification
+and the 12-task rerun follow in 12.6.
+
+### 12.6 Independent review and reconciliation (commit 3a62740)
+
+Review (a fresh same-class agent; verbatim in repair-002/INDEPENDENT_REVIEW.md): APPROVE WITH CHANGES - D1/D2/D3
+correct and fail-closed, no false success constructible through the attribution owner, the covering run or the
+resolver; one MAJOR finding on D4's follow-up: a direct `kriya generate` whose every file came back byte-identical
+ended PASSED with files [] and no decider (model bytes alone completing a run). Reconciliation (repair-002/
+REVIEW_RECONCILIATION.md): F1 FIXED - typed stop `unverified_no_change` / NO_CHANGE_UNVERIFIED through the repair path
+unless the caller has a downstream decider (the milestone driver's no_change_verification, flagged typed on the
+attempt context); F2 FIXED - the raw suite verdict (`suite_success`) stays on every attributed gate outcome, failures
+included; F3 FIXED - the no-change proposal unions only the unit's planned identical paths (a restored unplanned file
+is never "proposed"); F4 FIXED - one `artifact_resolution_scope` helper for both resolver sites; F5 FIXED - a
+Developer-path refusal test (measured first: the structured protocol rejects an answer naming another path before
+resolution, so the invented path enters through the Developer's result list); F6 FIXED - non-vacuous assertion; F7-F10
+documentation. Found during reconciliation (own defect, reported): under D4 the enforce controller's reopened owner
+regenerating identical bytes became a repairable refusal and burned the repair budget before the controller's
+`after == before` rejection; it now declares the typed VERIFICATION_RETRY_NO_CHANGE_POSSIBLE stop on its Failure
+(diagnostics[NO_PROGRESS_STOP_KEY]) which the retry strategy - the flag's single owner - applies after the
+workspace-progress classification: one attempt, then the controller rejects as before. Two tests pinning the old
+evidence shape (one terminal event; attempt.failed == [(1,"test")]) were updated to the typed shape. A regression
+during reconciliation (an import edit lost to an earlier sort: F821, 36 tests failing with the NameError swallowed into
+no_progress) was caught by ruff before any commit. After reconciliation: 233 tests across the repair, reopen,
+retry-admission, no-change, T6, PRD-024, milestone and tripwire files pass; ruff clean; pylint exit 0. The canonical
+full suite, merge, certification and the 12-task rerun follow in 12.7.
+Full-suite fallout (commit 740d8d8; repair-002/REVIEW_RECONCILIATION.md, trailing section): the first canonical run
+@3a62740 failed 30 tests, all own defects of the reconciliation - the `reopened_owner` keyword inserted into the
+resume-fingerprint call instead of the executor forwarding call (20 resume tests), the direct-goal stop placed
+before the deterministic gates (3 run_attempt tests, now at the terminal point), the real-engine no-change milestone
+test whose convergence rested on the identical COMMIT the model-decided completion S4c-1 forbids (now asserts:
+completes without a commit, not reused on resume, NO_COMMITTED_OUTPUT; a no-change unit's unchanged planned files
+are reported and established for later units), an FS-1A state double and the gate-outcome inventory pin. A second,
+scoped independent review covers the two post-review commits (3a62740, 740d8d8) before the merge.
+Second scoped independent review (commits 3a62740, 740d8d8; verbatim repair-002/INDEPENDENT_REVIEW_2.md): APPROVE WITH
+CHANGES; reconciled in commit 431fd9f (repair-002/REVIEW_RECONCILIATION.md, second table). F1 FIXED: a reopened owner
+that changed one planned file and returned another identical is decided by the controller's own byte-change acceptance
+(no identical path proposed, no typed stop; two-planned-file reopen test). F2 is an OWNER DECISION, not changed: a
+milestone that commits nothing without a deterministic no-change proof completes with the refusal recorded on its
+proof and is never reused (PRD-008 S4c-1's tested contract); failing it typed (option ii) was implemented, measured to
+contradict 14 S4c tests, and reverted - registry row MILESTONE-ZERO-COMMIT-COMPLETION-001 (P2, DEFERRED). F3-F5 FIXED
+(failure-report categories for the two no-change failure types, the scope helper's documented UNRESTRICTED reading,
+direct guard tests for the gate-declared no-progress stop). Canonical full suite @740d8d8 (before the second review's
+fixes): 9816 passed / 0 failed (repair-002/FULL_SUITE_740d8d8.log); the certifying run is the one on 431fd9f.
+
+### 12.7 Owner decision: MILESTONE-ZERO-COMMIT-COMPLETION-001 -> option (ii), before merge (2026-10-09)
+
+The owner chose option (ii): "A milestone must not report success when it committed no effective output and
+deterministic no-change verification refused to prove the goal was already satisfied." Required invariant on every
+execution path: effective mutation committed and verified -> may complete; OR deterministic no-change authority proves
+the required state already satisfied -> may complete; otherwise a typed failure/refusal. Developer/model output alone
+never establishes milestone completion. Implementation: `_complete_milestone` (kriya/workflow/milestones.py) returns a
+typed error for a zero-commit milestone whose `no_change_verification` refused; `complete_unit` turns it into the
+unit's typed failure (`status: no_change_unverified`, `reason_codes: [NO_CHANGE_UNVERIFIED]`, `no_change_refusal`),
+nothing persisted as complete (not in `completed_milestone_ids`, no completion proof, hence never reusable). The PRD-008
+S4c handover's S4c-1 section records the superseded contract (handover/PRD-008_S4C_CODING_HANDOVER.md). The S4c tests
+written against the superseded contract are re-pinned to the typed stop with positive controls (a committed verified
+mutation; a deterministically verified no-change with sufficient coverage -> VERIFIED_NO_CHANGE) and negative controls
+(all-identical Developer output; empty/no-effective mutation; refused verification; retry/resume; no path converting a
+refusal into success). No deterministic authority is invented for free-text criteria. The Option-1 full-suite run on
+431fd9f is historical evidence only; the Option-2 revision is re-reviewed, re-certified and becomes the FINAL
+EXECUTABLE for the 12-task rerun.
+Third scoped independent review of the option-(ii) commit 42b59a9 (verbatim repair-002/INDEPENDENT_REVIEW_3.md):
+APPROVE WITH CHANGES, reconciled (repair-002/REVIEW_RECONCILIATION.md, third table). F1 FIXED: the decision runs
+before any side effect and without a `files` guard - zero committed cycles plus a refused verification fail typed
+whatever the result reported; a result that reports files without a committed cycle is its own typed code
+COMMIT_EVIDENCE_MISSING (the RunRecord is the only authority for committed output); ten mocked driver call sites now commit
+a real cycle through the terminal-commit seam (two capability-bookkeeping tests are re-pinned to the typed stop). F2 DISPOSITION (b): the integration pass is not a mutation unit - its
+completion authority is the plan-level original-requirement verification (PRD-020) plus its gates; a zero-change
+integration pass is the normal shape when the milestones did the work (documented at the decider and the
+discriminator; no deterministic authority invented). F3/F5/F6/F8 FIXED (decision before side effects; registry row
+CLOSED; vacuous assertions dropped; docstring). The full suite on 42b59a9 (1 failed / 9821 passed) exposed one more
+fixture whose second milestone rewrote the first's file byte-identically (tests/test_prd020_mutation_scope.py): each
+unit's write now names its writer. MEASURED: the twelve frozen tasks run through the enforce controller (every
+C2-*/P5-* generate.log carries workflow_controller "Current subtask" lines), never the milestone driver.
+Fourth scoped independent review (commit eecb6f3; verbatim repair-002/INDEPENDENT_REVIEW_4.md): APPROVE WITH CHANGES,
+reconciled in the next commit (repair-002/REVIEW_RECONCILIATION.md, fourth table). F1 FIXED: the reported-but-uncommitted
+branch has its own typed code REPORTED_OUTPUT_UNCOMMITTED (the previous name collided with milestone_completion's reuse
+reason COMMIT_EVIDENCE_MISSING), a direct completion-step control (no side effect), a driver-level regression (status,
+reason code, nothing completed or established, a rerun fails the same way) and mutation control D5-M2 (the files guard
+reintroduced). F2 CAVEAT RECORDED, owner decision raised: the integration pass's PRD-020 authority blocks an unverified
+original requirement only under the "block" requirement policies, which the production runtime profile seals - the
+twelve frozen tasks run under `runtime_profile: production` (MEASURED in their configs); under the default "record"
+policies a milestone plan can end success with every requirement UNVERIFIED (pre-existing; registry row
+INTEGRATION-PASS-REQUIREMENT-POLICY-001, P2, DEFERRED, owner decision). F4 FIXED: M2's invocation carries its own
+capabilities (PRD-029 bookkeeping test extended to two committing milestones). F5/F6/F7 FIXED (helper cleanup; "ten
+call sites"; the handover records committed with the slice). The full suite on eecb6f3: 9822 passed / 0 failed; the
+certifying run is the one on the reconciled commit.

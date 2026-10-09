@@ -522,6 +522,14 @@ def test_the_completion_step_never_persists_a_zero_commit_milestone_whose_no_cha
     assert error["code"] == NO_CHANGE_UNVERIFIED and error["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
     assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
 
+    # fourth review F1: files REPORTED without a committed cycle - its own typed code, the refusal carried, and no
+    # side effect of the completion step (established context/dependencies untouched, no artifact registry record)
+    reported = dict(result, files=["a.py"])
+    error = m._complete_milestone(str(workspace), state, CHAIN[0], [], ["a.py"], registry, result=reported)
+    assert error["code"] == m.REPORTED_OUTPUT_UNCOMMITTED and error["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
+    assert "M1" not in state.completed_milestone_ids and "M1" not in state.completion_proofs
+    assert state.established_file_context == {} and state.established_dependencies == []
+
     # the positive no-change control: a deterministic proof completes as VERIFIED_NO_CHANGE
     with patch.object(m, "no_change_verification", return_value=({"acceptance_coverage": [], "kind": VERIFIED_NO_CHANGE}, None)):
         assert m._complete_milestone(str(workspace), state, CHAIN[0], [], [], registry, result=result) is None

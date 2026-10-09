@@ -128,6 +128,35 @@ Both crash windows are closed and tested:
 - **The recovered run keeps its own status.** Reconstruction only reads RunRecords, so the run stays RECOVERED with NEEDS_REVIEW or FAILURE; Test F asserts its revision is unchanged. The run lifecycle, the commit result and the milestone completion proof stay separate concepts.
 
 ## S4c-1: VERIFIED_NO_CHANGE
+
+> **SUPERSEDED IN PART (owner decision 2026-10-09, BACKEND-FINAL-CLOSURE-005 second repair cycle,
+> MILESTONE-ZERO-COMMIT-COMPLETION-001).** The contract below allowed a milestone that committed nothing to COMPLETE
+> while the deterministic no-change verification REFUSED to prove the goal already satisfied: the refusal was recorded
+> on the proof (`no_change_refusal`) and only reuse was refused (`NO_COMMITTED_OUTPUT`). That is a model-decided
+> completion (the Developer's "no change" or identical bytes were all that completed the unit). The stronger
+> completion invariant now holds on every execution path (direct goal, enforce unit, milestone):
+> `effective mutation committed and verified -> may complete` OR `deterministic no-change authority proves the
+> required state already satisfied -> may complete`, otherwise a typed failure. A milestone with zero committed
+> cycles and a refused no-change verification fails typed `NO_CHANGE_UNVERIFIED` (result status
+> `no_change_unverified`, reason_codes `[NO_CHANGE_UNVERIFIED]`, `no_change_refusal` carried); nothing is persisted as
+> complete, so it is neither completed nor reusable, and a resume runs it again (and fails the same typed way until
+> the repository or the criteria change). Because milestone criteria are free text today (no production producer
+> of the coverage map), an already-satisfied real-engine milestone fails `NO_CHANGE_UNVERIFIED`: the correct
+> fail-closed behaviour until milestone criteria gain deterministic verification contracts. The "identical-bytes
+> COMMITTED path" this section relied on no longer exists (ENFORCE-IDENTICAL-WRITE-COMPLETION-001: a byte-identical
+> rewrite is not a mutation and is never committed). The paragraphs below are kept as the record of the superseded
+> contract; the proof requirements, bindings and reuse rules for a DETERMINISTICALLY verified no-change remain in
+> force unchanged.
+> Two boundaries of the invariant, recorded with it: a result that REPORTS files but recorded no committed cycle is
+> `REPORTED_OUTPUT_UNCOMMITTED` (typed failure; the RunRecord is the only authority for committed output); the
+> INTEGRATION PASS is not a mutation unit - its completion authority is the plan-level original-requirement
+> verification (PRD-020) plus its deterministic gates, so a zero-change integration pass completes when the plan's
+> requirements verify (the normal shape when the milestones did the work).
+> That authority blocks an unverified/unknown original requirement only under the `block` requirement policies the
+> production runtime profile seals; under the default `record` policies a plan can succeed with unverified requirements
+> (owner decision INTEGRATION-PASS-REQUIREMENT-POLICY-001). A result that reports files without a committed cycle is
+> `REPORTED_OUTPUT_UNCOMMITTED` (renamed from the colliding COMMIT_EVIDENCE_MISSING, which stays the reuse reason).
+
 **What I found first.** In the real engine, a "nothing to change" milestone rewrites its target file with identical bytes. That produces a COMMITTED cycle, so S4b already proves it byte-exactly and it converges. The test `test_a_real_engine_no_change_milestone_converges` covers this.
 - The zero-cycle path only exists when the candidate is empty. My probes could not get a real engine run to succeed that way: a "No change needed" developer answer goes through repair retries and fails.
 - VERIFIED_NO_CHANGE therefore covers the zero-cycle path, and is only reachable with deterministic evidence.

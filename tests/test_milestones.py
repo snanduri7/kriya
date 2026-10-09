@@ -43,20 +43,19 @@ from kriya.workflow.repository_topology import RepositoryTopology
 def _committing(*results):
     """MILESTONE-ZERO-COMMIT-COMPLETION-001: a stand-in run_generation_workflow whose reported files are REALLY
     committed through the terminal-commit seam (the RunRecord is the only authority for committed output; a result
-    that merely reports files completes nothing). Each call takes the next result; a dict with files commits a
-    unique content for each; an exception is raised; a callable is awaited/called with (goal, workspace_path, kwargs)."""
+    that merely reports files completes nothing). Each call takes the next result and the LAST result repeats for
+    every further call (the integration pass); a dict with files commits a unique content for each (or the
+    ``_content`` bytes given); an exception is raised."""
     from _milestone_proof_harness import _apply
 
     queue = list(results)
     counter = {"n": 0}
 
     async def run(goal, workspace_path, *args, **kwargs):
-        del goal, args
+        del goal, args, kwargs
         item = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(item, BaseException):
             raise item
-        if callable(item):
-            return item(workspace_path, kwargs)
         counter["n"] += 1
         if item.get("files"):
             content = item.get("_content") or {}
@@ -736,7 +735,7 @@ async def test_run_milestones_success_path_through_all_milestones_and_integratio
 
 
 @pytest.mark.asyncio
-async def test_run_milestones_registers_and_implements_declared_capabilities():
+async def test_run_milestones_registers_declared_capabilities_and_carries_them_on_the_invocation():
     """MA5.2/5.7's ContractRegistry bridge (kriya/control/contracts.py::
     contract_records_from_provided_capabilities/mark_capabilities_implemented)
     was genuinely dead code (zero callers anywhere) until wired into this
@@ -1587,3 +1586,28 @@ async def test_plan_milestones_without_trace_db_does_no_io():
     with tempfile.TemporaryDirectory() as tmp:
         state, err = await plan_milestones(planner, "goal", tmp)
     assert err is None
+
+
+@pytest.mark.asyncio
+async def test_run_milestones_fails_typed_when_a_unit_reports_files_it_never_committed():
+    """MILESTONE-ZERO-COMMIT-COMPLETION-001 (fourth review F1 - the exact shape the dropped `files` guard admitted): a
+    unit whose result REPORTS files while the run recorded no committed cycle is neither a committed verified
+    mutation nor a proven no-change - typed REPORTED_OUTPUT_UNCOMMITTED, nothing completed, nothing established, and
+    a rerun fails the same way."""
+    milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
+    for _ in range(2):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+            we = strict_engine()
+            we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]})
+            we.run_verifier = MagicMock()
+            we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+
+            result = await run_milestones(we, state, tmp)
+
+        assert result["status"] == "reported_output_uncommitted" and result["milestone_id"] == "M1", result
+        assert result["reason_codes"] == ["REPORTED_OUTPUT_UNCOMMITTED"] and result["quality_gates_passed"] is False
+        assert result["no_change_refusal"]["code"]
+        assert state.completed_milestone_ids == [] and state.completion_proofs == {}
+        assert state.established_file_context == {}
+        assert we.run_generation_workflow.await_count == 1  # the plan stopped typed at M1

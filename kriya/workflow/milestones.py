@@ -91,7 +91,7 @@ from kriya.workflow.workflow import _log_phase_banner
 
 # Typed codes of a milestone completion step that did not complete (MILESTONE-ZERO-COMMIT-COMPLETION-001).
 ARTIFACT_REGISTRY_FAILED = "ARTIFACT_REGISTRY_FAILED"
-COMMIT_EVIDENCE_MISSING = "COMMIT_EVIDENCE_MISSING"  # files reported, no committed cycle recorded, no no-change proof
+REPORTED_OUTPUT_UNCOMMITTED = "REPORTED_OUTPUT_UNCOMMITTED"  # files reported, no committed cycle, no no-change proof (distinct from milestone_completion.COMMIT_EVIDENCE_MISSING, a reuse reason)
 
 logger = logging.getLogger(__name__)
 
@@ -642,7 +642,7 @@ def _complete_milestone(
                 # The result REPORTS files but the run recorded no committed cycle (the RunRecord is the only
                 # authority for committed output - never a workflow's reported file list): neither a committed
                 # verified mutation nor a proven no-change. Its own typed code, never a completion.
-                return {"code": COMMIT_EVIDENCE_MISSING, "no_change_refusal": refusal, "detail": (
+                return {"code": REPORTED_OUTPUT_UNCOMMITTED, "no_change_refusal": refusal, "detail": (
                     f"the milestone reported {', '.join(sorted(files))} but the run recorded no committed cycle, and "
                     "deterministic no-change verification refused to prove the goal already satisfied "
                     f"({refusal.get('code')}: {refusal.get('detail')})")}
@@ -1352,10 +1352,14 @@ class _MilestonePlanDriver(PlanDriver):
         milestone = self._milestone(unit)
         if milestone is None:
             # The integration pass is not a mutation unit: it verifies the plan, and its completion authority is
-            # the plan-level ORIGINAL-REQUIREMENT verification (PRD-020: a plan with an unverified original
-            # requirement is not successful) plus its own deterministic gates. A zero-change integration pass is
-            # the normal shape when the milestones did the work, so the zero-commit milestone rule above does not
-            # apply to it (MILESTONE-ZERO-COMMIT-COMPLETION-001, third review F2, disposition b).
+            # the plan-level ORIGINAL-REQUIREMENT verification (PRD-020) plus its own deterministic gates. CAVEAT
+            # (fourth review): PRD-020 blocks an unverified/unknown original requirement only under
+            # autonomy.requirement_unverified_policy / requirement_unknown_policy = "block" - sealed by the
+            # production runtime profile (the frozen readiness tasks run under it); under the default "record"
+            # policies a milestone plan can end success with every original requirement UNVERIFIED. Whether
+            # non-production profiles accept that is the owner's decision (INTEGRATION-PASS-REQUIREMENT-POLICY-001).
+            # A zero-change integration pass is the normal shape when the milestones did the work, so the
+            # zero-commit milestone rule above does not apply to it (MILESTONE-ZERO-COMMIT-COMPLETION-001, disposition b).
             if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
                 save_milestone_run_state(self.workspace_path, self.run_state)
             return None
@@ -1375,7 +1379,7 @@ class _MilestonePlanDriver(PlanDriver):
             self.artifact_registry, result=result, config=self.engine_config,
         )
         if completion_error is not None:
-            if completion_error["code"] in (NO_CHANGE_UNVERIFIED, COMMIT_EVIDENCE_MISSING):
+            if completion_error["code"] in (NO_CHANGE_UNVERIFIED, REPORTED_OUTPUT_UNCOMMITTED):
                 logger.error("Milestone '%s' NOT complete - %s", milestone.id, completion_error["detail"])
                 return {
                     "status": completion_error["code"].lower(),

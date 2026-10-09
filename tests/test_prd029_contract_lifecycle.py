@@ -692,14 +692,26 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
     calls = {"n": 0}
 
     async def unit_commits_a_contract(*args, **kwargs):
+        from _milestone_proof_harness import _apply
+
         calls["n"] += 1
+        if calls["n"] == 2:
+            # M2 (fourth review F4 of the second repair cycle: a later unit's invocation carries ITS capabilities):
+            # commits OWNER again through the seam and promotes its transition from the LIVE registry.
+            _apply(str(workspace), {OWNER: OWNER_V2.replace("1L", "2L").encode()})
+            transition = cl.derive_contract_transition(
+                workspace_path=workspace, registry=load_contract_registry(workspace),
+                original_contents={OWNER: OWNER_V2}, final_contents={OWNER: OWNER_V2.replace("1L", "2L")},
+                authorizations=[_auth()], transaction_id="tx2", candidate_hash="hash2", downstream_verified=True,
+                capability_contracts=kwargs["work_unit"].provided_capabilities,
+            )
+            save_contract_registry(workspace, ContractRegistry.from_dict(transition.after_payload))
+            return {"quality_gates_passed": True, "design": "d", "files": [OWNER]}
         if calls["n"] == 1:
             # The unit's committed cycle, through the real terminal-commit seam (MILESTONE-ZERO-COMMIT-
             # COMPLETION-001: a milestone completes on a committed verified mutation, never on a reported file
             # list), then what that commit promotes: ONE transition from the live registry carrying both the API
             # contract and the capabilities this milestone unit provides.
-            from _milestone_proof_harness import _apply
-
             _apply(str(workspace), {OWNER: OWNER_V2.encode()})
             transition = cl.derive_contract_transition(
                 workspace_path=workspace, registry=None, original_contents={OWNER: OWNER_V1},
@@ -716,13 +728,18 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
     we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
     state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=[
         mkv2("M1", goal="g1", provides=[{"name": "Pricing"}]),
+        mkv2("M2", goal="g2", depends_on=["M1"], provides=[{"name": "Reporting"}]),
     ])
     result = await run_milestones(we, state, workspace)
 
-    assert result["status"] == "success"
+    assert result["status"] == "success", result
     live = load_contract_registry(workspace)
-    assert live.get("api:src/Owner.java").source_revision == "tx1:hash1"
+    assert live.get("api:src/Owner.java").source_revision == "tx1:hash1"  # M2's body edit is not an API change
     assert live.get("M1:Pricing").state is ContractState.IMPLEMENTED
+    assert live.get("M2:Reporting").state is ContractState.IMPLEMENTED
+    invocations = {call.kwargs["work_unit"].work_unit_id: call.kwargs["work_unit"].provided_capabilities
+                   for call in we.run_generation_workflow.await_args_list}
+    assert invocations["M1"] == ("M1:Pricing",) and invocations["M2"] == ("M2:Reporting",)
 
 
 
