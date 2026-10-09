@@ -11,8 +11,11 @@ Two readings of "B must remain unchanged" exist in the repository and both are r
 1. B is frozen by the GOAL ("Do not modify README.md."): a per-file immutability claim closed by the run's own
    mutation record - exactly how TEST_IMMUTABILITY already closes "do not change any existing test".
 2. B is a PLANNED file of a mutating unit the Developer leaves unchanged (the registered row's live shape,
-   spring-xml s3): the whole-unit ENFORCE-VERIFIED-NO-CHANGE-001 rule applied per file - the unit completes only
-   when every acceptance criterion is covered by deterministic gate evidence of the final attempt.
+   spring-xml s3). OD-3 first applied the whole-unit ENFORCE-VERIFIED-NO-CHANGE-001 rule per file (the unit
+   completed only when every acceptance criterion was covered by deterministic gate evidence); the owner's
+   2026-10-09 decision (ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001, below) replaced that with: a unit that
+   carries an effective mutation delivers B unchanged and is judged by its gates and terminal authorities like
+   every other mutating unit; per-file deterministic coverage applies only to a unit that changed nothing.
 
 Every run is end to end through the real run_generation_workflow; the model is scripted at the transport (reading 2)
 or as the Developer's result (reading 1); only the toolchain gates are stubbed.
@@ -174,13 +177,16 @@ def _plan(criterion):
         ]})
 
 
-def _answer_per_path(system_prompt, b_changes):
-    """One block per planned path the structured contract names: A rewritten, B a NO CHANGE (or rewritten)."""
+def _answer_per_path(system_prompt, b_changes, b_identical=False, a_identical=False):
+    """One block per planned path the structured contract names: A rewritten (or returned byte-identical), B a
+    NO CHANGE (or rewritten, or returned byte-identical - ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001)."""
     assert wants_structured(system_prompt), "the production default protocol is structured"
     blocks = []
     for path in dict.fromkeys(_PATH_IN_PROMPT.findall(system_prompt)):
         if path == A:
-            blocks.append(sentinel(A, analysis="cache the service call.", content=A_FIXED))
+            blocks.append(sentinel(A, analysis="cache the service call.", content=A_SRC if a_identical else A_FIXED))
+        elif path == B and b_identical:
+            blocks.append(sentinel(B, analysis="populate_pet_types already calls the service.", content=B_SRC))
         elif path == B:
             blocks.append(sentinel(B, analysis="document the cached call.", content=B_SRC.replace(
                 "def populate_pet_types():\n", 'def populate_pet_types():\n    """Cached pet types."""\n'))
@@ -188,7 +194,8 @@ def _answer_per_path(system_prompt, b_changes):
     return "".join(blocks)
 
 
-def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False):
+def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False, b_identical=False, a_identical=False,
+              compile_result=None):
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
     cfg.llm.model = "dev-model"
@@ -219,7 +226,7 @@ def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False):
             content = json.dumps({"files": [A, B]})
         elif "Developer Agent" in first:
             developer.append(system_prompt)
-            content = _answer_per_path(system_prompt, b_changes)
+            content = _answer_per_path(system_prompt, b_changes, b_identical, a_identical)
         else:
             content = "Review: Approved"
         tokens = len(((system_prompt or "") + (user_prompt or "")).encode()) * 2 // 7
@@ -236,7 +243,8 @@ def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False):
     engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               new=lambda *a, **k: compile_result or {"success": True, "output": "ok"}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: TESTS_PASS):
         result = asyncio.run(engine.run_generation_workflow(
             goal=GOAL, workspace_path=str(workspace), predetermined_plan="cache the pet types",
@@ -247,24 +255,30 @@ def _run_unit(tmp_path, *, criterion=TOOL_CRITERION, b_changes=False):
     return workspace, developer, events, result
 
 
-def test_r2_a_unit_that_changes_a_and_deterministically_verifies_no_change_for_b_completes(tmp_path):
-    """The registered row's shape: one mutating unit, A rewritten, NO CHANGE for the planned B."""
+def test_r2_a_unit_that_changes_a_and_answers_no_change_for_b_delivers_b_unchanged_and_completes(tmp_path):
+    """The registered row's shape: one mutating unit, A rewritten, NO CHANGE for the planned B. B is delivered
+    unchanged (never a no-change claim of its own to verify); the unit is an ordinary mutation of A."""
     workspace, developer, events, result = _run_unit(tmp_path)
     assert developer, "the Developer was asked"
     assert result["quality_gates_passed"] is True, (result.get("failure_category"), result.get("environment_failure"))
     assert sorted(result["files"]) == [A]
     assert _bytes(workspace, A, B) == {A: A_FIXED.encode(), B: B_SRC.encode()}
-    [verified] = [e.details for e in events if e.kind == "unit.verified_no_change"]
-    assert verified["paths"] == [B] and verified["acceptance_coverage"][0]["criterion_id"] == "ac1"
-    assert result["completion_kind"] is None  # the unit mutated: an ordinary completion carrying a verified per-file no-change
+    [delivered] = [e.details for e in events if e.kind == DELIVERED_UNCHANGED]
+    assert delivered["paths"] == [B] and delivered["answered_no_change"] == [B] and delivered["written_paths"] == [A]
+    assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change") for e in events)
+    assert result["completion_kind"] is None  # the unit mutated: an ordinary completion, B delivered unchanged
 
 
-def test_r2_a_judgment_criterion_is_never_evidence_for_the_planned_files_no_change(tmp_path):
-    """Nothing deterministic covers B's no-change: the unit does not complete and A is not applied either."""
-    workspace, _developer, events, result = _run_unit(tmp_path, criterion=JUDGMENT_CRITERION)
+def test_r2_a_unit_with_zero_effective_mutation_is_still_judged_by_the_no_change_contract(tmp_path):
+    """The other half of the owner invariant (the mutation control for `not state.all_files_written`): a unit that
+    changed NOTHING - A returned byte-identical, NO CHANGE for B - with a judgment criterion is refused as before
+    (ACCEPTANCE_COVERAGE_INCOMPLETE), nothing is applied and nothing is 'delivered unchanged': model output never
+    establishes no-change success."""
+    workspace, _developer, events, result = _run_unit(tmp_path, criterion=JUDGMENT_CRITERION, a_identical=True)
     assert result["quality_gates_passed"] is False
     assert _bytes(workspace, A, B) == {A: A_SRC.encode(), B: B_SRC.encode()}
-    assert not any(e.kind == "unit.verified_no_change" for e in events)
+    assert "ACCEPTANCE_COVERAGE_INCOMPLETE" in _refusal_codes(events)
+    assert not any(e.kind in ("unit.verified_no_change", DELIVERED_UNCHANGED) for e in events)
 
 
 def test_r2_a_unit_that_writes_both_planned_files_is_an_ordinary_mutation(tmp_path):
@@ -273,6 +287,53 @@ def test_r2_a_unit_that_writes_both_planned_files_is_an_ordinary_mutation(tmp_pa
     assert sorted(result["files"]) == sorted([A, B])
     assert b"Cached pet types" in (workspace / B).read_bytes()
     assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change") for e in events)
+
+
+# ------------------------------------------------------------------ ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 (P1)
+COMPILE_FAIL = {"success": False, "output": "shop/service.py:1: SyntaxError: invalid syntax"}
+DELIVERED_UNCHANGED = "unit.planned_files_delivered_unchanged"
+
+
+def _refusal_codes(events):
+    return [e.details.get("refusal", {}).get("code") for e in events if e.kind == "unit.verified_no_change_refused"]
+
+
+@pytest.mark.parametrize("b_shape", ["identical", "no_change"])
+def test_p1_a_mutating_unit_whose_other_planned_file_is_untouched_completes_under_free_text_criteria(tmp_path, b_shape):
+    """C2-S2_A-final on 557035d (BACKEND-FINAL-CLOSURE-005 final twelve): s1 planned pyproject.toml + MANIFEST.in;
+    attempt 1 changed pyproject.toml correctly (external oracle ACCEPT 0 / REGRESS 0) and returned MANIFEST.in
+    byte-identical; the unit's criteria are free text, so the OD-3 partial contract refused the candidate
+    (VERIFIED_NO_CHANGE_REFUSED / ACCEPTANCE_COVERAGE_INCOMPLETE), applied nothing, and drove the Developer to mutate a
+    file that needed no change (attempt 6: a wrong candidate). Owner invariant (2026-10-09): a planned-file list is
+    execution intent, not verification authority - a unit carrying an effective mutation delivers its untouched planned
+    file unchanged and is judged by its gates and the terminal authorities like every other mutating unit; per-file
+    deterministic coverage applies only to a unit that changed nothing. Both shapes of "untouched": the identical
+    rewrite (the measured one) and an explicit NO CHANGE answer (T2 attempt 5)."""
+    workspace, developer, events, result = _run_unit(
+        tmp_path, criterion=JUDGMENT_CRITERION, b_identical=(b_shape == "identical"))
+    assert developer, "the Developer was asked"
+    assert result["quality_gates_passed"] is True, (result.get("failure_category"), _refusal_codes(events))
+    assert sorted(result["files"]) == [A]
+    assert _bytes(workspace, A, B) == {A: A_FIXED.encode(), B: B_SRC.encode()}
+    [delivered] = [e.details for e in events if e.kind == DELIVERED_UNCHANGED]
+    assert delivered["paths"] == [B] and delivered["written_paths"] == [A] and delivered["subtask"] == "s1"
+    assert (delivered["identical_rewrites"], delivered["answered_no_change"]) == (
+        ([B], []) if b_shape == "identical" else ([], [B]))
+    assert result["unchanged_files"] == ([B] if b_shape == "identical" else [])
+    assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change", "unit.verified_no_change_refused")
+                   for e in events)
+    assert result["completion_kind"] is None  # an ordinary mutation, never VERIFIED_NO_CHANGE
+
+
+@pytest.mark.parametrize("b_shape", ["identical", "no_change"])
+def test_p1_control_a_delivered_unchanged_file_never_bypasses_the_units_gates(tmp_path, b_shape):
+    """Negative control (same result before and after the fix): the same shape with a failing deterministic gate
+    applies nothing - delivering B unchanged is not a verdict on the unit."""
+    workspace, _developer, events, result = _run_unit(
+        tmp_path, criterion=JUDGMENT_CRITERION, b_identical=(b_shape == "identical"), compile_result=COMPILE_FAIL)
+    assert result["quality_gates_passed"] is False
+    assert _bytes(workspace, A, B) == {A: A_SRC.encode(), B: B_SRC.encode()}
+    assert not any(e.kind == "unit.verified_no_change" for e in events)
 
 
 # ------------------------------------------------------------------ negative controls, edge by edge (owner OD-3 list)

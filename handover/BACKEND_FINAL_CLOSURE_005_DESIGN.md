@@ -493,3 +493,65 @@ candidate was refused) and SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001 (
 site, requirements.py close_suite_preservation_requirements). Observations REGRESSION-ATTRIBUTION-UNAVAILABLE-DETAIL-001
 and VERIFICATION-UNIT-ENV-FALLBACK-001 (P2 DEFERRED, owner decisions). The registry tripwire is RED on this records commit
 by design while P1 rows are OPEN; the certified executable 557035d is unchanged and green.
+
+## 13. Third repair cycle - operator-controlled (2026-10-09, branch repair/c3-p1 from 5407a80)
+
+Mode: the operator runs every pytest / live execution and returns the output; one repair branch; one logical defect at a
+time; no commit before the operator's verification; no push; readiness bar unchanged.
+
+### 13.1 ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 (P1) - owner decision and fix
+
+- Observation (MEASURED, C2-S2_A-final on 557035d): s1 planned pyproject.toml + MANIFEST.in; attempt 1 changed
+  pyproject.toml correctly (frozen external oracle ACCEPT 0 / REGRESS 0) and returned MANIFEST.in byte-identical;
+  candidate gates PASSED; then VERIFIED_NO_CHANGE_REFUSED for MANIFEST.in (ACCEPTANCE_COVERAGE_INCOMPLETE); attempt 4
+  the same; attempt 6 mutated MANIFEST.in and broke the package list -> applied (the FALSE_NEGATIVE). The same
+  attempt-1 candidate PASSED at b185bd6, before D4 made an identical rewrite reach the proposal.
+- Producer (TRACED): attempt.py commit batch (D4) -> `state.identical_rewrites`; `_verified_no_change_proposal`
+  returns the identical planned file as the partial proposal (OD-3 reading 2); after the terminal regression
+  `workflow._settle_no_change_proposal` -> `verified_no_change.verify_no_change_unit` ->
+  `milestone_completion.criterion_coverage` / `coverage_refusal` over the UNIT's acceptance criteria; a free-text
+  (judgment) criterion is UNCOVERED by construction ("No production verifier emits this map yet") -> refusal, the
+  attempt's own writes not applied. Contrast: a unit that writes BOTH planned files is never held to per-criterion
+  coverage - its mandatory claims close at the candidate gates, the terminal regression and the run's terminal
+  requirement gate (S2_A: REQ-1..REQ-9 judged there). The reopened-owner rule of the second review (F1) already
+  delivered an identical planned file unchanged when the owner changed another file.
+- Root cause (CONFIRMED by the trace and the b185bd6-vs-557035d discriminator): the OD-3 partial contract treated an
+  untouched planned file as an obligation of its own requiring deterministic coverage of the whole unit's criteria -
+  stricter than any mutation of that file faces and unsatisfiable with free-text criteria - so a correct candidate
+  that over-approximated its planned files was refused and the Developer was driven to mutate a file that needed no
+  change. Not model behaviour.
+- Owner decision (2026-10-09, P1-1 semantics): a planned-file list is execution intent, not verification authority.
+  If the unit carries at least one effective authorized mutation and every mandatory claim closes at its bound gates /
+  terminal authorities, the unit may complete with another planned file byte-identical; an untouched planned file is
+  never independently an unsatisfied obligation. A unit with zero effective mutation keeps the deterministic no-change
+  contract; model output never establishes no-change success.
+- Fix (smallest, `kriya/workflow/attempt.py` only): `_verified_no_change_proposal` keeps computing the untouched
+  planned paths (NO CHANGE answers + identical rewrites that explain exactly the never-written planned files; the
+  reopened-owner special case is subsumed and removed); the call site proposes them as a no-change ONLY when
+  `state.all_files_written` is empty. Otherwise they are delivered unchanged: excluded from the completeness check,
+  recorded as `unit.planned_files_delivered_unchanged` (subtask, paths, identical_rewrites, answered_no_change,
+  written_paths), never applied (not in all_files_written; identical rewrites still reported as `unchanged_files`),
+  and the unit runs the ordinary mutation path. `_settle_no_change_proposal`, `verified_no_change.py`,
+  `milestone_completion.py`, the D4 commit batch and the result shape are unchanged.
+- Reproducer first (`tests/test_backend_final_closure_005_partial_no_change.py`, reading-2 harness, both untouched
+  shapes: identical rewrite = the measured mechanism, explicit NO CHANGE = T2 attempt 5), MEASURED pre-fix by the
+  operator on repair/c3-p1 (2026-10-09): both shapes refused on every attempt with ACCEPTANCE_COVERAGE_INCOMPLETE
+  (identical: quality_gates_exhausted; no_change: no_progress), the gate-bypass controls PASS, 2 failed / 29 passed.
+- Predicted post-fix: both shapes complete with A applied and B byte-identical, one delivered-unchanged event, no
+  proposal / refusal events; the zero-mutation control (A identical + NO CHANGE for B, judgment criterion) is still
+  refused with ACCEPTANCE_COVERAGE_INCOMPLETE and nothing delivered; a failing compile gate still applies nothing;
+  D4 t1/t2 (S4_B shape) unchanged; the owner-reopen two-file case delivers HELPER unchanged on both runs. The S2_A
+  shape ends unit s1 at attempt 1 with pyproject.toml applied - and still blocks at REQ-9 until 13.2 (P1-2).
+- Assertions changed by the decision (the completion/bytes assertions stay; only the event shape moved):
+  partial_no_change r2 "verifies no-change for B" (now delivered unchanged) and the judgment-criterion refusal (now
+  the zero-mutation control); D4 t3 (`partial` -> delivered); owner-reopen two-file case (`proposed == [[HELPER]]`
+  -> nothing proposed, delivered twice); D4 t5 (the retry that restores B to baseline bytes: `verified_no_change`
+  -> delivered on attempt 2) - missed in the first flip list, found by the operator's post-fix step-1 run (1 failed /
+  30 passed: its completion, applied-set and byte assertions held; only the event unpack failed).
+- Verification (operator runs, 2026-10-09): step 1 (partial_no_change + D4 modules) 31 passed / 0 failed after the
+  t5 assertion update; step 2 (enforce no-change, owner reopen, failure reporting, S4b/S4c milestone completion and
+  resume, plan executability, LR-R1 M1/P4/P5 modules) reported all green. Mutation controls: repair-003/mutations
+  (operator run 2026-10-09, attempt.py restored byte-identical): M1 restores the old partial proposal -> KILLED, 6 failed
+  (p1 x2, r2 delivered, D4 t3/t5, owner-reopen two-file); M2 never proposes -> KILLED, 4 failed (zero-mutation control,
+  D4 t1/t2, owner-reopen no-change case); M3 drops the delivered event -> KILLED, 6 failed (the same six as M1).
+  Registry row ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 -> CLOSED with this slice.

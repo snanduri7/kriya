@@ -6869,32 +6869,29 @@ def _restore_api_contract_owners_deterministically(
 def _verified_no_change_proposal(
     state: GenerationState, ctx: "AttemptContext", files: List[Dict[str, Any]], missing_files: List[str],
 ) -> List[str]:
-    """ENFORCE-VERIFIED-NO-CHANGE-001 and ENFORCE-PARTIAL-NO-CHANGE-001 (owner
-    decision OD-3, BACKEND-FINAL-CLOSURE-005): the planned paths of an enforce
-    unit the Developer answered NO CHANGE for, when they explain exactly the
-    expected files never written - else []. The unit may have written nothing
-    (the whole-unit case) or its other planned files, in this attempt or an
-    earlier one (the partial case: A rewritten, NO CHANGE for B). Only an
-    existing file this unit never wrote can be a no-change (a planned file
-    still missing is a missing artifact; a file the unit wrote and now calls
+    """ENFORCE-VERIFIED-NO-CHANGE-001 / ENFORCE-PARTIAL-NO-CHANGE-001 (OD-3)
+    / ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 (BACKEND-FINAL-
+    CLOSURE-005): the planned paths of an enforce unit the Developer left
+    untouched - a NO CHANGE answer or a byte-identical rewrite
+    (ENFORCE-IDENTICAL-WRITE-COMPLETION-001, state.identical_rewrites) - when
+    they explain exactly the expected files never written, else []. Only an
+    existing file this unit never wrote can be untouched (a planned file still
+    missing is a missing artifact; a file the unit wrote and now calls
     unchanged is not an assessment of the base); a protocol-error entry is a
-    rejected response, never an assessment. The answer is never success by
-    itself: kriya/workflow/verified_no_change.py decides it from the final
-    attempt's deterministic gate evidence."""
+    rejected response, never an assessment.
+
+    What the untouched paths MEAN is the caller's decision, from the unit's
+    effective mutation (state.all_files_written): a unit that changed nothing
+    proposes them as a no-change the final attempt's deterministic gate
+    evidence must verify (kriya/workflow/verified_no_change.py); a unit that
+    changed another file delivers them unchanged and is judged like every
+    other mutating unit. The answer is never success by itself."""
     if not missing_files or ctx.structured_plan is None or not ctx.current_subtask_id:
         return []
-    # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: a planned file the unit returned
-    # byte-identical to the baseline (state.identical_rewrites) is the same
-    # assessment of the base as a NO CHANGE answer - and is decided the same
-    # way, by deterministic evidence, never by the write.
     subtask = ctx.structured_plan.subtask_by_id(ctx.current_subtask_id)
     planned_paths = {pf.path for pf in (subtask.planned_files if subtask is not None else [])}
-    # Review F3: a restored unplanned path is no proposal. Second review F1: a reopened owner that DID change
-    # bytes is judged by the controller's own acceptance (a byte change, gates, scope) - its identical planned
-    # files are delivered unchanged, not a no-change claim to verify; only a regeneration that changed NOTHING
-    # is proposed (and then stopped typed by the settlement).
-    identical_proposals = (set() if ctx.reopened_owner and state.all_files_written
-                           else set(state.identical_rewrites) & planned_paths)
+    # Review F3: a restored unplanned path is never an untouched planned file.
+    identical_proposals = set(state.identical_rewrites) & planned_paths
     no_change = sorted({
         f["filepath"] for f in files
         if f.get("filepath") and not f.get("protocol_error")
@@ -9186,43 +9183,66 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                      - _structured_plan_paths(ctx))
         expected_files = {os.path.basename(f) for f in ctx.architect_files if f not in abandoned}
         missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=ctx.goal)
-        no_change_proposal = _verified_no_change_proposal(state, ctx, files, missing_files)
-        if no_change_proposal:
-            # ENFORCE-VERIFIED-NO-CHANGE-001: not success - the gates below
-            # and the terminal regression run as always, then the workflow
-            # decides from deterministic evidence (verified_no_change.py).
-            state.no_change_proposal = no_change_proposal
+        untouched_planned = _verified_no_change_proposal(state, ctx, files, missing_files)
+        if untouched_planned and not state.all_files_written:
+            # ENFORCE-VERIFIED-NO-CHANGE-001: a unit with ZERO effective
+            # mutation - not success: the gates below and the terminal
+            # regression run as always, then the workflow decides from
+            # deterministic evidence (verified_no_change.py).
+            state.no_change_proposal = untouched_planned
             state.record_event(RunEvent(
                 kind="unit.no_change_proposed",
                 attempt=state.attempt_number,
                 source="developer",
                 authority=EventAuthority.ADVISORY,
-                details={"subtask": ctx.current_subtask_id, "paths": no_change_proposal,
-                         "identical_rewrites": sorted(set(no_change_proposal) & state.identical_rewrites)},
+                details={"subtask": ctx.current_subtask_id, "paths": untouched_planned,
+                         "identical_rewrites": sorted(set(untouched_planned) & state.identical_rewrites)},
             ))
         else:
-            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: outside the enforce
-            # no-change contract (no structured plan, or another expected
-            # file is genuinely missing) an identical rewrite is DELIVERED,
-            # unchanged - never "never written". It is still not a mutation
-            # (not in all_files_written, nothing to apply): a milestone or
-            # direct run that changes nothing completes through its own
-            # no-change verification (kriya/workflow/milestone_completion.py),
-            # never through the write.
+            # ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 (owner decision
+            # 2026-10-09, C2-S2_A-final): a planned-file list is execution
+            # intent, not verification authority. A unit that carries an
+            # effective mutation delivers its untouched planned files
+            # unchanged - never an obligation of their own to prove by
+            # per-criterion coverage, which free-text criteria can never meet
+            # - and is judged by its gates and the terminal authorities like
+            # every other mutating unit. ENFORCE-IDENTICAL-WRITE-COMPLETION-
+            # 001: outside the enforce contract too (no structured plan, or
+            # another expected file genuinely missing) an identical rewrite
+            # is DELIVERED, unchanged - never "never written". Neither is a
+            # mutation (not in all_files_written, nothing to apply); a
+            # milestone or direct run that changes nothing completes through
+            # its own no-change verification (milestone_completion.py), never
+            # through the write.
+            missing_basenames = set(missing_files)
             delivered_unchanged = sorted(
-                path for path in state.identical_rewrites if os.path.basename(path) in set(missing_files))
+                path for path in set(state.identical_rewrites) | set(untouched_planned)
+                if os.path.basename(path) in missing_basenames)
             missing_files = find_missing_expected_files(
-                expected_files, state.all_files_written | state.identical_rewrites, goal=ctx.goal)
+                expected_files, state.all_files_written | state.identical_rewrites | set(untouched_planned),
+                goal=ctx.goal)
             if missing_files:
+                delivered_identical = [path for path in delivered_unchanged if path in state.identical_rewrites]
                 raise IncompleteGenerationError(
                     missing_files,
                     "INCOMPLETE GENERATION: The design called for the following files, but "
                     f"they were never written: {', '.join(missing_files)}. "
-                    + (f"({', '.join(delivered_unchanged)}: returned byte-identical to the baseline - delivered, "
-                       "not a change.) " if delivered_unchanged else "")
+                    + (f"({', '.join(delivered_identical)}: returned byte-identical to the baseline - delivered, "
+                       "not a change.) " if delivered_identical else "")
                     + "You must generate ALL files listed in the Architect Design Guidelines, "
                     "not just a subset."
                 )
+            if delivered_unchanged and state.all_files_written:
+                state.record_event(RunEvent(
+                    kind="unit.planned_files_delivered_unchanged",
+                    attempt=state.attempt_number,
+                    source="workflow",
+                    authority=EventAuthority.ADVISORY,
+                    details={"subtask": ctx.current_subtask_id, "paths": delivered_unchanged,
+                             "identical_rewrites": [p for p in delivered_unchanged if p in state.identical_rewrites],
+                             "answered_no_change": [p for p in delivered_unchanged if p not in state.identical_rewrites],
+                             "written_paths": sorted(state.all_files_written)},
+                ))
 
         # Static pre-check: deterministic, no-LLM scan for known anti-patterns already
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,

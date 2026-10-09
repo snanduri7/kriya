@@ -183,18 +183,22 @@ def test_t2_an_identical_rewrite_without_deterministic_coverage_is_refused_and_n
     assert not any(e.kind == "unit.verified_no_change" for e in events)
 
 
-def test_t3_a_changed_file_beside_an_identical_rewrite_is_a_partial_no_change(tmp_path):
+def test_t3_a_changed_file_beside_an_identical_rewrite_delivers_the_rewrite_unchanged(tmp_path):
+    """ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 (C2-S2_A-final): the unit mutated A, so the identical B is
+    delivered unchanged - reported as such, never applied, never a no-change claim of its own to verify."""
     def answers(_attempt, path):
         return sentinel(path, analysis="x", content=A_FIXED if path == A else B_SRC)
 
     workspace, _developer, events, result = _run_unit(tmp_path, answers)
 
     assert result["quality_gates_passed"] is True, (result.get("failure_category"), result.get("environment_failure"))
-    assert result["files"] == [A]
+    assert result["files"] == [A] and result["unchanged_files"] == [B]
     assert result["completion_kind"] is None
     assert _bytes(workspace) == {A: A_FIXED.encode(), B: B_SRC.encode()}
-    [verified] = [e for e in events if e.kind == "unit.verified_no_change"]
-    assert verified.details["paths"] == [B] and verified.details["partial"] is True and verified.details["written_paths"] == [A]
+    [delivered] = [e for e in events if e.kind == "unit.planned_files_delivered_unchanged"]
+    assert delivered.details["paths"] == [B] and delivered.details["identical_rewrites"] == [B]
+    assert delivered.details["written_paths"] == [A]
+    assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change") for e in events)
 
 
 def test_t4_line_endings_follow_the_files_own_convention_and_a_text_change_is_a_change(tmp_path):
@@ -218,7 +222,8 @@ def test_t4_line_endings_follow_the_files_own_convention_and_a_text_change_is_a_
 
 def test_t5_a_retry_that_restores_a_file_to_its_baseline_bytes_withdraws_it_from_the_mutation(tmp_path):
     """Attempt 1 changes both files and the test gate fails; attempt 2 keeps A's fix and returns B exactly as the
-    baseline: B is restored on disk and leaves the written set - the unit settles B as a verified no-change."""
+    baseline: B is restored on disk and leaves the written set - delivered unchanged beside A's mutation
+    (ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001), never a no-change claim of its own to verify."""
     def answers(attempt, path):
         if path == A:
             return sentinel(path, analysis="x", content=A_FIXED)
@@ -230,8 +235,10 @@ def test_t5_a_retry_that_restores_a_file_to_its_baseline_bytes_withdraws_it_from
     assert result["quality_gates_passed"] is True, (result.get("failure_category"), result.get("environment_failure"))
     assert result["files"] == [A]
     assert _bytes(workspace) == {A: A_FIXED.encode(), B: B_SRC.encode()}
-    [verified] = [e for e in events if e.kind == "unit.verified_no_change"]
-    assert verified.details["paths"] == [B] and verified.details["written_paths"] == [A]
+    [delivered] = [e for e in events if e.kind == "unit.planned_files_delivered_unchanged"]
+    assert delivered.details["paths"] == [B] and delivered.details["identical_rewrites"] == [B]
+    assert delivered.details["written_paths"] == [A] and delivered.attempt == 2
+    assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change") for e in events)
 
 
 def test_t6_a_direct_goal_whose_every_file_came_back_identical_is_a_typed_stop_never_passed(tmp_path):

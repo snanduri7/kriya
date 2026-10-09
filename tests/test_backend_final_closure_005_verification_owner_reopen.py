@@ -325,10 +325,11 @@ def test_a_reopened_owner_that_changes_one_planned_file_and_returns_another_iden
     assert (workspace / SERVICE).read_text() == FIXED_SOURCE
     assert (workspace / HELPER).read_text() == HELPER_SOURCE
     assert test_gate_runs == ["s1", "s2", "s1", "s2", "s2"]  # the reopened owner's gates, then the verification rerun (same shape as the single-file reopen)
-    # the planned run settled HELPER as a verified partial no-change (OD-3); the reopened run proposed nothing:
-    # its byte change in SERVICE is the controller's acceptance criterion, and no typed identical-regeneration stop
-    proposed = [e for e in events if e.kind == "unit.no_change_proposed"]
-    assert [e.details["paths"] for e in proposed] == [[HELPER]], proposed
-    assert not any(e.kind == "unit.verified_no_change_refused" for e in events)
+    # neither run proposes a no-change: both carry a byte change in SERVICE, so HELPER is delivered unchanged
+    # (ENFORCE-PARTIAL-NO-CHANGE-COVERAGE-FREE-TEXT-001 generalized this review's rule to every mutating unit),
+    # and no typed identical-regeneration stop
+    assert not any(e.kind in ("unit.no_change_proposed", "unit.verified_no_change_refused") for e in events)
+    delivered = [e.details["paths"] for e in events if e.kind == "unit.planned_files_delivered_unchanged"]
+    assert delivered == [[HELPER], [HELPER]], delivered
     assert [e.details.get("reason_code") for e in events if e.kind == "retry.no_progress_terminal"] == [
         "VERIFICATION_RETRY_NO_CHANGE_POSSIBLE"]  # s2's first failure only
