@@ -654,3 +654,30 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   3 failed / 5 passed, checkpoint.py restored byte-identical; adjacent checkpoint / workspace-identity / resume /
   subtask-checkpoint / validation-baseline / analyzer-cache / proposal-promotion / REG-R1 / workflow modules: 1134
   passed. Registry row CLOSED. Then back to P1-2 case 3 (13.2).
+
+### 13.4 P2-1 REGRESSION-ATTRIBUTION-UNAVAILABLE-DETAIL-001 - investigation, disposition BY_DESIGN (records only)
+
+- Observation (MEASURED, C2-S3_A-final generate.log 266-320; sealed store 20261009T135450-b902eeca regression.decision
+  seq 101 and 183): full regression attempt 2 and 4 blocked with 17 reasons - level1 CHANGED_FAILURE plus sixteen
+  level2 CHANGED_FAILURE for DnsStringLookupTest / InetAddressStringLookupLocalHostTest /
+  StringSubstitutorWithInterpolatorStringLookupTest, each rendered "PRE: error -> POST: FAIL" with "(failure detail
+  unavailable in raw output)"; authority whole_output, stability_measured 0.
+- Producer (TRACED): `classify_baseline_delta` -> `_whole_output_delta` for a Maven run (no pytest evidence); level1 =
+  normalized Surefire "Results:" fingerprint; level2 = `classify_level2_delta` over `parse_surefire_structured_outcomes`
+  (status from the Errors / Failures section, fingerprint from the entry's reason text - computed for BOTH sides); both
+  CHANGED_FAILURE are in TERMINAL_BLOCKING_CLASSIFICATIONS; `confirmed_regressions` counts CHANGED with NEW. The
+  "detail unavailable" text is `extract_test_failure_sections` (pytest FAILURES layout only) - a renderer limitation
+  that did not participate in the decision.
+- Corrected premise: the registry row's "unavailable fingerprint" was INFERRED and is wrong - an Errors entry
+  (exception summary) and a Failures entry (assertion message) carry different reason text by construction, so the
+  fingerprints differ whatever the text. The run's raw PRE/POST reason strings are UNKNOWN (store content-free, log
+  holds the rendered evidence, oracle outputs exclude these tests).
+- Disposition (owner, 2026-10-09): BY_DESIGN. The documented REG-R2 rule makes FAIL<->ERROR CHANGED_FAILURE unless the
+  untouched baseline's own envelope shows both states; the Maven path has no envelope by documented scope ("every other
+  runner is decided exactly as before"); excusing a state change without measured baseline volatility would open a
+  false-success path. Consequence class: never a false success; a possible false negative when an environment-dependent
+  test's non-pass state flips between PRE and POST, plus unnecessary retries - intentional fail-closed attribution.
+  Existing coverage: tests/test_reg_r1_pytest_regression_authority.py test_06b (FAIL->ERROR blocks); no characterization
+  test added. Follow-ups: SUREFIRE-RENDERER-FAILURE-DETAIL-001 (P3 diagnostic, never a certification blocker) and
+  SUREFIRE-STABILITY-ENVELOPE-001 (deferred future capability, rule 9: substantial independent design).
+
