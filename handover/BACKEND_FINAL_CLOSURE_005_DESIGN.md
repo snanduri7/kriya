@@ -803,3 +803,48 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   passed, the one failure the registry tripwire on this slice's own row (closure_evidence must be non-empty on
   every row, including OPEN; a harness contract missed when the row was added, filled with the closure). Registry
   row CLOSED.
+
+### 13.7 SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (P3, independent review of 6d97558, finding F3) - fix
+
+- Review (2026-10-10, F3 CONFIRMED by trace, reviews/REVIEW_DISPOSITION_c3.md): the direct terminal boundary and the
+  enforce terminal gate both reach the one wrapper, and a run whose effective baseline policy captured no baseline
+  (configured `disabled`, or `auto` resolved to not required: workflow.py run start, `full_regression` None unless
+  `required`) passes `suite_baseline=None` exactly as the enforce gate does; the wrapper (13.2) captures lazily.
+- Observation (MEASURED pre-fix by the operator, repair-003/prefix/F3_reproducer_before.txt, the real wrapper called
+  as the direct site calls it, the run's replay callable counted): a stable pre-existing failure -> one replay call
+  (the lazy capture) and the requirement CLOSED by attribution; a candidate-introduced failure -> three replay calls
+  (capture + the owner's two bounded stability replays) and the regression named - under a policy that captured
+  nothing. Reach: the terminal regression passed under the raw rule, then the closer's own suite run failed.
+- Root cause: CONFIRMED. The wrapper had no caller/policy input; a missing baseline meant "capture lazily" for every
+  caller. Classification: KRIYA_PRODUCT, authority (the closer gained attribution authority the operator disabled);
+  fail-closed on every error path, no false success; P3.
+- Owner decision (2026-10-10): FIX NOW as a separate narrow slice. The direct path respects the run's baseline policy:
+  policy disabled / resolved disabled + failing suite -> no lazy capture, no attribution authority, open with typed
+  REGRESSION_UNATTRIBUTED; captured run baseline reused (no recapture); indeterminate fails closed (no recapture);
+  the enforce terminal-closure path keeps lazy capture (its explicit design); green suite never captures, whatever
+  the caller; the distinction is an explicit caller/policy input, never inferred from `suite_baseline is None`.
+- Fix (three production files): `workflow.py` - closed set `SUITE_BASELINE_FROM_RUN` / `SUITE_BASELINE_LAZY_CAPTURE`;
+  the wrapper takes the required keyword `baseline_source` (an unknown value raises ValueError before anything runs)
+  and `run_baseline_policy`; with `FROM_RUN` and no captured baseline it returns the typed unavailable reason "the
+  run's full-regression baseline policy (<policy>) captured no PRE-mutation baseline, and the direct terminal
+  closure may not capture one" (after the indeterminate check, before the lazy capture); the run start records the
+  effective policy on `state.validation_baseline_policy`; the direct call site passes `FROM_RUN` and that policy.
+  `state.py` - the one new field. `terminal_gate_service.py` - the enforce call passes `LAZY_CAPTURE`. The closer
+  (`requirements.py`), the attribution owner, the lazy capture itself and `captured_baseline` are unchanged.
+- Reproducer first (`tests/test_repair_003_f3_suite_preservation_baseline_policy.py`, the P1-2 harness; two call-site
+  helpers mirror the production callers): (1) direct + policy disabled + failing suite, stable and introduced
+  variants; (2) direct + captured baseline reused; (3) direct + indeterminate fails closed; (4) enforce lazy capture
+  kept; (5) green suite, three callers, no capture; (6) enforce capture failure fails closed; (7, added with the fix)
+  an unknown `baseline_source` is refused before any suite runs. The P1-2 harness `_close` now states the source
+  explicitly (enforce by default; its two direct-boundary cases say `FROM_RUN`, policy `required`).
+- Predicted post-fix: F3 10/10 (the two case-1 variants now pass; case 7 new), P1-2 8/8 unchanged in outcome; mutants
+  F3-M1 (direct refusal removed) kills F3 case 1 both variants; F3-M2 (refusal for every source) kills F3 case 4 and
+  P1-2 cases 1, 2, 3, 6; F3-M3 (unknown-source guard removed) kills F3 case 7 (repair-003/mutations/
+  run_f3_mutations.sh); adjacent closer / attribution / terminal-service / baseline-policy / REG-R1 / D1 / D8 /
+  contract-closer / resume / workflow / registry modules unchanged in outcome.
+- Verification (operator runs, 2026-10-10): F3 10/10 + P1-2 8/8 (repair-003/prefix/F3_reproducer_after.txt);
+  mutants F3-M1 KILLED 2 failed / 16 passed (the two case-1 variants only), F3-M2 KILLED 6 failed / 12 passed (F3
+  cases 4 and 6, P1-2 cases 1, 2, 3, 6), F3-M3 KILLED 1 failed / 17 passed (case 7 only), workflow.py restored
+  byte-identical (repair-003/mutations/F3-M*.txt) - every prediction matched; adjacent 15 modules (D1, D8, FS-1A,
+  PRD-008 resume, PRD-024 policy, PRD-030 terminal services, PRD-031A, PRD-032, REG-R1, plain-goal closer,
+  validation baseline, contract closers and scopes, workflow, registry): 1421 passed. Registry row CLOSED.

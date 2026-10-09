@@ -521,6 +521,11 @@ class GenerationState:
     # (e.g. "ContextItem" as a forward-ref string).
     validation_baseline_targeted: Optional[Any] = None
     validation_baseline_full_regression: Optional[Any] = None
+    # SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001: the run's EFFECTIVE full-
+    # regression baseline policy ("required" / "disabled", after `auto`
+    # resolution), recorded at run start so the direct terminal boundary can
+    # state why no baseline exists instead of inferring it from None.
+    validation_baseline_policy: Optional[str] = None
     # REG-R1: untouched-baseline field stability (binding digest -> measurement),
     # kriya/workflow/pytest_stability.py; checkpointed with the baselines.
     pytest_stability_cache: Dict[str, Any] = field(default_factory=dict)

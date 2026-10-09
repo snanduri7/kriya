@@ -96,10 +96,11 @@ def _unverified_ledger(reqs, evidence_id="candidate-1"):
     return ledger
 
 
-def _close(workspace, candidate, goal=GOAL, **direct_path_inputs):
+def _close(workspace, candidate, goal=GOAL, *, baseline_source=wf.SUITE_BASELINE_LAZY_CAPTURE, **direct_path_inputs):
     """The real wrapper, the production pytest gate on both trees; every suite run is accounted by the tree it ran on.
-    ``direct_path_inputs``: the run's own ``suite_baseline`` / ``stability_cache`` / ``baseline_suite_run`` (the direct
-    boundary's call site); none = the enforce terminal gate's call (lazy capture)."""
+    ``baseline_source`` is the caller's explicit statement (SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001): the
+    enforce terminal gate's lazy capture by default here, or the direct boundary's ``SUITE_BASELINE_FROM_RUN`` with
+    ``direct_path_inputs`` - the run's own ``suite_baseline`` / ``stability_cache`` / ``baseline_suite_run``."""
     reqs = derive_requirements(goal)
     ledger = _unverified_ledger(reqs)
     runs = []
@@ -113,7 +114,8 @@ def _close(workspace, candidate, goal=GOAL, **direct_path_inputs):
          patch.object(PolymorphicValidator, "run_tests", new=run_tests):
         entries = wf.close_requirements_by_suite_preservation(
             AutonomyConfig(), ledger, reqs, str(candidate), str(workspace), revision="terminal",
-            toolchain_declaration_mutable=False, candidate_paths=["calc.py"], **direct_path_inputs)
+            toolchain_declaration_mutable=False, candidate_paths=["calc.py"], baseline_source=baseline_source,
+            **direct_path_inputs)
     base = [t for root, t in runs if root == os.path.realpath(str(workspace))]
     cand = [t for root, t in runs if root == os.path.realpath(str(candidate))]
     assert len(base) + len(cand) == len(runs), runs  # every run was on one of the two trees
@@ -243,8 +245,9 @@ def test_p1_2_the_direct_boundary_reuses_the_runs_captured_baseline_and_replay_w
     assert captured.status == "captured" and replay.calls == [None]
     candidate = _candidate(tmp_path, workspace, CALC_TIDIED)
     cache = {}
-    entries, reqs, ledger, base, cand = _close(workspace, candidate, suite_baseline=captured, stability_cache=cache,
-                                               baseline_suite_run=replay)
+    entries, reqs, ledger, base, cand = _close(workspace, candidate, baseline_source=wf.SUITE_BASELINE_FROM_RUN,
+                                               suite_baseline=captured, stability_cache=cache, baseline_suite_run=replay,
+                                               run_baseline_policy="required")
     [entry] = _suite_entries(entries)
     assert entry["closed"] is True and entry["regression_attribution"]["pre_existing_only"] is True
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.CLOSED_BY_EVIDENCE
@@ -263,7 +266,8 @@ def test_p1_2_an_indeterminate_run_baseline_is_reported_unavailable_never_recapt
                                              compute_revision=lambda: None)
     assert indeterminate.status == "baseline_indeterminate"
     candidate = _candidate(tmp_path, workspace, CALC_TIDIED)
-    entries, reqs, ledger, base, cand = _close(workspace, candidate, suite_baseline=indeterminate)
+    entries, reqs, ledger, base, cand = _close(workspace, candidate, baseline_source=wf.SUITE_BASELINE_FROM_RUN,
+                                               suite_baseline=indeterminate, run_baseline_policy="required")
     [entry] = _suite_entries(entries)
     assert entry["closed"] is False
     assert requirement_outcomes(ledger, reqs)["REQ-2"] is RequirementOutcome.UNVERIFIED

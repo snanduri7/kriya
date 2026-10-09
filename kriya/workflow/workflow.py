@@ -1594,12 +1594,20 @@ def close_requirements_by_documentation(
 SCOPE_SUITE_PRESERVATION = "suite_preservation"
 
 
+# SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (2026-10-10): who owns the PRE-mutation baseline a suite-preservation
+# closure may judge through - an explicit caller input, never inferred from a missing baseline. Closed set.
+SUITE_BASELINE_FROM_RUN = "run"            # the direct terminal gate: the run's baseline policy owns it; none means none
+SUITE_BASELINE_LAZY_CAPTURE = "lazy_capture"  # the enforce terminal gate: captured lazily on the untouched workspace
+_SUITE_BASELINE_SOURCES = frozenset({SUITE_BASELINE_FROM_RUN, SUITE_BASELINE_LAZY_CAPTURE})
+
+
 def close_requirements_by_suite_preservation(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
-    revision: Any, toolchain_declaration_mutable: bool, candidate_paths: Iterable[str] = (),
+    revision: Any, toolchain_declaration_mutable: bool, baseline_source: str, candidate_paths: Iterable[str] = (),
     java_home_override: Optional[str] = None, tree_binding: Any = None, contract: Any = None,
     goal: str = "", suite_baseline: Any = None, stability_cache: Optional[Dict[str, Dict[str, Any]]] = None,
     baseline_suite_run: Optional[Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]]] = None,
+    run_baseline_policy: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """REQUIREMENT-CLOSURE-PLAIN-GOAL-001: closes every UNVERIFIED whole-suite
     preservation requirement ("every existing test must keep passing") from
@@ -1622,7 +1630,22 @@ def close_requirements_by_suite_preservation(
     - under the same validator and toolchain identity as the candidate run.
     An indeterminate run baseline, a baseline that cannot be captured or an
     attribution that cannot be made is reported as unavailable, and the
-    closer fails closed (REGRESSION_UNATTRIBUTED)."""
+    closer fails closed (REGRESSION_UNATTRIBUTED).
+
+    SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (review F3, 2026-10-10):
+    ``baseline_source`` is the caller's explicit statement of who owns the
+    baseline. ``SUITE_BASELINE_FROM_RUN`` (the direct terminal gate): the
+    run's effective policy (``run_baseline_policy``, recorded at run start)
+    decided whether a baseline exists; when it captured none (``disabled``,
+    or ``auto`` resolved to not required) a failing suite is unattributable
+    by policy - no lazy capture, no attribution authority the operator did
+    not grant, the typed REGRESSION_UNATTRIBUTED refusal. ``SUITE_BASELINE_
+    LAZY_CAPTURE`` (the enforce terminal gate) keeps the lazy capture above.
+    Any other value is refused before anything runs: the distinction is
+    never inferred from ``suite_baseline is None``."""
+    if baseline_source not in _SUITE_BASELINE_SOURCES:
+        raise ValueError(f"close_requirements_by_suite_preservation: unknown baseline_source {baseline_source!r} "
+                         f"(expected one of {sorted(_SUITE_BASELINE_SOURCES)})")
     from kriya.workflow.baseline_policy import baseline_environment_identity
     from kriya.workflow.contract_closers import contract_claims_map
     from kriya.workflow.requirements import (
@@ -1651,6 +1674,10 @@ def close_requirements_by_suite_preservation(
         if baseline is None and suite_baseline is not None:
             return None, ("the run's PRE-mutation baseline is indeterminate: "
                           f"{getattr(suite_baseline, 'indeterminate_reason', None)}")
+        if baseline is None and baseline_source == SUITE_BASELINE_FROM_RUN:
+            # The run's policy captured no baseline; the direct closure owns no capture of its own.
+            return None, (f"the run's full-regression baseline policy ({run_baseline_policy or 'not required'}) "
+                          "captured no PRE-mutation baseline, and the direct terminal closure may not capture one")
         if baseline is None:
             try:
                 environment = baseline_environment_identity(workspace_path, autonomy_cfg, goal=goal)
@@ -4891,6 +4918,7 @@ class WorkflowEngine:
             except Exception as exc:
                 logger.warning(f"Brownfield baseline auto policy could not be evaluated: {exc}")
         full_regression_policy = effective_baseline_policy(configured_baseline_policy, auto_baseline_decision)
+        state.validation_baseline_policy = full_regression_policy
         state.record_event(RunEvent(
             kind="validation_baseline.policy", attempt=0, source="workflow.run_generation_workflow",
             authority=EventAuthority.AUXILIARY,
@@ -5400,6 +5428,8 @@ class WorkflowEngine:
                             # baseline, stability cache and replay - no second baseline run on this path.
                             goal=goal, suite_baseline=state.validation_baseline_full_regression,
                             stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
+                            baseline_source=SUITE_BASELINE_FROM_RUN,
+                            run_baseline_policy=state.validation_baseline_policy,
                         )
                     except Exception as exc:
                         suite_closures = []

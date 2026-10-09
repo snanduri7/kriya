@@ -470,6 +470,7 @@ class TerminalGateService:
                 from kriya.policy.filesystem import WriteScopeMode
                 from kriya.workflow.toolchain import toolchain_declaration_mutable
                 from kriya.workflow.workflow import (
+                    SUITE_BASELINE_LAZY_CAPTURE,
                     close_requirements_by_api_preservation,
                     close_requirements_by_documentation,
                     close_requirements_by_file_immutability,
@@ -588,6 +589,7 @@ class TerminalGateService:
                         WriteScopeMode.DENY_ALL, (), request.plan,
                     ),
                     tree_binding=tree_binding, contract=contract,
+                    baseline_source=SUITE_BASELINE_LAZY_CAPTURE,  # the enforce gate owns the lazy capture (13.2)
                 )
                 if suite_closures:
                     logger.info("Original requirement suite-preservation evidence: %s", suite_closures)
