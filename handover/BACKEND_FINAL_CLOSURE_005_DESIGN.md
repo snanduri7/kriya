@@ -614,6 +614,14 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   D8 / LR-R1-M1 candidate gates / verification binding / partial no-change / registry): 333 passed, the one failure
   the registry tripwire on this row while still OPEN. Registry row CLOSED.
 
+- Review F5 (2026-10-10, independent review of 6d97558): BY_DESIGN. For a failing candidate suite the enforce
+  terminal closure performs the candidate suite once, the lazy baseline capture once and at most BASELINE_REPLAYS = 2
+  bounded stability replays when a test is disputed, with a closure-local stability cache (the terminal gate request
+  carries none, by this section's design): at most four full-suite executions per closure, no recursion, no
+  correctness defect. "Reused" above means the owner's bounded replay within the closure, not the run's
+  candidate-gate measurements. Threading the run's stability cache through the terminal gate request is a deferred
+  P3 optimization (registry ENFORCE-CLOSURE-STABILITY-CACHE-REUSE-001), not worked in this cycle.
+
 ### 13.3 WORKSPACE-CONTENT-HASH-IGNORED-KRIYA-DIR (P1, found by the P1-2 reproducer) - fix
 
 - Observation (MEASURED, 2026-10-09): P1-2 reproducer case 3 (a pre-existing failure whose text the candidate changed)
@@ -664,6 +672,13 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   (index entry only, working tree untouched); reproducer extended with a real dirty worktree in both ignore shapes
   (pre-fix: the not-ignored case fails, the ignored case never did), 10/10 post-fix; mutants H1 (old pathspec)
   and H2 (force dropped) in repair-003/mutations; REG-R1 / REG-R2 / PRD-024 / checkpoint consumers 122 passed.
+
+- Review F4 (2026-10-10, independent review of 6d97558): records only. In a repository that TRACKS the root `.kriya`
+  the identity VALUE changes once between the old and the corrected algorithm (the old scratch tree kept HEAD's
+  `.kriya` entries, the corrected one drops them; a plain repository yields byte-identical values under both -
+  reviewer-measured). Semantics are unchanged (tracked `.kriya` edits were excluded in both; the base commit still
+  binds HEAD). Consequence: at most one fail-closed mismatch of a pre-fix checkpoint or reusable baseline in such a
+  repository, re-established on the next run; none of the frozen twelve tracks `.kriya`. No production change.
 
 ### 13.4 P2-1 REGRESSION-ATTRIBUTION-UNAVAILABLE-DETAIL-001 - investigation, disposition BY_DESIGN (records only)
 
@@ -848,3 +863,19 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   byte-identical (repair-003/mutations/F3-M*.txt) - every prediction matched; adjacent 15 modules (D1, D8, FS-1A,
   PRD-008 resume, PRD-024 policy, PRD-030 terminal services, PRD-031A, PRD-032, REG-R1, plain-goal closer,
   validation baseline, contract closers and scopes, workflow, registry): 1421 passed. Registry row CLOSED.
+
+### 13.8 Independent review of candidate 6d97558 - dispositions (records)
+
+- Review: reviews/REVIEW_RESULT_c3.md (fresh Claude session run by the operator, prompt reviews/REVIEWER_PROMPT_c3.md,
+  verdict APPROVE WITH CHANGES, no pytest run by the reviewer); classification reviews/REVIEW_DISPOSITION_c3.md.
+- F1 P2 CONFIRMED -> fixed, 13.6 (3d5f6db). F3 P3 CONFIRMED -> fixed, 13.7 (8e09cc1). F4 P3 CONFIRMED -> records,
+  13.3. F5 P3 BY_DESIGN -> records, 13.2 + deferred row. F2 P2 CONFIRMED at review time (the certification record
+  said GREEN while the 6d97558 full-suite log was still running) -> resolved by the completed authoritative run,
+  recorded verbatim in repair-003/certification/CERTIFICATION_CANDIDATE_6d97558.md
+  (log repair-003/FULL_SUITE_6d97558.log, start 2026-10-09T18:10:20Z):
+  `9852 passed, 15 warnings in 1332.84s (0:22:12)`
+  `[full-suite] pytest exit 0; repository root gained no package artifacts`
+  `end 2026-10-09T18:32:35Z exit=0`
+- The candidate after F1 and F3 is a new SHA; its canonical full suite, ruff and pylint are the operator's, on that
+  exact HEAD, and are the certification authority (the session's own lint runs are supporting evidence only).
+  Then one focused independent review of F1/F3 and their interactions with the already-reviewed P1/P2 changes.
