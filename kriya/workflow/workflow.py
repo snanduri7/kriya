@@ -325,6 +325,12 @@ from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling as _likely_misattributed_sibling,
 )
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
+from kriya.workflow.suite_attribution import (
+    SCOPE_FULL_REGRESSION,
+    attribute_suite_result,
+    captured_baseline,
+    post_environment_identity,
+)
 from kriya.workflow.terminal_commit import (
     CandidateFile,
     CandidateMaterializationError,
@@ -1352,12 +1358,7 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
     from kriya.workflow.acceptance_jvm import run_java_acceptance
     from kriya.workflow.acceptance_oracle import judge_acceptance, run_acceptance
     from kriya.workflow.authority_bundle import AUTHORITY_RUNS_DIR, bound_authority_bundle, run_authority_bundle
-    from kriya.workflow.contract_baseline import (
-        BASELINE_FAIL,
-        BASELINE_INDETERMINATE,
-        BASELINE_PASS,
-        run_baseline_authorities,
-    )
+    from kriya.workflow.contract_baseline import run_baseline_authorities, suite_verdict_from_report
     from kriya.workflow.example_oracle import bound_derived_examples
 
     base_revision = _workspace_head(workspace_path)
@@ -1391,14 +1392,11 @@ def run_contract_baseline(engine: Any, contract: Any, requirement_set: Any, work
             return judge_acceptance(artifact, executed)
         return run
 
-    def judge_suite() -> str:
+    def judge_suite() -> Any:
+        # CANDIDATE-GATE-BASELINE-POLICY-001 (D1b): a complete per-case report decides; failures of the untouched
+        # base are recorded as pre-existing (kriya/workflow/contract_baseline.py suite_verdict_from_report).
         result = validator_for(exported()).run_tests()
-        report = test_execution.report_from_result(result)
-        if report is None or not report.complete:
-            return BASELINE_INDETERMINATE
-        if not result.get("success") or not report.cases:
-            return BASELINE_FAIL if report.cases else BASELINE_INDETERMINATE
-        return BASELINE_PASS if all(c.status in (test_execution.PASSED, test_execution.SKIPPED) for c in report.cases) else BASELINE_FAIL
+        return suite_verdict_from_report(result, test_execution.report_from_result(result))
 
     bundle = bound_authority_bundle(engine)
     acceptance = bound_acceptance(engine)
@@ -5016,6 +5014,9 @@ class WorkflowEngine:
             allowed_write_relpaths=list(allowed_write_relpaths or []),
             authorized_semantic_regions=list(authorized_semantic_regions or []),
             required_verification=list(required_verification or []),
+            # CANDIDATE-GATE-BASELINE-POLICY-001: the baseline's own
+            # verification call, for the candidate gates' attribution.
+            baseline_suite_replay=baseline_suite_run,
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so
             # every write-gate call site downstream (kriya/workflow/
@@ -5864,76 +5865,29 @@ class WorkflowEngine:
                 # as strictly as before (invariants 5/"fail conservatively").
                 _regression_should_block = not full_test_res["success"]
                 _baseline_delta_result = None
-                if (
-                    state.validation_baseline_full_regression is not None
-                    and state.validation_baseline_full_regression.status == "captured"
-                ):
-                    _post_regression_outcome = build_validation_outcome(full_test_res)
-                    # PRD-024: POST's own environment, over the candidate's
-                    # toolchain declarations; a different one is not comparable.
-                    _post_environment = None
-                    if state.validation_baseline_full_regression.invocation.environment_fingerprint is not None:
-                        from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
-                        from kriya.workflow.baseline_policy import baseline_environment_identity
-                        _declarations = {}
-                        for _path in ALL_TOOLCHAIN_DECLARATION_FILES:
-                            if _path in state.all_files_written:
-                                try:
-                                    with open(os.path.join(worktree_path, _path), "r", encoding="utf-8") as _fh:
-                                        _declarations[_path] = _fh.read()
-                                except OSError:
-                                    pass
-                        try:
-                            _post_environment = baseline_environment_identity(
-                                workspace_path, self.kernel.config.autonomy, goal=goal,
-                                candidate_files=_declarations or None,
-                            )
-                        except Exception as exc:
-                            logger.warning(f"POST environment identity unavailable: {exc}")
-                    # REG-R1: per-test pytest authority; a disputed message/body is
-                    # measured on the untouched baseline, in the baseline's own
-                    # verification context, before anyone is blamed.
-                    _baseline_delta_result, _stability = classify_with_baseline_stability(
-                        baseline=state.validation_baseline_full_regression, post=_post_regression_outcome,
-                        post_environment=_post_environment, cache=state.pytest_stability_cache,
-                        replay=baseline_suite_run,
-                        current_revision=lambda: compute_workspace_content_hash(workspace_path),
-                        working_directory=os.path.realpath(workspace_path),
+                # CANDIDATE-GATE-BASELINE-POLICY-001: the one attribution
+                # owner (kriya/workflow/suite_attribution.py) - the same
+                # decision the candidate gates now make.
+                _full_baseline = captured_baseline(state.validation_baseline_full_regression)
+                if _full_baseline is not None:
+                    _full_attribution = attribute_suite_result(
+                        scope=SCOPE_FULL_REGRESSION, baseline=_full_baseline, result=full_test_res,
+                        post_environment=post_environment_identity(
+                            baseline=_full_baseline, workspace_path=workspace_path, worktree_path=worktree_path,
+                            autonomy_cfg=self.kernel.config.autonomy, goal=goal, written_files=state.all_files_written),
+                        stability_cache=state.pytest_stability_cache, replay=baseline_suite_run,
+                        workspace_path=workspace_path,
                     )
-                    record_regression_decision("full_regression", state.validation_baseline_full_regression,
-                                               _post_regression_outcome, _baseline_delta_result, _stability)
+                    _baseline_delta_result = _full_attribution.delta
                     _regression_should_block = _baseline_delta_result.blocking
                     state.record_event(RunEvent(
                         kind="validation_baseline.full_regression_delta",
                         attempt=state.attempt_number,
                         source="workflow.run_generation_workflow",
                         authority=EventAuthority.ADVISORY,
-                        message=(
-                            f"Full-regression PRE/POST delta: level1={_baseline_delta_result.level1.classification.value} "
-                            f"blocking={_regression_should_block}"
-                        ),
-                        details={
-                            "level1_classification": _baseline_delta_result.level1.classification.value,
-                            "level2": {k: v.value for k, v in _baseline_delta_result.level2.items()},
-                            "aggregate_drop_detected": _baseline_delta_result.aggregate_drop_detected,
-                            "blocking": _baseline_delta_result.blocking,
-                            "blocking_reasons": list(_baseline_delta_result.blocking_reasons),
-                            # PRD-024: per-test comparison availability, never
-                            # an empty result read as "no failures".
-                            "level2_available": _baseline_delta_result.level2_available,
-                            "level2_unavailable_reason": _baseline_delta_result.level2_unavailable_reason,
-                            "pre_environment": (
-                                state.validation_baseline_full_regression.invocation.environment_fingerprint),
-                            "post_environment": _post_environment,
-                            **pytest_decision_summary(_baseline_delta_result, _stability),
-                        },
+                        message=f"Full-regression {_full_attribution.message()}",
+                        details=_full_attribution.event_details(),
                     ))
-                    if not _regression_should_block and not full_test_res["success"]:
-                        logger.info(
-                            "Full-regression suite failed, but every failure is classified "
-                            "PRE_EXISTING_FAILURE relative to the captured PRE-mutation baseline - "
-                            "not attributed to this candidate, not blocking."
-                        )
 
                 # VAL-001 G1-R3 (2026-09-18): the targeted baseline's own
                 # POST comparison - separate from, and additive to, the

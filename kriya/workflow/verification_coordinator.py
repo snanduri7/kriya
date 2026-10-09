@@ -17,7 +17,7 @@ and is injected, so this module never imports attempt.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 from kriya.tools.validate import execution_evidence
 from kriya.workflow.failure import Failure, QualityGateFailure
@@ -110,16 +110,23 @@ class VerificationCoordinator:
     def __init__(
         self, validator: Any, *, record_gate_outcome: Callable[[Dict[str, Any]], None],
         run_runtime_verification: Callable[[], Awaitable[None]],
+        judge_suite: Optional[Callable[[Dict[str, Any]], Tuple[bool, str, Dict[str, Any]]]] = None,
     ) -> None:
         self._validator = validator
         self._record = record_gate_outcome
         self._run_runtime_verification = run_runtime_verification
+        # CANDIDATE-GATE-BASELINE-POLICY-001: the caller's suite judgment -
+        # (blocking, evidence text, gate evidence) against the frozen PRE
+        # baseline (kriya/workflow/suite_attribution.py); None keeps the raw
+        # rule. Injected, so this module still never imports attempt.py.
+        self._judge_suite = judge_suite
 
-    def _gate(self, outcome_type: str, result: Dict[str, Any], attempt: int) -> List[str]:
+    def _gate(self, outcome_type: str, result: Dict[str, Any], attempt: int,
+              extra: Optional[Dict[str, Any]] = None) -> List[str]:
         self._record({
             "attempt": attempt, "type": outcome_type,
             "success": result["success"], "output": result.get("output", ""),
-            **execution_evidence(result),
+            **execution_evidence(result), **(extra or {}),
         })
         return [outcome_type]
 
@@ -151,15 +158,17 @@ class VerificationCoordinator:
                         ))
                 result = self._validator.run_tests()
                 outcome_type = "test"
-            gates += self._gate(outcome_type, result, attempt)
-            if not result["success"]:
+            blocking, evidence, extra = (self._judge_suite(result) if outcome_type == "test" and self._judge_suite is not None
+                                         else (not result["success"], result.get("output", ""), {}))
+            gates += self._gate(outcome_type, {**result, "success": not blocking}, attempt, extra)
+            if blocking:
                 self._raise(Failure(
                     type=outcome_type,
                     message=(
                         f"{outcome_type.upper()} FAILURE (verification-only subtask):\n"
-                        f"{result.get('output', '')}"
+                        f"{evidence}"
                     ),
-                    raw_output=result.get("output", ""), attempt=attempt,
+                    raw_output=evidence, attempt=attempt,
                 ))
 
         runtime_verified = bool(_directly_executable_runtime_verifiers(list(request.required_verification)))

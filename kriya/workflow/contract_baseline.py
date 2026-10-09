@@ -25,7 +25,7 @@ earlier under the blocking policy).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from kriya.workflow.contract_compilation import (
     CLOSER_ACCEPTANCE,
@@ -64,10 +64,41 @@ BASELINE_INDETERMINATE = "INDETERMINATE"
 BASELINE_IDENTITY = "IDENTITY"  # holds for a zero mutation by definition
 BASELINE_MUTATION_REQUIRED = "MUTATION_REQUIRED"  # the claim asks for a change the baseline cannot carry
 BASELINE_UNBOUND = "UNBOUND"  # no authority bound to the claim
+# CANDIDATE-GATE-BASELINE-POLICY-001 (D1b): the untouched base's suite ran to a complete per-case report and some
+# cases fail - at the base every failure is pre-existing and a zero mutation introduces none; the claim holds, with
+# the failing identities recorded. An aggregate failure (no case identifies it) stays FAIL; incomplete evidence
+# stays INDETERMINATE (VC3-R9: a regression claim is never assumed, the suite must execute).
+BASELINE_PRE_EXISTING = "PRE_EXISTING_FAILURES"
 # OD-3: a frozen named file holds at the untouched baseline by definition, like an existing test's immutability.
 _IDENTITY_CLAIMS = frozenset({TEST_IMMUTABILITY_CLAIM, API_PRESERVATION, FILE_IMMUTABILITY_CLAIM})
 _AUTHORITY_CLOSERS = frozenset({CLOSER_EXTERNAL_ACCEPTANCE, CLOSER_ACCEPTANCE, CLOSER_ACCEPTANCE_APPROVAL,
                                 CLOSER_DERIVED_EXAMPLES})
+
+
+@dataclass(frozen=True)
+class BaselineSuiteVerdict:
+    """What the baseline suite established: PASS, FAIL, INDETERMINATE or PRE_EXISTING_FAILURES with the failing
+    test identities of the untouched base."""
+
+    verdict: str
+    pre_existing_failures: Tuple[str, ...] = ()
+
+
+def suite_verdict_from_report(result: Mapping[str, Any], report: Any) -> BaselineSuiteVerdict:
+    """The baseline suite verdict from one validator result and its structured test report
+    (kriya/tools/test_execution.py): complete per-case evidence decides; anything less is INDETERMINATE."""
+    from kriya.tools import test_execution
+
+    if report is None or not report.complete or not report.cases:
+        return BaselineSuiteVerdict(BASELINE_INDETERMINATE)
+    failing = tuple(sorted({case.identity for case in report.cases
+                            if case.status in (test_execution.FAILED, test_execution.ERROR)}))
+    if result.get("success"):
+        green = all(case.status in (test_execution.PASSED, test_execution.SKIPPED) for case in report.cases)
+        return BaselineSuiteVerdict(BASELINE_PASS if green else BASELINE_FAIL)
+    if failing:
+        return BaselineSuiteVerdict(BASELINE_PRE_EXISTING, failing)
+    return BaselineSuiteVerdict(BASELINE_FAIL)  # the run failed outside its cases (collection, a crashed session)
 
 
 @dataclass
@@ -164,7 +195,7 @@ def run_baseline_authorities(
     run_bundle: Optional[Callable[[], Any]] = None, bundle_digest: Optional[str] = None,
     judge_acceptance: Optional[Callable[[], Mapping[str, Any]]] = None, acceptance_digest: Optional[str] = None,
     judge_examples: Optional[Callable[[], Mapping[str, Any]]] = None, examples_digest: Optional[str] = None,
-    judge_suite: Optional[Callable[[], str]] = None,
+    judge_suite: Optional[Callable[[], Any]] = None,
 ) -> BaselineAuthorityReport:
     """Run every bound behaviour authority against the baseline (each callable
     executes its authority on the untouched tree and returns the judgment)
@@ -193,10 +224,18 @@ def run_baseline_authorities(
     # the baseline suite must execute and pass (``judge_suite`` -> PASS/FAIL/
     # INDETERMINATE, run once, only when such a claim is bound).
     suite_verdict: Optional[str] = None
+    suite_failures: List[str] = []
     suite_bound = any(REGRESSION_PRESERVATION in entry.required_claims for entry in contract.mandatory_entries())
     if suite_bound and judge_suite is not None:
-        suite_verdict = judge_suite()
-        report.authorities_run.append({"kind": "baseline_suite", "digest": None, "verdict": suite_verdict})
+        judged_suite = judge_suite()
+        if isinstance(judged_suite, BaselineSuiteVerdict):
+            suite_verdict, suite_failures = judged_suite.verdict, list(judged_suite.pre_existing_failures)
+        else:
+            suite_verdict = judged_suite
+        if suite_verdict == BASELINE_PRE_EXISTING and not suite_failures:
+            suite_verdict = BASELINE_FAIL  # pre-existing without identities is not evidence
+        report.authorities_run.append({"kind": "baseline_suite", "digest": None, "verdict": suite_verdict,
+                                       "pre_existing_failures": suite_failures})
     all_satisfied = True
     for entry in contract.entries:
         rid = entry.requirement_id
@@ -229,6 +268,11 @@ def run_baseline_authorities(
                                      "why": "the baseline suite was not executed"}
                     all_satisfied = False
                     report.unsatisfied.setdefault(rid, []).append(claim)
+                elif suite_verdict == BASELINE_PRE_EXISTING:
+                    claims[claim] = {"state": BASELINE_PRE_EXISTING, "authority": "repository",
+                                     "pre_existing_failures": list(suite_failures),
+                                     "why": (f"the baseline suite ran: {len(suite_failures)} pre-existing failure(s) of the "
+                                             "untouched base recorded; a zero mutation introduces none")}
                 else:
                     claims[claim] = {"state": suite_verdict, "authority": "repository",
                                      "why": f"the baseline suite ran: {suite_verdict}"}

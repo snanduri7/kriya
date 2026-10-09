@@ -236,6 +236,14 @@ from kriya.workflow.static_checks import (
     run_static_checks,
     validate_stack_contract_artifacts,
 )
+from kriya.workflow.suite_attribution import (
+    SCOPE_CANDIDATE_GATE,
+    SCOPE_TEST_DELTA_COVERING_RUN,
+    SCOPE_VERIFICATION_UNIT,
+    attribute_suite_result,
+    captured_baseline,
+    post_environment_identity,
+)
 from kriya.workflow.test_delta import TEST_EXECUTION_EVIDENCE_INDETERMINATE, judge_test_delta
 from kriya.workflow.toolchain import (
     _check_java_toolchain_mismatch,
@@ -3289,6 +3297,11 @@ class AttemptContext:
     # mutation/retry pipeline, burning several attempts discovering it had
     # nothing to write before its own required verification ever ran).
     required_verification: List[Dict[str, Any]] = field(default_factory=list)
+    # CANDIDATE-GATE-BASELINE-POLICY-001: the baseline's own verification
+    # call (run_generation_workflow's baseline_suite_run) - replays the
+    # untouched baseline when a disputed test's stability must be measured.
+    # None (a caller without a baseline) keeps every suite gate's raw rule.
+    baseline_suite_replay: Optional[Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]]] = None
     runtime_verification_required: bool = False
     strict_spec_compliance: bool = False
     # Human-readable identity for nested structured executions. Attempt
@@ -4280,13 +4293,17 @@ def _raise_unexecuted_test_delta(
     covered = selected_test is None or set(changed) == {selected_test}
     result = accepted_result
     if not covered or test_execution.report_from_result(result) is None:
-        result = (validator.run_tests(target_test=sorted(changed)) if validator.stack == "python"
-                  else validator.run_tests())
+        targeted = validator.stack == "python"
+        result = validator.run_tests(target_test=sorted(changed)) if targeted else validator.run_tests()
         _stop_on_environment_gate_result(state, result, "test")
-        if not result.get("success"):
+        # A targeted run executes only the changed tests - its failures are the candidate's own; a full-suite
+        # run is attributed against the frozen baseline (CANDIDATE-GATE-BASELINE-POLICY-001).
+        blocking, evidence, _extra = ((not result.get("success"), result.get("output", ""), {}) if targeted
+                                      else _judge_candidate_suite(state, ctx, result, SCOPE_TEST_DELTA_COVERING_RUN))
+        if blocking:
             failure = _build_test_quality_gate_failure(
-                "test", f"TEST FAILURE:\n{result.get('output', '')}",
-                result.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                "test", f"TEST FAILURE:\n{evidence}",
+                evidence, ctx.worktree_path, state.all_files_written, state.attempt_number,
             )
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
@@ -5142,6 +5159,48 @@ def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> 
     )
 
 
+def _attribute_candidate_suite(
+    state: GenerationState, ctx: "AttemptContext", result: Dict[str, Any], scope: str,
+) -> Optional[Any]:
+    """CANDIDATE-GATE-BASELINE-POLICY-001: this full-suite ``result`` judged
+    against the frozen PRE-mutation baseline by the one attribution owner
+    (kriya/workflow/suite_attribution.py) - the decision the terminal check
+    makes, now made at every candidate gate that runs the repository suite.
+    None when no baseline was captured (the raw rule stays) or the attempt
+    has no replay for stability measurement."""
+    baseline = captured_baseline(state.validation_baseline_full_regression)
+    if baseline is None or ctx.baseline_suite_replay is None:
+        return None
+    attribution = attribute_suite_result(
+        scope=scope, baseline=baseline, result=result,
+        post_environment=post_environment_identity(
+            baseline=baseline, workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+            autonomy_cfg=ctx.kernel.config.autonomy, goal=ctx.goal, written_files=state.all_files_written),
+        stability_cache=state.pytest_stability_cache, replay=ctx.baseline_suite_replay,
+        workspace_path=ctx.workspace_path,
+    )
+    state.record_event(RunEvent(
+        kind="validation_baseline.candidate_gate_delta", attempt=state.attempt_number,
+        source="attempt.candidate_gate", authority=EventAuthority.ADVISORY,
+        message=f"Candidate-gate ({scope}) {attribution.message()}",
+        details={"scope": scope, **attribution.event_details()},
+    ))
+    return attribution
+
+
+def _judge_candidate_suite(
+    state: GenerationState, ctx: "AttemptContext", result: Dict[str, Any], scope: str,
+) -> Tuple[bool, str, Dict[str, Any]]:
+    """(blocking, Developer-facing evidence, gate-outcome evidence) for one
+    full-suite run: attributed against the frozen baseline when one was
+    captured, else the raw ``success`` rule exactly as before."""
+    attribution = _attribute_candidate_suite(state, ctx, result, scope)
+    if attribution is None:
+        return not result["success"], result.get("output", ""), {}
+    evidence = attribution.evidence_text(state.validation_baseline_full_regression, result.get("output", ""))
+    return attribution.blocking, evidence, {"regression_attribution": attribution.gate_evidence()}
+
+
 async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """First-class execution path for a verification-only subtask
     (ctx.write_scope_mode == WriteScopeMode.DENY_ALL): executes its own
@@ -5192,6 +5251,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     await VerificationCoordinator(
         validator, record_gate_outcome=lambda outcome: state.record_gate_outcome(outcome),
         run_runtime_verification=lambda: _execute_runtime_verification_directly(state, ctx, validator),
+        judge_suite=lambda result: _judge_candidate_suite(state, ctx, result, SCOPE_VERIFICATION_UNIT),
     ).verify(VerificationRequest(
         required_verification=ctx.required_verification,
         known_files=sorted(set(ctx.established_files)), attempt_number=state.attempt_number,
@@ -9537,10 +9597,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 target_test = None
                 test_res = validator.run_tests()
                 _stop_on_environment_gate_result(state, test_res, "test")
-                if not test_res["success"]:
+                suite_blocks, suite_evidence, suite_gate_evidence = _judge_candidate_suite(
+                    state, ctx, test_res, SCOPE_CANDIDATE_GATE)
+                if suite_blocks:
                     failure = _build_test_quality_gate_failure(
-                        "test", f"TEST FAILURE:\n{test_res['output']}",
-                        test_res.get("output", ""), ctx.worktree_path,
+                        "test", f"TEST FAILURE:\n{suite_evidence}",
+                        suite_evidence, ctx.worktree_path,
                         state.all_files_written, state.attempt_number,
                     )
                     if failure.type == "test_process_terminated":
@@ -9559,6 +9621,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "output": test_res.get("output", ""),
                     "selection_fallback": True,
                     **execution_evidence(test_res),
+                    **suite_gate_evidence,
                 })
                 accepted_test_output = test_res.get("output", "")
                 accepted_test_result = test_res
@@ -9647,10 +9710,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
                 test_res = validator.run_tests()
                 _stop_on_environment_gate_result(state, test_res, "test")
-                if not test_res["success"]:
+                # CANDIDATE-GATE-BASELINE-POLICY-001 (C2-S2_A): judged against
+                # the frozen PRE baseline, never raw - a pre-existing failure
+                # the terminal check would not attribute to this candidate
+                # does not block its candidate gate either.
+                suite_blocks, suite_evidence, suite_gate_evidence = _judge_candidate_suite(
+                    state, ctx, test_res, SCOPE_CANDIDATE_GATE)
+                if suite_blocks:
                     failure = _build_test_quality_gate_failure(
-                        "test", f"TEST FAILURE:\n{test_res['output']}",
-                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                        "test", f"TEST FAILURE:\n{suite_evidence}",
+                        suite_evidence, ctx.worktree_path, state.all_files_written, state.attempt_number,
                     )
                     if failure.type == "test_process_terminated":
                         if _record_process_boundary_obligation(
@@ -9667,6 +9736,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "success": True,
                     "output": test_res.get("output", ""),
                     **execution_evidence(test_res),
+                    **suite_gate_evidence,
                 })
                 accepted_test_output = test_res.get("output", "")
                 accepted_test_result = test_res
