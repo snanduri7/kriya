@@ -161,8 +161,18 @@ class PipBuildAdapter(BuildAdapter):
         # ModuleNotFoundError: No module named 'django', regardless of the
         # generated code's correctness - a structurally unwinnable gate.
         python_interpreter, install_error = v._resolve_python_interpreter()
+        provenance = getattr(v, "python_interpreter_provenance", None)
+        environment = getattr(v, "python_environment_error", None)
+        if environment is not None:
+            # VERIFICATION-UNIT-ENV-FALLBACK-001: the required environment could not be created - typed
+            # (``environment_reason_code``, the verification_infrastructure_failure stop), nothing runs.
+            code, message = environment
+            return {"success": False, "output": message, "environment_reason_code": code, "python_interpreter": provenance}
         if install_error:
-            return {"success": False, "output": install_error}
+            result = {"success": False, "output": install_error}
+            if provenance is not None:  # a resolver stubbed by a test records none: the result shape stays as before
+                result["python_interpreter"] = provenance
+            return result
 
         binding = getattr(v, "test_report_binding", None)
         report_argument = binding.pytest_argument if binding is not None else None
@@ -189,6 +199,9 @@ class PipBuildAdapter(BuildAdapter):
         res = v._run_cmd_with_timeout(cmd, cwd=v.workspace_path)
         if binding is not None:
             binding.observe(res)
-        return v._validation_result(
+        result = v._validation_result(
             res["returncode"] in (0, 5), res["stdout"] + "\n" + res["stderr"], res,
         )
+        if provenance is not None:
+            result["python_interpreter"] = provenance  # which environment produced this verdict (evidence only)
+        return result

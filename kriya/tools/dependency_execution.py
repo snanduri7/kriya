@@ -110,6 +110,11 @@ def classify_maven_offline_failure_text(combined_output: str) -> OfflineFailureK
 # (``environment_reason_code``): the verification tool could not start, so
 # nothing about the candidate was observed - never a code failure.
 GRADLE_DISTRIBUTION_UNAVAILABLE = "GRADLE_DISTRIBUTION_UNAVAILABLE"
+# VERIFICATION-UNIT-ENV-FALLBACK-001 (BACKEND-FINAL-CLOSURE-005): the Python
+# gate's twin - the project's required verification environment (its
+# .kriya/venv) could not be created, so no interpreter may produce an
+# authoritative verdict for the workspace; never a substitute interpreter.
+PYTHON_ENVIRONMENT_UNAVAILABLE = "PYTHON_ENVIRONMENT_UNAVAILABLE"
 # The offline run still misses a dependency/plugin after one bounded,
 # registry-scoped acquisition (the Maven marker's Gradle twin; a marker in
 # the output, repair-eligible like Maven's: a candidate may have declared

@@ -681,3 +681,50 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   test added. Follow-ups: SUREFIRE-RENDERER-FAILURE-DETAIL-001 (P3 diagnostic, never a certification blocker) and
   SUREFIRE-STABILITY-ENVELOPE-001 (deferred future capability, rule 9: substantial independent design).
 
+### 13.5 P2-2 VERIFICATION-UNIT-ENV-FALLBACK-001 - investigation, disposition FIX (narrow), fix
+
+- Observation (MEASURED, C2-S2_A-final generate.log 1652, 1662-1672, 2251-2283): the verification-only unit s2's
+  project venv could not be created (python:3.12-slim, `ensurepip --upgrade --default-pip` exit 1, cause UNKNOWN);
+  kriya.tools.validate logged "falling back to the default interpreter" and the gate ran on the bare container
+  python3: "No module named 'pytest'", reported as "TEST FAILURE (verification-only subtask)" -> the unit stopped
+  VERIFICATION_RETRY_NO_CHANGE_POSSIBLE -> verification-owner recovery of s1 started (13:35:46), the lineage that
+  later carried the wrong tlz.curried candidate. The passing rerun (13:52) created its venv and ran a pip acquisition
+  - it never used the fallback. CORRECTED PREMISE: no verification passed on a fallback interpreter; the only fallback
+  run failed closed; the defect is the untyped degradation.
+- Producer (TRACED): `_ensure_project_venv_impl` returns (None, None) on creation failure; `_resolve_python_interpreter`
+  substitutes the default interpreter (bare "python3" under containment, Kriya's own sys.executable on the host) with
+  only a WARNING; pip.run_tests / run_acceptance / _substitute_python_interpreter run on it; the verification
+  coordinator builds Failure(type="test"). No config or policy field authorizes the substitution (implicit, "degrades
+  silently"); no result field records which interpreter ran. Under production containment the substitute structurally
+  cannot pass (no pytest, no report); on the host a manifest-bearing project can PASS on Kriya's interpreter without
+  its own install - MEASURED by the reproducer pre-fix ("the gate ran on the fallback interpreter and passed").
+- Owner decision (2026-10-09): FIX narrowly, reusing the existing taxonomy (GRADLE-WRAPPER-CONTAINMENT-001's
+  `environment_reason_code` on the gate result -> `verification_infrastructure_failure` -> STOP_ENVIRONMENT).
+- Fix: `dependency_execution.PYTHON_ENVIRONMENT_UNAVAILABLE`; `validate._resolve_python_interpreter` records
+  `python_interpreter_provenance` ({requested, actual, path, fallback}) on every resolution and, when a REQUIRED
+  environment (a dependency declaration, or containment's pytest venv) cannot be created, `python_environment_error`
+  = (code, message) with the creation error; pip.run_tests, run_acceptance, run_app and run_app_sequence report it
+  typed instead of running (the test gate result carries `environment_reason_code` + `python_interpreter`; every
+  Python test result carries `python_interpreter`); `verification_coordinator._stop_on_environment` raises the
+  existing infrastructure stop for a result carrying the code (the candidate gates already did through
+  attempt._stop_on_environment_gate_result). Unchanged: successful creation, the dependency-install error path
+  (repair-eligible), dependency-free host projects on sys.executable, contained projects whose venv is created.
+  Provenance authorizes nothing; `fallback` can no longer be True for a required environment.
+- Reproducer first (`tests/test_repair_003_p2_2_venv_environment_failure.py`: real host workspace with a real
+  dependency declaration, the one `python -m venv` subprocess stubbed to exit 1, every other command real), MEASURED
+  pre-fix by the operator (repair-003/prefix/P2-2_reproducer_before.txt): 4 failed / 3 passed - the typed-failure case
+  ("ran on the fallback interpreter and passed"), the verification-only stop (DID NOT RAISE), both provenance shapes;
+  the three controls (created venv, dependency-install failure, dependency-free host project) passed. A first run
+  with a callable-object stub (not bound as a method) was a harness defect, fixed before the measurement.
+- Mutation control: repair-003/mutations/run_p2_2_mutation.sh restores the silent fallback - the reproducer must fail.
+- Stage 1 (operator, 2026-10-09): reproducer 7/7; mutant V1 (silent fallback restored) KILLED on the typed-failure
+  and verification-only-stop cases, validate.py restored byte-identical. Stage 2 (29 modules, 1830 tests): 3 failures,
+  classified: (1) test_capability_adapters - a test that stubs the resolver got `python_interpreter: None` on the
+  install-error result; provenance is now attached only when a resolution recorded one (production, result shape
+  unchanged for a stubbed resolver); (2)+(3) test_prd011_toolchain_evidence - the fake contained process runner
+  answered exit 0 to `python3 -m venv` without creating anything, so the builder reported creation failed and the
+  new invariant typed it (before: silently the bare container token, which the same fake 'passed'); the fake now
+  materializes the venv interpreter it was asked to create, as real containment does (harness realism, the
+  invariant unchanged).
+- Verification (operator rerun, 2026-10-09): reproducer, capability adapters, PRD-011 toolchain evidence, contained
+  Python test gate, Linux OCI venv interpreter and the registry tripwire all green. Registry row CLOSED.

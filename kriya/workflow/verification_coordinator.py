@@ -130,6 +130,27 @@ class VerificationCoordinator:
         })
         return [outcome_type]
 
+    def _stop_on_environment(self, result: Dict[str, Any], outcome_type: str, attempt: int) -> None:
+        """VERIFICATION-UNIT-ENV-FALLBACK-001: a gate result whose verification tool could not start carries a
+        typed ``environment_reason_code`` (the validator sets it from a structured outcome - the project's
+        verification environment could not be created, GRADLE-WRAPPER-CONTAINMENT-001's Gradle twin). It is
+        raised as the existing ``verification_infrastructure_failure`` (retry_strategy: STOP_ENVIRONMENT - no
+        Developer attempt, no no-progress terminal, so no verification-owner recovery), never as a test or
+        compile failure of the candidate: nothing about the candidate was observed. The same decision the
+        candidate gates make (attempt._stop_on_environment_gate_result); this module never imports attempt.py."""
+        code = result.get("environment_reason_code") if isinstance(result, dict) else None
+        if not code:
+            return
+        output = str(result.get("output") or "")
+        self._raise(Failure(
+            type="verification_infrastructure_failure",
+            message=(f"VERIFICATION_INFRASTRUCTURE_FAILURE: the {outcome_type} gate's verification tool could not "
+                     f"start ({code}); nothing about the candidate was observed, so this is not a code failure.\n{output}"),
+            raw_output=output, source="verification_coordinator", attempt=attempt,
+            diagnostics={"reason_code": code, "gate": outcome_type,
+                         "python_interpreter": result.get("python_interpreter")},
+        ))
+
     def _raise(self, failure: Failure, extra: Optional[Dict[str, Any]] = None) -> None:
         if extra:
             failure.diagnostics = {**(failure.diagnostics or {}), **extra}
@@ -145,12 +166,14 @@ class VerificationCoordinator:
             if tool_name == "compile":
                 result = self._validator.run_compile_check(known_files)
                 outcome_type = "compile"
+                self._stop_on_environment(result, outcome_type, attempt)
             else:
                 # test/tests/regression/quality_gates all ultimately mean "run
                 # the test suite" for this direct-execution path - quality_gates
                 # additionally implies compile must pass first.
                 if tool_name == "quality_gates":
                     compile_result = self._validator.run_compile_check(known_files)
+                    self._stop_on_environment(compile_result, "compile", attempt)
                     gates += self._gate("compile", compile_result, attempt)
                     if not compile_result["success"]:
                         self._raise(Failure(
@@ -160,6 +183,7 @@ class VerificationCoordinator:
                         ))
                 result = self._validator.run_tests()
                 outcome_type = "test"
+                self._stop_on_environment(result, outcome_type, attempt)
             blocking, evidence, extra = (self._judge_suite(result) if outcome_type == "test" and self._judge_suite is not None
                                          else (not result["success"], result.get("output", ""), {}))
             gates += self._gate(outcome_type, {**result, "success": not blocking}, attempt, extra)

@@ -31,7 +31,15 @@ ATTESTED = {
 }
 
 
-def _contained_run(*_args, **_kwargs):
+def _contained_run(command, *_args, cwd=None, **_kwargs):
+    # A container that succeeds at `python3 -m venv <dir>` leaves the venv's interpreter on the bind mount; the fake
+    # does the same (VERIFICATION-UNIT-ENV-FALLBACK-001: a venv that was asked for and never appeared is a typed
+    # environment failure, no longer the bare container interpreter).
+    if len(command) >= 4 and command[1:3] == ["-m", "venv"] and cwd:
+        venv_python = os.path.join(cwd, command[3], "bin", "python")
+        os.makedirs(os.path.dirname(venv_python), exist_ok=True)
+        with open(venv_python, "w", encoding="utf-8") as handle:
+            handle.write("")
     return ProcessResult(returncode=0, stdout="", stderr="", timeout=False, toolchain_identity=ATTESTED)
 
 

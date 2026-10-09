@@ -515,6 +515,13 @@ class PolymorphicValidator:
         # i.e. only when the expensive pip install subprocess actually ran.
         self.venv_install_attempts = 0
         self.venv_recreations = 0  # VENV-ADDITIVE-REUSE-001: venvs rebuilt because a declared dependency was dropped
+        # VERIFICATION-UNIT-ENV-FALLBACK-001: what the last _resolve_python_interpreter() decided - the
+        # provenance every Python gate result carries ({requested, actual, path, fallback}; evidence, never an
+        # authorization of equivalence) and, when the required environment could not be created, the typed
+        # (reason_code, message) the gate reports instead of running anything.
+        self.python_interpreter_provenance: Optional[Dict[str, Any]] = None
+        self.python_environment_error: Optional[Tuple[str, str]] = None
+        self._venv_creation_error: Optional[str] = None
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -633,12 +640,15 @@ class PolymorphicValidator:
 
         Returns (venv_python_path, None) on success. Returns (None, None) if
         venv CREATION itself fails - an infrastructure problem, not something
-        a code retry can fix, so the caller falls back to sys.executable
-        (today's pre-existing behavior) rather than failing the gate. Returns
-        (None, error_message) if the actual `pip install` fails - a real
-        dependency problem (e.g. a nonexistent package/version the model
-        wrote), which the caller fails the gate on so the retry loop sees it,
-        mirroring the Ruby bundle-install precedent exactly."""
+        a code retry can fix; the reason is kept in ``_venv_creation_error``
+        and _resolve_python_interpreter() reports it typed
+        (PYTHON_ENVIRONMENT_UNAVAILABLE, VERIFICATION-UNIT-ENV-FALLBACK-001)
+        - never a substitute interpreter for a workspace that required its
+        own environment. Returns (None, error_message) if the actual `pip
+        install` fails - a real dependency problem (e.g. a nonexistent
+        package/version the model wrote), which the caller fails the gate on
+        so the retry loop sees it, mirroring the Ruby bundle-install
+        precedent exactly."""
         # SEC-001-P6 Stage 3 (2026-09-11): execution-environment-aware venv
         # creation/reference - the ONE thing this needed to NOT be is a
         # host-path-translation hack (this stage's own explicit
@@ -703,17 +713,15 @@ class PolymorphicValidator:
                     [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60,
                 )
                 if create_res["returncode"] != 0 or not venv_present(venv_python_host):
-                    logger.warning(
-                        f"Failed to create project-local venv at {venv_dir_host} - falling back to "
-                        f"the default interpreter for this test run: {create_res['stderr']}"
-                    )
+                    self._venv_creation_error = (f"`{create_interpreter} -m venv` exited {create_res['returncode']}: "
+                                                 f"{create_res['stderr']}")
+                    logger.warning(f"Failed to create project-local venv at {venv_dir_host}: {self._venv_creation_error}")
                     return None, None
             except Exception as e:
-                logger.warning(
-                    f"Failed to create project-local venv at {venv_dir_host} - falling back to "
-                    f"the default interpreter for this test run: {e}"
-                )
+                self._venv_creation_error = f"`{create_interpreter} -m venv` could not be invoked: {e}"
+                logger.warning(f"Failed to create project-local venv at {venv_dir_host}: {self._venv_creation_error}")
                 return None, None
+        self._venv_creation_error = None
 
         # PERF/DEPENDENCY-001 (2026-09-19): this method (the real
         # implementation, only ever reached through _ensure_project_venv()'s
@@ -767,15 +775,26 @@ class PolymorphicValidator:
 
         Returns (interpreter_path, install_error). interpreter_path is
         sys.executable when there's no requirements.txt/pyproject.toml
-        dependency declaration, or when venv CREATION itself failed (an
-        infrastructure problem, not something a retry can fix - degrades
-        silently, same reasoning as _ensure_project_venv()'s own docstring).
-        install_error is set ONLY when `pip install` of THIS project's own
-        declared dependencies genuinely failed (a real, potentially
-        code-fixable dependency problem, e.g. a bad package pin) - the
-        caller should treat that as a hard failure rather than silently
+        dependency declaration. install_error is set ONLY when `pip install`
+        of THIS project's own declared dependencies genuinely failed (a real,
+        potentially code-fixable dependency problem, e.g. a bad package pin)
+        - the caller should treat that as a hard failure rather than silently
         proceeding with an interpreter missing the dependencies the goal
         actually needs.
+
+        VERIFICATION-UNIT-ENV-FALLBACK-001 (BACKEND-FINAL-CLOSURE-005): when
+        the workspace REQUIRES its own environment (a dependency declaration,
+        or containment's pytest venv) and that venv cannot be CREATED, the
+        failure is no longer degraded into the default interpreter: it is
+        recorded as ``python_environment_error`` = (PYTHON_ENVIRONMENT_
+        UNAVAILABLE, message) and every caller reports it typed (the gate's
+        ``environment_reason_code``, the verification_infrastructure_failure
+        stop) instead of running anything - Kriya's own sys.executable on the
+        host, or the bare container python3, must never produce an
+        authoritative verdict for such a workspace. Every call also records
+        ``python_interpreter_provenance`` ({requested, actual, path,
+        fallback}) for the result: evidence of which environment produced a
+        verdict, never an authorization of equivalence.
 
         requirements.txt takes priority when both exist (today's
         pre-existing behavior, unchanged); pyproject.toml (PRV-17,
@@ -808,6 +827,32 @@ class PolymorphicValidator:
         # same venv.
         contained = self.autonomy_cfg.contained_execution_required
         default_interpreter = "python3" if contained else sys.executable
+        from kriya.tools.dependency_execution import PYTHON_ENVIRONMENT_UNAVAILABLE
+
+        def _resolved(requested: str, actual: str, path: str) -> Tuple[str, Optional[str]]:
+            self.python_environment_error = None
+            self.python_interpreter_provenance = {"requested": requested, "actual": actual, "path": path, "fallback": False}
+            return path, None
+
+        def _venv_outcome(venv_python: Optional[str], install_error: Optional[str]) -> Tuple[str, Optional[str]]:
+            if install_error:
+                self.python_environment_error = None
+                self.python_interpreter_provenance = {"requested": "project_venv", "actual": None, "path": None,
+                                                      "fallback": False}
+                return default_interpreter, install_error
+            if venv_python:
+                return _resolved("project_venv", "project_venv", venv_python)
+            # The required environment could not be created: typed, nothing runs (the returned token is never
+            # used by a caller that honours python_environment_error, which every gate does).
+            message = (f"{PYTHON_ENVIRONMENT_UNAVAILABLE}: the project's verification environment (.kriya/venv) could "
+                       "not be created, so no interpreter can produce an authoritative verdict for this workspace; "
+                       "nothing about the candidate was observed, so this is not a code failure. "
+                       f"{self._venv_creation_error or 'the venv was not created'}")
+            self.python_environment_error = (PYTHON_ENVIRONMENT_UNAVAILABLE, message)
+            self.python_interpreter_provenance = {"requested": "project_venv", "actual": None, "path": None,
+                                                  "fallback": False}
+            return default_interpreter, None
+
         requirements_path = os.path.join(self.workspace_path, "requirements.txt")
         if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
             # SEC-001-P6 Stage 3: the host-absolute requirements_path (used
@@ -819,31 +864,17 @@ class PolymorphicValidator:
             # unchanged (existing test coverage pins this exact argv shape,
             # and there is no reason to touch behavior that already works).
             pip_requirements_arg = "requirements.txt" if contained else requirements_path
-            venv_python, install_error = self._ensure_project_venv(["-r", pip_requirements_arg])
-            if install_error:
-                return default_interpreter, install_error
-            if venv_python:
-                return venv_python, None
-            return default_interpreter, None
+            return _venv_outcome(*self._ensure_project_venv(["-r", pip_requirements_arg]))
         pyproject_path = os.path.join(self.workspace_path, "pyproject.toml")
         if os.path.exists(pyproject_path):
             dependencies = _pyproject_dependencies(pyproject_path)
             if dependencies:
-                venv_python, install_error = self._ensure_project_venv(dependencies)
-                if install_error:
-                    return default_interpreter, install_error
-                if venv_python:
-                    return venv_python, None
-                return default_interpreter, None
+                return _venv_outcome(*self._ensure_project_venv(dependencies))
         if contained:
             # No dependency declaration at all (CONTAINED-PYTHON-TEST-GATE-001):
-            # a venv with pytest only, through the same acquisition path.
-            venv_python, install_error = self._ensure_project_venv([])
-            if install_error:
-                return default_interpreter, install_error
-            if venv_python:
-                return venv_python, None
-        return default_interpreter, None
+            # a venv with pytest only, through the same acquisition path - required all the same.
+            return _venv_outcome(*self._ensure_project_venv([]))
+        return _resolved("default", "default", default_interpreter)
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
@@ -1858,8 +1889,14 @@ class PolymorphicValidator:
         binding = self._bind_test_report()
         try:
             interpreter, install_error = self._resolve_python_interpreter()
+            if self.python_environment_error is not None:
+                code, message = self.python_environment_error
+                return {"success": False, "output": message, "acceptance_environment_error": True,
+                        "environment_reason_code": code, "python_interpreter": self.python_interpreter_provenance,
+                        "test_execution": test_execution.collect(binding).to_dict()}
             if install_error:
                 return {"success": False, "output": install_error, "acceptance_environment_error": True,
+                        "python_interpreter": self.python_interpreter_provenance,
                         "test_execution": test_execution.collect(binding).to_dict()}
             cmd = [interpreter, "-I", "-B", runner_script]
             if binding.pytest_argument:
@@ -2066,6 +2103,16 @@ class PolymorphicValidator:
 
         return {"success": True, "output": "Stack test execution skipped."}
 
+    def _python_environment_result_fields(self) -> Dict[str, Any]:
+        """VERIFICATION-UNIT-ENV-FALLBACK-001: the typed code and the interpreter provenance of the last
+        resolution, for a result built outside the test gate (runtime verification)."""
+        fields: Dict[str, Any] = {}
+        if self.python_interpreter_provenance is not None:
+            fields["python_interpreter"] = self.python_interpreter_provenance
+        if self.python_environment_error is not None:
+            fields["environment_reason_code"] = self.python_environment_error[0]
+        return fields
+
     def _substitute_python_interpreter(
         self, commands: List[List[str]]
     ) -> Tuple[Optional[List[List[str]]], Optional[str]]:
@@ -2095,6 +2142,8 @@ class PolymorphicValidator:
         if self.stack != "python":
             return commands, None
         interpreter, install_error = self._resolve_python_interpreter()
+        if self.python_environment_error is not None:
+            return None, self.python_environment_error[1]  # typed in the caller's result (environment_reason_code)
         if install_error:
             return None, install_error
         # "python3" added to the match set (SEC-001-P6 Stage 3, 2026-09-11):
@@ -2123,7 +2172,8 @@ class PolymorphicValidator:
             return {"success": False, "timed_out": False, "returncode": None, "output": "No run command provided."}
         commands, install_error = self._substitute_python_interpreter([command])
         if install_error:
-            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error,
+                    **self._python_environment_result_fields()}
         command = commands[0]
         not_ready, prerequisite = self._prepare_runtime([command])
         if not_ready is not None:
@@ -2384,7 +2434,8 @@ class PolymorphicValidator:
 
         commands, install_error = self._substitute_python_interpreter(commands)
         if install_error:
-            return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
+            return {"success": False, "timed_out": False, "returncode": None, "output": install_error,
+                    **self._python_environment_result_fields()}
         not_ready, prerequisite = self._prepare_runtime(commands)
         if not_ready is not None:
             return not_ready
