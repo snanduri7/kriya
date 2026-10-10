@@ -893,13 +893,19 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   explicitly (enforce by default; its two direct-boundary cases say `FROM_RUN`, policy `required`).
 - Predicted post-fix: F3 10/10 (the two case-1 variants now pass; case 7 new), P1-2 8/8 unchanged in outcome; mutants
   F3-M1 (direct refusal removed) kills F3 case 1 both variants; F3-M2 (refusal for every source) kills F3 case 4 and
-  P1-2 cases 1, 2, 3, 6; F3-M3 (unknown-source guard removed) kills F3 case 7 (repair-003/mutations/
+  P1-2 cases 1, 2, 3, 6 (as predicted before the run; the prediction MISSED F3 case 6, whose capture-failure reason
+  text the policy refusal necessarily replaces - see Verification); F3-M3 (unknown-source guard removed) kills F3
+  case 7 (repair-003/mutations/
   run_f3_mutations.sh); adjacent closer / attribution / terminal-service / baseline-policy / REG-R1 / D1 / D8 /
   contract-closer / resume / workflow / registry modules unchanged in outcome.
 - Verification (operator runs, 2026-10-10): F3 10/10 + P1-2 8/8 (repair-003/prefix/F3_reproducer_after.txt);
   mutants F3-M1 KILLED 2 failed / 16 passed (the two case-1 variants only), F3-M2 KILLED 6 failed / 12 passed (F3
   cases 4 and 6, P1-2 cases 1, 2, 3, 6), F3-M3 KILLED 1 failed / 17 passed (case 7 only), workflow.py restored
-  byte-identical (repair-003/mutations/F3-M*.txt) - every prediction matched; adjacent 15 modules (D1, D8, FS-1A,
+  byte-identical (repair-003/mutations/F3-M*.txt). Prediction record (rule 5, corrected 2026-10-10 on the focused
+  review's finding F2): F3-M1 and F3-M3 matched exactly; F3-M2's measured kill set (6) was a strict SUPERSET of the
+  predicted five - case 6 was omitted from the prediction, not from the measurement; the mutant is KILLED and the
+  fix is not in doubt, but the earlier sentence here claiming every prediction matched was false and is withdrawn.
+  Adjacent 15 modules (D1, D8, FS-1A,
   PRD-008 resume, PRD-024 policy, PRD-030 terminal services, PRD-031A, PRD-032, REG-R1, plain-goal closer,
   validation baseline, contract closers and scopes, workflow, registry): 1421 passed. Registry row CLOSED.
 
@@ -918,3 +924,26 @@ time; no commit before the operator's verification; no push; readiness bar uncha
 - The candidate after F1 and F3 is a new SHA; its canonical full suite, ruff and pylint are the operator's, on that
   exact HEAD, and are the certification authority (the session's own lint runs are supporting evidence only).
   Then one focused independent review of F1/F3 and their interactions with the already-reviewed P1/P2 changes.
+
+### 13.9 Focused independent review of 6d97558..6169745 (F1/F3 follow-up) - dispositions (records)
+
+- Review: reviews/REVIEW_RESULT_c3_f1f3.md (one fresh independent reviewer launched in-session on the owner's
+  instruction, read-only; four targeted modules 53 passed, one scratch probe; prompt reviews/REVIEWER_PROMPT_c3_f1f3.md),
+  verdict APPROVE WITH CHANGES, no P0/P1/P2; classification reviews/REVIEW_DISPOSITION_c3_f1f3.md. Operator gates on
+  6169745 before the review: full suite `9868 passed, 15 warnings in 1354.82s (0:22:34)` (repair-003/
+  FULL_SUITE_6169745.log), ruff 0, pylint 0.
+- F1 P3 CONFIRMED and REPRODUCED -> fixed, 13.6 addendum (RUNTIME-VERIFICATION-RERUN-ENV-STOP-001, f053ab6).
+- F2 P3 CONFIRMED (own records defect, quality bar rule 6) -> 13.7 corrected above and the mutation script header in
+  the evidence tree annotated; no code.
+- F3 P3 CONFIRMED as a binding/intent gap, NOT reproducible as a live defect -> owner decision: no production change,
+  deferred row MANAGED-SERVICE-ENV-STATE-BINDING-001. The managed-service admission's environment branch reads the
+  validator's environment state for every admission refusal, including the three contract-shape refusals returned
+  before the resolver runs; the field is reset on every resolver return, the validator is per attempt, and any earlier
+  setter already raised the typed stop at its own gate, so the stale value is unreachable on every traced path and
+  the outcome if reached is still a fail-closed typed stop. Reopen only on a deterministic reproducer proving live
+  reachability; not folded into the F1 slice.
+- Reviewer observations recorded, not findings: STOP_ENVIRONMENT's `environment_failure` flag is set on the shared
+  failure type string (retry_strategy), pre-existing and shared with the compile/test stops; the no-progress counter
+  still increments on an environment failure (pre-existing); the milestone drift replay is advisory.
+- Nothing else reopened. P1-1, P1-2, hash, P2-1, P2-2 and the F3 baseline-policy logic are unchanged since their
+  reviews.
