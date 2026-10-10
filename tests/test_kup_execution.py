@@ -508,7 +508,7 @@ def test_declined_decisions_are_bounded(ws):
 def test_the_preflight_reports_tool_visibility_under_the_processs_own_environment(ws, monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     tools = {t["tool"]: t for t in _preflight(ws)["data"]["toolchains"]["tools"]}
-    assert set(tools) == {"python3", "git", "java", "mvn", "gradle", "node", "npm"}
+    assert set(tools) == {"python3", "git", "java", "mvn", "gradle", "node"}
     for entry in tools.values():
         assert entry["available"] == (entry["path"] is not None)
     assert "no login shell" in _preflight(ws)["data"]["toolchains"]["note"]

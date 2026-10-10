@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -76,8 +77,8 @@ def jdk_home_for_version(version: str) -> Optional[str]:
         return None
 
 
-READINESS_TOOLS = ("python3", "git", "java", "mvn", "gradle", "node", "npm")
-_RUNNABLE_CHECK = ("python3", "git", "node", "npm")  # cheap `--version`; mvn/gradle start a JVM and are only looked up
+READINESS_TOOLS = ("python3", "git", "java", "mvn", "gradle", "node")
+_RUNNABLE_CHECK = ("python3", "git", "node")  # cheap `--version`; mvn/gradle start a JVM and are only looked up
 
 
 def _first_runnable(tool: str, search_path: str) -> dict:
@@ -103,15 +104,18 @@ def _first_runnable(tool: str, search_path: str) -> dict:
 
 def tool_visibility() -> list:
     """Which common build tools THIS process can use (GUI M7 execution readiness), under this process's own PATH - never a login shell, never an
-    extended PATH. python3/git/node/npm are checked by running `--version` (a shim that fails is reported unavailable, with the reason); mvn/gradle are
+    extended PATH. python3/git/node are checked by running `--version` (a shim that fails is reported unavailable, with the reason); mvn/gradle are
     looked up only; `java` on macOS is whether a JDK is registered with `/usr/libexec/java_home` (the absolute-path mechanism the workflow uses; Apple's
     /usr/bin/java is only a stub). Each entry: {tool, available, path, checked, [reason]}. Whether a goal needs a tool is not knowable before the
     workflow runs, so this reports usability only."""
-    report = []
     search_path = os.environ.get("PATH", "")
+    # the `--version` runs are independent: concurrently, the preflight costs the slowest one instead of their sum
+    with ThreadPoolExecutor(max_workers=len(_RUNNABLE_CHECK)) as pool:
+        runnable = {tool: pool.submit(_first_runnable, tool, search_path) for tool in _RUNNABLE_CHECK}
+    report = []
     for tool in READINESS_TOOLS:
-        if tool in _RUNNABLE_CHECK:
-            report.append(_first_runnable(tool, search_path))
+        if tool in runnable:
+            report.append(runnable[tool].result())
             continue
         found = shutil.which(tool)
         checked = "found on PATH" if found else "not on PATH"
