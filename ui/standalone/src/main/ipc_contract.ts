@@ -21,6 +21,8 @@ export type SettingKey = (typeof SETTING_KEYS)[number];
 
 export const LIMITS = {
   listMax: 200,
+  evidencePageMax: 1000,
+  evidenceFilterMax: 256,
   listDefault: 50,
   runIdMax: 256,
   cursorMax: 1024,
@@ -45,7 +47,10 @@ export type KupRequest =
   | { operation: 'history.list'; snapshot_id: string; limit?: number; cursor?: string }
   | { operation: 'history.detail'; snapshot_id: string; run_id: string }
   | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
-  | { operation: 'workspace.status'; workspace: string };
+  | { operation: 'workspace.status'; workspace: string }
+  | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string }
+  | { operation: 'evidence.verify'; run_id: string }
+  | { operation: 'evidence.records'; run_id: string; unit?: string; phase?: string; role?: string; attempt?: number; from_seq?: number; kind?: string[]; limit?: number; cursor?: string };
 
 export function validateSnapshotId(v: unknown): ValidationResult<string> {
   if (typeof v !== 'string' || !SNAPSHOT_ID_RE.test(v)) return { ok: false, message: 'snapshot_id must be a published snapshot id (YYYYMMDDTHHMMSSffffffZ-xxxxxxxx)' };
@@ -118,6 +123,19 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       const r = validateRunId(v.run_id); if (!r.ok) return r;
       return { ok: true, value: { operation: v.operation, snapshot_id: sid.value, run_id: r.value } };
     }
+    case 'evidence.manifest': {
+      if (!keys.every((k) => ['operation', 'run_id', 'snapshot_id'].includes(k))) return { ok: false, message: 'evidence.manifest accepts only run_id and snapshot_id' };
+      const r = validateRunId(v.run_id); if (!r.ok) return r;
+      const out: KupRequest = { operation: 'evidence.manifest', run_id: r.value };
+      if ('snapshot_id' in v) { const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid; out.snapshot_id = sid.value; }
+      return { ok: true, value: out };
+    }
+    case 'evidence.verify': {
+      if (keys.join() !== 'operation,run_id') return { ok: false, message: 'evidence.verify takes exactly run_id' };
+      const r = validateRunId(v.run_id); if (!r.ok) return r;
+      return { ok: true, value: { operation: 'evidence.verify', run_id: r.value } };
+    }
+    case 'evidence.records': return validateEvidenceRecords(v, keys);
     case 'workspace.status': {
       if (keys.join() !== 'operation,workspace') return { ok: false, message: 'workspace.status takes exactly workspace' };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
@@ -126,6 +144,34 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     default:
       return { ok: false, message: `unknown operation ${String(v.operation)}` };
   }
+}
+
+const EVIDENCE_RECORDS_KEYS = ['operation', 'run_id', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'kind', 'limit', 'cursor'];
+const KIND_RE = /^[a-z][a-z_]*(\.[a-z_]+)*$/;
+
+function boundedInt(v: unknown, min: number, max: number): v is number { return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max; }
+
+function validateEvidenceRecords(v: Record<string, unknown>, keys: string[]): ValidationResult<KupRequest> {
+  if (!keys.every((k) => EVIDENCE_RECORDS_KEYS.includes(k))) return { ok: false, message: `evidence.records accepts only ${EVIDENCE_RECORDS_KEYS.slice(1).join(', ')}` };
+  const r = validateRunId(v.run_id); if (!r.ok) return r;
+  const out: Extract<KupRequest, { operation: 'evidence.records' }> = { operation: 'evidence.records', run_id: r.value };
+  for (const name of ['unit', 'phase', 'role'] as const) {
+    if (!(name in v)) continue;
+    const t = v[name];
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+    if (typeof t !== 'string' || !t.length || t.length > LIMITS.evidenceFilterMax || /[\u0000-\u001f]/.test(t)) return { ok: false, message: `${name} must be a non-empty string without control characters, at most ${LIMITS.evidenceFilterMax} chars` };
+    out[name] = t;
+  }
+  if ('attempt' in v) { if (!boundedInt(v.attempt, 0, 1_000_000)) return { ok: false, message: 'attempt must be an integer in 0..1000000' }; out.attempt = v.attempt; }
+  if ('from_seq' in v) { if (!boundedInt(v.from_seq, 1, 1_000_000_000)) return { ok: false, message: 'from_seq must be an integer >= 1' }; out.from_seq = v.from_seq; }
+  if ('limit' in v) { if (!boundedInt(v.limit, 1, LIMITS.evidencePageMax)) return { ok: false, message: `limit must be an integer in 1..${LIMITS.evidencePageMax}` }; out.limit = v.limit; }
+  if ('kind' in v) {
+    const k = v.kind;
+    if (!Array.isArray(k) || !k.length || k.length > 40 || !k.every((x) => typeof x === 'string' && x.length <= 64 && KIND_RE.test(x))) return { ok: false, message: 'kind must be a non-empty list of record kind names' };
+    out.kind = k as string[];
+  }
+  if ('cursor' in v) { const c = validateCursor(v.cursor); if (!c.ok) return c; out.cursor = c.value; }
+  return { ok: true, value: out };
 }
 
 export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; line?: number }> {

@@ -4,6 +4,10 @@
  */
 import { LIMITS, type KupRequest } from './ipc_contract';
 
+function evidenceHead(subcommand: 'manifest' | 'verify' | 'records', runId: string): string[] {
+  return ['evidence', subcommand, runId, '--json', '--kup-version', '1'];
+}
+
 export function buildKriyaArgv(request: KupRequest): string[] {
   switch (request.operation) {
     case 'capabilities':
@@ -27,6 +31,19 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       return ['traces', '--json', '--snapshot-id', request.snapshot_id, '--run-id', request.run_id];
     case 'history.prompt':
       return ['traces', '--json', '--snapshot-id', request.snapshot_id, '--run-id', request.run_id, '--include-prompt'];
+    case 'evidence.manifest':
+      return [...evidenceHead('manifest', request.run_id), ...(request.snapshot_id !== undefined ? [`--snapshot-id=${request.snapshot_id}`] : [])];
+    case 'evidence.verify':
+      return evidenceHead('verify', request.run_id);
+    case 'evidence.records': {
+      // Every value is attached with `=`: a value that starts with `-` (a unit id, a cursor) can never be read as an option.
+      const argv = evidenceHead('records', request.run_id);
+      for (const [flag, value] of [['unit', request.unit], ['phase', request.phase], ['role', request.role], ['attempt', request.attempt], ['from-seq', request.from_seq], ['limit', request.limit], ['cursor', request.cursor]] as const) {
+        if (value !== undefined) argv.push(`--${flag}=${String(value)}`);
+      }
+      for (const kind of request.kind ?? []) argv.push(`--kind=${kind}`);
+      return argv;
+    }
     case 'workspace.status':
       return ['runs', 'status', '--workspace', request.workspace, '--json', '--kup-version', '1'];
     default: {
@@ -47,6 +64,14 @@ export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['runs', 'status', '--workspace'],
 ];
 
+const EVIDENCE_SUBCOMMANDS: readonly string[] = ['manifest', 'verify', 'records'];
+
+/** `evidence <read-only KUP subcommand> <run id> --json --kup-version 1 ...`: the subcommand, the KUP flags and their position are pinned. */
+function isEvidenceArgv(argv: readonly string[]): boolean {
+  return argv[0] === 'evidence' && EVIDENCE_SUBCOMMANDS.includes(argv[1] ?? '') && typeof argv[2] === 'string' && argv[2].length > 0 && !argv[2].startsWith('-')
+    && argv[3] === '--json' && argv[4] === '--kup-version' && argv[5] === '1';
+}
+
 export function argvIsAllowed(argv: readonly string[]): boolean {
-  return ALLOWED_ARGV_PREFIXES.some((p) => p.every((tok, i) => argv[i] === tok));
+  return isEvidenceArgv(argv) || ALLOWED_ARGV_PREFIXES.some((p) => p.every((tok, i) => argv[i] === tok));
 }

@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum EnvelopeOperation {
+public enum Operation {
     CAPABILITIES, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
 
     @JsonValue
@@ -28,7 +28,7 @@ public enum EnvelopeOperation {
     }
 
     @JsonCreator
-    public static EnvelopeOperation forValue(String value) throws IOException {
+    public static Operation forValue(String value) throws IOException {
         if (value.equals("capabilities")) return CAPABILITIES;
         if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;
         if (value.equals("evidence.records")) return EVIDENCE_RECORDS;
@@ -41,6 +41,6 @@ public enum EnvelopeOperation {
         if (value.equals("snapshot.prune")) return SNAPSHOT_PRUNE;
         if (value.equals("snapshot.verify")) return SNAPSHOT_VERIFY;
         if (value.equals("workspace.status")) return WORKSPACE_STATUS;
-        throw new IOException("Cannot deserialize EnvelopeOperation");
+        throw new IOException("Cannot deserialize Operation");
     }
 }

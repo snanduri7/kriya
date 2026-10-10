@@ -61,7 +61,7 @@ features: {
   diagnosis_evidence_classes: [MEASURED, DERIVED_DETERMINISTIC, MODEL_CLAIMED, UNKNOWN]
 }
 limits: { ...v1, evidence_page_default: 200, evidence_page_max: 1000, evidence_blob_max_bytes: 1048576,
-          evidence_blob_range_max_bytes: 262144, evidence_verify_max_bytes: <reader bound> }
+          evidence_blob_range_max_bytes: 262144 }   # evidence_verify_max_bytes is NOT advertised until Kriya enforces such a bound
 ```
 
 The UI hides every surface whose flag is false (02 §4.3). **`evidence_content` is owned by Kriya, not the host:** a
@@ -124,7 +124,7 @@ only values in `model.KINDS` (`INVALID_REQUEST` otherwise). `phase` filter match
 adds `phase_provenance` per record, computed by the reader (never stored): `explicit` when the record's `seq` lies
 inside a `phase.opened` … `phase.closed` range of the same chain (none exist today; §7), else
 `derived_from_attempt_scope` when the record carries an `attempt_number`, else `derived_from_role` when the `role` is in
-the reader's copy of `_ROLE_PHASES`, else `role_name_fallback`. The UI badges everything but `explicit` as DERIVED.
+the reader's copy of `_ROLE_PHASES`, else `null` (no role fallback is synthesized; see §9). The UI badges everything but `explicit` as DERIVED.
 
 ### 4.4 `evidence.blob` — capped, lazy content (M-rows 31, 41, 45)
 
@@ -225,7 +225,7 @@ host passes `--evidence-verify` (cost; `traces --verify` already means snapshot 
    mid-append) is not a record and makes the result `live_observation` with `truncated_tail: true`; never wait for the
    writer. On a **sealed** store a partial tail is corruption (`TRUNCATED_TAIL`, rule 6), never served as live.
 2. Never take or probe the writer's lock; never create, rename or touch any file under the store root.
-3. Directories whose name starts with `.` (retention's rename-before-delete) are invisible: `NOT_FOUND`.
+3. Directories whose name starts with `.` (retention's rename-before-delete) are unreachable: a run id starting with `.` is `INVALID_REQUEST` before any lookup (owner disposition 2026-10-10).
 4. A record whose `schema` is not the reader's supported schema → `EVIDENCE_SCHEMA_UNSUPPORTED` (reader's
    `UnsupportedEvidenceSchema`); nothing is reinterpreted.
 5. `UNSEALED` stores are readable (the run may be active or crashed) but are never cached, always carry
@@ -305,10 +305,10 @@ checker gains rules for S2 envelopes (EVC-EVD-*).
 Additions and clarifications proven by the code and its tests; none alters a frozen owner decision.
 
 1. **Source block.** Evidence operations return `source.state_directory`, `source.trace_database` (kept so the M1 `Source` schema is unchanged) and `source.evidence_directory`; with a snapshot, `snapshot_directory` and `snapshot_id` as in M1.
-2. **`sealed_store` is returned only for `VERIFIED`.** `evidence.verify` and `evidence.records` verify the chain, every referenced blob and the seal in the same invocation, and the consistency block carries `head_digest`. Every other status, including `UNSEALED` and an unsealed `TRUNCATED_TAIL`, is `live_observation`. `evidence.records` therefore re-verifies on every page (one pass that also collects the records); the host caches pages by `(operation, params, head_digest)` for sealed stores only.
+2. **`sealed_store` is returned only for `VERIFIED`.** `evidence.verify` and `evidence.records` verify the chain, every referenced blob and the seal in the same invocation, and the consistency block carries `head_digest`. Every other status, including `UNSEALED` and an unsealed `TRUNCATED_TAIL`, is `live_observation`. `evidence.records` therefore re-verifies on every page (one pass that also collects the records); every page re-verifies fully (owner disposition: correctness first; measure real store cost before optimizing; no persistent verification cache keyed by head_digest, because it would conceal later blob tampering).
 3. **`evidence.verify`** reports every reader status as data (`NOT_FOUND` included, no error); `head_digest` is the digest of the last complete record verified (null for `NOT_FOUND` and `CHAIN_BROKEN`).
 4. **`evidence.manifest` absence block** also carries `snapshot_id` and `recorded_event` (the `evidence.attempt_store` details verbatim, or null). Only `OPEN`/`CLOSED` events that name a `path` derive `pruned`; any other status is `unknown` and says which. A trace row missing from the snapshot is `unknown`, never `pre_recorder`.
-5. **`evidence.records`.** `truncated` means the page stopped at the response byte budget (`limit.evidence_page_max_bytes`, half of the 8 MiB response cap) before `limit`; `truncated_tail` is the separate partial-tail flag of an unsealed store. The first matching record is always served. The cursor is bound to run, filters and `head_digest` (changing the first two is `INVALID_REQUEST`, a moved head is `EVIDENCE_HEAD_CHANGED`). `filters_applied` lists only the filters that were supplied. `phase_provenance` is `null` when no phase was recorded, and `role_name_fallback` only for an unmapped raw role name; the reader's `ROLE_PHASES` is a tested copy of the recorder's map.
+5. **`evidence.records`.** `truncated` means the page stopped at the response byte budget (`limit.evidence_page_max_bytes`, half of the 8 MiB response cap) before `limit`; `truncated_tail` is the separate partial-tail flag of an unsealed store. The first matching record is always served. The cursor is bound to run, filters and `head_digest` (changing the first two is `INVALID_REQUEST`, a moved head is `EVIDENCE_HEAD_CHANGED`). `filters_applied` lists only the filters that were supplied. `phase_provenance` is `null` when no phase was recorded, and an unmapped raw role name is also `null` (owner disposition: evidence.records synthesizes no role fallback; a higher-level role-derived presentation must be marked DERIVED). The reader's `ROLE_PHASES` is a tested copy of the recorder's map.
 6. **Errors added so far:** `EVIDENCE_STORE_UNREADABLE`, `EVIDENCE_SCHEMA_UNSUPPORTED`, `EVIDENCE_STORE_NOT_FOUND` (records only), `EVIDENCE_VERIFY_FAILED` (status, broken_seq, detail, blob_problems), `EVIDENCE_HEAD_CHANGED`. The remaining 04 §6 codes arrive with their operations.
 7. **Capabilities advertise only what exists:** `evidence: true`; `evidence_content`, `qualification`, `authority`, `knowledge`, `tools`, `experiments`, `live`, `actions` are `false`. `limits` gains `evidence_page_default`, `evidence_page_max`, `evidence_page_max_bytes`; `evidence_blob_*` arrive with 1A-3 and `evidence_verify_max_bytes` is not advertised because the reader has no such bound.
 8. **Reader.** `Verification.head_digest`, `EvidenceRun.measure()`, `EvidenceRun.verify(records_out)`, `UnsupportedEvidenceSchema.schema_seen`, and a non-object record, manifest or seal is corruption (`CHAIN_BROKEN` / `ValueError`), never an `AttributeError` (commit 14f2438).

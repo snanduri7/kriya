@@ -230,8 +230,8 @@ def test_phase_provenance_never_claims_more_than_was_recorded():
     assert got[1] is None and got[4] is None and got[15] is None                      # run.opened / unit.opened: no phase was recorded
     assert got[2] == got[3] == "derived_from_role"                # planner: role in the role -> phase map, no attempt scope
     assert got[5] == got[6] == got[8] == got[13] == "derived_from_attempt_scope"
-    assert got[14] == "role_name_fallback"                        # an unmapped role is shown as its raw name
-    assert set(got.values()) <= {None, "explicit", "derived_from_attempt_scope", "derived_from_role", "role_name_fallback"}
+    assert got[14] is None                                        # an unmapped raw role name: nothing is synthesized from it
+    assert set(got.values()) <= {None, "explicit", "derived_from_attempt_scope", "derived_from_role"}
 
 
 def test_explicit_phase_events_mark_only_the_records_between_them():

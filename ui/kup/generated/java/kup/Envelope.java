@@ -22,7 +22,7 @@ public class Envelope {
     private Data data;
     private KupError error;
     private String observedAt;
-    private EnvelopeOperation operation;
+    private Operation operation;
     private String requestid;
     private long schemaVersion;
     private SourceClass source;
@@ -54,9 +54,9 @@ public class Envelope {
     public void setObservedAt(String value) { this.observedAt = value; }
 
     @JsonProperty("operation")
-    public EnvelopeOperation getOperation() { return operation; }
+    public Operation getOperation() { return operation; }
     @JsonProperty("operation")
-    public void setOperation(EnvelopeOperation value) { this.operation = value; }
+    public void setOperation(Operation value) { this.operation = value; }
 
     /**
      * Opaque, client-chosen; echoed verbatim.

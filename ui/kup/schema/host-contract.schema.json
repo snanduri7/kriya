@@ -189,6 +189,106 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "run_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "evidence.manifest"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            },
+            "snapshot_id": {
+              "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "run_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "evidence.verify"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "run_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "evidence.records"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001F]+$"
+            },
+            "phase": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001F]+$"
+            },
+            "role": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001F]+$"
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "from_seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000000
+            },
+            "kind": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 40,
+              "items": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z_]*(\\.[a-z_]+)*$"
+              }
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "cursor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9+/=_-]*$"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

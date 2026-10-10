@@ -84,7 +84,7 @@ public class RecordElement {
 
     /**
      * How the record's phase is known; everything but explicit is DERIVED. null: no phase was
-     * recorded.
+     * recorded, or it is an unmapped raw role name (nothing is synthesized).
      */
     @JsonProperty("phase_provenance")
     public PhaseProvenance getPhaseProvenance() { return phaseProvenance; }

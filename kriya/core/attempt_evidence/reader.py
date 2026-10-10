@@ -209,7 +209,6 @@ ROLE_PHASES = {
 PHASE_EXPLICIT = "explicit"
 PHASE_FROM_ATTEMPT = "derived_from_attempt_scope"
 PHASE_FROM_ROLE = "derived_from_role"
-PHASE_FROM_ROLE_NAME = "role_name_fallback"
 
 
 def explicit_phase_ranges(records: List[Dict[str, Any]]) -> List[Tuple[int, float]]:
@@ -232,7 +231,7 @@ def explicit_phase_ranges(records: List[Dict[str, Any]]) -> List[Tuple[int, floa
 def phase_provenance(record: Dict[str, Any], ranges: List[Tuple[int, float]]) -> Optional[str]:
     """How a record's phase is known (computed here, never stored): ``explicit`` inside a recorded phase range, else
     ``derived_from_attempt_scope`` when it carries an attempt number, ``derived_from_role`` when its role is in the recorder's role
-    map, ``role_name_fallback`` when the phase is an unmapped raw role name, and None when no phase was recorded at all."""
+    map, and None otherwise (no phase was recorded, or it is an unmapped raw role name: nothing is synthesized from a role name)."""
     seq = record.get("seq")
     if any(start <= seq <= end for start, end in ranges):
         return PHASE_EXPLICIT
@@ -241,8 +240,6 @@ def phase_provenance(record: Dict[str, Any], ranges: List[Tuple[int, float]]) ->
     role = record.get("role")
     if role in ROLE_PHASES:
         return PHASE_FROM_ROLE
-    if record.get("phase") is not None and role is not None:
-        return PHASE_FROM_ROLE_NAME
     return None
 
 

@@ -341,10 +341,9 @@
             "explicit",
             "derived_from_attempt_scope",
             "derived_from_role",
-            "role_name_fallback",
             null
           ],
-          "description": "How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded."
+          "description": "How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded, or it is an unmapped raw role name (nothing is synthesized)."
         }
       },
       "additionalProperties": true

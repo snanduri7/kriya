@@ -3,6 +3,7 @@
 package kup;
 
 import com.fasterxml.jackson.annotation.*;
+import java.util.List;
 
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id
@@ -11,7 +12,7 @@ import com.fasterxml.jackson.annotation.*;
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public class KupRequest {
-    private KupRequestOperation operation;
+    private Operation operation;
     private String workspace;
     private Boolean verify;
     private Long keep;
@@ -19,11 +20,17 @@ public class KupRequest {
     private String cursor;
     private Long limit;
     private String runid;
+    private Long attempt;
+    private Long fromSeq;
+    private List<String> kind;
+    private String phase;
+    private String role;
+    private String unit;
 
     @JsonProperty("operation")
-    public KupRequestOperation getOperation() { return operation; }
+    public Operation getOperation() { return operation; }
     @JsonProperty("operation")
-    public void setOperation(KupRequestOperation value) { this.operation = value; }
+    public void setOperation(Operation value) { this.operation = value; }
 
     /**
      * Absolute path without control characters.
@@ -62,4 +69,34 @@ public class KupRequest {
     public String getRunid() { return runid; }
     @JsonProperty("run_id")
     public void setRunid(String value) { this.runid = value; }
+
+    @JsonProperty("attempt")
+    public Long getAttempt() { return attempt; }
+    @JsonProperty("attempt")
+    public void setAttempt(Long value) { this.attempt = value; }
+
+    @JsonProperty("from_seq")
+    public Long getFromSeq() { return fromSeq; }
+    @JsonProperty("from_seq")
+    public void setFromSeq(Long value) { this.fromSeq = value; }
+
+    @JsonProperty("kind")
+    public List<String> getKind() { return kind; }
+    @JsonProperty("kind")
+    public void setKind(List<String> value) { this.kind = value; }
+
+    @JsonProperty("phase")
+    public String getPhase() { return phase; }
+    @JsonProperty("phase")
+    public void setPhase(String value) { this.phase = value; }
+
+    @JsonProperty("role")
+    public String getRole() { return role; }
+    @JsonProperty("role")
+    public void setRole(String value) { this.role = value; }
+
+    @JsonProperty("unit")
+    public String getUnit() { return unit; }
+    @JsonProperty("unit")
+    public void setUnit(String value) { this.unit = value; }
 }

@@ -605,9 +605,9 @@ export interface EvidenceRecord {
     [k: string]: string;
   };
   /**
-   * How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded.
+   * How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded, or it is an unmapped raw role name (nothing is synthesized).
    */
-  phase_provenance: 'explicit' | 'derived_from_attempt_scope' | 'derived_from_role' | 'role_name_fallback' | null;
+  phase_provenance: 'explicit' | 'derived_from_attempt_scope' | 'derived_from_role' | null;
   [k: string]: unknown;
 }
 
@@ -660,6 +660,31 @@ export type KupRequest =
        * Absolute path without control characters.
        */
       workspace: string;
+    }
+  | {
+      operation: 'evidence.manifest';
+      run_id: RunId;
+      snapshot_id?: string;
+    }
+  | {
+      operation: 'evidence.verify';
+      run_id: RunId;
+    }
+  | {
+      operation: 'evidence.records';
+      run_id: RunId;
+      unit?: string;
+      phase?: string;
+      role?: string;
+      attempt?: number;
+      from_seq?: number;
+      /**
+       * @minItems 1
+       * @maxItems 40
+       */
+      kind?: [string, ...string[]];
+      limit?: number;
+      cursor?: string;
     };
 export type RunId = string;
 

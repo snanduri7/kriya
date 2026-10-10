@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { KupRequest } from '@kriya-ui/kup';
 import { LIMITS, validateKupRequest, validateOpenInIde, validateSettingValue } from '../src/main/ipc_contract';
 import { ALLOWED_ARGV_PREFIXES, argvIsAllowed, buildKriyaArgv } from '../src/main/kriya_argv';
 
@@ -62,6 +63,23 @@ describe('KUP request validation (P-25, P-31)', () => {
   });
 });
 
+const EVIDENCE_REQUESTS = [
+  { operation: 'evidence.manifest', run_id: 'r1' }, { operation: 'evidence.manifest', run_id: 'r1', snapshot_id: SID }, { operation: 'evidence.verify', run_id: 'r1' },
+  { operation: 'evidence.records', run_id: 'r1' }, { operation: 'evidence.records', run_id: 'r1', unit: '-u', phase: 'attempt', role: 'developer', attempt: 2, kind: ['gate.result', 'model.request'], from_seq: 3, limit: 50, cursor: 'abc' },
+] as const;
+
+describe('evidence argv (Run Cockpit v1.1)', () => {
+  it('builds the exact CLI grammar, values attached with = so a value can never be read as an option', () => {
+    expect(buildKriyaArgv({ operation: 'evidence.verify', run_id: 'r1' })).toEqual(['evidence', 'verify', 'r1', '--json', '--kup-version', '1']);
+    expect(buildKriyaArgv({ operation: 'evidence.manifest', run_id: 'r1', snapshot_id: SID })).toEqual(['evidence', 'manifest', 'r1', '--json', '--kup-version', '1', `--snapshot-id=${SID}`]);
+    expect(buildKriyaArgv({ operation: 'evidence.records', run_id: 'r1', unit: '-u', kind: ['gate.result', 'model.request'], attempt: 2, from_seq: 3, limit: 50, cursor: 'abc', phase: 'p', role: 'r' })).toEqual(
+      ['evidence', 'records', 'r1', '--json', '--kup-version', '1', '--unit=-u', '--phase=p', '--role=r', '--attempt=2', '--from-seq=3', '--limit=50', '--cursor=abc', '--kind=gate.result', '--kind=model.request']);
+  });
+  it('the allowlist pins the subcommand, the run id position and the KUP flags', () => {
+    for (const bad of [['evidence', 'prune', 'r', '--json', '--kup-version', '1'], ['evidence', 'show', 'r', '--json', '--kup-version', '1'], ['evidence', 'verify', 'r', '--json'], ['evidence', 'verify', 'r', '--kup-version', '1', '--json'], ['evidence', 'verify', 'r', '--json', '--kup-version', '2'], ['evidence', 'candidate', 'r', '--out', '/x'], ['evidence', 'records', '--json', '--kup-version', '1'], ['evidence']]) expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
+  });
+});
+
 describe('argv builder (the only command-line source)', () => {
   it('produces exactly the P-25 grammar', () => {
     expect(buildKriyaArgv({ operation: 'capabilities' })).toEqual(['traces', '--json', '--capabilities']);
@@ -78,6 +96,7 @@ describe('argv builder (the only command-line source)', () => {
   });
   it('every built argv is allowlisted; anything else is not', () => {
     for (const r of [{ operation: 'capabilities' }, { operation: 'snapshot.acquire' }, { operation: 'snapshot.list' }, { operation: 'snapshot.prune' }, { operation: 'snapshot.verify', snapshot_id: SID }, { operation: 'history.list', snapshot_id: SID, limit: 3 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'x' }, { operation: 'workspace.status', workspace: '/w' }] as const) expect(argvIsAllowed(buildKriyaArgv(r))).toBe(true);
+    for (const r of EVIDENCE_REQUESTS) expect(argvIsAllowed(buildKriyaArgv(r as unknown as KupRequest)), r.operation).toBe(true);
     for (const bad of [['generate', 'goal'], ['fix'], ['traces', '--migrate-legacy'], ['traces', '--all'], ['traces', '--json', '-n', '5'], ['traces', '--json', '--run-id', 'r'], ['traces', '--json', '--verify'], ['runs', 'resume'], [], ['sh', '-c', 'traces']]) expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
     expect(ALLOWED_ARGV_PREFIXES.length).toBe(7);
   });
