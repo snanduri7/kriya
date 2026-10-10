@@ -947,3 +947,58 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   still increments on an environment failure (pre-existing); the milestone drift replay is advisory.
 - Nothing else reopened. P1-1, P1-2, hash, P2-1, P2-2 and the F3 baseline-policy logic are unchanged since their
   reviews.
+
+### 13.10 The final twelve from 3844540, owner dispositions and closure of BACKEND-FINAL-CLOSURE-005 (2026-10-10)
+
+Run 09:54-12:49 local by repair-003/run_final_12_c3.sh (serial, one run per task, `-c3` directories; executable
+3844540 bound by the guard, checkout 6c917fa == origin/main; false-success guard never fired); false-negative check
+repair-003/judge_c3_failed.sh with the frozen external oracles; classification by hand under
+cohort-002/CLASSIFICATION_RULES.md. Table, tally and gate: evidence/backend-final-closure-005-repair-003/final-twelve/
+FINAL_GATE_c3.md (verbatim copy of repair-003/FINAL_GATE_c3.md; the twelve CLASSIFICATION.md, both logs, the driver,
+the judge and the handoff are beside it).
+
+Final measured result (preserved exactly, not reinterpreted):
+- Primary 3/6 genuine (T1, T5, T6); Cohort 2 1/6 genuine (S6_A); combined 4/12 genuine.
+- SAFE_FAILURE 8 (T2, T3, T4, S1_A, S2_A, S3_A, S4_A, S4_B); FALSE_NEGATIVE 0; FALSE_SUCCESS 0; authority violations 0;
+  corruption 0; hidden-oracle leaks 0.
+- Every exported failed candidate rejected by the frozen external oracle; every sealed store VERIFIED; every workspace
+  restored to its frozen base.
+- **BACKEND READINESS = NO** under the predefined >= 8/12 end-to-end solver threshold (primary >= 4/6, cohort 2 >= 4/6).
+Against the 557035d twelve (12.9, 6/12): the S2_A false negative is gone (0 FN); T4 and S1_A flipped GENUINE ->
+SAFE_FAILURE on planner choices (setup.py instead of pyproject.toml; a unit editing the goal-protected test file while
+the product fix itself was correct); no task that failed on 557035d passes on 3844540. No Kriya verdict was wrong in
+twelve runs.
+
+Owner decisions (2026-10-10), recorded exactly as decided:
+1. GRADLE-REGRESSION-DELTA-PER-TEST-001 - DEFERRED P2 reliability/diagnostic gap (registry row added). Gradle
+   candidate-gate attribution lacks structured per-test evidence (validation_baseline.py ~706-735 parses Surefire and
+   pytest console only), which can misroute a genuine regression as REGRESSION_UNATTRIBUTED and deprive the Developer
+   of useful feedback (T3: no retry, failing test names absent, reason text claims replays that never ran; sealed store
+   20261010T103435-ed4927a4 seq 67/68/74/75). The T3 candidate was nevertheless objectively wrong: frozen acceptance
+   failed (hidden 2/2) and regression failed 3/489. The finding does not invalidate the verdict and is not authorized
+   for implementation now.
+2. SUREFIRE-STABILITY-ENVELOPE-001 - remains DEFERRED; evidence updated with the final S3_A measurement: the same 16
+   DNS/localhost lookup tests exhibited PRE ERROR -> POST FAIL on four consecutive candidate runs. This demonstrates the
+   usefulness of a Maven/Surefire stability envelope, but every exported S3_A candidate still failed frozen hidden
+   acceptance (3/4, 2/4, 2/4), so no repair is authorized in this cycle.
+3. S4_A owner-recovery observation - P3 investigation/hardening only (RECOVERY-UPSTREAM-OWNER-ROUTING-001, DEFERRED).
+   No implementation without a deterministic reproducer demonstrating an incorrect recovery decision on a candidate
+   that matters.
+4. S1_A immutable named-test plan validation - P3 planner-efficiency hardening (PLAN-VALIDATION-IMMUTABLE-NAMED-TEST-001,
+   DEFERRED). Terminal authority already refused the illegal test mutation correctly; no product change now.
+5. No fourth repair cycle. Product code is FROZEN at executable 38445408b7ad5a1a1dfd588dd54ee11406185799.
+
+Closure verdict, stated in two separate parts:
+- **A. Backend / control-plane correctness.** Verification and authority behaviour demonstrated fail-closed with zero
+  false-positive and zero false-negative verdicts in the final twelve (every refusal matched the frozen external oracle;
+  every success was genuine; no authority violation, corruption or leak). The certified executable 3844540 (full suite
+  9871 passed, ruff 0, pylint exit 0, two independent reviews dispositioned) is frozen for product integration.
+- **B. Current local-model solver readiness: NOT READY.** The final twelve are dominated by planner/developer behaviour
+  (fabricated anchors, wrong manifest file, a unit editing a protected test, planner non-convergence, wrong candidates)
+  and by the known deferred reliability capabilities above, with only 4/12 genuine completions.
+
+BACKEND-FINAL-CLOSURE-005 is complete. The next reliability workstream is MODEL/PLANNER QUALIFICATION, not a
+continuation of this batch; Kriya is not to be modified merely to improve the frozen cohort score, and a future backend
+change requires a newly demonstrated general correctness defect with deterministic reproduction. The next owner-directed
+workstream is Kriya GUI/product design, with model reliability proceeding separately. This section is records only
+(no pytest, models, cohorts, reviewers or qualification were run for it; executable 3844540 unmodified).

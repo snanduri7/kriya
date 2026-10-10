@@ -11,6 +11,12 @@ Certified executable revision: 3844540 (branch repair/c3-p1 fast-forwarded into 
 - reviews/ - REVIEWER_PROMPT_c3.md, REVIEW_RESULT_c3.md, REVIEW_DISPOSITION_c3.md (independent review of main..6d97558,
   APPROVE WITH CHANGES) and REVIEWER_PROMPT_c3_f1f3.md, REVIEW_RESULT_c3_f1f3.md, REVIEW_DISPOSITION_c3_f1f3.md (focused
   review of 6d97558..6169745, APPROVE WITH CHANGES); every finding dispositioned by the owner and applied.
+- final-twelve/ - the operator-run frozen Primary 6 + Cohort-2 6 on 3844540 (2026-10-10): FINAL_GATE_c3.md (table,
+  tally, gate, owner dispositions), the twelve per-run CLASSIFICATION.md, RUN_FINAL_12_c3.log, JUDGE_c3.log, the driver
+  run_final_12_c3.sh, the judge judge_c3_failed.sh and FINAL_12_HANDOFF_3844540.md. Result 4/12 genuine, FN 0, FS 0,
+  BACKEND READINESS = NO; batch closed by owner decision, product frozen at 3844540 (design 13.10). The raw run
+  directories (result.json, generate.log, oracle outputs, exported candidates, sealed stores) stay in the operator's
+  evidence tree ~/kriya-m1-live/backend-final-closure-005/{primary,cohort-002}/*-c3/.
 - Pre-fix reproducer outputs, mutant outputs and scripts, and the F1 probe stay in the operator's evidence tree
   ~/kriya-m1-live/backend-final-closure-005/repair-003/{prefix,mutations,scratch}/ (never overwritten); their summary
   lines are quoted in handover/BACKEND_FINAL_CLOSURE_005_DESIGN.md sections 13.1-13.9 and the registry rows.

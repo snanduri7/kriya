@@ -74,3 +74,20 @@ every commit above keeps its SHA), on explicit owner authorization. Then one rec
 (this record + the two review results/dispositions + the full-suite logs under evidence/), kept distinct from the
 certified executable revision (rule 23), then push on explicit approval. Not before authorization: merge, push,
 live-model runs, the frozen Primary 6 + Cohort-2 6 driver.
+
+## Final twelve on 3844540 and batch closure (records added 2026-10-10, after the merge/push of 6c917fa)
+Operator-run frozen Primary 6 + Cohort-2 6 on executable 3844540 (checkout 6c917fa == origin/main): final-twelve/
+FINAL_GATE_c3.md (table, tally, gate, owner dispositions) and the twelve CLASSIFICATION.md records beside it.
+- Primary 3/6 genuine; Cohort 2 1/6 genuine; combined 4/12 genuine; SAFE_FAILURE 8; FALSE_NEGATIVE 0; FALSE_SUCCESS 0;
+  authority violations 0; corruption 0; hidden-oracle leaks 0; every exported failed candidate rejected by the frozen
+  external oracle; every sealed store VERIFIED; every workspace restored.
+- BACKEND READINESS = NO under the predefined >= 8/12 end-to-end solver threshold (historical gate, not reinterpreted).
+- A. Backend/control-plane correctness: fail-closed verification and authority with zero false positive/negative
+  verdicts in the final twelve; product code FROZEN at 38445408b7ad5a1a1dfd588dd54ee11406185799 for product integration.
+- B. Current local-model solver readiness: NOT READY - planner/developer behaviour and known deferred reliability
+  capabilities dominate, 4/12 genuine completions.
+- Owner decisions 2026-10-10 (design 13.10): GRADLE-REGRESSION-DELTA-PER-TEST-001 DEFERRED P2;
+  SUREFIRE-STABILITY-ENVELOPE-001 stays DEFERRED (evidence updated); RECOVERY-UPSTREAM-OWNER-ROUTING-001 DEFERRED P3;
+  PLAN-VALIDATION-IMMUTABLE-NAMED-TEST-001 DEFERRED P3; no fourth repair cycle. Registry: 172 rows, no open P0/P1.
+- Next reliability workstream: MODEL/PLANNER QUALIFICATION (separate); next owner-directed workstream: Kriya GUI/product
+  design. BACKEND-FINAL-CLOSURE-005 is complete.
