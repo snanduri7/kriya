@@ -11,7 +11,7 @@ import com.fasterxml.jackson.annotation.*;
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public class KupRequest {
-    private Operation operation;
+    private KupRequestOperation operation;
     private String workspace;
     private Boolean verify;
     private Long keep;
@@ -21,9 +21,9 @@ public class KupRequest {
     private String runid;
 
     @JsonProperty("operation")
-    public Operation getOperation() { return operation; }
+    public KupRequestOperation getOperation() { return operation; }
     @JsonProperty("operation")
-    public void setOperation(Operation value) { this.operation = value; }
+    public void setOperation(KupRequestOperation value) { this.operation = value; }
 
     /**
      * Absolute path without control characters.

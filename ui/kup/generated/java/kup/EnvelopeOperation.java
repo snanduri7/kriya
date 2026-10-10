@@ -5,13 +5,15 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Operation {
-    CAPABILITIES, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
+public enum EnvelopeOperation {
+    CAPABILITIES, EVIDENCE_MANIFEST, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case CAPABILITIES: return "capabilities";
+            case EVIDENCE_MANIFEST: return "evidence.manifest";
+            case EVIDENCE_VERIFY: return "evidence.verify";
             case HISTORY_DETAIL: return "history.detail";
             case HISTORY_LIST: return "history.list";
             case HISTORY_PROMPT: return "history.prompt";
@@ -25,8 +27,10 @@ public enum Operation {
     }
 
     @JsonCreator
-    public static Operation forValue(String value) throws IOException {
+    public static EnvelopeOperation forValue(String value) throws IOException {
         if (value.equals("capabilities")) return CAPABILITIES;
+        if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;
+        if (value.equals("evidence.verify")) return EVIDENCE_VERIFY;
         if (value.equals("history.detail")) return HISTORY_DETAIL;
         if (value.equals("history.list")) return HISTORY_LIST;
         if (value.equals("history.prompt")) return HISTORY_PROMPT;
@@ -35,6 +39,6 @@ public enum Operation {
         if (value.equals("snapshot.prune")) return SNAPSHOT_PRUNE;
         if (value.equals("snapshot.verify")) return SNAPSHOT_VERIFY;
         if (value.equals("workspace.status")) return WORKSPACE_STATUS;
-        throw new IOException("Cannot deserialize Operation");
+        throw new IOException("Cannot deserialize EnvelopeOperation");
     }
 }

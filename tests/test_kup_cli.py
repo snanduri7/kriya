@@ -203,6 +203,12 @@ def test_every_error_code_is_producible():
     with open(snap.db_path, "ab") as f:
         f.write(b"!")
     produced.add(_json(["traces", "--json", "--snapshot-id", snap.snapshot_id, "-n", "1"])["error"]["code"])  # SNAPSHOT_CORRUPT
+    # Run Cockpit v1.1 evidence codes: a store whose manifest is corrupt / of an unsupported schema (through the real CLI)
+    from _kup_evidence_fixtures import write_store
+    for run_id, content in (("cor", b"{nope"), ("sch", b'{"schema": "kriya.attempt_evidence/99"}')):
+        with open(os.path.join(write_store(run_id), "manifest.json"), "wb") as f:
+            f.write(content)
+        produced.add(_json(["evidence", "manifest", run_id, "--json", "--kup-version", "1"])["error"]["code"])
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced

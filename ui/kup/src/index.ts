@@ -4,15 +4,15 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
 export const KUP_SCHEMA_VERSION = 1 as const;
-export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify'] as const;
+export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify'] as const;
 /** Closed vocabulary (gate). HOST_ERROR is minted by a host for transport failures. */
-export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'HOST_ERROR'] as const;
-export const CONSISTENCY_KINDS = ['snapshot_copy', 'live_observation', 'not_applicable'] as const;
+export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'EVIDENCE_STORE_UNREADABLE', 'EVIDENCE_SCHEMA_UNSUPPORTED', 'HOST_ERROR'] as const;
+export const CONSISTENCY_KINDS = ['snapshot_copy', 'live_observation', 'not_applicable', 'sealed_store'] as const;
 export const DATABASE_STATES = ['missing', 'hot_journal', 'locked', 'readonly_directory', 'unreadable', 'not_a_database'] as const;
 export const SNAPSHOT_ID_RE = /^\d{8}T\d{12}Z-[0-9a-f]{8}$/;
 export const AVAILABILITY_STATES: readonly Availability[] = ['recorded', 'not_recorded', 'unreadable', 'excluded', 'unsupported'];
@@ -53,6 +53,8 @@ export const validate = {
   snapshotList: (x: unknown) => run<SnapshotList>('validateSnapshotList', x),
   snapshotPrune: (x: unknown) => run<SnapshotPrune>('validateSnapshotPrune', x),
   snapshotVerify: (x: unknown) => run<SnapshotVerify>('validateSnapshotVerify', x),
+  evidenceManifest: (x: unknown) => run<EvidenceManifest>('validateEvidenceManifest', x),
+  evidenceVerify: (x: unknown) => run<EvidenceVerify>('validateEvidenceVerify', x),
 };
 
 /** Validate the payload of an envelope by its operation (the envelope itself must already be valid). */
@@ -67,6 +69,8 @@ export function validateData(operation: string, data: unknown): Validation<unkno
     case 'snapshot.list': return validate.snapshotList(data);
     case 'snapshot.prune': return validate.snapshotPrune(data);
     case 'snapshot.verify': return validate.snapshotVerify(data);
+    case 'evidence.manifest': return validate.evidenceManifest(data);
+    case 'evidence.verify': return validate.evidenceVerify(data);
     default: return { ok: false, errors: [`unknown operation ${operation}`] };
   }
 }

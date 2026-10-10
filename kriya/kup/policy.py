@@ -24,6 +24,9 @@ from __future__ import annotations
 
 KUP_SCHEMA_VERSION = 1
 PROTOCOL_IMPLEMENTATION = "kriya-kup/1"
+# Run Cockpit v1.1 (handover/GUI-RUN-COCKPIT-V1_1/04): additive operations, error codes, one consistency kind and feature
+# flags inside schema version 1, discoverable through ``capabilities``. A host that only knows the M1 set ignores them.
+CAPABILITY_SET = "1.1"
 
 OPERATIONS = (
     "capabilities",
@@ -35,6 +38,8 @@ OPERATIONS = (
     "snapshot.list",
     "snapshot.prune",
     "snapshot.verify",  # SHA-256 of exactly one published snapshot (digest verified at pin; metadata checked per query)
+    "evidence.manifest",  # evidence-store store metadata: capture mode, seal, gaps, DERIVED absence reason
+    "evidence.verify",  # chain, blobs and seal of one run's evidence-store store, recomputed now
 )
 
 # Error codes (closed vocabulary; the host shows an unknown code literally).
@@ -53,10 +58,13 @@ SNAPSHOT_TOO_LARGE = "SNAPSHOT_TOO_LARGE"
 SNAPSHOT_CORRUPT = "SNAPSHOT_CORRUPT"
 ACQUISITION_IN_PROGRESS = "ACQUISITION_IN_PROGRESS"
 ACQUISITION_REFUSED_RUN_ACTIVE = "ACQUISITION_REFUSED_RUN_ACTIVE"
+EVIDENCE_STORE_UNREADABLE = "EVIDENCE_STORE_UNREADABLE"      # permission or I/O failure on the store (extra: path_kind)
+EVIDENCE_SCHEMA_UNSUPPORTED = "EVIDENCE_SCHEMA_UNSUPPORTED"  # a manifest/record schema this reader does not support (extra: schema_seen)
 ERROR_CODES = (
     UNSUPPORTED_SCHEMA_VERSION, INVALID_RESPONSE, INVALID_REQUEST, STORE_BUSY, READ_ONLY_UNAVAILABLE,
     RESPONSE_TOO_LARGE, CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED,
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
+    EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.
@@ -73,7 +81,15 @@ DATABASE_STATES = (DB_STATE_MISSING, DB_STATE_HOT_JOURNAL, DB_STATE_LOCKED, DB_S
 CONSISTENCY_SNAPSHOT_COPY = "snapshot_copy"      # history ops and snapshot.acquire: one committed image via backup
 CONSISTENCY_LIVE_OBSERVATION = "live_observation"  # workspace.status, snapshot.list, snapshot.prune: a point observation
 CONSISTENCY_NOT_APPLICABLE = "not_applicable"    # capabilities
-CONSISTENCY_KINDS = (CONSISTENCY_SNAPSHOT_COPY, CONSISTENCY_LIVE_OBSERVATION, CONSISTENCY_NOT_APPLICABLE)
+# sealed_store: returned only by an operation that verified the chain, every referenced blob and the seal of a SEALED store in
+# the same invocation, for the head_digest it reports (04 section 5 rule 0). Never for an unsealed or failing store.
+CONSISTENCY_SEALED_STORE = "sealed_store"
+CONSISTENCY_KINDS = (CONSISTENCY_SNAPSHOT_COPY, CONSISTENCY_LIVE_OBSERVATION, CONSISTENCY_NOT_APPLICABLE, CONSISTENCY_SEALED_STORE)
+
+# Attempt-evidence verification states in the order the capabilities list them (the reader's own statuses, 04 section 3).
+EVIDENCE_VERIFICATION_STATES = ("VERIFIED", "UNSEALED", "NOT_FOUND", "CHAIN_BROKEN", "TRUNCATED_TAIL", "BLOB_CORRUPT", "SEAL_MISMATCH")
+# evidence.manifest absence reasons (DERIVED from the S1 evidence.attempt_store event; 03 matrix row 27).
+EVIDENCE_ABSENCE_REASONS = ("pruned", "capture_off", "recorder_unavailable", "pre_recorder", "unknown")
 
 # Limits
 LIST_DEFAULT = 50

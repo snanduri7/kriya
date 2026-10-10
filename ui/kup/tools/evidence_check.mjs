@@ -122,8 +122,8 @@ const isObj = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 const same = (a, b) => stableStringify(a ?? null, 0) === stableStringify(b ?? null, 0);
 const sortStr = (a, b) => a.localeCompare(b, 'en', { numeric: true });
 const ENVELOPE_KEYS = new Set(['schema_version', 'operation', 'request_id', 'observed_at', 'source', 'consistency', 'data', 'error']);
-const SOURCE_KEYS = new Set(['state_directory', 'trace_database', 'snapshot_directory', 'snapshot_id']);
-const CONSISTENCY_KEYS = new Set(['kind', 'live_stream', 'snapshot_id', 'acquisition_started_at', 'acquisition_completed_at', 'source_metadata_at_acquisition', 'source_metadata_now', 'source_metadata_changed']);
+const SOURCE_KEYS = new Set(['state_directory', 'trace_database', 'snapshot_directory', 'snapshot_id', 'evidence_directory']);
+const CONSISTENCY_KEYS = new Set(['kind', 'live_stream', 'head_digest', 'snapshot_id', 'acquisition_started_at', 'acquisition_completed_at', 'source_metadata_at_acquisition', 'source_metadata_now', 'source_metadata_changed']);
 const SECTION_KEYS = new Set(['availability', 'provenance', 'reason', 'data']);
 export const SUMMARY_KEYS = Object.freeze(['run_id', 'timestamp', 'goal', 'duration_sec', 'attempts', 'status', 'failure_category', 'files_modified', 'milestone_group_id', 'milestone_index', 'milestone_total']);
 const DETAIL_KEYS = new Set(['run', 'fields', ...DETAIL_SECTIONS]);
@@ -131,8 +131,8 @@ const SNAPSHOT_SUMMARY_KEYS = new Set(['snapshot_id', 'acquisition_started_at', 
 const MANIFEST_FACTS = ['acquisition_started_at', 'acquisition_completed_at', 'source', 'source_metadata_at_acquisition', 'rows', 'size', 'sqlite_version', 'sha256'];
 const AUTHORITIES = new Set(['authoritative', 'advisory', 'auxiliary']);
 const META_KEYS = ['size', 'mtime_ns', 'inode', 'wal_size', 'shm_size', 'journal_size'];
-const EXPECTED_KIND = Object.freeze({ capabilities: 'not_applicable', 'history.list': 'snapshot_copy', 'history.detail': 'snapshot_copy', 'history.prompt': 'snapshot_copy', 'snapshot.acquire': 'snapshot_copy', 'snapshot.list': 'live_observation', 'snapshot.prune': 'live_observation', 'snapshot.verify': 'live_observation', 'workspace.status': 'live_observation' });
-const DATA_VALIDATORS = Object.freeze({ capabilities: validators.validateCapabilities, 'history.list': validators.validateHistoryList, 'history.detail': validators.validateRunDetail, 'history.prompt': validators.validatePrompt, 'workspace.status': validators.validateWorkspaceStatus, 'snapshot.acquire': validators.validateSnapshotAcquireResult, 'snapshot.list': validators.validateSnapshotList, 'snapshot.prune': validators.validateSnapshotPrune, 'snapshot.verify': validators.validateSnapshotVerify });
+const EXPECTED_KIND = Object.freeze({ capabilities: 'not_applicable', 'history.list': 'snapshot_copy', 'history.detail': 'snapshot_copy', 'history.prompt': 'snapshot_copy', 'snapshot.acquire': 'snapshot_copy', 'snapshot.list': 'live_observation', 'snapshot.prune': 'live_observation', 'snapshot.verify': 'live_observation', 'workspace.status': 'live_observation', 'evidence.manifest': 'live_observation', 'evidence.verify': ['live_observation', 'sealed_store'] });
+const DATA_VALIDATORS = Object.freeze({ capabilities: validators.validateCapabilities, 'history.list': validators.validateHistoryList, 'history.detail': validators.validateRunDetail, 'history.prompt': validators.validatePrompt, 'workspace.status': validators.validateWorkspaceStatus, 'snapshot.acquire': validators.validateSnapshotAcquireResult, 'snapshot.list': validators.validateSnapshotList, 'snapshot.prune': validators.validateSnapshotPrune, 'snapshot.verify': validators.validateSnapshotVerify, 'evidence.manifest': validators.validateEvidenceManifest, 'evidence.verify': validators.validateEvidenceVerify });
 
 /** Resolve an RFC 6901 pointer against a parsed document. */
 export function resolvePointer(doc, ptr) {
@@ -239,7 +239,7 @@ function checkEnvelope(ctx) {
   if (src && typeof src.snapshot_id === 'string') ctx.input.snapshot_id = src.snapshot_id; else if (con && typeof con.snapshot_id === 'string') ctx.input.snapshot_id = con.snapshot_id;
   if (src && con && 'snapshot_id' in src && 'snapshot_id' in con && !same(src.snapshot_id, con.snapshot_id)) diag(ctx, 'EVC-ID-001', pointer('source', 'snapshot_id'), { related: [{ pointer: pointer('consistency', 'snapshot_id') }], explanation: 'the serializer fills source and consistency from the one Snapshot the history was read from; the two ids must be equal' });
   if (src && typeof src.snapshot_directory === 'string' && typeof src.snapshot_id === 'string' && basename(src.snapshot_directory) !== src.snapshot_id) diag(ctx, 'EVC-ID-002', pointer('source', 'snapshot_directory'), { related: [{ pointer: pointer('source', 'snapshot_id') }], explanation: 'a published snapshot lives in <snapshot directory>/<snapshot_id>; the directory name must be the id' });
-  if (con && typeof con.kind === 'string' && EXPECTED_KIND[d.operation] && con.kind !== EXPECTED_KIND[d.operation]) diag(ctx, 'EVC-ID-004', pointer('consistency', 'kind'), { related: [{ pointer: pointer('operation') }], explanation: `operation ${d.operation} records consistency.kind ${EXPECTED_KIND[d.operation]} (policy.py, cli_ops.py); ${JSON.stringify(con.kind)} was recorded` });
+  if (con && typeof con.kind === 'string' && EXPECTED_KIND[d.operation] && ![].concat(EXPECTED_KIND[d.operation]).includes(con.kind)) diag(ctx, 'EVC-ID-004', pointer('consistency', 'kind'), { related: [{ pointer: pointer('operation') }], explanation: `operation ${d.operation} records consistency.kind ${[].concat(EXPECTED_KIND[d.operation]).join(' or ')} (policy.py, cli_ops.py); ${JSON.stringify(con.kind)} was recorded` });
   if (con && con.kind === 'snapshot_copy' && (!('snapshot_id' in con) || con.snapshot_id === null)) diag(ctx, 'EVC-ID-005', pointer('consistency', 'snapshot_id'), { explanation: 'snapshot_consistency always records the snapshot id; without it the record cannot be placed in a snapshot scope' });
   if (con) checkMetadataChanged(ctx, pointer('consistency'), con);
 }

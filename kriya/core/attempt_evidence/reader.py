@@ -25,7 +25,7 @@ import gzip
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import model
 from kriya.core.attempt_evidence.writer import _BLOBS, _MANIFEST, _RECORDS, _SEAL, run_directory, store_root
@@ -40,7 +40,11 @@ NOT_FOUND = "NOT_FOUND"
 
 
 class UnsupportedEvidenceSchema(ValueError):
-    """A record or manifest of a schema this reader does not support."""
+    """A record or manifest of a schema this reader does not support. ``schema_seen`` is the value found, verbatim."""
+
+    def __init__(self, message: str, schema_seen: Any = None) -> None:
+        super().__init__(message)
+        self.schema_seen = schema_seen
 
 
 class BlobCorrupt(ValueError):
@@ -57,6 +61,9 @@ class Verification:
     detail: str = ""
     seal: Optional[Dict[str, Any]] = None
     blob_problems: List[str] = field(default_factory=list)
+    # Digest of the last complete record verified in this pass (``prev`` of the next record); None when the chain
+    # did not verify up to a head (NOT_FOUND, CHAIN_BROKEN).
+    head_digest: Optional[str] = None
 
 
 class EvidenceRun:
@@ -76,7 +83,7 @@ class EvidenceRun:
         if not isinstance(data, dict):
             raise ValueError("manifest is not a JSON object")
         if data.get("schema") not in model.SUPPORTED_SCHEMAS:
-            raise UnsupportedEvidenceSchema(f"manifest schema {data.get('schema')!r}")
+            raise UnsupportedEvidenceSchema(f"manifest schema {data.get('schema')!r}", data.get("schema"))
         return data
 
     def seal(self) -> Optional[Dict[str, Any]]:
@@ -88,6 +95,22 @@ class EvidenceRun:
         if not isinstance(seal, dict):
             raise ValueError("seal is not a JSON object")
         return seal
+
+    def measure(self) -> Tuple[int, int, int]:
+        """(complete record lines, bytes of every file under the run directory, blob files): a cheap count that verifies
+        nothing. ``lstat`` only - symlinks are never followed - and nothing is created or touched."""
+        lines = 0
+        with open(os.path.join(self.directory, _RECORDS), "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                lines += chunk.count(b"\n")
+        total = blobs = 0
+        blob_root = os.path.join(self.directory, _BLOBS)
+        for root, _dirs, files in os.walk(self.directory):
+            for name in files:
+                total += os.lstat(os.path.join(root, name)).st_size
+                if root.startswith(blob_root) and name.endswith(".gz"):
+                    blobs += 1
+        return lines, total, blobs
 
     def _lines(self):
         path = os.path.join(self.directory, _RECORDS)
@@ -106,7 +129,7 @@ class EvidenceRun:
             if not isinstance(record, dict):
                 raise ValueError("record is not a JSON object")
             if record.get("schema") not in model.SUPPORTED_SCHEMAS:
-                raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}")
+                raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}", record.get("schema"))
             yield record
 
     def blob(self, ref: str) -> bytes:
@@ -141,7 +164,7 @@ class EvidenceRun:
                 return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
                                     detail="record is not a JSON object")
             if record.get("schema") not in model.SUPPORTED_SCHEMAS:
-                raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}")
+                raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}", record.get("schema"))
             if record.get("seq") != count + 1 or record.get("prev") != prev:
                 return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
                                     detail=f"seq/prev does not follow record {count}")
@@ -153,7 +176,7 @@ class EvidenceRun:
         seal = self.seal()
         if tail:
             return Verification(self.run_id, TRUNCATED_TAIL, count, seal is not None, seal=seal,
-                                detail=f"{len(tail)} bytes of a partial record after seq {count}")
+                                detail=f"{len(tail)} bytes of a partial record after seq {count}", head_digest=prev)
         problems = []
         for ref in dict.fromkeys(blob_refs):
             try:
@@ -162,13 +185,19 @@ class EvidenceRun:
                 problems.append(str(error))
         if problems:
             return Verification(self.run_id, BLOB_CORRUPT, count, seal is not None, seal=seal,
-                                blob_problems=problems)
+                                blob_problems=problems, head_digest=prev)
         if seal is None:
-            return Verification(self.run_id, UNSEALED, count, False)
+            return Verification(self.run_id, UNSEALED, count, False, head_digest=prev)
         if seal.get("final_seq") != count or seal.get("head_digest") != prev:
             return Verification(self.run_id, SEAL_MISMATCH, count, True, seal=seal,
-                                detail=f"seal names seq {seal.get('final_seq')}, chain head is seq {count}")
-        return Verification(self.run_id, VERIFIED, count, True, seal=seal)
+                                detail=f"seal names seq {seal.get('final_seq')}, chain head is seq {count}",
+                                head_digest=prev)
+        return Verification(self.run_id, VERIFIED, count, True, seal=seal, head_digest=prev)
+
+
+def store_directory(state_dir: str) -> str:
+    """The directory that holds every run's store under ``state_dir`` (reported, never opened, by consumers)."""
+    return store_root(state_dir)
 
 
 def list_runs(state_dir: str) -> List[str]:

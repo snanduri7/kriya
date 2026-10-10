@@ -21,6 +21,8 @@ export type ErrorCode =
   | 'SNAPSHOT_CORRUPT'
   | 'ACQUISITION_IN_PROGRESS'
   | 'ACQUISITION_REFUSED_RUN_ACTIVE'
+  | 'EVIDENCE_STORE_UNREADABLE'
+  | 'EVIDENCE_SCHEMA_UNSUPPORTED'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -42,7 +44,9 @@ export interface Envelope {
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
-    | 'snapshot.verify';
+    | 'snapshot.verify'
+    | 'evidence.manifest'
+    | 'evidence.verify';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -85,10 +89,10 @@ export interface Source {
   [k: string]: unknown;
 }
 /**
- * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities.
+ * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed attempt-evidence store whose chain, every referenced blob and seal were verified in the same invocation, for the head_digest reported; never returned for an unsealed or failing store.
  */
 export interface Consistency {
-  kind: 'snapshot_copy' | 'live_observation' | 'not_applicable';
+  kind: 'snapshot_copy' | 'live_observation' | 'not_applicable' | 'sealed_store';
   live_stream: false;
   snapshot_id?: string;
   /**
@@ -105,6 +109,10 @@ export interface Consistency {
    * true supports 'source metadata change detected'; false or null support nothing about contents, freshness or quiescence, and never skip a requested acquisition.
    */
   source_metadata_changed?: boolean | null;
+  /**
+   * sealed_store only: the verified chain head.
+   */
+  head_digest?: string;
   [k: string]: unknown;
 }
 /**
@@ -401,7 +409,7 @@ export interface WorkspaceStatus {
 
 // ---- Consistency (common.schema.json#/$defs/Consistency) ----
 /**
- * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities.
+ * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed attempt-evidence store whose chain, every referenced blob and seal were verified in the same invocation, for the head_digest reported; never returned for an unsealed or failing store.
  */
 // ---- SnapshotSummary (snapshot.schema.json#/$defs/SnapshotSummary) ----
 export type SnapshotId = string;
@@ -455,6 +463,83 @@ export interface SnapshotVerify {
   verified_at: string;
   duration_ms: number;
   guarantee?: string;
+  [k: string]: unknown;
+}
+
+// ---- EvidenceManifest (evidence.schema.json#/$defs/EvidenceManifest) ----
+export interface EvidenceManifest {
+  run_id: string;
+  store: 'present' | 'absent';
+  /**
+   * manifest.json verbatim: schema, writer_version, redaction_policy_version, capture, run_id and the run manifest keys.
+   */
+  manifest: {
+    schema?: string;
+    writer_version?: string;
+    redaction_policy_version?: string;
+    /**
+     * A capture mode (full, digest_only, full_with_reasoning); a value outside capabilities.features.evidence_capture_modes is shown literally.
+     */
+    capture?: string;
+    [k: string]: unknown;
+  } | null;
+  /**
+   * seal.json verbatim; null when the store is unsealed. An unsealed store does not by itself prove a run is active.
+   */
+  seal: {
+    final_seq?: number;
+    head_digest?: string;
+    record_count?: number;
+    blob_count?: number;
+    complete?: boolean;
+    gaps?: number;
+    degraded?: string[];
+    closed_reason?: string;
+    [k: string]: unknown;
+  } | null;
+  /**
+   * Complete record lines (a cheap count, not a verification).
+   */
+  line_count: number | null;
+  bytes_on_disk: number | null;
+  blob_file_count: number | null;
+  absence: EvidenceAbsence | null;
+  [k: string]: unknown;
+}
+/**
+ * DERIVED (never recorded) reason a run has no store on disk, from the run's recorded evidence.attempt_store event.
+ */
+export interface EvidenceAbsence {
+  reason: 'pruned' | 'capture_off' | 'recorder_unavailable' | 'pre_recorder' | 'unknown';
+  derived_from: string;
+  detail: string;
+  snapshot_id?: string | null;
+  /**
+   * The evidence.attempt_store event details exactly as stored; null when the event is absent or no snapshot was supplied.
+   */
+  recorded_event?: {
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+// ---- EvidenceVerify (evidence.schema.json#/$defs/EvidenceVerify) ----
+export interface EvidenceVerify {
+  run_id: string;
+  status: 'VERIFIED' | 'UNSEALED' | 'NOT_FOUND' | 'CHAIN_BROKEN' | 'TRUNCATED_TAIL' | 'BLOB_CORRUPT' | 'SEAL_MISMATCH';
+  record_count: number;
+  sealed: boolean;
+  broken_seq: number | null;
+  detail: string;
+  seal: {
+    [k: string]: unknown;
+  } | null;
+  blob_problems: string[];
+  /**
+   * Digest of the last complete record verified in this pass; null when the chain did not verify up to a head.
+   */
+  head_digest: string | null;
+  verified_at: string;
   [k: string]: unknown;
 }
 

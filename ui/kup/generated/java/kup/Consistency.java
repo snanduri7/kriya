@@ -8,7 +8,10 @@ import com.fasterxml.jackson.annotation.*;
  * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's
  * online backup inside one read transaction, read from a published snapshot;
  * live_observation: a point-in-time observation (workspace status, snapshot directory
- * listing); not_applicable: capabilities.
+ * listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed
+ * attempt-evidence store whose chain, every referenced blob and seal were verified in the
+ * same invocation, for the head_digest reported; never returned for an unsealed or failing
+ * store.
  */
 public class Consistency {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
@@ -20,6 +23,7 @@ public class Consistency {
 
     private String acquisitionCompletedAt;
     private String acquisitionStartedAt;
+    private String headDigest;
     private Kind kind;
     private boolean liveStream;
     private String snapshotid;
@@ -43,6 +47,14 @@ public class Consistency {
     public String getAcquisitionStartedAt() { return acquisitionStartedAt; }
     @JsonProperty("acquisition_started_at")
     public void setAcquisitionStartedAt(String value) { this.acquisitionStartedAt = value; }
+
+    /**
+     * sealed_store only: the verified chain head.
+     */
+    @JsonProperty("head_digest")
+    public String getHeadDigest() { return headDigest; }
+    @JsonProperty("head_digest")
+    public void setHeadDigest(String value) { this.headDigest = value; }
 
     @JsonProperty("kind")
     public Kind getKind() { return kind; }

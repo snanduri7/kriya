@@ -161,7 +161,9 @@ def test_no_production_code_reads_the_store():
                "kriya/core/attempt_evidence/leak_check.py", "kriya/core/attempt_evidence/candidate_export.py",
                # The doctor's evidence.attempt_recorder row (read-only diagnostics, outside the
                # workflow/control/policy/agents/tools/core packages design §9.1 forbids).
-               "kriya/production_doctor.py"}
+               "kriya/production_doctor.py",
+               # Run Cockpit v1.1 slice 1A-1: the UI read facade (KUP evidence operations), read-only over the reader API.
+               "kriya/kup/evidence_ops.py"}
     for path in (ROOT / "kriya").rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
         if rel in allowed:

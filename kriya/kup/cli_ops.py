@@ -11,7 +11,8 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from kriya.kup import policy
+from kriya.core.state_paths import StateDirectoryError
+from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import (
     capabilities,
     envelope,
@@ -55,9 +56,19 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _history(cfg, operation, request, request_id)
         if operation == "workspace.status":
             return _workspace_status(request, request_id)
+        if operation in ("evidence.manifest", "evidence.verify"):
+            return _evidence(cfg, operation, request, request_id)
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
     except SnapshotError as error:
         return from_snapshot_error(operation, request_id, error)
+
+
+def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    handler = evidence_ops.manifest if operation == "evidence.manifest" else evidence_ops.verify
+    try:
+        return handler(cfg, request, request_id)
+    except StateDirectoryError as error:  # the configured state directory is unusable: a configuration failure, typed
+        return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
 
 def _source(cfg, snapshot=None) -> Dict[str, Any]:

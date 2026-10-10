@@ -1,0 +1,231 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/evidence.schema.json",
+  "title": "Attempt-evidence operations",
+  "description": "evidence.manifest / evidence.verify payloads (Run Cockpit v1.1, capability set 1.1; handover/GUI-RUN-COCKPIT-V1_1/04 sections 4.1, 4.2). Values the recorder wrote are carried verbatim and unknown fields are preserved; nothing is normalized or reconstructed.",
+  "$defs": {
+    "EvidenceAbsence": {
+      "type": "object",
+      "description": "DERIVED (never recorded) reason a run has no store on disk, from the run's recorded evidence.attempt_store event.",
+      "required": [
+        "reason",
+        "derived_from",
+        "detail"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "pruned",
+            "capture_off",
+            "recorder_unavailable",
+            "pre_recorder",
+            "unknown"
+          ]
+        },
+        "derived_from": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "snapshot_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recorded_event": {
+          "description": "The evidence.attempt_store event details exactly as stored; null when the event is absent or no snapshot was supplied."
+        }
+      },
+      "additionalProperties": true
+    },
+    "EvidenceManifest": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "store",
+        "manifest",
+        "seal",
+        "line_count",
+        "bytes_on_disk",
+        "blob_file_count",
+        "absence"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "store": {
+          "type": "string",
+          "enum": [
+            "present",
+            "absent"
+          ]
+        },
+        "manifest": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "manifest.json verbatim: schema, writer_version, redaction_policy_version, capture, run_id and the run manifest keys.",
+          "additionalProperties": true,
+          "properties": {
+            "schema": {
+              "type": "string"
+            },
+            "writer_version": {
+              "type": "string"
+            },
+            "redaction_policy_version": {
+              "type": "string"
+            },
+            "capture": {
+              "type": "string",
+              "description": "A capture mode (full, digest_only, full_with_reasoning); a value outside capabilities.features.evidence_capture_modes is shown literally."
+            }
+          }
+        },
+        "seal": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "seal.json verbatim; null when the store is unsealed. An unsealed store does not by itself prove a run is active.",
+          "additionalProperties": true,
+          "properties": {
+            "final_seq": {
+              "type": "integer"
+            },
+            "head_digest": {
+              "type": "string"
+            },
+            "record_count": {
+              "type": "integer"
+            },
+            "blob_count": {
+              "type": "integer"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "gaps": {
+              "type": "integer"
+            },
+            "degraded": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "closed_reason": {
+              "type": "string"
+            }
+          }
+        },
+        "line_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Complete record lines (a cheap count, not a verification)."
+        },
+        "bytes_on_disk": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "blob_file_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "absence": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EvidenceAbsence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "EvidenceVerify": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "status",
+        "record_count",
+        "sealed",
+        "broken_seq",
+        "detail",
+        "seal",
+        "blob_problems",
+        "head_digest",
+        "verified_at"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "UNSEALED",
+            "NOT_FOUND",
+            "CHAIN_BROKEN",
+            "TRUNCATED_TAIL",
+            "BLOB_CORRUPT",
+            "SEAL_MISMATCH"
+          ]
+        },
+        "record_count": {
+          "type": "integer"
+        },
+        "sealed": {
+          "type": "boolean"
+        },
+        "broken_seq": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "seal": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "blob_problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "head_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Digest of the last complete record verified in this pass; null when the chain did not verify up to a head."
+        },
+        "verified_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

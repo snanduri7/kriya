@@ -154,19 +154,22 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
     try:
         ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
-        if ctx.invoked_subcommand in ('doctor', 'traces'):
+        if ctx.invoked_subcommand in ('doctor', 'traces', 'evidence'):
             # PRD-010: `doctor --production --json` must still emit a parseable
             # (failing) report; the doctor itself decides how to render this.
             # GUI M1 Phase C: `traces --json` answers with a typed KUP error
             # envelope (CONFIG_AUTHORITY_REFUSED, D-7); text mode prints the
-            # same message main() always printed.
+            # same message main() always printed. `evidence` (Run Cockpit v1.1): its KUP
+            # (--json --kup-version) path answers the same typed envelope; its text commands
+            # print the same message and exit 1 from _evidence_prelude, unchanged.
             ctx.obj['config_error'] = e
             return
         click.secho(f"Error loading configuration: {_user_error_text(e)}", fg="red", err=True)
         sys.exit(1)
-    if ctx.invoked_subcommand not in ('doctor', 'traces'):
+    if ctx.invoked_subcommand not in ('doctor', 'traces', 'evidence'):
         # doctor configures its own logging: --production writes no log file.
-        # traces configures its own too: its KUP (--json) read path never bootstraps logging (GUI M1 Phase C).
+        # traces configures its own too: its KUP (--json) read path never bootstraps logging (GUI M1 Phase C);
+        # evidence likewise (_evidence_prelude bootstraps it for the text commands only).
         _bootstrap_logging(ctx.obj['config'])
 
     # No subcommand given: drop into the interactive session, same as bare
@@ -1377,10 +1380,45 @@ def evidence_group() -> None:
     except ``prune``; built on the store's reader API."""
 
 
+def _evidence_prelude(ctx: click.Context) -> None:
+    """What main() did for every subcommand before the evidence group deferred it (the KUP path must not): report a configuration
+    failure the historical way and configure logging, once per invocation."""
+    config_error = ctx.obj.get("config_error")
+    if config_error is not None:
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
+        sys.exit(1)
+    if not ctx.obj.get("evidence_logging_bootstrapped"):
+        ctx.obj["evidence_logging_bootstrapped"] = True
+        _bootstrap_logging(ctx.obj["config"])
+
+
 def _evidence_state_dir(ctx: click.Context) -> str:
     from kriya.core.state_paths import resolve_state_directory
 
+    _evidence_prelude(ctx)
     return resolve_state_directory(ctx.obj["config"])[0]
+
+
+def _evidence_kup(ctx: click.Context, operation: str, request: Dict[str, Any], kup_version: int) -> None:
+    """Print one KUP envelope for an evidence operation (exit 0; typed errors are envelopes). Never configures logging."""
+    sys.dont_write_bytecode = True
+    from kriya.kup.cli_ops import run_kup_operation
+    from kriya.kup.inspect import encode_response, error_envelope
+    from kriya.kup.policy import KUP_SCHEMA_VERSION, UNSUPPORTED_SCHEMA_VERSION
+
+    if kup_version != KUP_SCHEMA_VERSION:
+        click.echo(encode_response(error_envelope(operation, "cli", UNSUPPORTED_SCHEMA_VERSION,
+                                                  f"KUP schema version {kup_version} is not supported (supported: {KUP_SCHEMA_VERSION})")))
+        return
+    config_error = ctx.obj.get("config_error")
+    if config_error is not None:
+        _traces_kup_config_error(config_error)
+        return
+    click.echo(encode_response(run_kup_operation(ctx.obj["config"], {"operation": operation, **request})))
+
+
+_KUP_VERSION_OPTION = click.option("--kup-version", "kup_version", type=int, default=None,
+                                   help="With --json: wrap the result in a KUP envelope of this schema version (1). Run Cockpit v1.1.")
 
 
 def _answer_line(label: str, question: str, answer: Mapping[str, Any]) -> str:
@@ -1462,14 +1500,34 @@ def evidence_explain(ctx: click.Context, run_id: str, json_output: bool) -> None
         sys.exit(1)
 
 
+@evidence_group.command(name="manifest")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@_KUP_VERSION_OPTION
+@click.option("--snapshot-id", "snapshot_id", default=None,
+              help="A published KUP snapshot: lets the manifest DERIVE why an absent store is absent (from the run's recorded event).")
+@click.pass_context
+def evidence_manifest(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], snapshot_id: Optional[str]) -> None:
+    """Read-only KUP: a run's attempt-evidence store metadata (capture mode, seal, gaps) or the derived reason it is absent."""
+    if not json_output or kup_version is None:
+        raise click.UsageError("evidence manifest is a KUP operation: pass --json --kup-version 1")
+    _evidence_kup(ctx, "evidence.manifest", {"run_id": run_id, "snapshot_id": snapshot_id}, kup_version)
+
+
 @evidence_group.command(name="verify")
 @click.argument("run_id")
 @click.option("--json", "json_output", is_flag=True)
+@_KUP_VERSION_OPTION
 @click.pass_context
-def evidence_verify(ctx: click.Context, run_id: str, json_output: bool) -> None:
-    """Recompute a run's hash chain, blobs and seal (exit 0 only when VERIFIED)."""
+def evidence_verify(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int]) -> None:
+    """Recompute a run's hash chain, blobs and seal (exit 0 only when VERIFIED; with --kup-version, always a KUP envelope and exit 0)."""
     from kriya.core.attempt_evidence import reader
 
+    if kup_version is not None:
+        if not json_output:
+            raise click.UsageError("--kup-version requires --json")
+        _evidence_kup(ctx, "evidence.verify", {"run_id": run_id}, kup_version)
+        return
     try:
         verification = reader.open_run(_evidence_state_dir(ctx), run_id).verify()
     except (reader.UnsupportedEvidenceSchema, ValueError, OSError) as error:

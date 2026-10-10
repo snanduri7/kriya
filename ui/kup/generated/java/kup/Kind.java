@@ -6,13 +6,14 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Kind {
-    LIVE_OBSERVATION, NOT_APPLICABLE, SNAPSHOT_COPY;
+    LIVE_OBSERVATION, NOT_APPLICABLE, SEALED_STORE, SNAPSHOT_COPY;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case LIVE_OBSERVATION: return "live_observation";
             case NOT_APPLICABLE: return "not_applicable";
+            case SEALED_STORE: return "sealed_store";
             case SNAPSHOT_COPY: return "snapshot_copy";
         }
         return null;
@@ -22,6 +23,7 @@ public enum Kind {
     public static Kind forValue(String value) throws IOException {
         if (value.equals("live_observation")) return LIVE_OBSERVATION;
         if (value.equals("not_applicable")) return NOT_APPLICABLE;
+        if (value.equals("sealed_store")) return SEALED_STORE;
         if (value.equals("snapshot_copy")) return SNAPSHOT_COPY;
         throw new IOException("Cannot deserialize Kind");
     }

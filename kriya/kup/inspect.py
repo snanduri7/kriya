@@ -15,6 +15,7 @@ import sqlite3
 from typing import Any, Dict, Optional, Tuple
 
 from kriya.build_info import version_report
+from kriya.core.attempt_evidence import model as evidence_model
 from kriya.kup import policy
 from kriya.kup.store import Snapshot, SnapshotError, connect_read_only, snapshot_summary, stat_metadata
 
@@ -111,7 +112,22 @@ def capabilities() -> Dict[str, Any]:
                      "implementation": policy.PROTOCOL_IMPLEMENTATION, "sqlite_version": sqlite3.sqlite_version},
         "limits": dict(policy.LIMITS),
         "features": {"snapshot": True, "prompt": True, "comparisons": False, "attribution": False, "diagnostics": False, "output": False,
-                     "consistency_kinds": list(policy.CONSISTENCY_KINDS), "error_codes": list(policy.ERROR_CODES), "database_states": list(policy.DATABASE_STATES)},
+                     "consistency_kinds": list(policy.CONSISTENCY_KINDS), "error_codes": list(policy.ERROR_CODES), "database_states": list(policy.DATABASE_STATES),
+                     **_cockpit_features()},
+    }
+
+
+def _cockpit_features() -> Dict[str, Any]:
+    """Capability set 1.1 flags: true only for what this build implements (a flag is never advertised before its operation exists)."""
+    return {
+        "capability_set": policy.CAPABILITY_SET,
+        "evidence": True, "evidence_content": False, "qualification": False, "authority": False,
+        "knowledge": False, "tools": False, "experiments": False, "live": False, "actions": False,
+        "evidence_capture_modes": list(evidence_model.CAPTURE_MODES),
+        "evidence_verification_states": list(policy.EVIDENCE_VERIFICATION_STATES),
+        "evidence_kinds": sorted(evidence_model.KINDS),
+        "evidence_provenances": sorted(evidence_model.PROVENANCES),
+        "diagnosis_evidence_classes": list(evidence_model.EVIDENCE_CLASSES),
     }
 
 
@@ -235,6 +251,24 @@ def history_detail(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
                          ("output", "Developer output is not persisted")):
         detail[name] = _section(None, "not_persisted", False, reason)
     return detail
+
+
+def run_events_of(snapshot: Snapshot, run_id: str) -> Tuple[bool, Optional[Any]]:
+    """(row_exists, parsed ``runs.run_events`` or None when the column is NULL or not JSON), verbatim and read-only. Nothing else
+    of the row is read: callers that need the events alone (evidence.manifest's absence derivation) never touch the prompt."""
+    validate_run_id(run_id)
+    try:
+        conn = connect_read_only(snapshot.db_path)
+        try:
+            row = conn.execute("SELECT run_events FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as error:
+        raise _classify_read_error(error, snapshot) from error
+    if row is None:
+        return False, None
+    parsed, present = _parsed_json_text(row[0])
+    return True, parsed if present and not isinstance(parsed, str) else None
 
 
 def history_prompt(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:

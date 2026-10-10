@@ -31,6 +31,8 @@
 //     SnapshotList data = Converter.SnapshotListFromJsonString(jsonString);
 //     SnapshotPrune data = Converter.SnapshotPruneFromJsonString(jsonString);
 //     SnapshotVerify data = Converter.SnapshotVerifyFromJsonString(jsonString);
+//     EvidenceManifest data = Converter.EvidenceManifestFromJsonString(jsonString);
+//     EvidenceVerify data = Converter.EvidenceVerifyFromJsonString(jsonString);
 //     KupRequest data = Converter.KupRequestFromJsonString(jsonString);
 //     OpenInIdeRequest data = Converter.OpenInIdeRequestFromJsonString(jsonString);
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
@@ -243,6 +245,22 @@ public class Converter {
 
     public static String SnapshotVerifyToJsonString(SnapshotVerify obj) throws JsonProcessingException {
         return getSnapshotVerifyObjectWriter().writeValueAsString(obj);
+    }
+
+    public static EvidenceManifest EvidenceManifestFromJsonString(String json) throws IOException {
+        return getEvidenceManifestObjectReader().readValue(json);
+    }
+
+    public static String EvidenceManifestToJsonString(EvidenceManifest obj) throws JsonProcessingException {
+        return getEvidenceManifestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static EvidenceVerify EvidenceVerifyFromJsonString(String json) throws IOException {
+        return getEvidenceVerifyObjectReader().readValue(json);
+    }
+
+    public static String EvidenceVerifyToJsonString(EvidenceVerify obj) throws JsonProcessingException {
+        return getEvidenceVerifyObjectWriter().writeValueAsString(obj);
     }
 
     public static KupRequest KupRequestFromJsonString(String json) throws IOException {
@@ -864,6 +882,68 @@ public class Converter {
     private static ObjectWriter getSnapshotVerifyObjectWriter() {
         if (SnapshotVerifyWriter == null) instantiateSnapshotVerifyMapper();
         return SnapshotVerifyWriter;
+    }
+
+    private static ObjectReader EvidenceManifestReader;
+    private static ObjectWriter EvidenceManifestWriter;
+
+    private static void instantiateEvidenceManifestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        EvidenceManifestReader = mapper.readerFor(EvidenceManifest.class);
+        EvidenceManifestWriter = mapper.writerFor(EvidenceManifest.class);
+    }
+
+    private static ObjectReader getEvidenceManifestObjectReader() {
+        if (EvidenceManifestReader == null) instantiateEvidenceManifestMapper();
+        return EvidenceManifestReader;
+    }
+
+    private static ObjectWriter getEvidenceManifestObjectWriter() {
+        if (EvidenceManifestWriter == null) instantiateEvidenceManifestMapper();
+        return EvidenceManifestWriter;
+    }
+
+    private static ObjectReader EvidenceVerifyReader;
+    private static ObjectWriter EvidenceVerifyWriter;
+
+    private static void instantiateEvidenceVerifyMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        EvidenceVerifyReader = mapper.readerFor(EvidenceVerify.class);
+        EvidenceVerifyWriter = mapper.writerFor(EvidenceVerify.class);
+    }
+
+    private static ObjectReader getEvidenceVerifyObjectReader() {
+        if (EvidenceVerifyReader == null) instantiateEvidenceVerifyMapper();
+        return EvidenceVerifyReader;
+    }
+
+    private static ObjectWriter getEvidenceVerifyObjectWriter() {
+        if (EvidenceVerifyWriter == null) instantiateEvidenceVerifyMapper();
+        return EvidenceVerifyWriter;
     }
 
     private static ObjectReader KupRequestReader;
