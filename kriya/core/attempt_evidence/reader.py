@@ -73,6 +73,8 @@ class EvidenceRun:
     def manifest(self) -> Dict[str, Any]:
         with open(os.path.join(self.directory, _MANIFEST), "rb") as handle:
             data = json.loads(handle.read())
+        if not isinstance(data, dict):
+            raise ValueError("manifest is not a JSON object")
         if data.get("schema") not in model.SUPPORTED_SCHEMAS:
             raise UnsupportedEvidenceSchema(f"manifest schema {data.get('schema')!r}")
         return data
@@ -82,7 +84,10 @@ class EvidenceRun:
         if not os.path.isfile(path):
             return None
         with open(path, "rb") as handle:
-            return json.loads(handle.read())
+            seal = json.loads(handle.read())
+        if not isinstance(seal, dict):
+            raise ValueError("seal is not a JSON object")
+        return seal
 
     def _lines(self):
         path = os.path.join(self.directory, _RECORDS)
@@ -98,6 +103,8 @@ class EvidenceRun:
         complete, _tail = self._lines()
         for raw in complete:
             record = json.loads(raw)
+            if not isinstance(record, dict):
+                raise ValueError("record is not a JSON object")
             if record.get("schema") not in model.SUPPORTED_SCHEMAS:
                 raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}")
             yield record
@@ -130,6 +137,9 @@ class EvidenceRun:
             except ValueError:
                 return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
                                     detail="record is not valid JSON")
+            if not isinstance(record, dict):
+                return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
+                                    detail="record is not a JSON object")
             if record.get("schema") not in model.SUPPORTED_SCHEMAS:
                 raise UnsupportedEvidenceSchema(f"record schema {record.get('schema')!r}")
             if record.get("seq") != count + 1 or record.get("prev") != prev:
