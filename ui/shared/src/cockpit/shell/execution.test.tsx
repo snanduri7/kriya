@@ -267,7 +267,7 @@ describe('Start Run', () => {
     const line = await screen.findByText('Tools a run can see');
     const row = line.nextElementSibling as HTMLElement;
     expect(row.textContent).toContain('python3, git');
-    expect(row.textContent).toContain('not found: java, mvn');
+    expect(row.textContent).toContain('unavailable: java, mvn');
     expect(row.querySelector('[title]')?.getAttribute('title')).toMatch(/only known while the workflow runs/);
   });
 

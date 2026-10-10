@@ -465,8 +465,11 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
     import kriya.cli as cli
     source = inspect.getsource(cli._generate_impl)
     for callback in ("on_approval", "on_skill_gap", "on_skill_conflict", "on_web_lookup", "on_web_lookup_query"):
-        head = source[source.index(f"    def {callback}("):].split("\n", 3)
-        assert "note_approval_required" in head[1] + head[2], f"{callback} must record the decision first"
+        body = source[source.index(f"    def {callback}("):]
+        body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
+        prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(") if marker in body]
+        assert "note_approval_required(" in body, f"{callback} must CALL note_approval_required"
+        assert body.index("note_approval_required(") < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
     assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)
 
 
@@ -490,3 +493,31 @@ def test_tool_visibility_never_changes_the_environment_or_blocks_the_start(ws, m
     data = _preflight(ws)["data"]
     assert data["ready"] is True, "a missing tool is information, not a blocker: what a goal needs is only known during the run"
     assert dict(os.environ) == before
+
+
+def test_a_tool_that_exists_on_path_but_does_not_run_is_reported_unavailable_with_the_reason(ws, monkeypatch, tmp_path):
+    """The macOS Xcode shims (/usr/bin/git, /usr/bin/python3 without developer tools) exist and fail with 69: 'found on PATH' must not read as 'usable'."""
+    broken = tmp_path / "bin"
+    broken.mkdir()
+    for name in ("python3", "git"):
+        (broken / name).write_text("#!/bin/sh\nexit 69\n")
+        (broken / name).chmod(0o755)
+    (broken / "node").write_text("#!/bin/sh\necho v1.0.0\n")
+    (broken / "node").chmod(0o755)
+    monkeypatch.setenv("PATH", str(broken))
+    tools = {t["tool"]: t for t in _preflight(ws)["data"]["toolchains"]["tools"]}
+    assert tools["python3"]["available"] is False and "69" in tools["python3"]["reason"]
+    assert tools["git"]["available"] is False
+    assert tools["node"]["available"] is True and tools["node"]["checked"] == "ran --version"
+    assert tools["mvn"]["available"] is False and tools["mvn"]["path"] is None
+
+
+def test_a_working_tool_later_on_path_is_used_when_an_earlier_one_is_a_shim(ws, monkeypatch, tmp_path):
+    shim, good = tmp_path / "shim", tmp_path / "good"
+    for directory, body in ((shim, "exit 69"), (good, "echo git version 2.0")):
+        directory.mkdir()
+        (directory / "git").write_text(f"#!/bin/sh\n{body}\n")
+        (directory / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}:{good}")
+    entry = {t["tool"]: t for t in _preflight(ws)["data"]["toolchains"]["tools"]}["git"]
+    assert entry["available"] is True and entry["path"] == str(good / "git")

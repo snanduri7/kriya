@@ -77,17 +77,46 @@ def jdk_home_for_version(version: str) -> Optional[str]:
 
 
 READINESS_TOOLS = ("python3", "git", "java", "mvn", "gradle", "node", "npm")
+_RUNNABLE_CHECK = ("python3", "git", "node", "npm")  # cheap `--version`; mvn/gradle start a JVM and are only looked up
+
+
+def _first_runnable(tool: str, search_path: str) -> dict:
+    """The first `tool` on ``search_path`` that RUNS (`--version` exits 0). The macOS Xcode shims (/usr/bin/git, /usr/bin/python3 when the developer
+    tools are not installed) exist but exit 69, so being on PATH is not being usable. Read-only; the environment is never changed."""
+    seen_failure = None
+    for directory in search_path.split(os.pathsep):
+        candidate = os.path.join(directory, tool)
+        if not (os.path.isfile(candidate) and os.access(candidate, os.X_OK)):
+            continue
+        try:
+            result = subprocess.run([candidate, "--version"], capture_output=True, text=True, timeout=5)
+        except Exception as error:
+            seen_failure = seen_failure or f"{candidate}: {type(error).__name__}"
+            continue
+        if result.returncode == 0:
+            return {"tool": tool, "available": True, "path": candidate, "checked": "ran --version"}
+        seen_failure = seen_failure or f"{candidate} exits {result.returncode}"
+    if seen_failure:
+        return {"tool": tool, "available": False, "path": None, "checked": "ran --version", "reason": f"found but does not run ({seen_failure})"}
+    return {"tool": tool, "available": False, "path": None, "checked": "not on PATH"}
 
 
 def tool_visibility() -> list:
-    """Which common build tools THIS process can see (GUI M7 execution readiness): ``shutil.which`` over this process's own PATH - never a login
-    shell, never an extended PATH - and, for ``java`` on macOS, whether a JDK is registered with `/usr/libexec/java_home` (the same absolute-path
-    mechanism the workflow uses; Apple's /usr/bin/java is only a stub). Read-only; each entry is {tool, available, path}. Whether a goal needs a
-    tool is not knowable before the workflow runs, so this reports visibility only."""
+    """Which common build tools THIS process can use (GUI M7 execution readiness), under this process's own PATH - never a login shell, never an
+    extended PATH. python3/git/node/npm are checked by running `--version` (a shim that fails is reported unavailable, with the reason); mvn/gradle are
+    looked up only; `java` on macOS is whether a JDK is registered with `/usr/libexec/java_home` (the absolute-path mechanism the workflow uses; Apple's
+    /usr/bin/java is only a stub). Each entry: {tool, available, path, checked, [reason]}. Whether a goal needs a tool is not knowable before the
+    workflow runs, so this reports usability only."""
     report = []
+    search_path = os.environ.get("PATH", "")
     for tool in READINESS_TOOLS:
+        if tool in _RUNNABLE_CHECK:
+            report.append(_first_runnable(tool, search_path))
+            continue
         found = shutil.which(tool)
+        checked = "found on PATH" if found else "not on PATH"
         if tool == "java" and sys.platform == "darwin" and os.path.exists("/usr/libexec/java_home"):
+            checked = "registered JDK (java_home)"
             try:
                 result = subprocess.run(["/usr/libexec/java_home"], capture_output=True, text=True, timeout=5)
                 home = result.stdout.strip() if result.returncode == 0 else ""
@@ -95,5 +124,5 @@ def tool_visibility() -> list:
             except Exception as error:
                 logger.debug(f"java_home failed: {error}")
                 found = None
-        report.append({"tool": tool, "available": found is not None, "path": found})
+        report.append({"tool": tool, "available": found is not None, "path": found, "checked": checked})
     return report

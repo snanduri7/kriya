@@ -18,8 +18,9 @@ const AUTHORITY: Record<string, string> = {
 function ToolsLine({ data }: { data: ExecutionPreflight }) {
   const tools = data.toolchains.tools;
   const seen = tools.filter((t) => t.available).map((t) => t.tool);
-  const missing = tools.filter((t) => !t.available).map((t) => t.tool);
-  return <span title={data.toolchains.note}>{seen.length ? seen.join(', ') : 'none'}{missing.length ? <span className="muted"> · not found: {missing.join(', ')}</span> : null}</span>;
+  const missing = tools.filter((t) => !t.available);
+  const why = missing.map((t) => `${t.tool}: ${typeof t.reason === 'string' ? t.reason : 'not found'}`).join('; ');
+  return <span title={`${data.toolchains.note}${why ? ` Unavailable - ${why}` : ''}`}>{seen.length ? seen.join(', ') : 'none'}{missing.length ? <span className="muted"> · unavailable: {missing.map((t) => t.tool).join(', ')}</span> : null}</span>;
 }
 
 /** Kriya's execution preflight, compactly and in its own words. The cockpit resolves nothing: every line is a field of the answer. */
