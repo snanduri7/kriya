@@ -635,6 +635,18 @@ export interface LaunchStatus {
       [k: string]: unknown;
     } | null;
     /**
+     * Decisions the run could proceed without (skill gap/conflict, live lookup) that the desktop declined: nothing was approved, the run continued; informational only.
+     */
+    declined_decisions?: {
+      kind: string;
+      reason: string;
+      details: {
+        [k: string]: unknown;
+      };
+      noted_at: string;
+      [k: string]: unknown;
+    }[];
+    /**
      * The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.
      */
     approval_required: {

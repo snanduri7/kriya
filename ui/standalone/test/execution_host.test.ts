@@ -283,3 +283,16 @@ describe('state is a copy', () => {
     expect(m.host.state().phase).toBe('running');
   });
 });
+
+describe('quitting while a start is being admitted (reviewer P3-3)', () => {
+  it('nothing is launched after shutdown began, even if the preflight answer arrives later: no orphan run that nobody can signal', async () => {
+    let release: (v: unknown) => void = () => undefined;
+    const m = make({ preflight: () => new Promise((resolve) => { release = resolve; }) });
+    const starting = m.host.start(request());
+    await m.host.shutdown(); // the application is quitting while Kriya is still being asked
+    release(READY);
+    expect(await starting).toMatchObject({ started: false, refusal: { code: 'HOST_ERROR', message: expect.stringContaining('closing') } });
+    expect(m.invocations).toHaveLength(0);
+    expect(m.host.active()).toBe(false);
+  });
+});

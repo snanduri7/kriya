@@ -142,7 +142,7 @@ def preflight(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
 
 
 def _launch_view(record: Dict[str, Any]) -> Dict[str, Any]:
-    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required")
+    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required", "declined_decisions")
     view = {key: record.get(key) for key in keys}
     process = record.get("process")
     view["process"] = {"pid": process.get("pid")} if isinstance(process, dict) else None

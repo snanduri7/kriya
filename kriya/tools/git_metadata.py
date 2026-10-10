@@ -130,8 +130,9 @@ def workspace_head(path: str) -> Optional[str]:
 
 _PROBE_TIMEOUT_SECONDS = 15
 _PROBE_ENTRY_CAP = 1000
-# Opening a folder must never execute anything the folder configures: fsmonitor is a repository-supplied command, hooks are never
-# consulted by these read-only queries, and optional locks are off so `status` does not refresh (write) the index.
+# Opening a folder must never execute anything the folder configures: fsmonitor is a repository-supplied command, content-filter drivers
+# (filter.<x>.clean/process) are emptied for `status` (_filter_overrides), hooks are never consulted by these read-only queries, and optional
+# locks are off so `status` does not refresh (write) the index.
 _PROBE_OPTIONS = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false")
 
 
@@ -161,10 +162,29 @@ def _git_candidates() -> List[str]:
     return found
 
 
+_FILTER_COMMAND_KEYS = re.compile(r"^filter\..+\.(clean|smudge|process)$", re.IGNORECASE)
+
+
+def _probe_env() -> Dict[str, str]:
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", ""), "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
+
+
+def _filter_overrides(git: str, cwd: str) -> List[str]:
+    """`-c filter.<driver>.<clean|smudge|process>=` for every content-filter command the repository's own configuration defines. `git status` may run a
+    `clean`/`process` driver to compare racily-clean files; those commands come from the folder being opened, so they are emptied for this read.
+    Reading configuration (`git config --get-regexp`) executes nothing."""
+    try:
+        listed = subprocess.run([git, "config", "--name-only", "--get-regexp", r"^filter\."], cwd=cwd, env=_probe_env(), capture_output=True, check=False,
+                                timeout=_PROBE_TIMEOUT_SECONDS)
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    names = [n for n in listed.stdout.decode("utf-8", errors="replace").splitlines() if _FILTER_COMMAND_KEYS.match(n)]
+    return [part for name in dict.fromkeys(names) for part in ("-c", f"{name}=")]
+
+
 def _probe(git: str, cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", ""), "GIT_OPTIONAL_LOCKS": "0",
-           "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
-    return subprocess.run([git, *_PROBE_OPTIONS, *args], cwd=cwd, env=env, capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
+    overrides = _filter_overrides(git, cwd) if args and args[0] == "status" else []
+    return subprocess.run([git, *_PROBE_OPTIONS, *overrides, *args], cwd=cwd, env=_probe_env(), capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
 
 
 def _first_working_git(path: str) -> Tuple[Optional[str], Optional["subprocess.CompletedProcess[bytes]"], str]:

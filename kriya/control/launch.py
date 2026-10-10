@@ -85,7 +85,7 @@ class LaunchSession:
             "requested_at": _now(), "goal": goal_digest(goal), "options": options, "preflight": preflight,
             "process": {"pid": os.getpid()}, "phase": PHASE_STARTING, "run": None, "ended": None,
             "history": [{"phase": PHASE_STARTING, "at": _now()}],
-            "approval_required": None,
+            "approval_required": None, "declined_decisions": [],
         }
 
     @property
@@ -120,6 +120,19 @@ class LaunchSession:
             save_launch_record(self.workspace, self.launch_id, self._record)
         except Exception as error:
             logger.error("Launch %s: approval requirement not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
+
+    def decline_decision(self, kind: str, reason: str, details: Dict[str, Any]) -> None:
+        """A decision the workflow can proceed WITHOUT (a skill gap, a skill conflict, a live-lookup review or query): the desktop declines it - nothing is
+        approved, the run continues exactly as it would on a prompt that found no answer - and says so in the record. Informational: it never makes the
+        run's outcome 'approval required' (only a decision that stops the run does)."""
+        declined = self._record.setdefault("declined_decisions", [])
+        if len(declined) >= 20:
+            return
+        declined.append({"kind": kind, "reason": reason[:300], "details": details, "noted_at": _now()})
+        try:
+            save_launch_record(self.workspace, self.launch_id, self._record)
+        except Exception as error:
+            logger.error("Launch %s: declined decision not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
 
     def claim_run_id(self, workspace: str) -> Optional[str]:
         """The id the first top-level run in this launch's workspace must use (once)."""
@@ -184,6 +197,19 @@ def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> N
             _ACTIVE.note_approval_required(kind, reason, details)
     except Exception as error:  # observational
         logger.error("Launch: approval requirement not recorded (%s: %s)", type(error).__name__, error)
+
+
+def decline_decision(kind: str, reason: str, details: Dict[str, Any]) -> bool:
+    """For the callbacks of `kriya generate` whose decision the run can proceed without: inside a desktop launch, record that it was declined and return True
+    (the caller then returns its declining value WITHOUT prompting); outside a launch return False and change nothing. Never raises."""
+    try:
+        if _ACTIVE is None:
+            return False
+        _ACTIVE.decline_decision(kind, reason, details)
+        return True
+    except Exception as error:  # observational
+        logger.error("Launch: declined decision not recorded (%s: %s)", type(error).__name__, error)
+        return True
 
 
 def note_run_started(workspace: str, run_id: str, base_revision: Optional[str]) -> None:

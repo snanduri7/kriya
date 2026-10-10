@@ -220,6 +220,11 @@
               }
             },
             "process": { "type": ["object", "null"], "additionalProperties": true },
+            "declined_decisions": {
+              "type": "array",
+              "description": "Decisions the run could proceed without (skill gap/conflict, live lookup) that the desktop declined: nothing was approved, the run continued; informational only.",
+              "items": { "type": "object", "required": ["kind", "reason", "details", "noted_at"], "properties": { "kind": { "type": "string" }, "reason": { "type": "string" }, "details": { "type": "object", "additionalProperties": true }, "noted_at": { "type": "string" } }, "additionalProperties": true }
+            },
             "approval_required": {
               "type": ["object", "null"],
               "description": "The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.",

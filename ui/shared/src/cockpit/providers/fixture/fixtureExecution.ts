@@ -9,7 +9,7 @@
 import type { ExecutionHostPort } from '../../../host/HostAdapter';
 import type { ExecutionState, StartRunResult } from '../../../model/kup';
 
-export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required';
+export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined';
 
 export interface FixtureExecutionOptions {
   /** How the next launch ends (default 'success'). */
@@ -36,6 +36,7 @@ export class FixtureExecution {
   private launchGoal = '';
   private launchWorkspace = '';
   private outcome: FixtureOutcome;
+  private staleServed = false;
   readonly port: ExecutionHostPort;
 
   constructor(private readonly options: FixtureExecutionOptions = {}) {
@@ -67,12 +68,13 @@ export class FixtureExecution {
   /** The process is alive (the real host's `active()`): not yet at the final frame. */
   active(): boolean { return this.frame >= 0 && this.frame < 4; }
   /** The run's final records are durable (a finished, sealed run the history now lists). */
-  ended(): boolean { return this.frame === 4 && (this.outcome === 'success' || this.outcome === 'failure'); }
+  private succeeds(): boolean { return this.outcome === 'success' || this.outcome === 'success_after_stale_read' || this.outcome === 'success_with_declined'; }
+  ended(): boolean { return this.frame === 4 && (this.succeeds() || this.outcome === 'failure'); }
 
   private hostState(): ExecutionState {
     if (this.frame < 0) return { phase: 'idle', launch_id: null, workspace: null, started_at: null, ended_at: null, exit: null, diagnostic: null };
     const over = this.frame === 4;
-    const code = this.outcome === 'success' ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
+    const code = this.succeeds() ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
     return {
       phase: over ? 'exited' : 'running', launch_id: LAUNCH_ID, workspace: this.launchWorkspace, started_at: '2026-10-10T10:10:10.000Z', ended_at: over ? '2026-10-10T10:12:00.000Z' : null,
       exit: over ? { code, signal: this.outcome === 'died' ? 'SIGKILL' : null } : null, diagnostic: null,
@@ -99,17 +101,24 @@ export class FixtureExecution {
     const f = this.frame;
     if (f < 0 || this.outcome === 'never_recorded') return null;
     if (f === 0) return null; // the process exists; Kriya has not written the launch record yet
+    if (this.outcome === 'stuck_starting') return this.stuck();
+    if (this.outcome === 'success_after_stale_read' && f === 4 && !this.staleServed) { this.staleServed = true; return this.stale(); }
+    return this.statusFor(this.outcome);
+  }
+
+  private statusFor(outcome: FixtureOutcome): Json | null {
+    const f = this.frame;
     const lines = LINES_AT[f] ?? 0;
-    const sealed = f === 4 && (this.outcome === 'success' || this.outcome === 'failure');
-    const refused = this.outcome === 'refused' && f === 4;
-    const approval = this.outcome === 'approval_required' && f === 4;
-    const died = this.outcome === 'died' && f === 4;
+    const sealed = f === 4 && ((outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') || outcome === 'failure');
+    const refused = outcome === 'refused' && f === 4;
+    const approval = outcome === 'approval_required' && f === 4;
+    const died = outcome === 'died' && f === 4;
     const phase = refused || sealed || approval ? 'ENDED' : f === 1 ? 'STARTING' : 'RUNNING';
-    const terminal = sealed ? (this.outcome === 'success' ? 'SUCCESS' : 'FAILURE') : approval ? 'FAILURE' : null;
+    const terminal = sealed ? ((outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') ? 'SUCCESS' : 'FAILURE') : approval ? 'FAILURE' : null;
     const run = f >= 2 && !refused ? { run_id: LAUNCH_ID, started_at: '2026-10-10T10:10:12+00:00', base_revision: null } : null;
     const ended = phase === 'ENDED' ? {
-      at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : this.outcome === 'success' ? 0 : 1, workflow_status: approval ? null : refused ? 'refused' : this.outcome === 'success' ? 'success' : 'failure',
-      quality_gates_passed: refused ? false : this.outcome === 'success', failure_category: this.outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
+      at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') ? 0 : 1, workflow_status: approval ? null : refused ? 'refused' : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') ? 'success' : 'failure',
+      quality_gates_passed: refused ? false : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined'), failure_category: outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
       error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
     } : null;
     return {
@@ -118,7 +127,8 @@ export class FixtureExecution {
         options: { knowledge_policy: 'strict', interactive: false }, phase, run, ended,
         history: [{ phase: 'STARTING', at: '2026-10-10T10:10:10+00:00' }, ...(run ? [{ phase: 'RUNNING', at: '2026-10-10T10:10:12+00:00' }] : []), ...(ended ? [{ phase: 'ENDED', at: '2026-10-10T10:12:00+00:00' }] : [])],
         process: { pid: 4242 },
-        approval_required: approval ? { kind: 'change_approval', reason: 'the proposed change touches a sensitive path', details: { files: ['.github/workflows/ci.yml'] }, noted_at: '2026-10-10T10:11:59+00:00' } : null,
+        approval_required: outcome === 'success_with_declined' ? { kind: 'skill_gap_decision', reason: 'a stale note from before the fix', details: {}, noted_at: '2026-10-10T10:11:00+00:00' } : approval ? { kind: 'change_approval', reason: 'the proposed change touches a sensitive path', details: { files: ['.github/workflows/ci.yml'] }, noted_at: '2026-10-10T10:11:59+00:00' } : null,
+        declined_decisions: outcome === 'success_with_declined' ? [{ kind: 'skill_gap_decision', reason: 'no verified skill for lib-x', details: { skills: ['lib-x'] }, noted_at: '2026-10-10T10:11:00+00:00' }] : [],
       },
       run_record: run ? { found: true, unreadable: null, lifecycle_state: terminal ?? 'RUNNING', terminal_status: terminal, commit_result: terminal === 'SUCCESS' ? 'COMMITTED' : null, revision: 2 } : { found: false, unreadable: null },
       evidence: run ? { state: sealed ? 'sealed' : 'open', line_count: lines, sealed } : { state: 'absent', line_count: null, sealed: false },
@@ -126,6 +136,20 @@ export class FixtureExecution {
       liveness: phase === 'ENDED' ? 'ended' : died ? 'interrupted' : f === 1 ? 'starting' : 'live',
       liveness_note: 'DERIVED from the launch phase and the workspace run lock; a process exit alone is never the outcome',
     };
+  }
+
+  /** A launch that never got past STARTING (the child died right after writing its record). */
+  private stuck(): Json {
+    return { launch: { launch_id: LAUNCH_ID, workspace: { path: this.launchWorkspace, identity: 'ab'.repeat(32) }, requested_at: '2026-10-10T10:10:10+00:00', goal: { sha256: 'ef'.repeat(32), chars: this.launchGoal.length }, options: {}, phase: 'STARTING', run: null, ended: null,
+      history: [{ phase: 'STARTING', at: '2026-10-10T10:10:10+00:00' }], process: { pid: 4242 }, approval_required: null, declined_decisions: [] },
+    run_record: { found: false, unreadable: null }, evidence: { state: 'absent', line_count: null, sealed: false }, workspace_lock: { held: false, held_by_this_launch: false }, liveness: 'starting', liveness_note: 'DERIVED' };
+  }
+
+  /** A read that straddled the process's own final write: RUNNING with the lock already released (the next read shows the sealed truth). */
+  private stale(): Json {
+    const base = this.statusFor('success') as Json;
+    const launch = base.launch as Json;
+    return { ...base, launch: { ...launch, phase: 'RUNNING', ended: null }, run_record: { found: true, unreadable: null, lifecycle_state: 'RUNNING', terminal_status: null, commit_result: null, revision: 2 }, workspace_lock: { held: false, held_by_this_launch: false }, liveness: 'interrupted' };
   }
 
   /** The live records of the run, up to the current frame (verbatim shapes of the recorder's records). */

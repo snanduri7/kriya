@@ -40,6 +40,8 @@ export interface RunOutcome {
   workflowStatus: string | null;
   /** For approval_required: what Kriya recorded about the decision it reached (never an invented explanation). */
   approval?: { kind: string; reason: string; details: Record<string, unknown> };
+  /** Decisions the run could proceed without that the desktop declined (nothing approved); informational, whatever the outcome. */
+  declined: Array<{ kind: string; reason: string }>;
 }
 
 export interface RunTiming { clickedAt: number; acknowledgedAt: number | null; recordSeenAt: number | null; terminalAt: number | null; refreshedAt: number | null }
@@ -98,6 +100,12 @@ const PAGE = 200;
 
 /** The outcome, from DURABLE records only. null = not over (or not provably over). Pure: the tests drive it with every combination. */
 export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): RunOutcome | null {
+  const outcome = deriveCore(status, notRecorded, host);
+  const declined = (status?.launch.declined_decisions ?? []).map((d) => ({ kind: d.kind, reason: d.reason }));
+  return outcome === null ? null : { ...outcome, declined };
+}
+
+function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): Omit<RunOutcome, 'declined'> | null {
   const exited = host?.phase === 'exited';
   const exitText = host?.exit ? (host.exit.signal ? `signal ${host.exit.signal}` : `exit code ${host.exit.code ?? 'unknown'}`) : 'exit not reported';
   if (status === null) {
@@ -111,7 +119,8 @@ export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean,
     const workflowStatus = ended?.workflow_status ?? null;
     const traceRunId = ended?.trace_run_id ?? null;
     const needed = launch.approval_required;
-    if (needed) {
+    // The RunRecord is the authority: a run that reached SUCCESS was not stopped by any decision, whatever was noted along the way.
+    if (needed && !(record.found && record.terminal_status === 'SUCCESS')) {
       return { kind: 'approval_required', label: 'Approval required', detail: needed.reason, source: 'Kriya launch record (the decision the workflow reached)', traceRunId, workflowStatus,
         approval: { kind: needed.kind, reason: needed.reason, details: needed.details } };
     }
@@ -125,6 +134,9 @@ export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean,
       return { kind, label: word, detail: extras.length ? extras.join(' · ') : 'Recorded by Kriya.', source: 'Kriya RunRecord (the run\'s own lifecycle authority)', traceRunId, workflowStatus };
     }
     return { kind: 'interrupted', label: 'The run did not finish', detail: ended?.error ?? 'The launching process ended and no terminal outcome is recorded in the run record.', source: 'Kriya launch record', traceRunId, workflowStatus };
+  }
+  if (launch.phase === 'STARTING' && status.liveness === 'starting' && exited) {
+    return { kind: 'interrupted', label: 'The run did not finish', detail: `The execution process ended (${exitText}) before the run started: Kriya recorded the launch but never opened the run. Nothing ran.`, source: 'Kriya launch record (phase STARTING, workspace lock free; DERIVED); the host reports the process exit', traceRunId: null, workflowStatus: null };
   }
   if (status.liveness === 'interrupted' && exited) {
     return { kind: 'interrupted', label: 'The run did not finish', detail: `The execution process ended (${exitText}) without sealing its record. This is not a success; the evidence recorded so far is still inspectable.`, source: 'Kriya launch record + workspace run lock (DERIVED); the host reports the process exit', traceRunId: null, workflowStatus: null };
@@ -151,6 +163,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [run, setRun] = useState<RunView | null>(null);
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
+  const pendingRef = useRef<string | null>(null);
   const acquireRef = useRef(acquire);
   useEffect(() => { runRef.current = run; acquireRef.current = acquire; refreshWorkspaceRef.current = ws.refresh; });
 
@@ -234,7 +247,14 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
           progress = { ...progress, error: `${page.error.code}: ${page.error.message}` };
         }
       }
-      const outcome = deriveOutcome(data, notRecorded, hostState);
+      let outcome = deriveOutcome(data, notRecorded, hostState);
+      // A conclusion drawn from silence (not sealed by the process itself) must be seen by two consecutive polls: a status read and a process-exit read that
+      // straddle the process's own final write must never be taken as 'the run did not finish'.
+      const uncertain = outcome !== null && (data === null || data.launch.phase !== 'ENDED');
+      const signature = uncertain && outcome ? `${outcome.kind}|${hostState?.exit?.code ?? ''}|${hostState?.exit?.signal ?? ''}` : null;
+      const confirmed = signature !== null && pendingRef.current === signature;
+      pendingRef.current = uncertain ? signature : null;
+      if (uncertain && !confirmed) outcome = null;
       const now = performance.now();
       setRun((prev) => {
         if (!prev || prev.launchId !== launchId) return prev;
@@ -258,7 +278,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         return;
       }
       const hidden = typeof document !== 'undefined' && document.hidden;
-      const delay = more ? 0 : hidden ? intervals.hiddenMs : now - began > intervals.slowAfterMs ? intervals.slowMs : intervals.visibleMs;
+      const delay = more || pendingRef.current !== null ? Math.min(intervals.visibleMs, 250) : hidden ? intervals.hiddenMs : now - began > intervals.slowAfterMs ? intervals.slowMs : intervals.visibleMs;
       timer = setTimeout(() => { void tick(); }, delay);
     };
     void tick();

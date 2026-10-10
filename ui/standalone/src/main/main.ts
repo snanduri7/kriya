@@ -62,6 +62,7 @@ let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
 let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
+let quitting = false; // set once the person has confirmed interrupting a run and quitting
 
 function errorEnvelope(operation: string, code: string, message: string) {
   return { schema_version: 1, operation, request_id: `host-${Date.now()}`, observed_at: new Date().toISOString(), source: null, consistency: null, data: null, error: { code, message } };
@@ -256,6 +257,11 @@ function createWindow() {
     win.webContents.on('console-message', (event) => log(`console[${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`));
     win.webContents.on('render-process-gone', (_e, details) => log(`render-process-gone ${details.reason}`));
   }
+  // Closing the only window while a run this host started is in progress would leave the application running with no window and no way back to the run:
+  // the same question as quitting, and the window stays until it is answered.
+  win.on('close', (event) => {
+    if (!quitting && execution && execution.active()) { event.preventDefault(); void interruptAndQuit(); }
+  });
   win.on('page-title-updated', (e) => e.preventDefault()); // a page can never rename the product window
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.on('will-redirect', (e) => e.preventDefault());
@@ -316,23 +322,27 @@ app.on('window-all-closed', () => app.quit());
 // Ends the persistent child cleanly (EOF on its stdin); if the application dies instead, the closed pipe ends the child anyway.
 // M6: quitting while a run this host started is in progress asks first; confirming interrupts it the way a terminal's Ctrl-C does (SIGINT: Kriya seals
 // the run and the launch as interrupted), with a SIGKILL after the grace period. Nothing is left running unobserved.
-let quitting = false;
+/** Asks the person; true = interrupt the run (SIGINT, then SIGKILL after the grace period) and quit. */
+async function confirmInterruptAndQuit(): Promise<boolean> {
+  if (CAPTURE_DIR) return true;
+  const options = {
+    type: 'warning' as const, buttons: ['Interrupt run and quit', 'Keep running'], defaultId: 1, cancelId: 1, message: 'A Kriya run is in progress',
+    detail: 'Quitting interrupts it, the same as pressing Ctrl-C in a terminal. Kriya records the interruption; nothing is reported as finished.',
+  };
+  const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
+  return (parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)).response === 0;
+}
+async function interruptAndQuit(): Promise<void> {
+  if (!(await confirmInterruptAndQuit())) return;
+  quitting = true;
+  await execution.shutdown();
+  await services.stop();
+  app.quit();
+}
 app.on('before-quit', (event) => {
   if (!quitting && execution && execution.active()) {
     event.preventDefault();
-    void (async () => {
-      const options = {
-        type: 'warning' as const, buttons: ['Interrupt run and quit', 'Keep running'], defaultId: 1, cancelId: 1, message: 'A Kriya run is in progress',
-        detail: 'Quitting interrupts it, the same as pressing Ctrl-C in a terminal. Kriya records the interruption; nothing is reported as finished.',
-      };
-      const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
-      const proceed = CAPTURE_DIR ? true : (parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)).response === 0;
-      if (!proceed) return;
-      quitting = true;
-      await execution.shutdown();
-      await services.stop();
-      app.quit();
-    })();
+    void interruptAndQuit();
     return;
   }
   void services.stop();

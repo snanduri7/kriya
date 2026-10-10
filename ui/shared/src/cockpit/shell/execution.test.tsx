@@ -271,6 +271,46 @@ describe('Start Run', () => {
     expect(row.querySelector('[title]')?.getAttribute('title')).toMatch(/only known while the workflow runs/);
   });
 
+  it('a run that SUCCEEDED is a success even if a decision was noted earlier; declined decisions are shown as informational, nothing approved (reviewer P1-1)', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'success_with_declined' } });
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    fireEvent.click(startButton());
+    const bar = await banner();
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
+    expect(bar).toHaveAttribute('data-outcome', 'success');
+    expect(within(bar).getByText('Run succeeded')).toBeInTheDocument();
+    expect(within(bar).queryByText(/Approval required/)).toBeNull();
+    expect(within(bar).getByText(/Decisions declined, nothing approved.*skill_gap_decision: no verified skill for lib-x/)).toBeInTheDocument();
+  });
+
+  it('a launch stuck in STARTING after its process died ends as "did not finish" (no endless polling, workspace unlocked)', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'stuck_starting' } });
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    fireEvent.click(startButton());
+    const bar = await banner();
+    act(() => { host.exec!.advance(); });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'interrupted'));
+    expect(within(bar).getByText(/before the run started/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Switch workspace' })).toBeEnabled());
+  });
+
+  it('an "interrupted" reading that straddled the process\'s own final write is never concluded: the next poll shows the sealed success (stale-read race)', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'success_after_stale_read' } });
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    fireEvent.click(startButton());
+    const bar = await banner();
+    act(() => { host.exec!.advance(); host.exec!.advance(); });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
+    expect(bar).toHaveAttribute('data-outcome', 'success');
+    expect(within(bar).queryByText(/did not finish/)).toBeNull();
+  });
+
   it('a launch Kriya refused is "Refused before a run started" with Kriya\'s reason', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'refused' } });
     await typeGoal();
@@ -356,6 +396,15 @@ describe('deriveOutcome (durable records only)', () => {
     evidence: { state: 'sealed', line_count: 1, sealed: true }, workspace_lock: { held: false, held_by_this_launch: false }, liveness: over.liveness, liveness_note: '',
   } as LaunchStatus);
   const exited = { phase: 'exited', launch_id: LAUNCH_ID, workspace: '/w', started_at: 't', ended_at: 't', exit: { code: 0, signal: null }, diagnostic: null } as const;
+  it('RunRecord SUCCESS beats an approval note; a note on a run that did not succeed still means approval required', () => {
+    const approval = { kind: 'change_approval', reason: 'r', details: {} };
+    expect(deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', terminal: 'SUCCESS', approval }), false, exited)?.kind).toBe('success');
+    expect(deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', terminal: 'FAILURE', exit: 1, approval }), false, exited)?.kind).toBe('approval_required');
+  });
+  it('STARTING + process exited + lock free is interrupted; STARTING while the process still runs is not over', () => {
+    expect(deriveOutcome(status({ phase: 'STARTING', liveness: 'starting', run: false }), false, exited)?.kind).toBe('interrupted');
+    expect(deriveOutcome(status({ phase: 'STARTING', liveness: 'starting', run: false }), false, { ...exited, phase: 'running', exit: null, ended_at: null } as const)).toBeNull();
+  });
 
   it('ENDED + RunRecord SUCCESS = success; FAILURE = failure; anything else is needs_review', () => {
     expect(deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', terminal: 'SUCCESS' }), false, exited)?.kind).toBe('success');

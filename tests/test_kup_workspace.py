@@ -124,6 +124,26 @@ def test_a_repository_configured_command_is_never_executed(tmp_path):
     assert not marker.exists(), "opening a folder executed a command the repository configures"
 
 
+def test_a_content_filter_driver_the_repository_defines_is_never_executed(tmp_path):
+    """`git status` runs a filter's clean/process command to compare a file whose stat data changed (reviewer P3-5). Opening a folder must not."""
+    repo = _repo(tmp_path / "repo")
+    marker = tmp_path / "filter-ran"
+    script = tmp_path / "clean.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n")
+    script.chmod(0o755)
+    (repo / ".gitattributes").write_text("f.txt filter=mark\n")
+    _git(repo, "config", "filter.mark.clean", str(script))
+    (repo / "f.txt").write_text("one\n")  # same bytes, new stat data: git must look at the content
+    os.utime(repo / "f.txt", (1, 1))
+    subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True)
+    assert marker.exists(), "premise: a plain `git status` DOES run the repository's clean filter here"
+    marker.unlink()
+    os.utime(repo / "f.txt", (2, 2))
+    data = _describe(repo)["data"]
+    assert data["checkout"]["state"] == "checkout_root"
+    assert not marker.exists(), "opening a folder executed a content-filter command the repository configures"
+
+
 def _a_file(p):
     (p / "file.txt").write_text("x")
     return p / "file.txt"

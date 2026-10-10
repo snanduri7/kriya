@@ -160,6 +160,17 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     expect(hostTs).toContain("child.kill('SIGINT')");
     expect(hostTs).toContain("child.kill('SIGKILL')");
   });
+  it('closing the window during a run asks the same question as quitting and keeps the window until it is answered (reviewer P2-1)', () => {
+    expect(mainTs).toContain("win.on('close', (event) => {");
+    expect(mainTs).toContain('if (!quitting && execution && execution.active()) { event.preventDefault(); void interruptAndQuit(); }');
+    expect(mainTs).toContain('async function interruptAndQuit()');
+    expect(mainTs.match(/confirmInterruptAndQuit\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+  it('packaging refuses a fixture-bearing or non-cockpit build (reviewer P3-7)', () => {
+    const mac = read(join(__dirname, '..', 'mac-app.mjs'));
+    expect(mac).toContain("scripts-check-bundle.mjs");
+    expect(mac).toContain("if (mode !== 'cockpit') throw");
+  });
   it('the registry gets the run-active lock, and the M1 compatibility is switched on only by the build marker', () => {
     expect(mainTs).toContain("{ legacyInspector: UI_MODE === 'inspector', runActive: () => execution.active() }");
     expect(mainTs).toContain('resolveUiMode(');

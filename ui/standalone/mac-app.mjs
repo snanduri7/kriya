@@ -114,6 +114,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
     const out = resolve(argValue('--out') ?? join(HERE, 'out'));
     const icon = argValue('--icon') ?? (existsSync(DEFAULT_ICON) ? DEFAULT_ICON : undefined);
     if (!existsSync(join(HERE, 'dist', 'main', 'main.js')) || !existsSync(join(HERE, 'dist', 'renderer', 'index.html'))) throw new Error('build first: npm run build:cockpit (or build)');
+    // The packaged product is the cockpit and carries no fixture or retired-inspector code: refuse to package anything else.
+    execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs')], { stdio: 'inherit' });
+    const mode = JSON.parse(readFileSync(join(HERE, 'dist', 'renderer', 'ui-mode.json'), 'utf8')).ui;
+    if (mode !== 'cockpit') throw new Error(`dist/renderer is a "${mode}" build; only the cockpit is packaged (npm run build)`);
     const note = rebrand(join(out, `${PRODUCT}.app`), { icon, appDir: HERE });
     const findings = verifyBundle(join(out, `${PRODUCT}.app`));
     console.log(`packaged ${join(out, `${PRODUCT}.app`)}\n  ${note}`);

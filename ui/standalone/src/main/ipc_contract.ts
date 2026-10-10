@@ -247,6 +247,6 @@ export function validateSettingValue(key: SettingKey, v: unknown): ValidationRes
   if (typeof v !== 'string' || v.length > LIMITS.pathMax || v.includes('\0')) return { ok: false, message: 'setting value must be a string' };
   if (key === 'editor' && !(EDITOR_IDS as readonly string[]).includes(v)) return { ok: false, message: `editor must be one of ${EDITOR_IDS.join(', ')}` };
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
-  if ((key === 'configDirectory' || key === 'workspacePath') && (!v.startsWith('/') || /[\u0000-\u001f]/.test(v))) return { ok: false, message: `${key} must be an absolute path without control characters` };
+  if ((key === 'configDirectory' || key === 'workspacePath' || key === 'kriyaExecutable') && (!v.startsWith('/') || /[\u0000-\u001f]/.test(v))) return { ok: false, message: `${key} must be an absolute path without control characters` };
   return { ok: true, value: v };
 }

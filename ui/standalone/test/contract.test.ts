@@ -97,6 +97,14 @@ describe('M6 request grammar', () => {
   });
 });
 
+describe('executable setting (reviewer P3-4)', () => {
+  it('the Kriya executable setting must be an absolute path without control characters, like the other path settings', () => {
+    expect(validateSettingValue('kriyaExecutable', '/opt/kriya/bin/kriya').ok).toBe(true);
+    for (const bad of ['kriya', './kriya', '../bin/kriya', '', '/opt/kriya\nx']) expect(validateSettingValue('kriyaExecutable', bad).ok, JSON.stringify(bad)).toBe(false);
+    expect(validateSettingValue('kriyaExecutable', null).ok).toBe(true); // clearing it is always allowed
+  });
+});
+
 describe('evidence argv (Run Cockpit v1.1)', () => {
   it('builds the exact CLI grammar, values attached with = so a value can never be read as an option', () => {
     expect(buildKriyaArgv({ operation: 'evidence.verify', run_id: 'r1' })).toEqual(['evidence', 'verify', 'r1', '--json', '--kup-version', '1']);

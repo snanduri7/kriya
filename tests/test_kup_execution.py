@@ -464,13 +464,43 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
 
     import kriya.cli as cli
     source = inspect.getsource(cli._generate_impl)
-    for callback in ("on_approval", "on_skill_gap", "on_skill_conflict", "on_web_lookup", "on_web_lookup_query"):
+    # a decision that STOPS the run is recorded as an approval requirement; the four the run can proceed without are declined and recorded, never prompted
+    expectations = {"on_approval": "note_approval_required(", "on_skill_gap": "decline_decision(", "on_skill_conflict": "decline_decision(",
+                    "on_web_lookup": "decline_decision(", "on_web_lookup_query": "decline_decision("}
+    for callback, call in expectations.items():
         body = source[source.index(f"    def {callback}("):]
         body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
         prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(") if marker in body]
-        assert "note_approval_required(" in body, f"{callback} must CALL note_approval_required"
-        assert body.index("note_approval_required(") < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
+        assert call in body, f"{callback} must CALL {call}"
+        assert body.index(call) < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
     assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)
+
+
+def test_a_declined_decision_is_recorded_informationally_and_never_becomes_an_approval_requirement(ws):
+    canonical, session = _open_session(ws)
+    try:
+        assert launch_module.decline_decision("skill_gap_decision", "no verified skill for lib X", {"skills": ["lib-x"]}) is True
+    finally:
+        session.finish(0, {"status": "success", "quality_gates_passed": True, "run_id": "ab12cd34"}, None)
+    record = load_launch_record(canonical, LID)
+    assert record["approval_required"] is None
+    assert [d["kind"] for d in record["declined_decisions"]] == ["skill_gap_decision"] and record["declined_decisions"][0]["details"] == {"skills": ["lib-x"]}
+    assert _status(ws)["data"]["launch"]["declined_decisions"][0]["reason"] == "no verified skill for lib X"
+
+
+def test_declining_outside_a_desktop_launch_changes_nothing_and_tells_the_caller_to_prompt_as_before(ws):
+    assert launch_module.decline_decision("web_lookup_review", "x", {}) is False
+    assert not os.path.exists(os.path.join(canonical_workspace(str(ws)), ".kriya"))
+
+
+def test_declined_decisions_are_bounded(ws):
+    canonical, session = _open_session(ws)
+    try:
+        for i in range(40):
+            launch_module.decline_decision("skill_gap_decision", f"n{i}", {})
+    finally:
+        session.finish(0, {"status": "success"}, None)
+    assert len(load_launch_record(canonical, LID)["declined_decisions"]) == 20
 
 
 # ------------------------------------------------------------------ toolchain visibility (reported, never widened)

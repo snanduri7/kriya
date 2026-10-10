@@ -3163,8 +3163,11 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return click.confirm("\nDo you approve applying these changes to the codebase?")
 
     def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
-        from kriya.control.launch import note_approval_required
-        note_approval_required("skill_gap_decision", reason, {"skills": [str(n) for n in skill_names][:20]})
+        from kriya.control.launch import (
+            decline_decision,  # GUI M7: a desktop launch declines (and records) what the run can proceed without
+        )
+        if decline_decision("skill_gap_decision", reason, {"skills": [str(n) for n in skill_names][:20]}):
+            return None
         if yes:
             click.secho(f"\n[Auto-Skipping Skill Gap Check] {reason}", dim=True)
             return None
@@ -3178,8 +3181,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return supplied.strip() or None
 
     def on_skill_conflict(skill_a: str, rule_a: str, skill_b: str, rule_b: str, explanation: str) -> Optional[str]:
-        from kriya.control.launch import note_approval_required
-        note_approval_required("skill_conflict_decision", explanation or "two active skills may conflict", {"skills": [skill_a, skill_b]})
+        from kriya.control.launch import decline_decision
+        if decline_decision("skill_conflict_decision", explanation or "two active skills may conflict", {"skills": [skill_a, skill_b]}):
+            return None
         if yes:
             click.secho(f"\n[Auto-Skipping Skill Conflict Check] '{skill_a}' vs '{skill_b}'", dim=True)
             return None
@@ -3198,8 +3202,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return {"a": "prefer_a", "b": "prefer_b", "both": "both_ok"}[choice]
 
     def on_web_lookup(found: List[Dict[str, str]]) -> bool:
-        from kriya.control.launch import note_approval_required
-        note_approval_required("web_lookup_review", f"{len(found)} live-lookup reference(s) need a decision", {"terms": [str(i.get("term")) for i in found][:20]})
+        from kriya.control.launch import decline_decision
+        if decline_decision("web_lookup_review", f"{len(found)} live-lookup reference(s) need a decision", {"terms": [str(i.get("term")) for i in found][:20]}):
+            return False
         if yes:
             click.secho(f"\n[Auto-Skipping Live Lookup Review] found {len(found)} reference(s), discarding under -y", dim=True)
             return False
@@ -3212,8 +3217,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return click.confirm("\nUse these references for this run? (declining discards all of them, none partially)")
 
     def on_web_lookup_query(terms: List[str], base_url: str) -> bool:
-        from kriya.control.launch import note_approval_required
-        note_approval_required("web_lookup_query", "Kriya wants to send a live-lookup search", {"terms": [str(t) for t in terms][:20]})
+        from kriya.control.launch import decline_decision
+        if decline_decision("web_lookup_query", "Kriya wants to send a live-lookup search", {"terms": [str(t) for t in terms][:20]}):
+            return False
         # Only ever called when autonomy.web_lookup_auto_approve is False -
         # WorkflowEngine._approve_web_lookup() short-circuits to True without
         # reaching this callback at all when that opt-in is set.

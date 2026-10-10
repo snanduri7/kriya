@@ -63,6 +63,7 @@ export function ActiveRunBanner() {
         </div>
       ) : null}
       {finished && !run.outcome!.approval ? <div>{run.outcome!.detail} <span className="muted small">Source: {run.outcome!.source}.</span></div> : null}
+      {finished && run.outcome!.declined.length ? <div className="muted small">Decisions declined, nothing approved (the run proceeded without them): {run.outcome!.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</div> : null}
       {run.stage === 'starting' && !finished ? <div className="muted">Waiting for Kriya to record the launch…</div> : null}
       {run.status ? (
         <div className="muted small">

@@ -78,6 +78,7 @@ export class ExecutionHost {
   private current: ExecutionState = { ...IDLE };
   private child: ExecChild | null = null;
   private reserving = false;
+  private closing = false;
   private stdoutBytes = 0;
   private stderrBytes = 0;
   private exited: Promise<void> = Promise.resolve();
@@ -119,6 +120,8 @@ export class ExecutionHost {
         const blockers = Array.isArray(data?.blockers) ? (data.blockers as Array<{ code: string; message: string }>).filter((b) => typeof b?.code === 'string' && typeof b?.message === 'string') : [];
         return this.refuse('PREFLIGHT_BLOCKED', blockers[0]?.message ?? 'Kriya reports this folder is not ready for a run', blockers);
       }
+      // The application began closing while Kriya was being asked: nothing may be launched that shutdown() could not see.
+      if (this.closing) return this.refuse('HOST_ERROR', 'the application is closing; no run was started');
       // A changed workspace between the click and the end of the preflight is refused, never launched elsewhere.
       if (this.deps.currentWorkspace() !== workspace) return this.refuse('WORKSPACE_NOT_OPEN', 'the open workspace changed while the run was being prepared');
 
@@ -166,6 +169,7 @@ export class ExecutionHost {
 
   /** Quit-time handling: the terminal's own cancellation (SIGINT, which Kriya turns into a sealed failure record), then SIGKILL after the grace period. */
   async shutdown(): Promise<void> {
+    this.closing = true;
     const child = this.child;
     if (!child) return;
     this.current = { ...this.current, diagnostic: 'terminated_by_the_host' };

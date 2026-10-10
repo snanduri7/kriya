@@ -15,6 +15,7 @@ public class Launch {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private ApprovalRequired approvalRequired;
+    private List<DeclinedDecision> declinedDecisions;
     private Ended ended;
     private Goal goal;
     private List<History> history;
@@ -34,6 +35,15 @@ public class Launch {
     public ApprovalRequired getApprovalRequired() { return approvalRequired; }
     @JsonProperty("approval_required")
     public void setApprovalRequired(ApprovalRequired value) { this.approvalRequired = value; }
+
+    /**
+     * Decisions the run could proceed without (skill gap/conflict, live lookup) that the
+     * desktop declined: nothing was approved, the run continued; informational only.
+     */
+    @JsonProperty("declined_decisions")
+    public List<DeclinedDecision> getDeclinedDecisions() { return declinedDecisions; }
+    @JsonProperty("declined_decisions")
+    public void setDeclinedDecisions(List<DeclinedDecision> value) { this.declinedDecisions = value; }
 
     @JsonProperty("ended")
     public Ended getEnded() { return ended; }
