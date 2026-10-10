@@ -1,4 +1,5 @@
-import { Badge, KeyValue, Panel, useSession, useWorkspace, type ModuleDefinition } from '../../core';
+import { useEffect, useState } from 'react';
+import { Badge, KeyValue, Panel, useProvider, useSession, useWorkspace, type ModuleDefinition } from '../../core';
 import { RunPanel } from './RunPanel';
 import type { WorkspaceDescribe } from '../../../model/kup';
 
@@ -25,10 +26,28 @@ const treeLine = (c: Checkout): string => {
 };
 const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR (operator environment)', config: 'paths.state (configuration)', default: 'Kriya default (~/.kriya/state)' };
 
+/** The published snapshots Kriya lists, to pin another one. Choosing re-verifies its digest before anything is read and clears the selection. */
+function SnapshotPicker() {
+  const provider = useProvider();
+  const session = useSession();
+  const [list, setList] = useState<Array<{ snapshot_id: string; acquisition_completed_at: string; rows: number }> | null>(null);
+  useEffect(() => {
+    let live = true;
+    void provider.listSnapshots().then((r) => { if (live && r.ok) setList(r.data.snapshots as unknown as Array<{ snapshot_id: string; acquisition_completed_at: string; rows: number }>); });
+    return () => { live = false; };
+  }, [provider, session.snapshotId]);
+  if (!session.snapshotId) return <span>none pinned</span>;
+  if (!list || list.length < 2) return <span className="mono">{session.snapshotId}</span>;
+  return (
+    <select aria-label="Pinned snapshot" value={session.snapshotId} onChange={(e) => session.choose(e.target.value)}>
+      {list.map((snap) => <option key={snap.snapshot_id} value={snap.snapshot_id}>{snap.snapshot_id} · acquired {snap.acquisition_completed_at.slice(0, 19).replace('T', ' ')} · {snap.rows} rows</option>)}
+    </select>
+  );
+}
+
 /** The open workspace as Kriya describes it. Not a file explorer: facts only, each with the words Kriya used. */
 function Workspace() {
   const ws = useWorkspace();
-  const session = useSession();
   const open = ws.current;
   if (!open) return <Panel title="Workspace"><div className="ck-state"><strong>No workspace is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div></Panel>;
   const f = open.facts;
@@ -51,7 +70,7 @@ function Workspace() {
         ['State chosen by', STATE_SOURCE[f.state.source] ?? f.state.source],
         ['Trace database', f.state.trace_database_present ? 'present' : 'not present'],
         ['Workspace .kriya directory', f.kriya_directory_present ? 'present' : 'not present'],
-        ['Pinned snapshot', session.snapshotId ? <span key="n" className="mono">{session.snapshotId}</span> : 'none pinned'],
+        ['Pinned snapshot', <SnapshotPicker key="n" />],
       ]} />
       {f.configuration.file_in_workspace ? <p className="muted small" role="note">{f.configuration.note}</p> : null}
       <p className="muted small">Opening a folder only reads it. Nothing was written to it and no run was started.</p>

@@ -38,6 +38,8 @@ export interface FixtureHostOptions {
   /** capabilities.features.evidence_content. false (the production default) = content is not authorized. */
   evidenceContent?: boolean;
   scenarios?: readonly Scenario[];
+  /** Extra published snapshot ids the list reports (never readable: verification of them is refused, as for a pruned snapshot). */
+  extraSnapshotIds?: readonly string[];
   /** Scripted Start Run (fixtureExecution.ts). Omit for the default scripted successful run; false = a host that cannot execute. */
   execution?: FixtureExecutionOptions | false;
 }
@@ -46,6 +48,7 @@ type Json = Record<string, unknown>;
 
 export class FixtureHost implements HostAdapter {
   private readonly baseScenarios: readonly Scenario[];
+  private readonly extraSnapshotIds: readonly string[];
   /** The scripted execution (null when the host cannot execute). Tests advance its frames. */
   readonly exec: FixtureExecution | null;
   readonly execution?: ExecutionHostPort;
@@ -61,6 +64,7 @@ export class FixtureHost implements HostAdapter {
 
   constructor(options: FixtureHostOptions = {}) {
     this.baseScenarios = options.scenarios ?? SCENARIOS;
+    this.extraSnapshotIds = options.extraSnapshotIds ?? [];
     this.exec = options.execution === false ? null : new FixtureExecution(options.execution ?? {});
     if (this.exec) this.execution = this.exec.port;
     this.evidenceContent = options.evidenceContent ?? false;
@@ -238,7 +242,7 @@ export class FixtureHost implements HostAdapter {
     const findEvidence = (id: string) => this.scenarios.find((s) => s.evidenceId === id);
     switch (request.operation) {
       case 'capabilities': return this.env('capabilities', this.capabilities(), { kind: 'not_applicable', live_stream: false });
-      case 'snapshot.list': return this.env('snapshot.list', { snapshot_directory: '/fixture/state/kup-snapshots', snapshots: [this.snapshotSummary()], retain: 3 }, this.live);
+      case 'snapshot.list': return this.env('snapshot.list', { snapshot_directory: '/fixture/state/kup-snapshots', snapshots: [this.snapshotSummary(), ...this.extraSnapshotIds.map((id) => ({ ...this.snapshotSummary(), snapshot_id: id, acquisition_completed_at: '2026-10-09T09:00:00.010000Z' }))], retain: 3 }, this.live);
       case 'snapshot.acquire': return this.env('snapshot.acquire', { ...this.snapshotSummary(), orphans_removed: [], pruned: [], backup_steps: 1, duration_ms: 10 }, this.snapshotConsistency(), this.snapshotSource());
       case 'snapshot.prune': return this.env('snapshot.prune', { removed: [], orphans_removed: [], kept: [FIXTURE_SNAPSHOT_ID] }, this.live);
       case 'snapshot.verify':
@@ -291,8 +295,11 @@ export class FixtureHost implements HostAdapter {
     }
   }
 
-  async openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult> { return { ok: false, editor: 'vscode', verified: false, message: `fixture host cannot open ${request.path}` }; }
-  async copyToClipboard(): Promise<void> { /* no clipboard in fixtures */ }
+  /** What the person asked the host to do, for assertions (the fixture opens and copies nothing). */
+  readonly ideCalls: OpenInIdeRequest[] = [];
+  readonly copied: string[] = [];
+  async openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult> { this.ideCalls.push(request); return { ok: true, editor: 'vscode', verified: false, message: `fixture: code --goto ${request.path}${request.line ? `:${request.line}` : ''}` }; }
+  async copyToClipboard(text: string): Promise<void> { this.copied.push(text); }
   async getSetting<K extends keyof HostSettings>(key: K) { return this.settings[key] as HostSettings[K] | undefined; }
   async setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]) { this.settings[key] = value; }
   hostInfo(): HostInfo { return { kind: 'fixture', hostVersion: '0', fixtureMode: true, configDirectory: '/fixture/config', configDirectorySource: 'setting', configDirectoryProblem: null }; }

@@ -9,7 +9,7 @@
 import type { ExecutionHostPort } from '../../../host/HostAdapter';
 import type { ExecutionState, StartRunResult } from '../../../model/kup';
 
-export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded';
+export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required';
 
 export interface FixtureExecutionOptions {
   /** How the next launch ends (default 'success'). */
@@ -90,6 +90,7 @@ export class FixtureExecution {
       model: { provider: 'openai', model: 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', context_window: 32768, fallback_chain: ['fixture-fallback:3b'], role_overrides: {} },
       recovery: { status: 'CLEAN', run_active: false },
       interaction: { approvals: 'unavailable', knowledge_policy: 'strict', note: 'This host has no interactive approval: a step that needs one stops the run instead of being approved for you.' },
+      toolchains: { tools: [{ tool: 'python3', available: true, path: '/usr/bin/python3' }, { tool: 'git', available: true, path: '/usr/bin/git' }, { tool: 'java', available: false, path: null }, { tool: 'mvn', available: false, path: null }], note: 'Visibility under this process\'s own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs.' },
     };
   }
 
@@ -101,14 +102,15 @@ export class FixtureExecution {
     const lines = LINES_AT[f] ?? 0;
     const sealed = f === 4 && (this.outcome === 'success' || this.outcome === 'failure');
     const refused = this.outcome === 'refused' && f === 4;
+    const approval = this.outcome === 'approval_required' && f === 4;
     const died = this.outcome === 'died' && f === 4;
-    const phase = refused || sealed ? 'ENDED' : f === 1 ? 'STARTING' : 'RUNNING';
-    const terminal = sealed ? (this.outcome === 'success' ? 'SUCCESS' : 'FAILURE') : null;
+    const phase = refused || sealed || approval ? 'ENDED' : f === 1 ? 'STARTING' : 'RUNNING';
+    const terminal = sealed ? (this.outcome === 'success' ? 'SUCCESS' : 'FAILURE') : approval ? 'FAILURE' : null;
     const run = f >= 2 && !refused ? { run_id: LAUNCH_ID, started_at: '2026-10-10T10:10:12+00:00', base_revision: null } : null;
     const ended = phase === 'ENDED' ? {
-      at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : this.outcome === 'success' ? 0 : 1, workflow_status: refused ? 'refused' : this.outcome === 'success' ? 'success' : 'failure',
-      quality_gates_passed: refused ? false : this.outcome === 'success', failure_category: this.outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused ? null : LAUNCHED_TRACE_ID,
-      error: refused ? 'another Kriya run already owns this folder' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
+      at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : this.outcome === 'success' ? 0 : 1, workflow_status: approval ? null : refused ? 'refused' : this.outcome === 'success' ? 'success' : 'failure',
+      quality_gates_passed: refused ? false : this.outcome === 'success', failure_category: this.outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
+      error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
     } : null;
     return {
       launch: {
@@ -116,6 +118,7 @@ export class FixtureExecution {
         options: { knowledge_policy: 'strict', interactive: false }, phase, run, ended,
         history: [{ phase: 'STARTING', at: '2026-10-10T10:10:10+00:00' }, ...(run ? [{ phase: 'RUNNING', at: '2026-10-10T10:10:12+00:00' }] : []), ...(ended ? [{ phase: 'ENDED', at: '2026-10-10T10:12:00+00:00' }] : [])],
         process: { pid: 4242 },
+        approval_required: approval ? { kind: 'change_approval', reason: 'the proposed change touches a sensitive path', details: { files: ['.github/workflows/ci.yml'] }, noted_at: '2026-10-10T10:11:59+00:00' } : null,
       },
       run_record: run ? { found: true, unreadable: null, lifecycle_state: terminal ?? 'RUNNING', terminal_status: terminal, commit_result: terminal === 'SUCCESS' ? 'COMMITTED' : null, revision: 2 } : { found: false, unreadable: null },
       evidence: run ? { state: sealed ? 'sealed' : 'open', line_count: lines, sealed } : { state: 'absent', line_count: null, sealed: false },

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitProviders, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
+import { CockpitProviders, NavigationContext, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
 import type { Selection } from '../../state/selection';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
@@ -90,7 +90,9 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
   if (workspace && !(hasSecondary && showSecondary)) classes.push('no-secondary');
   if (workspace && !(hasInspector && showInspector)) classes.push('no-inspector');
 
+  const navigate = useCallback((id: string) => { if (pages.some((p) => p.id === id)) setPageId(id); }, [pages]);
   return (
+    <NavigationContext.Provider value={navigate}>
     <div className="ck ck-shell" ref={root} onKeyDown={onKeyDown} data-width={width} data-page={folderOpen ? page?.id ?? '' : 'welcome'}>
       <GlobalToolbar bare={!folderOpen} showSecondaryToggle={hasSecondary} open={toggles} onToggle={(which) => {
         if (which === 'secondary') setSecondaryOpen(!showSecondary);
@@ -119,6 +121,7 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
       )}
       {folderOpen && workspace ? <EvidenceDrawer modules={drawer} /> : null}
     </div>
+    </NavigationContext.Provider>
   );
 }
 

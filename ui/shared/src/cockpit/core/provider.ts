@@ -6,7 +6,7 @@
 import type {
   Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus,
 } from '../../model/kup';
-import type { ExecutionHostPort, HostSettings, WorkspaceHost } from '../../host/HostAdapter';
+import type { ExecutionHostPort, HostSettings, OpenInIdeResult, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
 
 export type ProviderKind = 'kriya' | 'fixture';
@@ -61,6 +61,9 @@ export interface UIProvider {
   evidenceChangeContent(runId: string, query: ChangeContentQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceChangeContent>>;
   /** ONE authorized part of ONE recorded model request (what the model was shown). Same authority and refusals as evidenceChangeContent. */
   evidenceCallContent(runId: string, query: ChangeContentQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceCallContent>>;
+  /** Host affordances (M1 parity): open a recorded file path in the configured editor (the host resolves it against the open workspace), and copy text. */
+  openInEditor(path: string, line?: number): Promise<OpenInIdeResult>;
+  copyText(text: string): Promise<void>;
   getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined>;
   setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void>;
 }

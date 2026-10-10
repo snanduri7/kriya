@@ -15,7 +15,7 @@ import { WorkspaceProvider, useWorkspacePath } from './workspace';
 export interface Services { provider: UIProvider; selection: SelectionStore; registry: ModuleRegistry; /** Tests only: how often a started run is polled. */ pollIntervals?: PollIntervals }
 const ServicesContext = createContext<Services | null>(null);
 const CapabilitiesContext = createContext<{ registry: CapabilityRegistry; state: Availability<Capabilities> }>({ registry: new CapabilityRegistry(null), state: { state: 'loading' } });
-export interface Session { snapshotId: string | null; status: Availability<{ snapshotId: string }>; refresh(): void; acquire(workspace?: string): Promise<void> }
+export interface Session { snapshotId: string | null; status: Availability<{ snapshotId: string }>; refresh(): void; acquire(workspace?: string): Promise<void>; /** Pin a chosen published snapshot (its digest is verified before anything is read; the selection is cleared). */ choose(snapshotId: string): void }
 const SessionContext = createContext<Session | null>(null);
 const RunEvidenceContext = createContext<Availability<RunEvidence>>({ state: 'loading' });
 const RunContextContext = createContext<Availability<RunContext>>({ state: 'loading' });
@@ -128,8 +128,9 @@ function SessionProvider({ children }: { children: ReactNode }) {
     setAcquired(res.data.snapshot_id);
   }, [provider, selection, openWorkspace]);
 
+  const choose = useCallback((id: string) => { setAcquireError(null); selection.dispatch({ type: 'reset' }); setAcquired(id); }, [selection]);
   const snapshotId = status.state === 'ready' ? status.data.snapshotId : null;
-  const value = useMemo<Session>(() => ({ snapshotId, status, refresh, acquire }), [snapshotId, status, refresh, acquire]);
+  const value = useMemo<Session>(() => ({ snapshotId, status, refresh, acquire, choose }), [snapshotId, status, refresh, acquire, choose]);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 

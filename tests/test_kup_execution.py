@@ -417,3 +417,76 @@ def test_the_new_operations_are_allowlisted_with_typed_arguments_and_answer_the_
     one_status = CliRunner().invoke(main, ["traces", "--json", "--launch-status", LID, "--workspace", str(ws)])
     served_status = json.loads(serve.answer({"id": "r2", "operation": "launch.status", "arguments": {"workspace": str(ws), "launch_id": LID}}, None, None))
     assert json.loads(one_status.output)["error"] == served_status["envelope"]["error"] and served_status["envelope"]["error"]["code"] == policy.LAUNCH_NOT_FOUND
+
+
+# ------------------------------------------------------------------ approval required (GUI M7: never auto-approved, recorded honestly)
+
+def _open_session(ws):
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    return canonical, session
+
+
+def test_a_decision_the_desktop_cannot_make_is_recorded_with_kriyas_reason_and_the_first_one_is_kept(ws):
+    canonical, session = _open_session(ws)
+    try:
+        launch_module.note_approval_required("change_approval", "touches a sensitive path", {"files": ["a", "b"]})
+        launch_module.note_approval_required("skill_gap_decision", "later one", {"skills": ["x"]})
+    finally:
+        session.finish(1, None, "Aborted!")
+    record = load_launch_record(canonical, LID)
+    assert record["approval_required"]["kind"] == "change_approval" and record["approval_required"]["details"] == {"files": ["a", "b"]}
+    assert record["approval_required"]["reason"] == "touches a sensitive path"
+    assert _status(ws)["data"]["launch"]["approval_required"]["kind"] == "change_approval"
+
+
+def test_the_note_is_a_noop_outside_a_desktop_launch(ws):
+    launch_module.note_approval_required("change_approval", "x", {})  # no active session: nothing raised, nothing written
+    assert not os.path.exists(os.path.join(canonical_workspace(str(ws)), ".kriya"))
+
+
+def test_a_strict_knowledge_gap_stop_is_recorded_as_an_acknowledgement_the_desktop_cannot_give(ws):
+    canonical, session = _open_session(ws)
+    session.finish(1, {"status": "knowledge_gap", "gap_report": {"gaps": [{"library": "org.apache.ignite:ignite-core"}]}}, None)
+    needed = load_launch_record(canonical, LID)["approval_required"]
+    assert needed["kind"] == "knowledge_gap_acknowledgement" and needed["details"] == {"libraries": ["org.apache.ignite:ignite-core"]}
+
+
+def test_a_launch_that_needs_no_decision_records_none(ws):
+    canonical, session = _open_session(ws)
+    session.finish(0, {"status": "success", "quality_gates_passed": True, "run_id": "ab12cd34"}, None)
+    assert load_launch_record(canonical, LID)["approval_required"] is None
+
+
+def test_every_interactive_callback_of_generate_records_the_decision_before_it_would_prompt():
+    import inspect
+
+    import kriya.cli as cli
+    source = inspect.getsource(cli._generate_impl)
+    for callback in ("on_approval", "on_skill_gap", "on_skill_conflict", "on_web_lookup", "on_web_lookup_query"):
+        head = source[source.index(f"    def {callback}("):].split("\n", 3)
+        assert "note_approval_required" in head[1] + head[2], f"{callback} must record the decision first"
+    assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)
+
+
+# ------------------------------------------------------------------ toolchain visibility (reported, never widened)
+
+def test_the_preflight_reports_tool_visibility_under_the_processs_own_environment(ws, monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    tools = {t["tool"]: t for t in _preflight(ws)["data"]["toolchains"]["tools"]}
+    assert set(tools) == {"python3", "git", "java", "mvn", "gradle", "node", "npm"}
+    for entry in tools.values():
+        assert entry["available"] == (entry["path"] is not None)
+    assert "no login shell" in _preflight(ws)["data"]["toolchains"]["note"]
+    monkeypatch.setenv("PATH", "/nonexistent")
+    nothing = {t["tool"]: t["available"] for t in _preflight(ws)["data"]["toolchains"]["tools"] if t["tool"] != "java"}
+    assert not any(nothing.values())
+
+
+def test_tool_visibility_never_changes_the_environment_or_blocks_the_start(ws, monkeypatch):
+    monkeypatch.setenv("PATH", "/nonexistent")
+    before = dict(os.environ)
+    data = _preflight(ws)["data"]
+    assert data["ready"] is True, "a missing tool is information, not a blocker: what a goal needs is only known during the run"
+    assert dict(os.environ) == before

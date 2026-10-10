@@ -1,0 +1,22 @@
+{
+ "open_folder_to_workspace_ms": 170,
+ "open_folder_to_runs_ms": true,
+ "preflight_ms": 23,
+ "start_click_to_banner_ms": 81,
+ "launch_record_seen_ms": 882,
+ "terminal_after_ms": 3682,
+ "timing_success_run": {
+  "clickedAt": 6663.900000035763,
+  "acknowledgedAt": 6726.600000023842,
+  "recordSeenAt": 7809.600000023842,
+  "terminalAt": 14209.400000035763,
+  "refreshedAt": 14250.699999988079
+ },
+ "tab_validation_first_render_ms": 22,
+ "tab_changes_first_render_ms": 21,
+ "tab_context_first_render_ms": 21,
+ "tab_plan_first_render_ms": 23,
+ "tab_attempts_first_render_ms": 21,
+ "tab_evidence_first_render_ms": 23,
+ "approval_banner_text": "Approval required\n20261010T221020-6ce72c56\napproval required\nelapsed 0:01\nDismiss\na proposed change needs approval.\nthe proposed change touches a sensitive path\nfiles: .github/workflows/ci.yml\nKriya stopped here instead of deciding for you. This version of the app cannot approve it: the approval must currently be performed outside the Kriya GUI (nothing was approved on your behalf). Source: Kriya launch record (the decision the workflow reached).\nObserved in Kriya's records (0 evidence records): Units opened 0 · Attempts opened 0 · Model requests 0 · Gate results 0 · liveness ended (DERIVED)"
+}

@@ -568,6 +568,16 @@ export interface ExecutionPreflight {
     run_active: boolean;
     [k: string]: unknown;
   };
+  toolchains: {
+    tools: {
+      tool: string;
+      available: boolean;
+      path: string | null;
+      [k: string]: unknown;
+    }[];
+    note: string;
+    [k: string]: unknown;
+  };
   interaction: {
     approvals: 'unavailable';
     knowledge_policy: string;
@@ -622,6 +632,18 @@ export interface LaunchStatus {
       [k: string]: unknown;
     }[];
     process: {
+      [k: string]: unknown;
+    } | null;
+    /**
+     * The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.
+     */
+    approval_required: {
+      kind: string;
+      reason: string;
+      details: {
+        [k: string]: unknown;
+      };
+      noted_at: string;
       [k: string]: unknown;
     } | null;
     [k: string]: unknown;

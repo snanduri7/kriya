@@ -5,6 +5,7 @@ export * from './capability';
 export * from './evidence';
 export * from './evidenceClient';
 export * from './modules';
+export * from './navigation';
 export * from './provider';
 export type { EvidenceCallContent, EvidenceChangeContent } from '../../model/kup';
 export * from './records';

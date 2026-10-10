@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, useDispatch, useModuleSelection, useProvider, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { AvailabilityView, useDispatch, useNavigate, useModuleSelection, useProvider, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
 import type { HistoryList, RunSummary } from '../../../model/kup';
 
 const PAGE = 200;
@@ -23,10 +23,12 @@ function RunsList() {
   const selected = useModuleSelection('runId');
   const dispatch = useDispatch();
   const snapshotId = session.snapshotId;
+  const go = useNavigate();
   // The list is the open workspace's runs: Kriya scopes it by what each run's evidence manifest records; Runs only reacts to the workspace.
   const workspace = useWorkspacePath();
   const key = snapshotId ? `${snapshotId}|${workspace ?? ''}` : null;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [query, setQuery] = useState('');
   const current = loaded && loaded.key === key ? loaded : null;
 
   useEffect(() => {
@@ -50,16 +52,24 @@ function RunsList() {
 
   const groups = useMemo(() => {
     const byGroup = new Map<string, RunSummary[]>();
-    for (const run of current?.runs ?? []) {
+    const needle = query.trim().toLowerCase();
+    for (const run of (current?.runs ?? []).filter((r) => !needle || `${r.goal ?? ''} ${r.status ?? ''}`.toLowerCase().includes(needle))) {
       const key = run.milestone_group_id ? `Milestone ${run.milestone_group_id}` : `${(run.timestamp ?? 'time not recorded').slice(0, 10)}`;
       byGroup.set(key, [...(byGroup.get(key) ?? []), run]);
     }
     return [...byGroup.entries()];
-  }, [current]);
+  }, [current, query]);
 
   return (
     <div>
-      <h2 style={{ fontSize: 14, margin: '0 0 6px' }}>Runs</h2>
+      <div className="ck-runs-head">
+        <h2 style={{ fontSize: 14, margin: 0 }}>Runs</h2>
+        <span>
+          <button type="button" title="Acquire a new consistent snapshot of the history store" onClick={() => void session.acquire()} disabled={snapshotId === null && session.status.state === 'loading'}>Refresh runs</button>{' '}
+          {workspace ? <button type="button" className="ck-primary" onClick={() => go('workspace')}>New Run</button> : null}
+        </span>
+      </div>
+      {(current?.runs.length ?? 0) > 6 ? <input type="search" aria-label="Filter runs" placeholder="Filter by goal or status" value={query} onChange={(e) => setQuery(e.target.value)} className="ck-filter" /> : null}
       {snapshotId === null ? <AvailabilityView value={session.status}>{() => null}</AvailabilityView> : null}
       {session.status.state !== 'ready' && session.status.state !== 'loading' ? <button type="button" onClick={() => void session.acquire()}>Acquire snapshot</button> : null}
       {snapshotId !== null && current === null ? <div className="ck-state muted" role="status">Loading…</div> : null}
@@ -80,7 +90,7 @@ function RunsList() {
         </div>
       ))}
       {current ? <div className="muted small" role="status">{current.runs.length} run(s) loaded{current.next ? '' : ' (all)'}</div> : null}
-      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No run is recorded for this workspace</strong>Kriya found no run whose evidence names this folder.</div> : null}
+      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No run is recorded for this workspace</strong>Kriya found no run whose evidence names this folder. Start one with New Run.</div> : null}
       {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
     </div>

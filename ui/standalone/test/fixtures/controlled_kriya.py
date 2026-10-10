@@ -6,11 +6,12 @@ logger and the typed result. Only `_generate_impl` - the planning/generation/ver
 script, so the cockpit's execution path can be driven deterministically without any model. Other commands (`traces`, `evidence`, `kup-stdio`, ...)
 are the real ones, so reads see exactly the durable records a real run would leave.
 
-A goal containing [controlled:success|failure|crash|die] overrides the outcome for that run.
-Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die|hold", "step_ms": 300, "release": "<path>"}
+A goal containing [controlled:success|failure|crash|die|approval] overrides the outcome for that run.
+Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die|hold|approval", "step_ms": 300, "release": "<path>"}
   success / failure  -> a run with unit, attempt, model, change and gate records; success seals RunRecord SUCCESS, failure seals FAILURE
   crash              -> raises inside the run (RunRecord FAILURE, no trace row)
   die                -> SIGKILL after the records: nothing is sealed (the launch stays RUNNING, the lock is released by the OS)
+  approval           -> records the human decision the workflow reached (Kriya's own recorder), then stops: nothing is approved
   hold               -> records, then waits until the `release` file exists (to observe a run in progress), then succeeds
 """
 import json
@@ -20,6 +21,8 @@ import signal
 import sys
 import time
 import uuid
+
+import click
 
 import kriya.cli as cli
 from kriya.control.run_coordinator import _complete_successful_run, begin_mutating_run, mark_run_stage
@@ -31,7 +34,7 @@ from kriya.core.trace import TraceLogger
 SCRIPT = json.loads(os.environ.get("KRIYA_CONTROLLED_SCRIPT", "{}"))
 STEP = float(SCRIPT.get("step_ms", 300)) / 1000.0
 OUTCOME = SCRIPT.get("outcome", "success")
-MARKER = re.compile(r"\[controlled:(success|failure|crash|die)\]")
+MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval)\]")
 
 
 def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
@@ -44,6 +47,11 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
     trace_id = uuid.uuid4().hex[:8]
     with begin_mutating_run(os.getcwd()) as context:
         mark_run_stage(context.workspace_path, RunLifecycle.RUNNING)
+        if OUTCOME == "approval":
+            # the real workflow reaches a human decision: the CLI callback records it, then its prompt finds no terminal (click.Abort)
+            from kriya.control.launch import note_approval_required
+            note_approval_required("change_approval", "the proposed change touches a sensitive path", {"files": [".github/workflows/ci.yml"]})
+            raise click.exceptions.Abort()
         with scope.unit_scope(cfg, "direct", "direct", {"goal_chars": len(goal)}):
             time.sleep(STEP)
             scope.emit("attempt.opened", {"mode": "direct", "operation": "generate"})

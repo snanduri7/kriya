@@ -1,0 +1,129 @@
+[
+ {
+  "wait": 800,
+  "file": "01-welcome.png",
+  "width": 1536,
+  "height": 960
+ },
+ {
+  "name": "open_folder_to_workspace_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 600
+ },
+ {
+  "name": "open_folder_to_runs_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});return await W(()=>document.body.innerText.includes('Runs'))})()",
+  "wait": 400,
+  "file": "02-runs-empty-existing-project.png"
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 600,
+  "file": "03-workspace.png"
+ },
+ {
+  "name": "preflight_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.body.innerText.includes('Configuration digest'));const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Update greet(name) so it returns \\\"Hello, <name>!\\\" while keeping the tests passing.\");ta.dispatchEvent(new Event('input',{bubbles:true}));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 600,
+  "file": "04-goal-preflight.png"
+ },
+ {
+  "name": "start_click_to_banner_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 200
+ },
+ {
+  "name": "launch_record_seen_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='running');return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 2600,
+  "file": "05-running.png"
+ },
+ {
+  "name": "terminal_after_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished');return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 1500,
+  "file": "06-terminal-success.png"
+ },
+ {
+  "name": "timing_success_run",
+  "js": "(()=>JSON.parse(document.querySelector('[aria-label=\"Active run\"]').dataset.timing))()",
+  "wait": 100
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 800,
+  "file": "07-run-overview-timeline-why.png"
+ },
+ {
+  "name": "tab_validation_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "08-validation.png"
+ },
+ {
+  "name": "tab_changes_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "09-changes.png"
+ },
+ {
+  "name": "tab_context_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "10-context.png"
+ },
+ {
+  "name": "tab_plan_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "11-plan.png"
+ },
+ {
+  "name": "tab_attempts_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "12-attempts.png"
+ },
+ {
+  "name": "tab_evidence_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20);return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "13-evidence.png"
+ },
+ {
+  "js": "(()=>{[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Overview').click();})()",
+  "wait": 300
+ },
+ {
+  "width": 1180,
+  "height": 900,
+  "wait": 700,
+  "file": "14-responsive-1180.png"
+ },
+ {
+  "width": 1100,
+  "height": 900,
+  "wait": 700,
+  "file": "15-responsive-1100.png"
+ },
+ {
+  "width": 1536,
+  "height": 960,
+  "wait": 500
+ },
+ {
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const d=[...document.querySelectorAll('button')].find(b=>b.textContent==='Dismiss');if(d)d.click();document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();await W(()=>document.body.innerText.includes('Configuration digest'));const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Add input validation to greet. [controlled:failure]\");ta.dispatchEvent(new Event('input',{bubbles:true}));await W(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')&&![...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').disabled);[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();await W(()=>document.querySelector('[aria-label=\"Active run\"]')&&document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished')})()",
+  "wait": 1500,
+  "file": "16-terminal-failure.png"
+ },
+ {
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const d=[...document.querySelectorAll('button')].find(b=>b.textContent==='Dismiss');if(d)d.click();const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Update the CI workflow. [controlled:approval]\");ta.dispatchEvent(new Event('input',{bubbles:true}));await W(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')&&![...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').disabled);[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();await W(()=>document.querySelector('[aria-label=\"Active run\"]')&&document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished')})()",
+  "wait": 1500,
+  "file": "17-approval-required.png"
+ },
+ {
+  "name": "approval_banner_text",
+  "js": "(()=>document.querySelector('[aria-label=\"Active run\"]').innerText)()",
+  "wait": 100
+ }
+]

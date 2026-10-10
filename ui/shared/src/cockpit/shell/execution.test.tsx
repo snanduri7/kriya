@@ -22,6 +22,24 @@ async function openRunPanel(fixture = {}) {
 async function typeGoal(text = GOAL) { fireEvent.change(await goalBox(), { target: { value: text } }); }
 const asked = (host: { calls: Array<{ operation: string }> }, op: string) => host.calls.filter((c) => c.operation === op);
 
+describe('New Run entry', () => {
+  it('Runs offers New Run, which takes the person to the goal entry on the Workspace page - for an empty folder and an existing project alike', async () => {
+    for (const folder of ['/fixture/empty', '/fixture/workspace']) {
+      document.body.innerHTML = '';
+      renderWorkspaceShell({ fixture: { workspace: folder } });
+      await screen.findByRole('navigation', { name: 'Destinations' });
+      fireEvent.click(await screen.findByRole('button', { name: 'New Run' }));
+      expect(await screen.findByRole('textbox', { name: 'Engineering goal' })).toBeInTheDocument();
+    }
+  });
+  it('the welcome screen has no New Run (no workspace is open)', async () => {
+    document.body.innerHTML = '';
+    renderWorkspaceShell({ fixture: { workspace: null } });
+    await screen.findByRole('main', { name: 'Welcome' });
+    expect(screen.queryByRole('button', { name: 'New Run' })).toBeNull();
+  });
+});
+
 describe('goal and preflight', () => {
   it('shows Kriya\'s preflight in its own words and keeps Start Run off until there is a goal', async () => {
     await openRunPanel();
@@ -174,6 +192,20 @@ describe('Start Run', () => {
     await waitFor(() => expect(JSON.parse(bar.getAttribute('data-timing') ?? '{}').refreshedAt).not.toBeNull());
   });
 
+  it('when a run ends the open folder is described again, so the Workspace facts are not the pre-run ones (and the folder stays open)', async () => {
+    const { host } = await openRunPanel();
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    const before = asked(host, 'workspace.describe').length;
+    fireEvent.click(startButton());
+    const bar = await banner();
+    expect(asked(host, 'workspace.describe').length).toBe(before);
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
+    await waitFor(() => expect(asked(host, 'workspace.describe').length).toBe(before + 1));
+    expect(screen.getByRole('button', { name: 'Switch workspace' }).textContent).toContain('workspace');
+  });
+
   it('when a run ends the preflight is asked of Kriya again (the folder may no longer be startable)', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
@@ -211,6 +243,32 @@ describe('Start Run', () => {
     expect(within(bar).getByText('The run did not finish')).toBeInTheDocument();
     expect(within(bar).getByText(/signal SIGKILL/)).toBeInTheDocument();
     expect(within(bar).queryByText(/succeeded/i)).toBeNull();
+  });
+
+  it('an approval the desktop cannot give is shown as "Approval required" with Kriya\'s recorded reason and details, says it must be done outside the GUI, and offers no Approve button', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'approval_required' } });
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    fireEvent.click(startButton());
+    const bar = await banner();
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'approval_required'));
+    expect(within(bar).getByText('Approval required')).toBeInTheDocument();
+    expect(within(bar).getByText(/a proposed change needs approval/)).toBeInTheDocument();
+    expect(within(bar).getByText(/the proposed change touches a sensitive path/)).toBeInTheDocument();
+    expect(within(bar).getByText(/files: \.github\/workflows\/ci\.yml/)).toBeInTheDocument();
+    expect(within(bar).getByText(/performed outside the Kriya GUI/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve|accept|allow|yes/i })).toBeNull();
+    expect(within(bar).queryByText(/Run failed/)).toBeNull();
+  });
+
+  it('shows which tools a run can see, without claiming a goal needs them', async () => {
+    await openRunPanel();
+    const line = await screen.findByText('Tools a run can see');
+    const row = line.nextElementSibling as HTMLElement;
+    expect(row.textContent).toContain('python3, git');
+    expect(row.textContent).toContain('not found: java, mvn');
+    expect(row.querySelector('[title]')?.getAttribute('title')).toMatch(/only known while the workflow runs/);
   });
 
   it('a launch Kriya refused is "Refused before a run started" with Kriya\'s reason', async () => {
@@ -290,10 +348,10 @@ describe('workspace during a run', () => {
 });
 
 describe('deriveOutcome (durable records only)', () => {
-  const status = (over: { phase: 'STARTING' | 'RUNNING' | 'ENDED'; liveness: 'starting' | 'live' | 'interrupted' | 'ended'; terminal?: string | null; run?: boolean; exit?: number; workflow?: string | null }): LaunchStatus => ({
+  const status = (over: { phase: 'STARTING' | 'RUNNING' | 'ENDED'; liveness: 'starting' | 'live' | 'interrupted' | 'ended'; terminal?: string | null; run?: boolean; exit?: number; workflow?: string | null; approval?: { kind: string; reason: string; details: Record<string, unknown> } }): LaunchStatus => ({
     launch: { launch_id: LAUNCH_ID, workspace: { path: '/w', identity: 'i' }, requested_at: 't', goal: { sha256: 'x', chars: 1 }, options: {}, phase: over.phase,
       run: over.run === false ? null : { run_id: LAUNCH_ID, started_at: 't', base_revision: null },
-      ended: over.phase === 'ENDED' ? { at: 't', exit_code: over.exit ?? 0, workflow_status: over.workflow ?? 'success', quality_gates_passed: true, failure_category: null, trace_run_id: 'tr', error: null, note: '' } : null, history: [], process: { pid: 1 } },
+      ended: over.phase === 'ENDED' ? { at: 't', exit_code: over.exit ?? 0, workflow_status: over.workflow ?? 'success', quality_gates_passed: true, failure_category: null, trace_run_id: 'tr', error: null, note: '' } : null, history: [], process: { pid: 1 }, approval_required: over.approval ? { ...over.approval, noted_at: 't' } : null },
     run_record: { found: over.terminal !== undefined, unreadable: null, ...(over.terminal !== undefined ? { lifecycle_state: over.terminal ?? 'RUNNING', terminal_status: over.terminal, commit_result: null, revision: 1 } : {}) },
     evidence: { state: 'sealed', line_count: 1, sealed: true }, workspace_lock: { held: false, held_by_this_launch: false }, liveness: over.liveness, liveness_note: '',
   } as LaunchStatus);
@@ -321,6 +379,12 @@ describe('deriveOutcome (durable records only)', () => {
     expect(deriveOutcome(null, true, { ...exited, phase: 'running', exit: null, ended_at: null } as const)).toBeNull();
     expect(deriveOutcome(null, true, exited)?.kind).toBe('not_recorded');
     expect(deriveOutcome(null, false, exited)).toBeNull(); // a read failure is not an outcome
+  });
+  it('a recorded approval requirement is "approval_required" - not a generic failure - whatever the run record says', () => {
+    const approval = { kind: 'change_approval', reason: 'the change touches a sensitive path', details: { files: ['.github/workflows/ci.yml'] } };
+    const out = deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', terminal: 'FAILURE', exit: 1, workflow: null, approval }), false, exited);
+    expect(out).toMatchObject({ kind: 'approval_required', label: 'Approval required', approval });
+    expect(deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', run: false, exit: 1, approval }), false, exited)?.kind).toBe('approval_required');
   });
   it('a sealed launch with no run is "refused"', () => {
     expect(deriveOutcome(status({ phase: 'ENDED', liveness: 'ended', run: false, exit: 2, workflow: 'refused' }), false, exited)?.kind).toBe('refused');

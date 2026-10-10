@@ -14,6 +14,7 @@ public class Launch {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
+    private ApprovalRequired approvalRequired;
     private Ended ended;
     private Goal goal;
     private List<History> history;
@@ -24,6 +25,15 @@ public class Launch {
     private String requestedAt;
     private Run run;
     private LaunchWorkspace workspace;
+
+    /**
+     * The human decision the run reached and the desktop cannot make (never auto-approved):
+     * which kind, the reason Kriya gave, and the recorded details.
+     */
+    @JsonProperty("approval_required")
+    public ApprovalRequired getApprovalRequired() { return approvalRequired; }
+    @JsonProperty("approval_required")
+    public void setApprovalRequired(ApprovalRequired value) { this.approvalRequired = value; }
 
     @JsonProperty("ended")
     public Ended getEnded() { return ended; }

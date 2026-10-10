@@ -25,6 +25,7 @@ public class ExecutionPreflight {
     private boolean ready;
     private ExecutionPreflightRecovery recovery;
     private ExecutionPreflightState state;
+    private Toolchains toolchains;
     private ExecutionPreflightWorkspace workspace;
 
     @JsonProperty("blockers")
@@ -61,6 +62,11 @@ public class ExecutionPreflight {
     public ExecutionPreflightState getState() { return state; }
     @JsonProperty("state")
     public void setState(ExecutionPreflightState value) { this.state = value; }
+
+    @JsonProperty("toolchains")
+    public Toolchains getToolchains() { return toolchains; }
+    @JsonProperty("toolchains")
+    public void setToolchains(Toolchains value) { this.toolchains = value; }
 
     @JsonProperty("workspace")
     public ExecutionPreflightWorkspace getWorkspace() { return workspace; }

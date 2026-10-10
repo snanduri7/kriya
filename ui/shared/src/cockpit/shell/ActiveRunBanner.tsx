@@ -22,7 +22,12 @@ function useElapsed(since: string | null, running: boolean): string | null {
   return Number.isFinite(start) ? clock(now - start) : null;
 }
 
-const TONE = { success: 'ok', failure: 'bad', needs_review: 'warn', refused: 'bad', interrupted: 'warn', not_recorded: 'warn' } as const;
+const TONE = { success: 'ok', failure: 'bad', needs_review: 'warn', refused: 'bad', interrupted: 'warn', not_recorded: 'warn', approval_required: 'warn' } as const;
+const APPROVAL_KIND: Record<string, string> = {
+  change_approval: 'a proposed change needs approval', knowledge_gap_acknowledgement: 'a knowledge gap needs acknowledgement', skill_gap_decision: 'a skill gap needs a decision',
+  skill_conflict_decision: 'two skills may conflict', web_lookup_review: 'live-lookup references need review', web_lookup_query: 'a live-lookup search needs approval',
+};
+const detailLines = (d: Record<string, unknown>): string[] => Object.entries(d).flatMap(([k, v]) => (Array.isArray(v) && v.length ? [`${k}: ${v.map(String).join(', ')}`] : []));
 
 /** The one run this window started, across every page: what Kriya's records say now, and the durable outcome once there is one. */
 export function ActiveRunBanner() {
@@ -50,7 +55,14 @@ export function ActiveRunBanner() {
           </>
         ) : null}
       </div>
-      {finished ? <div>{run.outcome!.detail} <span className="muted small">Source: {run.outcome!.source}.</span></div> : null}
+      {finished && run.outcome!.approval ? (
+        <div>
+          <div><strong>{APPROVAL_KIND[run.outcome!.approval.kind] ?? run.outcome!.approval.kind}.</strong> {run.outcome!.approval.reason}</div>
+          {detailLines(run.outcome!.approval.details).map((l) => <div key={l} className="muted small mono">{l}</div>)}
+          <div className="muted small">Kriya stopped here instead of deciding for you. This version of the app cannot approve it: the approval must currently be performed outside the Kriya GUI (nothing was approved on your behalf). Source: {run.outcome!.source}.</div>
+        </div>
+      ) : null}
+      {finished && !run.outcome!.approval ? <div>{run.outcome!.detail} <span className="muted small">Source: {run.outcome!.source}.</span></div> : null}
       {run.stage === 'starting' && !finished ? <div className="muted">Waiting for Kriya to record the launch…</div> : null}
       {run.status ? (
         <div className="muted small">

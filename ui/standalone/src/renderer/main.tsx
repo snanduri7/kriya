@@ -7,8 +7,9 @@ import { ElectronHostAdapter, type KriyaHostBridge } from './ElectronHostAdapter
 declare global { interface Window { kriyaHost: KriyaHostBridge; __kriyaDriver?: AppDriver } }
 
 async function start() {
-  // Build-time choice: the Run Cockpit replaces the M1 inspector only after parity is accepted (owner decision Q-4).
-  if (import.meta.env.VITE_KRIYA_UI === 'cockpit') {
+  // Build-time choice. The Run Cockpit IS the product (M1 inspector retired from shipped UI, owner decision Q-4, parity in 08_M7). The inspector
+  // exists only in an explicit legacy build (`npm run build:inspector-legacy`, VITE_KRIYA_UI=inspector), for the M1 evidence tests; there is no runtime route to it.
+  if (import.meta.env.VITE_KRIYA_UI !== 'inspector') {
     const { startCockpit } = await import('./cockpit');
     await startCockpit(window.kriyaHost);
     return;

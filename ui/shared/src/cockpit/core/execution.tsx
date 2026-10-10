@@ -28,7 +28,7 @@ export interface RunProgress {
 }
 export const NO_PROGRESS: RunProgress = { lastSeq: 0, kinds: {}, recent: [], error: null };
 
-export type OutcomeKind = 'success' | 'failure' | 'needs_review' | 'refused' | 'interrupted' | 'not_recorded';
+export type OutcomeKind = 'success' | 'failure' | 'needs_review' | 'refused' | 'interrupted' | 'not_recorded' | 'approval_required';
 export interface RunOutcome {
   kind: OutcomeKind;
   label: string;
@@ -38,6 +38,8 @@ export interface RunOutcome {
   /** The trace row id of the finished run, when the process sealed one (to select it in Runs). */
   traceRunId: string | null;
   workflowStatus: string | null;
+  /** For approval_required: what Kriya recorded about the decision it reached (never an invented explanation). */
+  approval?: { kind: string; reason: string; details: Record<string, unknown> };
 }
 
 export interface RunTiming { clickedAt: number; acknowledgedAt: number | null; recordSeenAt: number | null; terminalAt: number | null; refreshedAt: number | null }
@@ -108,6 +110,11 @@ export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean,
     const ended = launch.ended;
     const workflowStatus = ended?.workflow_status ?? null;
     const traceRunId = ended?.trace_run_id ?? null;
+    const needed = launch.approval_required;
+    if (needed) {
+      return { kind: 'approval_required', label: 'Approval required', detail: needed.reason, source: 'Kriya launch record (the decision the workflow reached)', traceRunId, workflowStatus,
+        approval: { kind: needed.kind, reason: needed.reason, details: needed.details } };
+    }
     if (!launch.run) {
       return { kind: 'refused', label: 'Refused before a run started', detail: ended?.error ?? 'Kriya refused the launch before starting a run.', source: 'Kriya launch record (sealed by the launching process)', traceRunId, workflowStatus };
     }
@@ -135,6 +142,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const port = provider.execution;
   const ws = useWorkspace();
   const workspace = ws.current?.path ?? null;
+  const refreshWorkspaceRef = useRef(ws.refresh);
   const [goal, setGoal] = useState('');
   const [done, setDone] = useState<{ key: string; state: PreflightState } | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -144,7 +152,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
   const acquireRef = useRef(acquire);
-  useEffect(() => { runRef.current = run; acquireRef.current = acquire; });
+  useEffect(() => { runRef.current = run; acquireRef.current = acquire; refreshWorkspaceRef.current = ws.refresh; });
 
   // A different workspace: the goal and the preflight belonged to the previous one. (A run in progress prevents the switch; a finished run's banner is kept.)
   const previousWorkspace = useRef<string | null>(workspace);
@@ -167,7 +175,8 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     });
     return () => ac.abort();
   }, [provider, key, workspace]);
-  const preflight = useMemo<PreflightState>(() => (!port ? { state: 'unavailable', reason: 'This host cannot start a run.' } : key === null ? { state: 'idle' } : done?.key === key ? done.state : { state: 'loading' }), [port, key, done]);
+  const preflight = useMemo<PreflightState>(() => (!port ? { state: 'unavailable', reason: 'This host cannot start a run.' } : key === null ? { state: 'idle' } : done?.key === key ? done.state : done && key !== null && done.key.split('|')[0] === key.split('|')[0] ? done.state : { state: 'loading' }), [port, key, done]);
+  // (a re-check of the SAME folder keeps showing the last answer until Kriya's new one arrives; the host re-resolves it authoritatively at Start regardless)
 
   const refreshPreflight = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -241,6 +250,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         setNonce((n) => n + 1); // the run changed what the folder is (recovery state, history): ask Kriya for the preflight again
         // Not tied to this effect's lifetime: the state change above re-runs the effect (its cleanup marks it not live), but the refresh must still finish.
         void (async () => {
+          void refreshWorkspaceRef.current(); // the folder's own facts (.kriya, trace database, Git state) changed during the run
           await acquireRef.current(runWorkspace);
           if (outcome.traceRunId) selection.dispatch({ type: 'selectRun', runId: outcome.traceRunId });
           setRun((prev) => (prev && prev.launchId === launchId ? { ...prev, timing: { ...prev.timing, refreshedAt: performance.now() } } : prev));

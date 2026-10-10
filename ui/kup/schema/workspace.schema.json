@@ -68,7 +68,7 @@
     "ExecutionPreflight": {
       "description": "data of `execution.preflight` (GUI M6): what a run in this folder would be, resolved by Kriya exactly as a terminal `kriya generate` run there would be. The host displays it and decides nothing from it; the launched process re-resolves it and refuses on any blocker.",
       "type": "object",
-      "required": ["ready", "blockers", "workspace", "configuration", "state", "model", "recovery", "interaction"],
+      "required": ["ready", "blockers", "workspace", "configuration", "state", "model", "recovery", "interaction", "toolchains"],
       "properties": {
         "ready": { "type": "boolean" },
         "blockers": {
@@ -138,6 +138,23 @@
           "properties": { "status": { "type": "string" }, "run_active": { "type": "boolean" } },
           "additionalProperties": true
         },
+        "toolchains": {
+          "type": "object",
+          "required": ["tools", "note"],
+          "properties": {
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["tool", "available", "path"],
+                "properties": { "tool": { "type": "string" }, "available": { "type": "boolean" }, "path": { "type": ["string", "null"] } },
+                "additionalProperties": true
+              }
+            },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
         "interaction": {
           "type": "object",
           "required": ["approvals", "knowledge_policy", "note"],
@@ -154,7 +171,7 @@
       "properties": {
         "launch": {
           "type": "object",
-          "required": ["launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "process"],
+          "required": ["launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "process", "approval_required"],
           "properties": {
             "launch_id": { "type": "string" },
             "workspace": {
@@ -202,7 +219,14 @@
                 "additionalProperties": true
               }
             },
-            "process": { "type": ["object", "null"], "additionalProperties": true }
+            "process": { "type": ["object", "null"], "additionalProperties": true },
+            "approval_required": {
+              "type": ["object", "null"],
+              "description": "The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.",
+              "required": ["kind", "reason", "details", "noted_at"],
+              "properties": { "kind": { "type": "string" }, "reason": { "type": "string" }, "details": { "type": "object", "additionalProperties": true }, "noted_at": { "type": "string" } },
+              "additionalProperties": true
+            }
           },
           "additionalProperties": true
         },

@@ -74,3 +74,26 @@ def jdk_home_for_version(version: str) -> Optional[str]:
     except Exception as e:
         logger.debug(f"Failed to resolve JDK home from 'java' on PATH: {e}")
         return None
+
+
+READINESS_TOOLS = ("python3", "git", "java", "mvn", "gradle", "node", "npm")
+
+
+def tool_visibility() -> list:
+    """Which common build tools THIS process can see (GUI M7 execution readiness): ``shutil.which`` over this process's own PATH - never a login
+    shell, never an extended PATH - and, for ``java`` on macOS, whether a JDK is registered with `/usr/libexec/java_home` (the same absolute-path
+    mechanism the workflow uses; Apple's /usr/bin/java is only a stub). Read-only; each entry is {tool, available, path}. Whether a goal needs a
+    tool is not knowable before the workflow runs, so this reports visibility only."""
+    report = []
+    for tool in READINESS_TOOLS:
+        found = shutil.which(tool)
+        if tool == "java" and sys.platform == "darwin" and os.path.exists("/usr/libexec/java_home"):
+            try:
+                result = subprocess.run(["/usr/libexec/java_home"], capture_output=True, text=True, timeout=5)
+                home = result.stdout.strip() if result.returncode == 0 else ""
+                found = os.path.join(home, "bin", "java") if home and os.path.isdir(home) else None
+            except Exception as error:
+                logger.debug(f"java_home failed: {error}")
+                found = None
+        report.append({"tool": tool, "available": found is not None, "path": found})
+    return report

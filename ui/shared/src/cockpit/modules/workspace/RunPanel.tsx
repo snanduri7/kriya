@@ -15,6 +15,13 @@ const AUTHORITY: Record<string, string> = {
   failed: 'The configuration could not be loaded',
 };
 
+function ToolsLine({ data }: { data: ExecutionPreflight }) {
+  const tools = data.toolchains.tools;
+  const seen = tools.filter((t) => t.available).map((t) => t.tool);
+  const missing = tools.filter((t) => !t.available).map((t) => t.tool);
+  return <span title={data.toolchains.note}>{seen.length ? seen.join(', ') : 'none'}{missing.length ? <span className="muted"> · not found: {missing.join(', ')}</span> : null}</span>;
+}
+
 /** Kriya's execution preflight, compactly and in its own words. The cockpit resolves nothing: every line is a field of the answer. */
 export function PreflightSummary({ data }: { data: ExecutionPreflight }) {
   const c = data.configuration;
@@ -27,6 +34,7 @@ export function PreflightSummary({ data }: { data: ExecutionPreflight }) {
       ['State directory', data.state.directory ? <span key="s"><span className="mono">{data.state.directory}</span> <span className="muted">({STATE_SOURCE[data.state.source ?? ''] ?? data.state.source})</span>{data.state.observable_by_cockpit === false ? <Badge tone="bad"> not read by this cockpit</Badge> : null}</span> : 'Not resolved'],
       ['Models', model ? <span key="m"><span className="mono">{model.model}</span> <span className="muted">via {model.provider} at {model.endpoint}, context {model.context_window}{model.fallback_chain.length ? `, fallback ${model.fallback_chain.join(' → ')}` : ''}</span></span> : 'Not resolved (configuration did not load)'],
       ['Approvals', data.interaction.note],
+      ['Tools a run can see', <ToolsLine key="t" data={data} />],
       ['Configuration digest', c.fingerprint ? <span key="f" className="mono" title={c.fingerprint}>{c.fingerprint.slice(0, 16)}…</span> : 'Not recorded'],
     ]} />
   );

@@ -14,6 +14,8 @@ export class HostProvider implements UIProvider {
 
   get desktop() { return this.host.workspace ?? null; }
   get execution() { return this.host.execution ?? null; }
+  openInEditor(path: string, line?: number) { return this.host.openInIde({ path, ...(line !== undefined ? { line } : {}) }); }
+  copyText(text: string) { return this.host.copyToClipboard(text); }
 
   private async call<T>(request: KupRequest, signal?: AbortSignal): Promise<ProviderResult<T>> {
     let raw: unknown;

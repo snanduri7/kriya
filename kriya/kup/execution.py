@@ -27,12 +27,16 @@ from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import envelope, live_consistency, source_block
 from kriya.kup.store import SnapshotError, trace_store_path
 from kriya.kup.workspace_ops import validated_workspace
+from kriya.platform.toolchain_locator import tool_visibility
 
 KNOWLEDGE_POLICY = "strict"
 INTERACTION = ("This host has no interactive approval: a step that needs one (an escalation, a knowledge-gap acknowledgement, a skill choice) "
                "stops the run instead of being approved for you.")
 DISCOVERY = ("Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` "
              "here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.")
+
+TOOLCHAIN_NOTE = ("Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; "
+                  "a missing tool then ends the run with Kriya's own typed failure.")
 
 _CWD_LOCK = threading.Lock()
 
@@ -123,6 +127,7 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
         "configuration": configuration, "state": runtime_state, "model": model,
         "recovery": {"status": assessment.status, "run_active": assessment.status == STATUS_RUN_ACTIVE},
         "interaction": {"approvals": "unavailable", "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION},
+        "toolchains": {"tools": tool_visibility(), "note": TOOLCHAIN_NOTE},
     }
 
 
@@ -137,7 +142,7 @@ def preflight(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
 
 
 def _launch_view(record: Dict[str, Any]) -> Dict[str, Any]:
-    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history")
+    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required")
     view = {key: record.get(key) for key in keys}
     process = record.get("process")
     view["process"] = {"pid": process.get("pid")} if isinstance(process, dict) else None

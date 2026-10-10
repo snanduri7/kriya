@@ -56,12 +56,25 @@ function ContentPanel({ row, evidence }: { row: ChangeRow; evidence: RunEvidence
       {(data) => (
         <div>
           {data.part === 'diff' ? <DiffView diff={data.content} path={data.path} /> : <pre className="mono" aria-label="Proposed content" style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 420, overflow: 'auto' }}>{sanitizeText(data.content)}</pre>}
+          <p><button type="button" onClick={() => void provider.copyText(data.content)}>{data.part === 'diff' ? 'Copy diff' : 'Copy content'}</button></p>
           <p className="muted small" aria-label="Content provenance">
             {data.part} · {data.bytes_total} bytes · {data.encoding} · digest verified {shortDigest(data.ref)} · {data.path ?? 'path not recorded'} · attempt {data.attempt ?? '-'}
           </p>
         </div>
       )}
     </AvailabilityView>
+  );
+}
+
+/** Open the recorded path in the configured editor. The host resolves it against the open workspace and reports whether it could. */
+function OpenInEditor({ path }: { path: string }) {
+  const provider = useProvider();
+  const [result, setResult] = useState<string | null>(null);
+  return (
+    <p>
+      <button type="button" onClick={() => void provider.openInEditor(path).then((r) => setResult(`${r.ok ? 'Opened' : 'Could not open'}: ${r.message}`), (e: unknown) => setResult(`Could not open: ${e instanceof Error ? e.message : String(e)}`))}>Open in editor</button>
+      {result ? <span role="status" className="muted small"> {result}</span> : null}
+    </p>
   );
 }
 
@@ -96,6 +109,7 @@ function Changes() {
             {selected ? (
               <Panel title={`${selected.path}`}>
                 <KeyValue items={[['Change', selected.kind], ['Baseline', baselineText(selected)], ['Baseline digest', selected.beforeDigest ?? 'none recorded'], ['Candidate digest', selected.afterDigest ?? 'none recorded'], ['Record', `seq ${selected.seq} · attempt ${selected.attempt ?? '-'}`]]} />
+                <OpenInEditor path={selected.path} />
                 <ContentPanel row={selected} evidence={data} />
               </Panel>
             ) : rows.length ? <p className="muted">Select a file for its recorded detail.</p> : null}

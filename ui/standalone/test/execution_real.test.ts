@@ -167,6 +167,19 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     expect(d.launch.ended.trace_run_id).toBeNull();
   }, 120_000);
 
+  it('a decision the desktop cannot make stops the run, is recorded with its reason by Kriya, and is read back as approval_required - nothing is approved', async () => {
+    const ws = workspace('approval');
+    const h = host(ws, executable('approval', { outcome: 'approval', step_ms: 50 }));
+    const r = await h.start({ workspace: ws, goal: 'g' });
+    await untilExited(h);
+    const d = (await status(ws, r.launch_id!)).data as Json;
+    expect(d.launch.approval_required).toMatchObject({ kind: 'change_approval', reason: 'the proposed change touches a sensitive path', details: { files: ['.github/workflows/ci.yml'] } });
+    expect(d.launch.phase).toBe('ENDED');
+    expect(d.run_record.terminal_status).toBe('FAILURE'); // the run did not proceed past the decision
+    expect(d.launch.ended.quality_gates_passed).toBeNull();
+    expect(existsSync(join(ws, '.github'))).toBe(false); // nothing was applied to the folder
+  }, 120_000);
+
   it('a process killed mid-run leaves a launch that is RUNNING, not live, and interrupted - never a success', async () => {
     const ws = workspace('die');
     const h = host(ws, executable('die', { outcome: 'die', step_ms: 50 }));

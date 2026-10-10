@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.test.json",
     "build:main": "tsc -p tsconfig.main.json && vite build --config vite.preload.config.mts",
     "build:renderer": "vite build",
+    "build:inspector-legacy": "npm run build:main && VITE_KRIYA_UI=inspector vite build",
     "build:cockpit-fixture": "npm run build:main && VITE_KRIYA_UI=cockpit VITE_KRIYA_PROVIDER=fixture vite build",
     "build:cockpit": "npm run build:main && VITE_KRIYA_UI=cockpit vite build && node scripts-check-bundle.mjs",
     "build": "npm run build:main && npm run build:renderer",

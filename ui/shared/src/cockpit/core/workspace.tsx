@@ -43,6 +43,8 @@ export interface WorkspaceApi extends WorkspaceState {
   openRecent(path: string): Promise<void>;
   forgetRecent(path: string): Promise<void>;
   dismissNotice(): void;
+  /** Ask Kriya about the open folder again (a run changes what is in it: .kriya, the trace database, the Git state). Never changes which folder is open. */
+  refresh(): Promise<void>;
   /** Leave the current workspace (back to the welcome screen). Remembered folders are kept. */
   close(): Promise<void>;
 }
@@ -139,6 +141,14 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     if (openPath.current === path) settle(null);
   }, [desktop, settle]);
 
+  const refresh = useCallback(async () => {
+    const path = openPath.current;
+    if (path === null) return;
+    const described = await provider.describeWorkspace(path);
+    if (!described.ok || openPath.current !== path) return; // a refused re-read keeps the last facts; the folder stays open
+    setState((s) => (s.current && s.current.path === path ? { ...s, current: { path, facts: described.data, provenance: described.provenance } } : s));
+  }, [provider]);
+
   const dismissNotice = useCallback(() => setState((s) => ({ ...s, notice: null })), []);
 
   const close = useCallback(async () => {
@@ -153,6 +163,6 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     return desktop.onMenuCommand((command) => { if (command === 'openFolder') void openFolder(); });
   }, [desktop, openFolder]);
 
-  const api = useMemo<WorkspaceApi>(() => ({ ...state, openFolder, openRecent, forgetRecent, dismissNotice, close }), [state, openFolder, openRecent, forgetRecent, dismissNotice, close]);
+  const api = useMemo<WorkspaceApi>(() => ({ ...state, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close }), [state, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close]);
   return <WorkspaceContext.Provider value={api}>{children}</WorkspaceContext.Provider>;
 }

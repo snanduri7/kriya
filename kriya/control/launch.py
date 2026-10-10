@@ -85,6 +85,7 @@ class LaunchSession:
             "requested_at": _now(), "goal": goal_digest(goal), "options": options, "preflight": preflight,
             "process": {"pid": os.getpid()}, "phase": PHASE_STARTING, "run": None, "ended": None,
             "history": [{"phase": PHASE_STARTING, "at": _now()}],
+            "approval_required": None,
         }
 
     @property
@@ -109,6 +110,17 @@ class LaunchSession:
         except Exception as error:  # the run is already underway: say so loudly, never alter it
             logger.error("Launch %s: record not updated to %s (%s: %s)", self.launch_id, phase, type(error).__name__, error)
 
+    def note_approval_required(self, kind: str, reason: str, details: Dict[str, Any]) -> None:
+        """A step that needs a human decision was reached. The desktop has no approval action (owner decision: never auto-approved), so the run stops;
+        this records WHICH decision and why, before the prompt finds no terminal. The first one is kept (it is the one that stopped the run)."""
+        if self._record.get("approval_required") is not None:
+            return
+        self._record["approval_required"] = {"kind": kind, "reason": reason[:400], "details": details, "noted_at": _now()}
+        try:
+            save_launch_record(self.workspace, self.launch_id, self._record)
+        except Exception as error:
+            logger.error("Launch %s: approval requirement not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
+
     def claim_run_id(self, workspace: str) -> Optional[str]:
         """The id the first top-level run in this launch's workspace must use (once)."""
         if self._claimed or workspace != self.workspace:
@@ -123,6 +135,11 @@ class LaunchSession:
     def finish(self, exit_code: int, result: Optional[Dict[str, Any]], error: Optional[str]) -> None:
         """Seal the record with what the launching process ended with. ``workflow_*`` are the workflow's own returned words, copied, not judged."""
         result = result if isinstance(result, dict) else {}
+        if result.get("status") == "knowledge_gap":
+            # strict KnowledgeGuard stop: acknowledging the gap is a human decision the desktop cannot make (kriya generate --ack-knowledge-gap is a CLI option)
+            gaps = [g for g in (result.get("gap_report") or {}).get("gaps", []) if isinstance(g, dict)]
+            self.note_approval_required("knowledge_gap_acknowledgement", "KnowledgeGuard found libraries Kriya has no verified information for; acknowledging the gap is a human decision",
+                                        {"libraries": [str(g.get("library")) for g in gaps][:20]})
         trace_id = result.get("run_id") if isinstance(result.get("run_id"), str) else None
         message = error or _text(result.get("error"))
         self._transition(PHASE_ENDED, ended={
@@ -158,6 +175,15 @@ def deactivate(session: LaunchSession) -> None:
 def claim_run_id(workspace: str) -> Optional[str]:
     """Called by ``begin_mutating_run`` for a top-level run with no explicit id."""
     return _ACTIVE.claim_run_id(workspace) if _ACTIVE is not None else None
+
+
+def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> None:
+    """Called by the interactive callbacks of `kriya generate` before they would prompt. A no-op outside a desktop launch. Never raises."""
+    try:
+        if _ACTIVE is not None:
+            _ACTIVE.note_approval_required(kind, reason, details)
+    except Exception as error:  # observational
+        logger.error("Launch: approval requirement not recorded (%s: %s)", type(error).__name__, error)
 
 
 def note_run_started(workspace: str, run_id: str, base_revision: Optional[str]) -> None:

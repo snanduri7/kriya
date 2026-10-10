@@ -15,9 +15,13 @@ describe('resolveUiMode', () => {
   ])('%s -> cockpit (strict default)', (_name, read) => {
     expect(resolveUiMode(read as () => string | null)).toBe('cockpit');
   });
-  it('the Vite build records the mode: cockpit only for VITE_KRIYA_UI=cockpit, inspector for every other build', () => {
+  it('the Vite build records the mode: inspector only for the explicit legacy build, cockpit for every other build', () => {
     const config = readFileSync(join(__dirname, '..', 'vite.config.ts'), 'utf8');
     expect(config).toContain("fileName: 'ui-mode.json'");
-    expect(config).toContain("process.env.VITE_KRIYA_UI === 'cockpit' ? 'cockpit' : 'inspector'");
+    expect(config).toContain("process.env.VITE_KRIYA_UI === 'inspector' ? 'inspector' : 'cockpit'");
+    const entry = readFileSync(join(__dirname, '..', 'src', 'renderer', 'main.tsx'), 'utf8');
+    expect(entry).toContain("import.meta.env.VITE_KRIYA_UI !== 'inspector'"); // the cockpit is the default; no runtime switch exists
+    expect(entry).not.toMatch(/localStorage|location\.(search|hash)|URLSearchParams/);
+    expect(JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).scripts['build:inspector-legacy']).toContain('VITE_KRIYA_UI=inspector');
   });
 });
