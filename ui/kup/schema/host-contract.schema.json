@@ -320,6 +320,33 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "run_id",
+            "seq",
+            "part"
+          ],
+          "properties": {
+            "operation": {
+              "const": "evidence.call_content"
+            },
+            "run_id": {
+              "$ref": "#/$defs/RunId"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000000
+            },
+            "part": {
+              "type": "string",
+              "pattern": "^[a-z_]{1,32}$"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

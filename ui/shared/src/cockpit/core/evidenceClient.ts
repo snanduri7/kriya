@@ -3,7 +3,7 @@
  * One selection = one manifest, one verification and one paged pass over the records, shared by every module (so the store is
  * verified once per page, not once per module). Nothing is cached across selections: a fresh selection or refresh re-verifies.
  */
-import type { EvidenceChangeContent, EvidenceManifest, EvidenceVerify } from '../../model/kup';
+import type { EvidenceManifest, EvidenceVerify } from '../../model/kup';
 import { failed, unavailable, type Availability, type UnavailableReason } from './availability';
 import type { Provenance } from './evidence';
 import type { ProviderError, ProviderResult, UIProvider } from './provider';
@@ -74,7 +74,7 @@ export async function loadRunEvidence(provider: UIProvider, runId: string, snaps
 
 
 /** A refused or failed content read as the Availability the user sees (Kriya states why; the UI never guesses). */
-export function contentAvailability(result: ProviderResult<EvidenceChangeContent>): Availability<EvidenceChangeContent> {
+export function contentAvailability<T>(result: ProviderResult<T>): Availability<T> {
   if (result.ok) return { state: 'ready', data: result.data, provenance: result.provenance };
   const { code, message, extra } = result.error;
   const reason = typeof extra.reason === 'string' ? extra.reason : '';

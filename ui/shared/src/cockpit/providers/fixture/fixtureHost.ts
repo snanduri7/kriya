@@ -9,6 +9,7 @@ import { SCENARIOS, type Scenario, type SeedRecord } from './scenarios';
 
 // The content classes Kriya's SECURITY_AUTHORITY table knows (kriya/kup/policy.py BLOB_CLASSES); anything else is unclassified and never served.
 const CANDIDATE_PARTS = ['before', 'after', 'diff', 'proposed', 'attempted_edits'];
+const MODEL_INPUT_PARTS = ['messages', 'tools', 'wire_body'];
 
 export const FIXTURE_SNAPSHOT_ID = '20261010T090000000000Z-f1c70001';
 const OBSERVED = '2026-10-10T09:30:00Z';
@@ -48,11 +49,11 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
-        capability_set: '1.1', snapshot: true, prompt: true, evidence: true, evidence_content: this.evidenceContent, evidence_content_classes: this.evidenceContent ? ['candidate_content'] : [], qualification: false, authority: false,
+        capability_set: '1.1', snapshot: true, prompt: true, evidence: true, evidence_content: this.evidenceContent, evidence_content_classes: this.evidenceContent ? ['candidate_content', 'model_input'] : [], qualification: false, authority: false,
         knowledge: false, tools: false, experiments: false, live: false, actions: false,
         consistency_kinds: ['snapshot_copy', 'live_observation', 'not_applicable', 'sealed_store'],
       },
@@ -74,7 +75,8 @@ export class FixtureHost implements HostAdapter {
     const rec = (col: string, data: unknown): Json => ({ availability: 'recorded', provenance: `runs.${col}`, reason: null, data });
     return {
       run: this.summary(s), fields: {},
-      run_events: rec('run_events', this.storeEvent(s) ? [{ kind: 'evidence.attempt_store', attempt: 0, source: 'workflow.run_generation_workflow', authority: 'auxiliary', message: 'attempt evidence store', failure_type: null, operation: null, details: this.storeEvent(s), created_at: 2 }] : []), evidence_records: absent('fixture', 'evidence_records'), gate_outcomes: absent('fixture', 'gate_outcomes'), model_hops: absent('fixture', 'model_hops'),
+      run_events: rec('run_events', [...(s.s1Events ?? []), ...(this.storeEvent(s) ? [{ kind: 'evidence.attempt_store', attempt: 0, source: 'workflow.run_generation_workflow', authority: 'auxiliary', message: 'attempt evidence store', failure_type: null, operation: null, details: this.storeEvent(s), created_at: 2 }] : [])]),
+      evidence_records: s.s1Evidence ? rec('evidence_records', s.s1Evidence) : absent('fixture', 'evidence_records'), gate_outcomes: absent('fixture', 'gate_outcomes'), model_hops: absent('fixture', 'model_hops'),
       generation_metrics: absent('fixture', 'generation_metrics'), failure_report: absent('fixture', 'failure_report'),
       context: absent('not persisted', 'not_persisted'), attribution: absent('not persisted', 'not_persisted'), diagnostics: absent('not persisted', 'not_persisted'),
       comparisons: absent('not persisted', 'not_persisted'), output: absent('not persisted', 'not_persisted'),
@@ -118,14 +120,18 @@ export class FixtureHost implements HostAdapter {
     return this.env('evidence.verify', data, seed.sealed ? { kind: 'sealed_store', live_stream: false, head_digest: head } : this.live, EVIDENCE_SOURCE);
   }
 
-  private changeContent(runId: string, s: Scenario | undefined, seq: number, part: string): KupEnvelope {
-    const op = 'evidence.change_content';
+  private changeContent(runId: string, s: Scenario | undefined, seq: number, part: string, op: 'evidence.change_content' | 'evidence.call_content'): KupEnvelope {
+    const candidate = op === 'evidence.change_content';
+    const served = candidate ? 'candidate_content' : 'model_input';
+    const classOf = CANDIDATE_PARTS.includes(part) ? 'candidate_content' : MODEL_INPUT_PARTS.includes(part) ? 'model_input' : 'unclassified';
     // Same order as Kriya: class table, then Kriya's visibility, then the store.
-    if (!CANDIDATE_PARTS.includes(part)) return this.err(op, 'EVIDENCE_CONTENT_POLICY', `${part} is not a classified content key; unclassified content is never served`, { content_class: 'unclassified', reason: 'unclassified_key' });
-    if (!this.evidenceContent) return this.err(op, 'EVIDENCE_CONTENT_POLICY', "Kriya's content visibility policy (evidence.attempt_recorder.content_visibility) is off", { content_class: 'candidate_content', reason: 'content_visibility_off' });
+    if (classOf === 'unclassified') return this.err(op, 'EVIDENCE_CONTENT_POLICY', `${part} is not a classified content key; unclassified content is never served`, { content_class: 'unclassified', reason: 'unclassified_key' });
+    if (classOf !== served) return this.err(op, 'EVIDENCE_CONTENT_POLICY', `${part} is ${classOf} content, which ${op} does not serve`, { content_class: classOf, reason: 'class_not_served_here' });
+    if (!this.evidenceContent) return this.err(op, 'EVIDENCE_CONTENT_POLICY', "Kriya's content visibility policy (evidence.attempt_recorder.content_visibility) is off", { content_class: served, reason: 'content_visibility_off' });
     if (!s || s.seed.store === 'absent') return this.err(op, 'EVIDENCE_STORE_NOT_FOUND', `no attempt-evidence store for run ${runId}`);
     const record = s.seed.records[seq - 1];
-    if (!record || record.kind !== 'candidate.change') return this.err(op, 'INVALID_REQUEST', `record ${seq} of run ${runId} is not a candidate.change record`);
+    const kind = candidate ? 'candidate.change' : 'model.request';
+    if (!record || record.kind !== kind) return this.err(op, 'INVALID_REQUEST', `record ${seq} of run ${runId} is not a ${kind} record`);
     const ref = record.blobs[part];
     if (ref === undefined) {
       const reason = part in record.content_digests ? 'digest_only' : 'part_not_recorded';
@@ -133,8 +139,9 @@ export class FixtureHost implements HostAdapter {
     }
     const text = s.seed.texts[ref] ?? '';
     const head = HEAD(s.seed.records);
-    return this.env(op, { run_id: runId, seq, part, content_class: 'candidate_content', path: typeof record.payload.path === 'string' ? record.payload.path : null, attempt: record.attempt_number, ref, bytes_total: text.length, encoding: 'utf-8', content: text, digest_ok: true, head_digest: head },
-      s.seed.sealed ? { kind: 'sealed_store', live_stream: false, head_digest: head } : this.live, EVIDENCE_SOURCE);
+    const base = { run_id: runId, seq, part, content_class: served, attempt: record.attempt_number, ref, bytes_total: text.length, encoding: 'utf-8', content: text, digest_ok: true, head_digest: head };
+    const data = candidate ? { ...base, path: typeof record.payload.path === 'string' ? record.payload.path : null } : { ...base, role: record.role, call_seq: record.call_seq };
+    return this.env(op, data, s.seed.sealed ? { kind: 'sealed_store', live_stream: false, head_digest: head } : this.live, EVIDENCE_SOURCE);
   }
 
   private records(runId: string, s: Scenario | undefined, q: Json): KupEnvelope {
@@ -185,7 +192,8 @@ export class FixtureHost implements HostAdapter {
         if (request.from_trace === true && !request.snapshot_id) return this.err('evidence.manifest', 'INVALID_REQUEST', 'from_trace needs the snapshot_id the trace row is read from');
         return request.from_trace === true ? this.manifest(find(request.run_id), request.run_id, true, true) : this.manifest(findEvidence(request.run_id), request.run_id, request.snapshot_id !== undefined, false);
       case 'evidence.verify': return this.verify(request.run_id, findEvidence(request.run_id));
-      case 'evidence.change_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part);
+      case 'evidence.change_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.change_content');
+      case 'evidence.call_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.call_content');
       case 'evidence.records': return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
       default: { const never: never = request; return this.err('unknown', 'INVALID_REQUEST', `fixture host does not answer ${JSON.stringify(never)}`); }
     }

@@ -180,9 +180,9 @@ describe.skipIf(!available)('KriyaProvider against the real Kriya CLI and real e
       } });
     }, 60_000);
 
-    it('capabilities advertise content only now, and only the candidate class', async () => {
+    it('capabilities advertise content only now, and only the two classes Kriya classifies', async () => {
       const caps = await onProvider.capabilities();
-      expect(caps.ok && (caps.data.features as Record<string, unknown>)).toMatchObject({ evidence_content: true, evidence_content_classes: ['candidate_content'] });
+      expect(caps.ok && (caps.data.features as Record<string, unknown>)).toMatchObject({ evidence_content: true, evidence_content_classes: ['candidate_content', 'model_input'] });
     }, 60_000);
 
     it('the authorized diff, before and after are the recorded bytes, digest-checked, with provenance', async () => {

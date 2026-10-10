@@ -56,7 +56,7 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _history(cfg, operation, request, request_id)
         if operation == "workspace.status":
             return _workspace_status(request, request_id)
-        if operation in ("evidence.manifest", "evidence.verify", "evidence.records", "evidence.change_content"):
+        if operation in ("evidence.manifest", "evidence.verify", "evidence.records", "evidence.change_content", "evidence.call_content"):
             return _evidence(cfg, operation, request, request_id)
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
     except SnapshotError as error:
@@ -64,7 +64,7 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
 
 
 def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    handler = {"evidence.manifest": evidence_ops.manifest, "evidence.verify": evidence_ops.verify, "evidence.records": evidence_ops.records, "evidence.change_content": evidence_ops.change_content}[operation]
+    handler = {"evidence.manifest": evidence_ops.manifest, "evidence.verify": evidence_ops.verify, "evidence.records": evidence_ops.records, "evidence.change_content": evidence_ops.change_content, "evidence.call_content": evidence_ops.call_content}[operation]
     try:
         return handler(cfg, request, request_id)
     except StateDirectoryError as error:  # the configured state directory is unusable: a configuration failure, typed

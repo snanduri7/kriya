@@ -509,6 +509,85 @@
         }
       },
       "additionalProperties": true
+    },
+    "EvidenceCallContent": {
+      "type": "object",
+      "description": "One authorized part of one recorded model request (evidence.call_content): what the model was shown. Served only when Kriya's own content_visibility is on; capped; re-hashed on read; never the model's answer.",
+      "required": [
+        "run_id",
+        "seq",
+        "part",
+        "content_class",
+        "role",
+        "call_seq",
+        "attempt",
+        "ref",
+        "bytes_total",
+        "encoding",
+        "content",
+        "digest_ok",
+        "head_digest"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "part": {
+          "type": "string"
+        },
+        "content_class": {
+          "type": "string"
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "call_seq": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        },
+        "bytes_total": {
+          "type": "integer"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "digest_ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "head_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

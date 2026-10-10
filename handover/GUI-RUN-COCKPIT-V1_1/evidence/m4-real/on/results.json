@@ -1,0 +1,9 @@
+{
+ "acquire_to_first_runs_ms": 2467,
+ "select_sealed_run_to_timeline_ms": 2461,
+ "context_first_render_ms": 16,
+ "plan_first_render_ms": 17,
+ "attempts_first_render_ms": 17,
+ "evidence_first_render_ms": 18,
+ "select_unsealed_run_to_timeline_ms": 2446
+}

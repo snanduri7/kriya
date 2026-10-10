@@ -117,7 +117,7 @@ describe.each(makers)('UIProvider contract: %s', (_name, kind, make) => {
     expect(!unclassified.ok && unclassified.error.extra).toMatchObject({ content_class: 'unclassified', reason: 'unclassified_key' });
     const on = kind === 'fixture' ? createFixtureProvider({ evidenceContent: true }) : createKriyaProvider(new FixtureHost({ evidenceContent: true }));
     const caps = await on.capabilities();
-    expect(caps.ok && (caps.data.features as Record<string, unknown>).evidence_content_classes).toEqual(['candidate_content']);
+    expect(caps.ok && (caps.data.features as Record<string, unknown>).evidence_content_classes).toEqual(['candidate_content', 'model_input']);
     const served = await on.evidenceChangeContent('ev-fx-brownfield-modify', { seq, part: 'diff' });
     expect(served.ok && [served.data.part, served.data.content_class, served.data.digest_ok, served.data.encoding]).toEqual(['diff', 'candidate_content', true, 'utf-8']);
     expect(served.ok && served.data.content).toContain('--- a/');
@@ -129,6 +129,28 @@ describe.each(makers)('UIProvider contract: %s', (_name, kind, make) => {
     expect(!notCandidate.ok && notCandidate.error.code).toBe('INVALID_REQUEST');
     const gone = await on.evidenceChangeContent('ev-fx-pruned', { seq: 1, part: 'diff' });
     expect(!gone.ok && gone.error.code).toBe('EVIDENCE_STORE_NOT_FOUND');
+  });
+
+  it('call content: the same authority; model_input is served only by its own operation, and only for model.request records', async () => {
+    const off = make();
+    const records = await off.evidenceRecords('ev-fx-greenfield-success', { kind: ['model.request'] });
+    const seq = records.ok ? records.data.records[0]!.seq : 0;
+    expect(seq).toBeGreaterThan(0);
+    const denied = await off.evidenceCallContent('ev-fx-greenfield-success', { seq, part: 'messages' });
+    expect(!denied.ok && denied.error).toMatchObject({ code: 'EVIDENCE_CONTENT_POLICY', extra: { content_class: 'model_input', reason: 'content_visibility_off' } });
+    const on = kind === 'fixture' ? createFixtureProvider({ evidenceContent: true }) : createKriyaProvider(new FixtureHost({ evidenceContent: true }));
+    const served = await on.evidenceCallContent('ev-fx-greenfield-success', { seq, part: 'messages' });
+    expect(served.ok && [served.data.content_class, served.data.role, served.data.call_seq, served.data.digest_ok]).toEqual(['model_input', 'developer', 1, true]);
+    expect(served.ok && JSON.parse(served.data.content)[0].role).toBe('system');
+    const wrongClass = await on.evidenceCallContent('ev-fx-greenfield-success', { seq, part: 'diff' });
+    expect(!wrongClass.ok && wrongClass.error.extra).toMatchObject({ content_class: 'candidate_content', reason: 'class_not_served_here' });
+    const unclassified = await on.evidenceCallContent('ev-fx-greenfield-success', { seq, part: 'content' });
+    expect(!unclassified.ok && unclassified.error.extra).toMatchObject({ reason: 'unclassified_key' });
+    const notRequest = await on.evidenceCallContent('ev-fx-greenfield-success', { seq: 1, part: 'messages' });
+    expect(!notRequest.ok && notRequest.error.code).toBe('INVALID_REQUEST');
+    const dig = await on.evidenceRecords('ev-fx-digest-only', { kind: ['model.request'] });
+    const unavailable = await on.evidenceCallContent('ev-fx-digest-only', { seq: dig.ok ? dig.data.records[0]!.seq : 0, part: 'messages' });
+    expect(!unavailable.ok && unavailable.error).toMatchObject({ code: 'EVIDENCE_CONTENT_UNAVAILABLE', extra: { reason: 'digest_only' } });
   });
 
   it('settings round-trip through the host', async () => {

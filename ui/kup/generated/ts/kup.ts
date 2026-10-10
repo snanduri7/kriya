@@ -54,7 +54,8 @@ export interface Envelope {
     | 'evidence.manifest'
     | 'evidence.verify'
     | 'evidence.records'
-    | 'evidence.change_content';
+    | 'evidence.change_content'
+    | 'evidence.call_content';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -653,6 +654,27 @@ export interface EvidenceChangeContent {
   [k: string]: unknown;
 }
 
+// ---- EvidenceCallContent (evidence.schema.json#/$defs/EvidenceCallContent) ----
+/**
+ * One authorized part of one recorded model request (evidence.call_content): what the model was shown. Served only when Kriya's own content_visibility is on; capped; re-hashed on read; never the model's answer.
+ */
+export interface EvidenceCallContent {
+  run_id: string;
+  seq: number;
+  part: string;
+  content_class: string;
+  role: string | null;
+  call_seq: number | null;
+  attempt: number | null;
+  ref: string;
+  bytes_total: number;
+  encoding: 'utf-8' | 'base64';
+  content: string;
+  digest_ok: true;
+  head_digest: string | null;
+  [k: string]: unknown;
+}
+
 // ---- KupRequest (host-contract.schema.json#/$defs/KupRequest) ----
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
@@ -734,6 +756,12 @@ export type KupRequest =
     }
   | {
       operation: 'evidence.change_content';
+      run_id: RunId;
+      seq: number;
+      part: string;
+    }
+  | {
+      operation: 'evidence.call_content';
       run_id: RunId;
       seq: number;
       part: string;

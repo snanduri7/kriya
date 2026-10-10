@@ -35,6 +35,7 @@
 //     EvidenceVerify data = Converter.EvidenceVerifyFromJsonString(jsonString);
 //     EvidenceRecords data = Converter.EvidenceRecordsFromJsonString(jsonString);
 //     EvidenceChangeContent data = Converter.EvidenceChangeContentFromJsonString(jsonString);
+//     EvidenceCallContent data = Converter.EvidenceCallContentFromJsonString(jsonString);
 //     KupRequest data = Converter.KupRequestFromJsonString(jsonString);
 //     OpenInIdeRequest data = Converter.OpenInIdeRequestFromJsonString(jsonString);
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
@@ -279,6 +280,14 @@ public class Converter {
 
     public static String EvidenceChangeContentToJsonString(EvidenceChangeContent obj) throws JsonProcessingException {
         return getEvidenceChangeContentObjectWriter().writeValueAsString(obj);
+    }
+
+    public static EvidenceCallContent EvidenceCallContentFromJsonString(String json) throws IOException {
+        return getEvidenceCallContentObjectReader().readValue(json);
+    }
+
+    public static String EvidenceCallContentToJsonString(EvidenceCallContent obj) throws JsonProcessingException {
+        return getEvidenceCallContentObjectWriter().writeValueAsString(obj);
     }
 
     public static KupRequest KupRequestFromJsonString(String json) throws IOException {
@@ -1024,6 +1033,37 @@ public class Converter {
     private static ObjectWriter getEvidenceChangeContentObjectWriter() {
         if (EvidenceChangeContentWriter == null) instantiateEvidenceChangeContentMapper();
         return EvidenceChangeContentWriter;
+    }
+
+    private static ObjectReader EvidenceCallContentReader;
+    private static ObjectWriter EvidenceCallContentWriter;
+
+    private static void instantiateEvidenceCallContentMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        EvidenceCallContentReader = mapper.readerFor(EvidenceCallContent.class);
+        EvidenceCallContentWriter = mapper.writerFor(EvidenceCallContent.class);
+    }
+
+    private static ObjectReader getEvidenceCallContentObjectReader() {
+        if (EvidenceCallContentReader == null) instantiateEvidenceCallContentMapper();
+        return EvidenceCallContentReader;
+    }
+
+    private static ObjectWriter getEvidenceCallContentObjectWriter() {
+        if (EvidenceCallContentWriter == null) instantiateEvidenceCallContentMapper();
+        return EvidenceCallContentWriter;
     }
 
     private static ObjectReader KupRequestReader;

@@ -303,9 +303,19 @@ _PART_RE = re.compile(r"^[a-z_]{1,32}$")
 
 
 def change_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    """ONE part of ONE recorded candidate change, when Kriya authorizes content. Order is fail-closed: (1) parameters, (2) the content
-    class of the requested key and Kriya's visibility setting - before any store access, so a refusal reveals nothing about a store,
-    (3) store verification, (4) the record and what it kept, (5) the recorded size against the cap, (6) the bytes, re-hashed on read."""
+    """ONE part of ONE recorded candidate change (class candidate_content), when Kriya authorizes content."""
+    return _serve_part(cfg, request, request_id, operation="evidence.change_content", record_kind="candidate.change", served_class=policy.CONTENT_CLASS_CANDIDATE)
+
+
+def call_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """ONE part (messages, tools, wire body) of ONE recorded model request (class model_input), when Kriya authorizes content."""
+    return _serve_part(cfg, request, request_id, operation="evidence.call_content", record_kind="model.request", served_class=policy.CONTENT_CLASS_MODEL_INPUT)
+
+
+def _serve_part(cfg, request: Dict[str, Any], request_id: str, *, operation: str, record_kind: str, served_class: str) -> Dict[str, Any]:
+    """Order is fail-closed: (1) parameters, (2) the content class of the requested key (a key of another class, or an unlisted key, is refused here)
+    and Kriya's visibility setting - before any store access, so a refusal reveals nothing about a store, (3) store verification, (4) the record and
+    what it kept, (5) the recorded size against the cap, (6) the bytes, re-hashed on read."""
     run_id = request.get("run_id")
     validate_run_id(run_id)
     seq, part = request.get("seq"), request.get("part")
@@ -317,14 +327,17 @@ def change_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, A
     if content_class == policy.CONTENT_CLASS_UNCLASSIFIED:
         raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, f"{part!r} is not a classified content key; unclassified content is never served",
                             content_class=content_class, reason="unclassified_key")
+    if content_class != served_class:
+        raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, f"{part!r} is {content_class} content, which {operation} does not serve",
+                            content_class=content_class, reason="class_not_served_here")
     visibility = getattr(getattr(getattr(cfg, "evidence", None), "attempt_recorder", None), "content_visibility", "off")
     if visibility != "on":
         raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, "Kriya's content visibility policy (evidence.attempt_recorder.content_visibility) is off",
                             content_class=content_class, reason="content_visibility_off")
     run, chain, result, _live = _verified_chain(cfg, run_id)
     record = chain[seq - 1] if seq <= len(chain) else None
-    if record is None or record.get("kind") != "candidate.change":
-        raise SnapshotError(policy.INVALID_REQUEST, f"record {seq} of run {run_id} is not a candidate.change record")
+    if record is None or record.get("kind") != record_kind:
+        raise SnapshotError(policy.INVALID_REQUEST, f"record {seq} of run {run_id} is not a {record_kind} record")
     ref = (record.get("blobs") or {}).get(part)
     digest_entry = (record.get("content_digests") or {}).get(part)
     if ref is None:
@@ -346,8 +359,12 @@ def change_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, A
     except UnicodeDecodeError:
         content, encoding = base64.b64encode(data).decode("ascii"), "base64"
     payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
-    out = {"run_id": run_id, "seq": seq, "part": part, "content_class": content_class, "path": payload.get("path"), "attempt": record.get("attempt_number"),
+    out = {"run_id": run_id, "seq": seq, "part": part, "content_class": content_class, "attempt": record.get("attempt_number"),
            "ref": ref, "bytes_total": len(data), "encoding": encoding, "content": content, "digest_ok": True, "head_digest": result.head_digest}
+    if record_kind == "candidate.change":
+        out["path"] = payload.get("path")
+    else:
+        out["role"], out["call_seq"] = record.get("role"), record.get("call_seq")
     consistency = ({"kind": policy.CONSISTENCY_SEALED_STORE, "live_stream": False, "head_digest": result.head_digest}
                    if result.status == reader.VERIFIED else live_consistency())
-    return envelope("evidence.change_content", request_id, data=out, source=_source(cfg), consistency=consistency)
+    return envelope(operation, request_id, data=out, source=_source(cfg), consistency=consistency)

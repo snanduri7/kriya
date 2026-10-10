@@ -73,6 +73,7 @@ describe('evidence argv (Run Cockpit v1.1)', () => {
     expect(buildKriyaArgv({ operation: 'evidence.verify', run_id: 'r1' })).toEqual(['evidence', 'verify', 'r1', '--json', '--kup-version', '1']);
     expect(buildKriyaArgv({ operation: 'evidence.manifest', run_id: 'r1', snapshot_id: SID })).toEqual(['evidence', 'manifest', 'r1', '--json', '--kup-version', '1', `--snapshot-id=${SID}`]);
     expect(buildKriyaArgv({ operation: 'evidence.change_content', run_id: 'r1', seq: 28, part: 'diff' })).toEqual(['evidence', 'change-content', 'r1', '--json', '--kup-version', '1', '--seq=28', '--part=diff']);
+    expect(buildKriyaArgv({ operation: 'evidence.call_content', run_id: 'r1', seq: 5, part: 'messages' })).toEqual(['evidence', 'call-content', 'r1', '--json', '--kup-version', '1', '--seq=5', '--part=messages']);
     expect(buildKriyaArgv({ operation: 'evidence.manifest', run_id: 't1', snapshot_id: SID, from_trace: true })).toEqual(['evidence', 'manifest', 't1', '--json', '--kup-version', '1', `--snapshot-id=${SID}`, '--from-trace']);
     expect(buildKriyaArgv({ operation: 'evidence.records', run_id: 'r1', unit: '-u', kind: ['gate.result', 'model.request'], attempt: 2, from_seq: 3, limit: 50, cursor: 'abc', phase: 'p', role: 'r' })).toEqual(
       ['evidence', 'records', 'r1', '--json', '--kup-version', '1', '--unit=-u', '--phase=p', '--role=r', '--attempt=2', '--from-seq=3', '--limit=50', '--cursor=abc', '--kind=gate.result', '--kind=model.request']);

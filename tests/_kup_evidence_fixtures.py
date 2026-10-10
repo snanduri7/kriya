@@ -110,3 +110,21 @@ def candidate_store(run_id: str, *, capture: str = model.CAPTURE_FULL, seal: boo
     if seal:
         assert writer.seal("run_closed")
     return run_directory(state_dir(), run_id), seqs
+
+
+MESSAGES = [{"role": "system", "content": "You are the developer."}, {"role": "user", "content": "Add clamp() to NumberUtils."}]
+
+
+def model_call_store(run_id: str, *, capture: str = model.CAPTURE_FULL, seal: bool = True):
+    """A store with a Developer model.request (messages and wire body kept), its model.response, a model.request that kept nothing but
+    its payload, and a candidate.change. Returns (directory, {name: seq})."""
+    writer = AttemptEvidenceWriter(state_dir(), run_id, capture=capture, manifest={"workspace_identity": "ws"})
+    ids = {**IDENTITY, "phase": "attempt", "role": "developer", "call_seq": 1}
+    seqs = {"request": writer.append("model.request", {"dispatched": True, "model": "dev-model", "tools": 0}, identity=ids,
+                                     content={"messages": MESSAGES, "wire_body": '{"model":"dev-model"}'})}
+    seqs["response"] = writer.append("model.response", {"finish_reason": "stop"}, identity=ids, content={"content": "the answer"})
+    seqs["bare"] = writer.append("model.request", {"dispatched": False, "refusal_type": "BudgetRefusal"}, identity={**ids, "call_seq": 2})
+    seqs["candidate"] = writer.append("candidate.change", {"decision": "STAGED", "path": "a.py"}, identity=ids, content={"diff": "d"})
+    if seal:
+        assert writer.seal("run_closed")
+    return run_directory(state_dir(), run_id), seqs

@@ -17,6 +17,7 @@ export interface Session { snapshotId: string | null; status: Availability<{ sna
 const SessionContext = createContext<Session | null>(null);
 const RunEvidenceContext = createContext<Availability<RunEvidence>>({ state: 'loading' });
 const RunContextContext = createContext<Availability<RunContext>>({ state: 'loading' });
+const RunDetailContext = createContext<Availability<RunDetail>>({ state: 'loading' });
 const ModuleScopeContext = createContext<ModuleDefinition | null>(null);
 
 function need<T>(value: T | null, name: string): T {
@@ -30,6 +31,8 @@ export const useCapabilities = () => useContext(CapabilitiesContext).registry;
 export const useSession = () => need(useContext(SessionContext), 'useSession');
 export const useRunEvidence = () => useContext(RunEvidenceContext);
 export const useRunContext = () => useContext(RunContextContext);
+/** The selected run's trace row (S1) exactly as history.detail returned it: its run_events and evidence_records are read through core selectors. */
+export const useRunDetail = () => useContext(RunDetailContext);
 export const useDispatch = () => { const { selection } = useServices(); return useCallback((a: SelectionAction) => selection.dispatch(a), [selection]); };
 
 /** Read one selection field. A module may read only the fields its definition declares; anything else is a programming error. */
@@ -150,5 +153,5 @@ function RunContextProvider({ children }: { children: ReactNode }) {
     };
     return { state: 'ready', data: ctx, provenance: detail.provenance };
   }, [runId, detail, evidence, caps, provider.kind, snapshotId]);
-  return <RunContextContext.Provider value={value}>{children}</RunContextContext.Provider>;
+  return <RunDetailContext.Provider value={detail}><RunContextContext.Provider value={value}>{children}</RunContextContext.Provider></RunDetailContext.Provider>;
 }

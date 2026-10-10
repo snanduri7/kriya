@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
 } from '../../model/kup';
 import type { HostSettings } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -48,6 +48,8 @@ export interface UIProvider {
   evidenceRecords(runId: string, query?: RecordsQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceRecords>>;
   /** ONE authorized part of ONE recorded candidate change. Kriya decides (content_visibility, class table, caps); a refusal is a typed error. */
   evidenceChangeContent(runId: string, query: ChangeContentQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceChangeContent>>;
+  /** ONE authorized part of ONE recorded model request (what the model was shown). Same authority and refusals as evidenceChangeContent. */
+  evidenceCallContent(runId: string, query: ChangeContentQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceCallContent>>;
   getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined>;
   setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void>;
 }

@@ -6,12 +6,13 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
+    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case CAPABILITIES: return "capabilities";
+            case EVIDENCE_CALL_CONTENT: return "evidence.call_content";
             case EVIDENCE_CHANGE_CONTENT: return "evidence.change_content";
             case EVIDENCE_MANIFEST: return "evidence.manifest";
             case EVIDENCE_RECORDS: return "evidence.records";
@@ -31,6 +32,7 @@ public enum Operation {
     @JsonCreator
     public static Operation forValue(String value) throws IOException {
         if (value.equals("capabilities")) return CAPABILITIES;
+        if (value.equals("evidence.call_content")) return EVIDENCE_CALL_CONTENT;
         if (value.equals("evidence.change_content")) return EVIDENCE_CHANGE_CONTENT;
         if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;
         if (value.equals("evidence.records")) return EVIDENCE_RECORDS;

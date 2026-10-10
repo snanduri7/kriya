@@ -6,7 +6,7 @@
  */
 import { validate, validateData } from '@kriya-ui/kup';
 import type { HostAdapter, HostSettings } from '../../host/HostAdapter';
-import type { Capabilities, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus } from '../../model/kup';
+import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus } from '../../model/kup';
 import type { ChangeContentQuery, ProviderKind, ProviderResult, RecordsQuery, UIProvider } from '../core/provider';
 
 export class HostProvider implements UIProvider {
@@ -60,6 +60,9 @@ export class HostProvider implements UIProvider {
   }
   evidenceChangeContent(runId: string, q: ChangeContentQuery, signal?: AbortSignal) {
     return this.call<EvidenceChangeContent>({ operation: 'evidence.change_content', run_id: runId, seq: q.seq, part: q.part }, signal);
+  }
+  evidenceCallContent(runId: string, q: ChangeContentQuery, signal?: AbortSignal) {
+    return this.call<EvidenceCallContent>({ operation: 'evidence.call_content', run_id: runId, seq: q.seq, part: q.part }, signal);
   }
   getSetting<K extends keyof HostSettings>(key: K) { return this.host.getSetting(key); }
   setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]) { return this.host.setSetting(key, value); }

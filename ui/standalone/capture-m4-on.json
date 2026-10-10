@@ -1,0 +1,76 @@
+[
+ {
+  "width": 1600,
+  "height": 1000,
+  "wait": 800
+ },
+ {
+  "name": "acquire_to_first_runs_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Acquire snapshot').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('.ck-list button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 300
+ },
+ {
+  "name": "select_sealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[0].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600
+ },
+ {
+  "name": "context_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Context').click();await new Promise((r)=>{const i=setInterval(()=>{ if(/prompt text|no model call recorded/i.test(document.querySelector('[data-module=\"context\"]')?.innerText||'')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "01-real-context.png"
+ },
+ {
+  "name": "plan_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Plan').click();await new Promise((r)=>{const i=setInterval(()=>{ if((document.querySelector('[data-module=\"plan\"]')?.innerText||'').includes('Not recorded')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "02-real-plan.png"
+ },
+ {
+  "name": "attempts_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Attempts').click();await new Promise((r)=>{const i=setInterval(()=>{ if(!!document.querySelector('[aria-label=\"Attempts\"]')||(document.querySelector('[data-module=\"attempts\"]')?.innerText||'').includes('No attempt recorded')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "03-real-attempts.png"
+ },
+ {
+  "name": "evidence_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Evidence').click();await new Promise((r)=>{const i=setInterval(()=>{ if(!!document.querySelector('[aria-label=\"Evidence records\"]')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "04-real-evidence.png"
+ },
+ {
+  "js": "document.querySelectorAll('[aria-label=\"Evidence records\"] tbody tr')[3].click()",
+  "wait": 500,
+  "file": "05-real-evidence-record-detail.png"
+ },
+ {
+  "js": "(()=>{const s=document.querySelector('select[aria-label=\"Group by\"]');const set=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;set.call(s,'kind');s.dispatchEvent(new Event('change',{bubbles:true}))})()",
+  "wait": 500,
+  "file": "06-real-evidence-grouped-by-kind.png"
+ },
+ {
+  "name": "select_unsealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[5].click();await new Promise((r)=>{const i=setInterval(()=>{ if(!!document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 500
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Context').click()",
+  "wait": 900,
+  "file": "07-real-context-unsealed-failed-run.png"
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Plan').click()",
+  "wait": 700,
+  "file": "08-real-plan-unsealed-failed-run.png"
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Attempts').click()",
+  "wait": 700,
+  "file": "09-real-attempts-unsealed-failed-run.png"
+ },
+ {
+  "js": "document.querySelectorAll('.ck-list button')[4].click();",
+  "wait": 2600,
+  "file": "10-real-pruned-run.png"
+ }
+]

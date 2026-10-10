@@ -42,6 +42,7 @@ OPERATIONS = (
     "evidence.verify",  # chain, blobs and seal of one run's evidence store, recomputed now
     "evidence.records",  # paged, filtered, verbatim records of a verified store
     "evidence.change_content",  # ONE authorized, capped part (diff/before/after) of ONE recorded candidate change
+    "evidence.call_content",  # ONE authorized, capped part (messages/tools/wire body) of ONE recorded model request
 )
 
 # Error codes (closed vocabulary; the host shows an unknown code literally).
@@ -116,10 +117,13 @@ EVIDENCE_BLOB_MAX_BYTES = 1024 * 1024  # one content part per response; larger i
 # (attempt.py: before/after/diff; scope.py refused candidates: proposed/attempted_edits), enforced by a producer-scanning test.
 # A key that is not listed is `unclassified` and is never served, whatever the visibility setting says.
 CONTENT_CLASS_CANDIDATE = "candidate_content"
+CONTENT_CLASS_MODEL_INPUT = "model_input"  # what a model request carried (messages, tools, wire body); never the model's answer
 CONTENT_CLASS_UNCLASSIFIED = "unclassified"
 BLOB_CLASSES = {
     "before": CONTENT_CLASS_CANDIDATE, "after": CONTENT_CLASS_CANDIDATE, "diff": CONTENT_CLASS_CANDIDATE,
     "proposed": CONTENT_CLASS_CANDIDATE, "attempted_edits": CONTENT_CLASS_CANDIDATE,
+    # scope.py model.request producers: record_wire_request (messages, tools, wire_body) and record_undispatched_call (messages, tools)
+    "messages": CONTENT_CLASS_MODEL_INPUT, "tools": CONTENT_CLASS_MODEL_INPUT, "wire_body": CONTENT_CLASS_MODEL_INPUT,
 }
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 RETAIN_SNAPSHOTS = 3

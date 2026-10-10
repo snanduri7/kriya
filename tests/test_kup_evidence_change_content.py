@@ -158,7 +158,7 @@ def test_capabilities_advertise_content_only_when_kriya_authorizes_it():
     off = run_kup_operation(strict_config(), {"operation": "capabilities"})["data"]
     on = run_kup_operation(_cfg("on"), {"operation": "capabilities"})["data"]
     assert off["features"]["evidence_content"] is False and on["features"]["evidence_content"] is True
-    assert on["features"]["evidence_content_classes"] == ["candidate_content"] and off["features"]["evidence_content_classes"] == []
+    assert on["features"]["evidence_content_classes"] == ["candidate_content", "model_input"] and off["features"]["evidence_content_classes"] == []
     assert on["limits"]["evidence_content_max_bytes"] == policy.EVIDENCE_BLOB_MAX_BYTES
     assert "evidence.change_content" in off["operations"]
 
@@ -187,6 +187,6 @@ def test_the_class_table_covers_every_candidate_blob_key_the_producers_emit():
     assert all(policy.BLOB_CLASSES[k] == policy.CONTENT_CLASS_CANDIDATE for k in keys)
 
 
-def test_the_class_table_holds_only_candidate_classes_in_m3():
-    assert set(policy.BLOB_CLASSES.values()) == {policy.CONTENT_CLASS_CANDIDATE}
+def test_the_class_table_holds_only_known_classes_and_never_the_unclassified_one():
+    assert set(policy.BLOB_CLASSES.values()) == {policy.CONTENT_CLASS_CANDIDATE, policy.CONTENT_CLASS_MODEL_INPUT}
     assert policy.CONTENT_CLASS_UNCLASSIFIED not in policy.BLOB_CLASSES.values()

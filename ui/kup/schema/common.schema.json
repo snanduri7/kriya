@@ -251,7 +251,8 @@
             "evidence.manifest",
             "evidence.verify",
             "evidence.records",
-            "evidence.change_content"
+            "evidence.change_content",
+            "evidence.call_content"
           ]
         },
         "request_id": {

@@ -73,7 +73,8 @@ export class BrowserFixtureHost implements HostAdapter {
       case 'evidence.manifest': return this.load('evidence.manifest.present.json') as Promise<KupEnvelope>;
       case 'evidence.verify': return this.load('evidence.verify.verified.json') as Promise<KupEnvelope>;
       case 'evidence.records': return this.load('evidence.records.page.json') as Promise<KupEnvelope>;
-      case 'evidence.change_content': return this.load('errors/EVIDENCE_CONTENT_POLICY.json') as Promise<KupEnvelope>; // the legacy M1 host never authorizes content
+      case 'evidence.change_content':
+      case 'evidence.call_content': return this.load('errors/EVIDENCE_CONTENT_POLICY.json') as Promise<KupEnvelope>; // the legacy M1 host never authorizes content
     }
   }
 

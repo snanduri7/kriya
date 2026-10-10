@@ -22,6 +22,7 @@ export const validateEvidenceManifest: ((value: unknown) => boolean) & { errors?
 export const validateEvidenceVerify: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateEvidenceRecords: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateEvidenceChangeContent: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateEvidenceCallContent: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateKupRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateOpenInIdeRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateOpenInIdeResult: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
