@@ -1,0 +1,49 @@
+/* Run Cockpit design tokens: a dark engineering palette with one restrained blue accent. Contrast is computed by
+   test/cockpit_contrast.test.ts (WCAG AA, 4.5:1 text including metadata text). Bundled, local, no remote assets. */
+.ck { --ck-bg: #0e1116; --ck-panel: #151a21; --ck-raised: #1c232c; --ck-line: #2d3743; --ck-fg: #e6edf3; --ck-muted: #a3b0be; --ck-accent: #6ea8fe; --ck-accent-bg: #1f3a5f; --ck-ok: #56d364; --ck-bad: #ff8179; --ck-warn: #e3b341; --ck-add: #12361f; --ck-del: #4a1e1e; --ck-focus: #8fc1ff;
+  color-scheme: dark; background: var(--ck-bg); color: var(--ck-fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; height: 100%; }
+.ck *:focus-visible { outline: 2px solid var(--ck-focus); outline-offset: 1px; }
+.ck button { font: inherit; color: inherit; background: var(--ck-raised); border: 1px solid var(--ck-line); border-radius: 5px; padding: 4px 9px; cursor: pointer; min-height: 28px; }
+.ck button[aria-pressed="true"], .ck button[aria-selected="true"] { background: var(--ck-accent-bg); border-color: var(--ck-accent); }
+.ck button:disabled { opacity: .55; cursor: default; }
+.ck .muted { color: var(--ck-muted); } .ck .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.ck .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+.ck-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
+.ck-toolbar { min-height: 44px; }
+.ck-body { display: grid; min-height: 0; grid-template-columns: 56px var(--ck-secondary, 280px) 6px minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
+.ck-body.no-secondary { grid-template-columns: 56px 0 0 minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
+.ck-body.no-inspector { grid-template-columns: 56px var(--ck-secondary, 280px) 6px minmax(0, 1fr) 0 0; }
+.ck-body.no-secondary.no-inspector { grid-template-columns: 56px 0 0 minmax(0, 1fr) 0 0; }
+.ck-body.single { grid-template-columns: 56px 0 0 minmax(0, 1fr) 0 0; }
+.ck-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--ck-line); background: var(--ck-panel); }
+.ck-toolbar .grow { flex: 1; } .ck-mark { font-weight: 700; letter-spacing: .02em; }
+.ck-rail { display: flex; flex-direction: column; gap: 4px; padding: 8px 4px; background: var(--ck-panel); border-right: 1px solid var(--ck-line); }
+.ck-rail button { display: flex; align-items: center; justify-content: center; padding: 0; font-size: 18px; min-height: 44px; }
+.ck-secondary, .ck-center, .ck-inspector { min-width: 0; min-height: 0; overflow: auto; }
+.ck-secondary { background: var(--ck-panel); border-right: 1px solid var(--ck-line); padding: 8px; }
+.ck-inspector { background: var(--ck-panel); border-left: 1px solid var(--ck-line); padding: 8px; }
+.ck-center { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ck-resize { cursor: col-resize; background: transparent; border: 0; padding: 0; min-height: 0; width: 6px; border-radius: 0; }
+.ck-resize:hover, .ck-resize:focus-visible { background: var(--ck-accent-bg); }
+.ck-hidden { display: none; }
+.ck-drawer { border-top: 1px solid var(--ck-line); background: var(--ck-panel); }
+.ck-drawer-body { height: 240px; overflow: auto; padding: 8px 12px; }
+.ck-tabbar { display: flex; gap: 2px; border-bottom: 1px solid var(--ck-line); }
+.ck-tabbar button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 12px; }
+.ck-tabbar button[aria-selected="true"] { border-bottom-color: var(--ck-accent); color: var(--ck-accent); background: transparent; }
+.ck-panel { background: var(--ck-panel); border: 1px solid var(--ck-line); border-radius: 6px; padding: 8px 10px; }
+.ck-panel > h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-badge { display: inline-block; padding: 0 7px; border: 1px solid var(--ck-line); border-radius: 10px; font-size: 11px; line-height: 18px; }
+.ck-badge.ok { color: var(--ck-ok); } .ck-badge.bad { color: var(--ck-bad); } .ck-badge.warn { color: var(--ck-warn); } .ck-badge.info { color: var(--ck-accent); }
+.ck-kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
+.ck-kv dt { color: var(--ck-muted); } .ck-kv dd { margin: 0; overflow-wrap: anywhere; }
+.ck-state { border: 1px dashed var(--ck-line); border-radius: 6px; padding: 10px 12px; }
+.ck-state strong { display: block; }
+.ck-list { list-style: none; margin: 0; padding: 0; }
+.ck-list li > button { width: 100%; text-align: left; display: block; border: 0; border-radius: 4px; background: transparent; padding: 6px 8px; min-height: 32px; }
+.ck-list li > button[aria-selected="true"] { background: var(--ck-accent-bg); }
+.ck-group { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-tree { list-style: none; margin: 0; padding: 0 0 0 14px; } .ck-tree.root { padding-left: 0; }
+.ck-provider-banner { background: var(--ck-accent-bg); padding: 2px 12px; font-size: 12px; }
+@media (max-width: 1180px) { .ck-toolbar .optional { display: none; } }

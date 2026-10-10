@@ -1,0 +1,42 @@
+/**
+ * The ONE typed provider contract every module consumes. Two implementations exist and satisfy the same contract tests:
+ * KriyaProvider (production, supported Kriya read APIs) and FixtureProvider (development and tests only). A module never knows
+ * which one it holds, and never contains separate "real" and "fake" logic.
+ */
+import type {
+  Capabilities, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
+} from '../../model/kup';
+import type { HostSettings } from '../../host/HostAdapter';
+import type { Provenance } from './evidence';
+
+export type ProviderKind = 'kriya' | 'fixture';
+
+export interface ProviderError {
+  /** A KUP error code, or one the provider mints: HOST_ERROR (transport), INVALID_RESPONSE (not a valid KUP envelope for the operation). */
+  code: string;
+  message: string;
+  /** The typed extras Kriya returned (status, broken_seq, head_then, ...), verbatim. */
+  extra: Record<string, unknown>;
+}
+
+export type ProviderResult<T> = { ok: true; data: T; provenance: Provenance } | { ok: false; error: ProviderError };
+
+export interface RecordsQuery {
+  unit?: string; phase?: string; role?: string; attempt?: number; fromSeq?: number; kind?: string[]; limit?: number; cursor?: string;
+}
+
+export interface UIProvider {
+  readonly kind: ProviderKind;
+  capabilities(signal?: AbortSignal): Promise<ProviderResult<Capabilities>>;
+  listSnapshots(signal?: AbortSignal): Promise<ProviderResult<SnapshotList>>;
+  acquireSnapshot(workspace?: string): Promise<ProviderResult<SnapshotAcquireResult>>;
+  verifySnapshot(snapshotId: string, signal?: AbortSignal): Promise<ProviderResult<SnapshotVerify>>;
+  listRuns(snapshotId: string, page?: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<ProviderResult<HistoryList>>;
+  runDetail(snapshotId: string, runId: string, signal?: AbortSignal): Promise<ProviderResult<RunDetail>>;
+  workspaceStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceStatus>>;
+  evidenceManifest(runId: string, snapshotId?: string, signal?: AbortSignal): Promise<ProviderResult<EvidenceManifest>>;
+  evidenceVerify(runId: string, signal?: AbortSignal): Promise<ProviderResult<EvidenceVerify>>;
+  evidenceRecords(runId: string, query?: RecordsQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceRecords>>;
+  getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined>;
+  setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void>;
+}

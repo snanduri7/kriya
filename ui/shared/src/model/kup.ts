@@ -35,3 +35,6 @@ export type RunDetail = Omit<KupRunDetail, 'run' | 'fields' | 'run_events' | 'ev
   comparisons: Section<Comparison[]>;
   output: Section<unknown>;
 };
+
+// Run Cockpit v1.1 evidence payloads (capability set 1.1), generated from ui/kup/schema/evidence.schema.json.
+export type { EvidenceManifest, EvidenceVerify, EvidenceRecords } from '@kriya-ui/kup';

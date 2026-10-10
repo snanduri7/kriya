@@ -1,0 +1,10 @@
+[
+  { "width": 1600, "height": 1000, "wait": 1200, "file": "01-runs-no-selection.png" },
+  { "js": "[...document.querySelectorAll('button')].find(b => /Create a utility library/.test(b.textContent)).click()", "wait": 1500, "file": "02-greenfield-compile-retry-overview.png" },
+  { "js": "document.querySelector('[role=tab][aria-selected=false]'); [...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Changes').click(); [...document.querySelectorAll('button')].find(b => b.textContent === 'Attempt 2').click()", "wait": 900, "file": "03-greenfield-changes-attempt2.png" },
+  { "js": "[...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Validation').click(); [...document.querySelectorAll('button')].find(b => b.textContent === 'Attempt 1').click()", "wait": 900, "file": "04-greenfield-validation-attempt1-failed.png" },
+  { "js": "[...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Raw Events').click()", "wait": 800, "file": "05-drawer-raw-events.png" },
+  { "js": "[...document.querySelectorAll('button')].find(b => /Fix whitespace handling/.test(b.textContent)).click(); [...document.querySelectorAll('[role=tab]')].find(t => t.textContent === 'Changes').click()", "wait": 1500, "file": "06-brownfield-changes.png" },
+  { "js": "[...document.querySelectorAll('button')].find(b => /An older run whose store/.test(b.textContent)).click()", "wait": 1500, "file": "07-pruned-evidence.png" },
+  { "width": 1100, "height": 900, "wait": 900, "file": "08-narrow-1100-inspector-collapsed.png" }
+]

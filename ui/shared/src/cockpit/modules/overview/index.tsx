@@ -1,0 +1,45 @@
+import { AvailabilityView, KeyValue, Panel, payloadOf, ofKind, useRunContext, useRunEvidence, type ModuleDefinition } from '../../core';
+
+function Overview() {
+  const run = useRunContext();
+  const evidence = useRunEvidence();
+  return (
+    <AvailabilityView value={run}>
+      {(ctx) => (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <Panel title="Run">
+            <KeyValue items={[
+              ['Goal', ctx.goal ?? 'not recorded'], ['Stored status', ctx.status === 'in_progress' ? 'Unfinished (the trace row says in_progress; this is not a claim that a run is active)' : ctx.status ?? 'not recorded'],
+              ['Workspace', ctx.workspace.identity ?? 'not recorded'],
+              ['Baseline revision', ctx.baseline.revision ?? 'not recorded (no baseline is assumed)'], ['Baseline tree', ctx.baseline.treeHash ?? 'not recorded'],
+              ['Evidence store', ctx.evidence.store === 'present' ? `present, capture ${ctx.evidence.captureMode ?? 'not recorded'}` : 'absent'],
+            ]} />
+          </Panel>
+          <AvailabilityView value={evidence}>
+            {(data) => {
+              const attempts = ofKind(data.records, 'attempt.opened').length;
+              const concluded = ofKind(data.records, 'attempt.concluded').map((r) => payloadOf(r).succeeded === true);
+              const closed = ofKind(data.records, 'run.closed')[0];
+              return (
+                <Panel title="Recorded outcome">
+                  <KeyValue items={[
+                    ['Attempts opened', String(attempts)],
+                    ['Attempts concluded', concluded.length ? concluded.map((ok, i) => `#${i + 1} ${ok ? 'succeeded' : 'failed'}`).join(', ') : 'none recorded'],
+                    ['Run closed', closed ? String(payloadOf(closed).terminal_status ?? 'terminal status not recorded') : 'no run.closed record'],
+                  ]} />
+                </Panel>
+              );
+            }}
+          </AvailabilityView>
+        </div>
+      )}
+    </AvailabilityView>
+  );
+}
+
+export const overviewModule: ModuleDefinition = {
+  id: 'overview',
+  placement: { page: 'runs', surface: 'center-tab', label: 'Overview', order: 10 },
+  requiredCapabilities: ['snapshot'], optionalCapabilities: ['evidence'], selectionDependencies: ['runId'],
+  render: Overview,
+};

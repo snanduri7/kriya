@@ -17,6 +17,7 @@ import { isFixtureMode, resolveHostMode } from './host_mode';
 import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
+import { runCapture } from './capture';
 import { runMeasurement } from './measure';
 import { DEFAULT_SOAK, runSoak } from './soak';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
@@ -24,6 +25,8 @@ import { SettingsStore } from './settings';
 
 const MEASURE = process.env.KRIYA_UI_MEASURE === '1';
 const SOAK = process.env.KRIYA_UI_SOAK === '1';
+const CAPTURE_DIR = process.env.KRIYA_UI_CAPTURE; // development screenshots only (capture.ts)
+const CAPTURE_STEPS = process.env.KRIYA_UI_CAPTURE_STEPS;
 const ALLOW_REAL = process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1';
 const FAKE_KRIYA = join(__dirname, '..', '..', 'fake-kriya', 'fake_kriya.mjs');
 const RENDERER_INDEX = join(__dirname, '..', 'renderer', 'index.html');
@@ -163,6 +166,14 @@ app.whenReady().then(async () => {
       app.exit(0);
     } catch (e) {
       process.stderr.write(`soak failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
+      app.exit(1);
+    }
+  } else if (CAPTURE_DIR && CAPTURE_STEPS) {
+    try {
+      const files = await runCapture(win, CAPTURE_DIR, CAPTURE_STEPS);
+      process.stdout.write(`captured: ${files.join(', ')}\n`);
+    } catch (e) {
+      process.stderr.write(`capture failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
       app.exit(1);
     }
   } else if (MEASURE) {

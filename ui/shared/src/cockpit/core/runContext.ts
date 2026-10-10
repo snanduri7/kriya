@@ -1,0 +1,33 @@
+import type { CapabilityRegistry } from './capability';
+import type { ProviderKind } from './provider';
+
+/**
+ * Authoritative UI-facing facts about the selected run, and nothing inferred. Greenfield and brownfield are not modes of the UI:
+ * they show up as the recorded baseline identity here and as the recorded per-file change semantics inside the Changes module.
+ * `changeType` stays null because Kriya does not record a greenfield/brownfield classification; the UI never guesses one
+ * (no assumption that a baseline commit exists, that files or tests pre-existed, or that Git HEAD is the workspace baseline).
+ */
+export interface RunContext {
+  runId: string;
+  snapshotId: string | null;
+  provider: ProviderKind;
+  goal: string | null;
+  status: string | null;
+  milestone: { groupId: string | null; index: number | null; total: number | null };
+  workspace: { identity: string | null; path: string | null };
+  baseline: {
+    /** base_revision / base_tree_hash exactly as the run manifest recorded them; null = not recorded (never "HEAD"). */
+    revision: string | null;
+    treeHash: string | null;
+    source: 'recorded' | 'not_recorded';
+  };
+  changeType: null;
+  capabilities: CapabilityRegistry;
+  evidence: {
+    store: 'present' | 'absent';
+    captureMode: string | null;
+    sealed: boolean | null;
+    verification: string | null;
+    consistency: string | null;
+  };
+}
