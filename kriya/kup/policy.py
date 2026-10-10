@@ -35,6 +35,8 @@ OPERATIONS = (
     "history.prompt",
     "workspace.status",
     "workspace.describe",  # read-only facts Kriya reports about a folder the desktop host picked (GUI M5)
+    "execution.preflight",  # what a run in a folder would be: configuration, state, models, authority, observability (GUI M6)
+    "launch.status",  # one desktop launch read back from durable records (GUI M6)
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",
@@ -70,13 +72,14 @@ EVIDENCE_HEAD_CHANGED = "EVIDENCE_HEAD_CHANGED"              # a cursor's chain 
 EVIDENCE_CONTENT_POLICY = "EVIDENCE_CONTENT_POLICY"          # content refused by Kriya's visibility policy or class table (extra: content_class, reason)
 EVIDENCE_CONTENT_UNAVAILABLE = "EVIDENCE_CONTENT_UNAVAILABLE"  # authorized, but the store holds no bytes for that part (extra: reason)
 WORKSPACE_UNAVAILABLE = "WORKSPACE_UNAVAILABLE"              # a folder to open is missing, not a directory or unreadable (extra: reason)
+LAUNCH_NOT_FOUND = "LAUNCH_NOT_FOUND"                        # no launch record with that id for the folder (extra: reason)
 EVIDENCE_BLOB_TOO_LARGE = "EVIDENCE_BLOB_TOO_LARGE"          # the part is over the response cap (extra: bytes_total)
 ERROR_CODES = (
     UNSUPPORTED_SCHEMA_VERSION, INVALID_RESPONSE, INVALID_REQUEST, STORE_BUSY, READ_ONLY_UNAVAILABLE,
     RESPONSE_TOO_LARGE, CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED,
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
     EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
-    EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, WORKSPACE_UNAVAILABLE,
+    EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, WORKSPACE_UNAVAILABLE, LAUNCH_NOT_FOUND,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.

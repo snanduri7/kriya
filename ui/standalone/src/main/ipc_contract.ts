@@ -16,6 +16,10 @@ export const IPC_CHANNELS = {
   recentWorkspaces: 'kriya:host:workspace:recent',
   rememberWorkspace: 'kriya:host:workspace:remember',
   forgetWorkspace: 'kriya:host:workspace:forget',
+  // M6 execution. Start Run is the ONLY execution action: a typed request (workspace + goal), no command text, no options. The host launches the
+  // one allowlisted Kriya command line itself (execution_host.ts); executionState reports the process, never the run's outcome.
+  startRun: 'kriya:host:execution:start',
+  executionState: 'kriya:host:execution:state',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';
@@ -39,7 +43,9 @@ export const LIMITS = {
   cursorMax: 1024,
   pathMax: 4096,
   clipboardMax: 8 * 1024 * 1024,
+  goalMax: 16000, // kriya/control/launch.py::GOAL_MAX_CHARS
 } as const;
+export const LAUNCH_ID_RE = /^\d{8}T\d{6}-[0-9a-f]{8}$/;
 
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 // A cursor must start alphanumeric so it can never be read as an option by the kriya CLI (`--cursor --help`).
@@ -60,6 +66,8 @@ export type KupRequest =
   | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
   | { operation: 'workspace.status'; workspace: string }
   | { operation: 'workspace.describe'; workspace: string }
+  | { operation: 'execution.preflight'; workspace: string }
+  | { operation: 'launch.status'; workspace: string; launch_id: string }
   | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
   | { operation: 'evidence.change_content'; run_id: string; seq: number; part: string }
@@ -161,10 +169,17 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     }
     case 'evidence.records': return validateEvidenceRecords(v, keys);
     case 'workspace.status':
-    case 'workspace.describe': {
+    case 'workspace.describe':
+    case 'execution.preflight': {
       if (keys.join() !== 'operation,workspace') return { ok: false, message: `${v.operation} takes exactly workspace` };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
       return { ok: true, value: { operation: v.operation, workspace: w.value } };
+    }
+    case 'launch.status': {
+      if (keys.join() !== 'launch_id,operation,workspace') return { ok: false, message: 'launch.status takes exactly workspace and launch_id' };
+      const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+      if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+      return { ok: true, value: { operation: 'launch.status', workspace: w.value, launch_id: v.launch_id } };
     }
     default:
       return { ok: false, message: `unknown operation ${String(v.operation)}` };
@@ -197,6 +212,18 @@ function validateEvidenceRecords(v: Record<string, unknown>, keys: string[]): Va
   }
   if ('cursor' in v) { const c = validateCursor(v.cursor); if (!c.ok) return c; out.cursor = c.value; }
   return { ok: true, value: out };
+}
+
+export interface StartRunRequest { workspace: string; goal: string }
+
+/** Start Run: exactly {workspace, goal}. Any other key is refused - there are no options to carry (a launch is non-interactive and cannot widen anything). */
+export function validateStartRun(v: unknown): ValidationResult<StartRunRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'goal,workspace') return { ok: false, message: 'startRun takes exactly workspace and goal' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.goal !== 'string' || !v.goal.trim().length) return { ok: false, message: 'an engineering goal is required' };
+  if (v.goal.length > LIMITS.goalMax) return { ok: false, message: `the goal is ${v.goal.length} characters; the limit is ${LIMITS.goalMax}` };
+  if (v.goal.includes('\0')) return { ok: false, message: 'the goal contains a NUL character' };
+  return { ok: true, value: { workspace: w.value, goal: v.goal } };
 }
 
 export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; line?: number }> {

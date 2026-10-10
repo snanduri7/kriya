@@ -20,7 +20,7 @@ public class Checkout {
     private String head;
     private String reason;
     private String root;
-    private StateEnum state;
+    private CheckoutState state;
 
     @JsonProperty("branch")
     public String getBranch() { return branch; }
@@ -75,7 +75,7 @@ public class Checkout {
     public void setRoot(String value) { this.root = value; }
 
     @JsonProperty("state")
-    public StateEnum getState() { return state; }
+    public CheckoutState getState() { return state; }
     @JsonProperty("state")
-    public void setState(StateEnum value) { this.state = value; }
+    public void setState(CheckoutState value) { this.state = value; }
 }

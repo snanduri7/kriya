@@ -221,6 +221,52 @@
           "type": "object",
           "required": [
             "operation",
+            "workspace"
+          ],
+          "properties": {
+            "operation": {
+              "const": "execution.preflight"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "workspace",
+            "launch_id"
+          ],
+          "properties": {
+            "operation": {
+              "const": "launch.status"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            },
+            "launch_id": {
+              "type": "string",
+              "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$",
+              "description": "The shape of a Kriya run id; the launch id IS the run id."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
             "run_id"
           ],
           "properties": {
@@ -616,6 +662,28 @@
               "$ref": "#/$defs/RecentWorkspaces"
             }
           }
+        },
+        "startRun": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/StartRunRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/StartRunResult"
+            }
+          }
+        },
+        "executionState": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "null"
+            },
+            "response": {
+              "$ref": "#/$defs/ExecutionState"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -645,6 +713,20 @@
               "type": "null"
             }
           ]
+        },
+        "refused": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "RUN_ACTIVE"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RUN_ACTIVE: the workspace cannot change while a run this host started is in progress."
         }
       },
       "additionalProperties": false
@@ -660,6 +742,221 @@
         "pattern": "^/[^\\u0000-\\u001F]*$",
         "description": "Absolute path without control characters."
       }
+    },
+    "StartRunRequest": {
+      "description": "Start Run (GUI M6): the ONLY execution action. The workspace must be the folder currently open in this host (chosen with Open Folder); the goal is the engineering task. There are no other options: a launch is non-interactive and cannot widen Kriya's configuration or authority.",
+      "type": "object",
+      "required": [
+        "workspace",
+        "goal"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001F]*$",
+          "description": "Absolute path without control characters."
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        }
+      },
+      "additionalProperties": false
+    },
+    "StartRunResult": {
+      "description": "Answer to Start Run. started=true means a Kriya process was launched and a launch id exists (follow it with launch.status); the outcome of the run is only ever in Kriya's durable records. started=false carries Kriya's or the host's typed refusal.",
+      "type": "object",
+      "required": [
+        "started",
+        "launch_id",
+        "refusal"
+      ],
+      "properties": {
+        "started": {
+          "type": "boolean"
+        },
+        "launch_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$",
+              "description": "The shape of a Kriya run id; the launch id IS the run id."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "refusal": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "blockers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "code",
+                      "message"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExecutionState": {
+      "description": "What the HOST knows about the one execution process it started: the process, not the run. It never carries an outcome - Kriya's durable records (launch.status, the trace row, the evidence store) are the outcome. No stdout/stderr text is passed on.",
+      "type": "object",
+      "required": [
+        "phase",
+        "launch_id",
+        "workspace",
+        "started_at",
+        "ended_at",
+        "exit",
+        "diagnostic"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "starting",
+            "running",
+            "exited"
+          ]
+        },
+        "launch_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$",
+              "description": "The shape of a Kriya run id; the launch id IS the run id."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "code",
+                "signal"
+              ],
+              "properties": {
+                "code": {
+                  "oneOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "signal": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diagnostic": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "spawn_failed",
+                "terminated_by_the_host"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A typed host-side reason; never process output."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

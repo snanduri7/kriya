@@ -49,7 +49,7 @@ describe('gate A-1 hardening settings (every one checked)', () => {
       expect(src, f).not.toMatch(/\bexec(Sync|File)?\(/);
       expect(src, f).not.toMatch(/from 'node:(http|https|net|dgram)'|\.listen\(/);
       expect(src, f).not.toMatch(/\.kriya\/|traces\.db|sqlite/i);
-      if (f !== 'kriya_process.ts' && f !== 'kriya_service.ts' && f !== 'main.ts') expect(src, f).not.toContain('spawn(');
+      if (f !== 'kriya_process.ts' && f !== 'kriya_service.ts' && f !== 'execution_process.ts' && f !== 'main.ts') expect(src, f).not.toContain('spawn(');
     }
     for (const f of readdirSync(RENDERER)) {
       const src = read(join(RENDERER, f));
@@ -68,7 +68,7 @@ describe('gate A-1 hardening settings (every one checked)', () => {
     expect(runner).toContain('KRIYA_CHILD_PATH');
   });
   it('every kriya child runs in the validated configuration directory, never in Electron\'s own working directory (F-5)', () => {
-    expect((mainTs.match(/cwd: dir\.directory/g) ?? []).length).toBe(3); // the persistent service, the one-shot real child and the stand-in alike
+    expect((mainTs.match(/cwd: dir\.directory/g) ?? []).length).toBe(4); // the persistent service (query path and the host's own preflight ask), the one-shot real child and the stand-in alike
     expect(mainTs).toContain("resolveConfigDirectory(settings.get('configDirectory'), process.env, isDirectory)");
     expect(mainTs).not.toMatch(/process\.cwd\(\)/);
     expect(mainTs).toContain('configDirectorySource');
@@ -89,7 +89,8 @@ describe('M5 persistent transport and workspace authority (hardening)', () => {
     expect(mainTs).toContain("process.env.KRIYA_UI_TRANSPORT === 'spawn' ? 'spawn' : 'service'");
     expect(mainTs).toContain("if (TRANSPORT === 'service')");
     expect(mainTs).toContain('runKriya({ executable: host.executable, argv, env: childEnv.env, cwd: dir.directory })');
-    expect(mainTs).toContain("app.on('before-quit', () => { void services.stop(); })");
+    expect(mainTs).toContain("app.on('before-quit', (event) => {");
+    expect(mainTs).toContain('void services.stop();');
   });
   it('the scripted chooser exists only while the screenshot driver is active and replaces nothing but the native dialog call', () => {
     expect(mainTs).toContain('CAPTURE_DIR && process.env.KRIYA_UI_CAPTURE_CHOOSE');
@@ -103,5 +104,64 @@ describe('M5 persistent transport and workspace authority (hardening)', () => {
     expect(mainTs).toContain('dialog.showOpenDialog');
     expect(mainTs).toContain('workspaces.refuseSetting(v.value)');
     for (const f of readdirSync(RENDERER)) expect(read(join(RENDERER, f)), f).not.toMatch(/showOpenDialog|webkitdirectory|showDirectoryPicker/);
+  });
+});
+
+describe('M6 execution (hardening): Start Run is the only execution action and it is not a command endpoint', () => {
+  const hostTs = read(join(MAIN, 'execution_host.ts'));
+  const processTs = read(join(MAIN, 'execution_process.ts'));
+  it('the preload exposes exactly two typed execution messages - no command, no argv, no generic invoke', () => {
+    expect(preloadTs).toContain('startRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.startRun, request)');
+    expect(preloadTs).toContain('executionState: () => ipcRenderer.invoke(IPC_CHANNELS.executionState)');
+    expect(preloadTs).not.toMatch(/ipcRenderer\.invoke\((?!IPC_CHANNELS\.)/);
+    expect(preloadTs).not.toMatch(/spawn|child_process|shell|exec\(/i);
+    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['executionState', 'startRun']);
+  });
+  it('both execution handlers verify the sender, and startRun hands the raw request to the host (which validates it) - the handler builds nothing', () => {
+    for (const name of ['startRun', 'executionState']) {
+      const at = mainTs.indexOf(`ipcMain.handle(IPC_CHANNELS.${name}`);
+      expect(at, name).toBeGreaterThan(-1);
+      expect(mainTs.slice(at, at + 220), name).toContain("if (!fromOwnedRenderer(event)) throw new Error('unexpected sender')");
+    }
+    expect(mainTs).toContain('await execution.start(raw)');
+  });
+  it('the execution process is spawned in exactly one place: no shell, the validated argv, the workspace as cwd, the prepared environment only', () => {
+    expect((processTs.match(/spawn\(/g) ?? []).length).toBe(1);
+    expect(processTs).toContain('shell: false');
+    expect(processTs).toContain('[...invocation.argv]');
+    expect(processTs).toContain('cwd: invocation.cwd');
+    expect(processTs).toContain('env: { ...invocation.env }');
+    expect(processTs).not.toMatch(/process\.env|\.\.\.process/);
+    expect(mainTs).toContain('launch: launchExecution');
+    expect(mainTs).toContain('currentWorkspace: () => workspaces.current()'); // the run's folder is the registry's open workspace, never a renderer-supplied one
+  });
+  it('the host module is pure: no Electron, no child_process, no filesystem or network, no environment', () => {
+    expect(hostTs).not.toMatch(/from 'electron'|from 'node:(child_process|fs|net|http|https|dgram)'|require\(|process\.env/);
+    expect(hostTs).not.toMatch(/spawn\(/);
+  });
+  it('the execution command line exists in one place only, and nothing in main or the preload can add to it', () => {
+    expect(hostTs).toContain("return ['generate', '--json', '--launch-id', launchId];");
+    for (const f of readdirSync(MAIN)) {
+      if (f === 'execution_host.ts') continue;
+      const src = read(join(MAIN, f));
+      expect(src, f).not.toMatch(/'generate'|"generate"|--launch-id|--yes|--knowledge-policy|--trust-file/);
+    }
+  });
+  it('the launch id is minted in main and never accepted from the renderer', () => {
+    expect(mainTs).toContain('mintLaunchId,');
+    expect(mainTs).toContain('function mintLaunchId()');
+    expect(hostTs).toContain('this.deps.mintLaunchId()');
+    expect(read(join(MAIN, 'ipc_contract.ts'))).toContain("Object.keys(v).sort().join() !== 'goal,workspace'");
+  });
+  it('quitting while a run exists asks first and interrupts through the host (SIGINT then SIGKILL); nothing is left unobserved', () => {
+    expect(mainTs).toContain('execution.active()');
+    expect(mainTs).toContain('await execution.shutdown()');
+    expect(mainTs).toContain("buttons: ['Interrupt run and quit', 'Keep running']");
+    expect(hostTs).toContain("child.kill('SIGINT')");
+    expect(hostTs).toContain("child.kill('SIGKILL')");
+  });
+  it('the registry gets the run-active lock, and the M1 compatibility is switched on only by the build marker', () => {
+    expect(mainTs).toContain("{ legacyInspector: UI_MODE === 'inspector', runActive: () => execution.active() }");
+    expect(mainTs).toContain('resolveUiMode(');
   });
 });

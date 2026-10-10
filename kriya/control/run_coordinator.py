@@ -393,6 +393,10 @@ def begin_mutating_run(
         yield require_mutating_run(canonical, existing)
         return
 
+    if run_id is None:
+        # GUI M6: the first top-level run of a desktop launch takes the launch's own id (kriya/control/launch.py); every other run is unchanged.
+        from kriya.control.launch import claim_run_id
+        run_id = claim_run_id(canonical)
     with acquire_run_lock(canonical, run_id=run_id) as acquired_run_id:
         assessment = assess_workspace_commit_state(canonical)
         if not assessment.safe:
@@ -413,6 +417,8 @@ def begin_mutating_run(
         )
         save_run_record(canonical, record, expected_revision=None)
         lease.record = record
+        from kriya.control.launch import note_run_started
+        note_run_started(canonical, acquired_run_id, base_revision)
         # The run log wraps the whole run, so terminal-record and retention
         # lines land in it; it never alters the run (see run_log).
         # LR-R1-M1: the attempt-evidence run scope spans the whole run. It is

@@ -81,6 +81,7 @@
         "EVIDENCE_CONTENT_UNAVAILABLE",
         "EVIDENCE_BLOB_TOO_LARGE",
         "WORKSPACE_UNAVAILABLE",
+        "LAUNCH_NOT_FOUND",
         "HOST_ERROR"
       ]
     },
@@ -246,6 +247,8 @@
             "history.prompt",
             "workspace.status",
             "workspace.describe",
+            "execution.preflight",
+            "launch.status",
             "snapshot.acquire",
             "snapshot.list",
             "snapshot.prune",

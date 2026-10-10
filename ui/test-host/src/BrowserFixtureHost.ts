@@ -70,6 +70,9 @@ export class BrowserFixtureHost implements HostAdapter {
       case 'history.prompt': { const s = find(request.snapshot_id); if (!s) return unavailable('history.prompt', request.snapshot_id); return this.pinned((await this.load(`history.prompt.${encodeURIComponent(request.run_id)}.json`)) as KupEnvelope, s); }
       case 'workspace.status': return this.load('workspace.status.json') as Promise<KupEnvelope>;
       case 'workspace.describe': return this.load('workspace.describe.json') as Promise<KupEnvelope>;
+      // M6: the legacy M1 inspector never starts a run; the canned answers keep the operation set total.
+      case 'execution.preflight': return this.load('execution.preflight.json') as Promise<KupEnvelope>;
+      case 'launch.status': return this.load('errors/LAUNCH_NOT_FOUND.json') as Promise<KupEnvelope>;
       // The legacy M1 test host serves one canned evidence envelope per operation; the cockpit uses FixtureProvider instead.
       case 'evidence.manifest': return this.load('evidence.manifest.present.json') as Promise<KupEnvelope>;
       case 'evidence.verify': return this.load('evidence.verify.verified.json') as Promise<KupEnvelope>;

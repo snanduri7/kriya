@@ -35,10 +35,13 @@ export function renderShell(opts: { registry?: ModuleRegistry; runId?: string | 
 }
 
 /** The shell over a fixture host the test can see into: the scripted native chooser, the remembered list, the calls the host received and the menu. */
+/** Polling fast enough for a test to see every scripted frame. */
+export const FAST_POLL = { visibleMs: 15, slowMs: 15, hiddenMs: 15, slowAfterMs: 1_000_000 } as const;
+
 export function renderWorkspaceShell(opts: { fixture?: FixtureHostOptions; registry?: ModuleRegistry; width?: number } = {}): Mounted & { host: FixtureHost } {
   const host = new FixtureHost(opts.fixture);
   const provider = new HostProvider(host, 'fixture');
   const store = createSelectionStore({ ...initialSelection });
-  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} />);
+  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} pollIntervals={FAST_POLL} />);
   return { provider, store, host };
 }

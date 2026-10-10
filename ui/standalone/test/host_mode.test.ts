@@ -51,7 +51,7 @@ describe('resolveHostMode: one rule for hostInfo and query', () => {
 describe('main.ts consults the one decision for BOTH handlers (trust strip == query behaviour)', () => {
   const mainTs = readFileSync(join(__dirname, '..', 'src', 'main', 'main.ts'), 'utf8');
   it('hostInfo and query each call resolveHostMode, and no handler re-derives real mode from the setting alone', () => {
-    expect((mainTs.match(/resolveHostMode\(ALLOW_REAL, settings\.get\('kriyaExecutable'\), existsSync\)/g) ?? []).length).toBe(2);
+    expect((mainTs.match(/resolveHostMode\(ALLOW_REAL, settings\.get\('kriyaExecutable'\), existsSync\)/g) ?? []).length).toBe(4); // hostInfo, the renderer's query, the host's own preflight ask (kupQuery) and the execution launch (prepareExecution)
     expect(mainTs).toContain("fixtureMode: isFixtureMode(");
     expect(mainTs).not.toMatch(/!!settings\.get\('kriyaExecutable'\)/);
     expect(mainTs).not.toMatch(/ALLOW_REAL && configured/);

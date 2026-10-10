@@ -4,7 +4,7 @@ package kup;
 
 import com.fasterxml.jackson.annotation.*;
 
-public class Configuration {
+public class Interaction {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter
@@ -12,13 +12,19 @@ public class Configuration {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private boolean fileInWorkspace;
+    private Approvals approvals;
+    private String knowledgePolicy;
     private String note;
 
-    @JsonProperty("file_in_workspace")
-    public boolean getFileInWorkspace() { return fileInWorkspace; }
-    @JsonProperty("file_in_workspace")
-    public void setFileInWorkspace(boolean value) { this.fileInWorkspace = value; }
+    @JsonProperty("approvals")
+    public Approvals getApprovals() { return approvals; }
+    @JsonProperty("approvals")
+    public void setApprovals(Approvals value) { this.approvals = value; }
+
+    @JsonProperty("knowledge_policy")
+    public String getKnowledgePolicy() { return knowledgePolicy; }
+    @JsonProperty("knowledge_policy")
+    public void setKnowledgePolicy(String value) { this.knowledgePolicy = value; }
 
     @JsonProperty("note")
     public String getNote() { return note; }

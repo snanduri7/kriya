@@ -9,9 +9,10 @@ import type { ModuleDefinition, ModuleRegistry, SelectionField } from './modules
 import type { UIProvider } from './provider';
 import type { RunContext } from './runContext';
 import { useSelectionState, type SelectionStore } from './selectionStore';
+import { ExecutionProvider, type PollIntervals } from './execution';
 import { WorkspaceProvider, useWorkspacePath } from './workspace';
 
-export interface Services { provider: UIProvider; selection: SelectionStore; registry: ModuleRegistry }
+export interface Services { provider: UIProvider; selection: SelectionStore; registry: ModuleRegistry; /** Tests only: how often a started run is polled. */ pollIntervals?: PollIntervals }
 const ServicesContext = createContext<Services | null>(null);
 const CapabilitiesContext = createContext<{ registry: CapabilityRegistry; state: Availability<Capabilities> }>({ registry: new CapabilityRegistry(null), state: { state: 'loading' } });
 export interface Session { snapshotId: string | null; status: Availability<{ snapshotId: string }>; refresh(): void; acquire(workspace?: string): Promise<void> }
@@ -60,9 +61,11 @@ export function CockpitProviders({ services, children }: { services: Services; c
       <CapabilitiesProvider>
         <WorkspaceBinding>
           <SessionProvider>
-            <RunEvidenceProvider>
-              <RunContextProvider>{children}</RunContextProvider>
-            </RunEvidenceProvider>
+            <ExecutionBinding>
+              <RunEvidenceProvider>
+                <RunContextProvider>{children}</RunContextProvider>
+              </RunEvidenceProvider>
+            </ExecutionBinding>
           </SessionProvider>
         </WorkspaceBinding>
       </CapabilitiesProvider>
@@ -75,6 +78,13 @@ function WorkspaceBinding({ children }: { children: ReactNode }) {
   const { provider, selection } = useServices();
   const reset = useCallback(() => selection.dispatch({ type: 'reset' }), [selection]);
   return <WorkspaceProvider provider={provider} onChanged={reset}>{children}</WorkspaceProvider>;
+}
+
+/** Start Run state (execution.tsx): follows the launch through Kriya's records and refreshes the cockpit through the ordinary snapshot path when the outcome is durable. */
+function ExecutionBinding({ children }: { children: ReactNode }) {
+  const { provider, selection, pollIntervals } = useServices();
+  const session = useSession();
+  return <ExecutionProvider provider={provider} selection={selection} acquire={session.acquire} intervals={pollIntervals}>{children}</ExecutionProvider>;
 }
 
 function CapabilitiesProvider({ children }: { children: ReactNode }) {

@@ -16,3 +16,4 @@ export { CockpitProviders, ModuleScope, useCapabilities, useDispatch, useModuleS
 export * from '../design';
 export * from './deep';
 export * from './describe';
+export { ExecutionProvider, useExecution, deriveOutcome, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';

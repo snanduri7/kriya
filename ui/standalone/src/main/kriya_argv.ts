@@ -53,6 +53,10 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       return ['runs', 'status', '--workspace', request.workspace, '--json', '--kup-version', '1'];
     case 'workspace.describe':
       return ['traces', '--json', '--describe-workspace', request.workspace];
+    case 'execution.preflight':
+      return ['traces', '--json', '--execution-preflight', request.workspace];
+    case 'launch.status':
+      return ['traces', '--json', '--launch-status', request.launch_id, '--workspace', request.workspace];
     default: {
       const never: never = request;
       throw new Error(`operation outside the grammar: ${JSON.stringify(never)}`);
@@ -69,6 +73,8 @@ export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['traces', '--json', '--snapshot-verify'],
   ['traces', '--json', '--snapshot-id'],
   ['traces', '--json', '--describe-workspace'],
+  ['traces', '--json', '--execution-preflight'],
+  ['traces', '--json', '--launch-status'],
   ['runs', 'status', '--workspace'],
 ];
 

@@ -18,13 +18,13 @@ public class WorkspaceDescribe {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private Checkout checkout;
-    private Configuration configuration;
+    private WorkspaceDescribeConfiguration configuration;
     private String identity;
     private boolean kriyaDirectoryPresent;
     private String name;
-    private Recovery recovery;
+    private WorkspaceDescribeRecovery recovery;
     private String requested;
-    private StateClass state;
+    private WorkspaceDescribeState state;
     private String workspace;
 
     @JsonProperty("checkout")
@@ -33,9 +33,9 @@ public class WorkspaceDescribe {
     public void setCheckout(Checkout value) { this.checkout = value; }
 
     @JsonProperty("configuration")
-    public Configuration getConfiguration() { return configuration; }
+    public WorkspaceDescribeConfiguration getConfiguration() { return configuration; }
     @JsonProperty("configuration")
-    public void setConfiguration(Configuration value) { this.configuration = value; }
+    public void setConfiguration(WorkspaceDescribeConfiguration value) { this.configuration = value; }
 
     /**
      * sha256 workspace identity Kriya records in run manifests.
@@ -56,9 +56,9 @@ public class WorkspaceDescribe {
     public void setName(String value) { this.name = value; }
 
     @JsonProperty("recovery")
-    public Recovery getRecovery() { return recovery; }
+    public WorkspaceDescribeRecovery getRecovery() { return recovery; }
     @JsonProperty("recovery")
-    public void setRecovery(Recovery value) { this.recovery = value; }
+    public void setRecovery(WorkspaceDescribeRecovery value) { this.recovery = value; }
 
     /**
      * The path as picked.
@@ -69,9 +69,9 @@ public class WorkspaceDescribe {
     public void setRequested(String value) { this.requested = value; }
 
     @JsonProperty("state")
-    public StateClass getState() { return state; }
+    public WorkspaceDescribeState getState() { return state; }
     @JsonProperty("state")
-    public void setState(StateClass value) { this.state = value; }
+    public void setState(WorkspaceDescribeState value) { this.state = value; }
 
     /**
      * Kriya's canonical spelling of the folder (control-plane identity input).

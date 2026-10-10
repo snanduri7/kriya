@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'EVIDENCE_CONTENT_UNAVAILABLE'
   | 'EVIDENCE_BLOB_TOO_LARGE'
   | 'WORKSPACE_UNAVAILABLE'
+  | 'LAUNCH_NOT_FOUND'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -49,6 +50,8 @@ export interface Envelope {
     | 'history.prompt'
     | 'workspace.status'
     | 'workspace.describe'
+    | 'execution.preflight'
+    | 'launch.status'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -502,6 +505,155 @@ export interface WorkspaceDescribe {
   [k: string]: unknown;
 }
 
+// ---- ExecutionPreflight (workspace.schema.json#/$defs/ExecutionPreflight) ----
+/**
+ * data of `execution.preflight` (GUI M6): what a run in this folder would be, resolved by Kriya exactly as a terminal `kriya generate` run there would be. The host displays it and decides nothing from it; the launched process re-resolves it and refuses on any blocker.
+ */
+export interface ExecutionPreflight {
+  ready: boolean;
+  blockers: {
+    code: string;
+    message: string;
+    [k: string]: unknown;
+  }[];
+  workspace: {
+    path: string;
+    identity: string;
+    name: string;
+    [k: string]: unknown;
+  };
+  configuration: {
+    status: 'loaded' | 'refused' | 'failed';
+    /**
+     * Kriya's ConfigSource value for the user layer (packaged_default when no file was found).
+     */
+    source: string;
+    file: string | null;
+    /**
+     * The directory configuration was discovered from (the folder itself).
+     */
+    directory: string;
+    discovery: string;
+    /**
+     * Digest of the effective configuration (the resume checkpoint's own fingerprint); null when it did not load.
+     */
+    fingerprint: string | null;
+    authority: {
+      status: 'no_findings' | 'approved' | 'refused' | 'failed';
+      fields: unknown[];
+      [k: string]: unknown;
+    };
+    [k: string]: unknown;
+  };
+  state: {
+    directory: string | null;
+    source: 'env' | 'config' | 'default' | null;
+    cockpit_directory: string | null;
+    observable_by_cockpit: boolean | null;
+    [k: string]: unknown;
+  };
+  model: {
+    provider: string;
+    model: string;
+    endpoint: string;
+    context_window: number;
+    fallback_chain: string[];
+    role_overrides: {
+      [k: string]: string;
+    };
+    [k: string]: unknown;
+  } | null;
+  recovery: {
+    status: string;
+    run_active: boolean;
+    [k: string]: unknown;
+  };
+  interaction: {
+    approvals: 'unavailable';
+    knowledge_policy: string;
+    note: string;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+// ---- LaunchStatus (workspace.schema.json#/$defs/LaunchStatus) ----
+/**
+ * data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.
+ */
+export interface LaunchStatus {
+  launch: {
+    launch_id: string;
+    workspace: {
+      path: string;
+      identity: string;
+      [k: string]: unknown;
+    };
+    requested_at: string;
+    goal: {
+      sha256: string;
+      chars: number;
+      [k: string]: unknown;
+    };
+    options: {
+      [k: string]: unknown;
+    };
+    phase: 'STARTING' | 'RUNNING' | 'ENDED';
+    run: {
+      run_id: string;
+      started_at: string;
+      base_revision: string | null;
+      [k: string]: unknown;
+    } | null;
+    ended: {
+      at: string;
+      exit_code: number;
+      workflow_status: string | null;
+      quality_gates_passed: boolean | null;
+      failure_category: string | null;
+      trace_run_id: string | null;
+      error: string | null;
+      note: string;
+      [k: string]: unknown;
+    } | null;
+    history: {
+      phase: string;
+      at: string;
+      [k: string]: unknown;
+    }[];
+    process: {
+      [k: string]: unknown;
+    } | null;
+    [k: string]: unknown;
+  };
+  run_record: {
+    found: boolean;
+    unreadable: string | null;
+    lifecycle_state?: string;
+    terminal_status?: string | null;
+    commit_result?: string | null;
+    revision?: number;
+    [k: string]: unknown;
+  };
+  evidence: {
+    state: 'absent' | 'open' | 'sealed' | 'unreadable';
+    line_count: number | null;
+    sealed: boolean;
+    [k: string]: unknown;
+  };
+  workspace_lock: {
+    held: boolean;
+    held_by_this_launch: boolean;
+    [k: string]: unknown;
+  };
+  /**
+   * DERIVED from the launch phase and the workspace run lock.
+   */
+  liveness: 'starting' | 'live' | 'interrupted' | 'ended';
+  liveness_note: string;
+  [k: string]: unknown;
+}
+
 // ---- Consistency (common.schema.json#/$defs/Consistency) ----
 /**
  * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed attempt-evidence store whose chain, every referenced blob and seal were verified in the same invocation, for the head_digest reported; never returned for an unsealed or failing store.
@@ -823,6 +975,24 @@ export type KupRequest =
       workspace: string;
     }
   | {
+      operation: 'execution.preflight';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'launch.status';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      /**
+       * The shape of a Kriya run id; the launch id IS the run id.
+       */
+      launch_id: string;
+    }
+  | {
       operation: 'evidence.manifest';
       run_id: RunId;
       snapshot_id?: string;
@@ -916,6 +1086,60 @@ export interface WorkspaceChoice {
    */
   chosen: boolean;
   path: string | null;
+  /**
+   * RUN_ACTIVE: the workspace cannot change while a run this host started is in progress.
+   */
+  refused?: 'RUN_ACTIVE' | null;
+}
+
+// ---- StartRunRequest (host-contract.schema.json#/$defs/StartRunRequest) ----
+/**
+ * Start Run (GUI M6): the ONLY execution action. The workspace must be the folder currently open in this host (chosen with Open Folder); the goal is the engineering task. There are no other options: a launch is non-interactive and cannot widen Kriya's configuration or authority.
+ */
+export interface StartRunRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  goal: string;
+}
+
+// ---- StartRunResult (host-contract.schema.json#/$defs/StartRunResult) ----
+/**
+ * Answer to Start Run. started=true means a Kriya process was launched and a launch id exists (follow it with launch.status); the outcome of the run is only ever in Kriya's durable records. started=false carries Kriya's or the host's typed refusal.
+ */
+export interface StartRunResult {
+  started: boolean;
+  launch_id: string | null;
+  refusal: {
+    code: string;
+    message: string;
+    blockers?: {
+      code: string;
+      message: string;
+      [k: string]: unknown;
+    }[];
+  } | null;
+}
+
+// ---- ExecutionState (host-contract.schema.json#/$defs/ExecutionState) ----
+/**
+ * What the HOST knows about the one execution process it started: the process, not the run. It never carries an outcome - Kriya's durable records (launch.status, the trace row, the evidence store) are the outcome. No stdout/stderr text is passed on.
+ */
+export interface ExecutionState {
+  phase: 'idle' | 'starting' | 'running' | 'exited';
+  launch_id: string | null;
+  workspace: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  exit: {
+    code: number | null;
+    signal: string | null;
+  } | null;
+  /**
+   * A typed host-side reason; never process output.
+   */
+  diagnostic: ('spawn_failed' | 'terminated_by_the_host') | null;
 }
 
 // ---- RecentWorkspaces (host-contract.schema.json#/$defs/RecentWorkspaces) ----
@@ -1010,6 +1234,16 @@ export interface HostMessages {
      */
     request?: string;
     response?: RecentWorkspaces;
+    [k: string]: unknown;
+  };
+  startRun?: {
+    request?: StartRunRequest;
+    response?: StartRunResult;
+    [k: string]: unknown;
+  };
+  executionState?: {
+    request?: null;
+    response?: ExecutionState;
     [k: string]: unknown;
   };
 }

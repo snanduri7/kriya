@@ -42,6 +42,8 @@ const TYPES = [
   ['Prompt', 'history.schema.json', '#/$defs/Prompt'],
   ['WorkspaceStatus', 'workspace.schema.json', '#'],
   ['WorkspaceDescribe', 'workspace.schema.json', '#/$defs/WorkspaceDescribe'],
+  ['ExecutionPreflight', 'workspace.schema.json', '#/$defs/ExecutionPreflight'],
+  ['LaunchStatus', 'workspace.schema.json', '#/$defs/LaunchStatus'],
   ['Consistency', 'common.schema.json', '#/$defs/Consistency'],
   ['SnapshotSummary', 'snapshot.schema.json', '#/$defs/SnapshotSummary'],
   ['SnapshotAcquireResult', 'snapshot.schema.json', '#/$defs/SnapshotAcquireResult'],
@@ -58,6 +60,9 @@ const TYPES = [
   ['OpenInIdeResult', 'host-contract.schema.json', '#/$defs/OpenInIdeResult'],
   ['HostInfo', 'host-contract.schema.json', '#/$defs/HostInfo'],
   ['WorkspaceChoice', 'host-contract.schema.json', '#/$defs/WorkspaceChoice'],
+  ['StartRunRequest', 'host-contract.schema.json', '#/$defs/StartRunRequest'],
+  ['StartRunResult', 'host-contract.schema.json', '#/$defs/StartRunResult'],
+  ['ExecutionState', 'host-contract.schema.json', '#/$defs/ExecutionState'],
   ['RecentWorkspaces', 'host-contract.schema.json', '#/$defs/RecentWorkspaces'],
   ['HostMessages', 'host-contract.schema.json', '#/$defs/Messages'],
 ];

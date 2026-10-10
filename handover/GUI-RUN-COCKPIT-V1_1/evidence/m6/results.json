@@ -1,0 +1,22 @@
+{
+ "open_empty_to_workspace_ms": 132,
+ "preflight_ready_ms": 21,
+ "start_click_to_banner_ms": 61,
+ "launch_record_seen_ms": 801,
+ "switch_disabled_while_running": [
+  true,
+  "A run is in progress; the workspace cannot change until it ends."
+ ],
+ "terminal_after_ms": 1621,
+ "timing_run_1": {
+  "clickedAt": 5621.899999976158,
+  "acknowledgedAt": 5673.899999976158,
+  "recordSeenAt": 6749.699999988079,
+  "terminalAt": 13256.699999988079,
+  "refreshedAt": 13295
+ },
+ "terminal_to_timeline_ms": true,
+ "open_existing_menu": true,
+ "preflight_after_interruption": "Kriya will not start a run here yet\nthe folder's last run left it in state RECOVERY_AVAILABLE; recover it (kriya runs recover) before starting another (RECOVERY_REQUIRED)\nCheck again",
+ "banner_text_final": 1811
+}

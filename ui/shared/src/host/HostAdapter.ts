@@ -1,4 +1,4 @@
-import type { KupEnvelope, KupRequest } from '../model/kup';
+import type { ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -43,7 +43,7 @@ export interface HostInfo {
 
 /** The desktop's folder lifecycle (GUI M5). The host owns the NATIVE chooser and the remembered list; it returns paths and nothing else - what a
  * folder is (identity, Git, state) is Kriya's answer (`workspace.describe`). A host without a native chooser (a browser test host) omits it. */
-export interface WorkspaceChoice { chosen: boolean; path: string | null }
+export interface WorkspaceChoice { chosen: boolean; path: string | null; /** RUN_ACTIVE: a run this host started is in progress, so the workspace cannot change (M6). */ refused?: 'RUN_ACTIVE' | null }
 export type MenuCommand = 'openFolder';
 export interface WorkspaceHost {
   /** The native folder chooser. Cancelling resolves { chosen: false } and changes nothing. */
@@ -56,8 +56,16 @@ export interface WorkspaceHost {
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }
 
+/** Start Run (GUI M6). The host launches the ONE Kriya command line for a typed {workspace, goal}; it reports the PROCESS, never the run's outcome (that is
+ * Kriya's durable records, read with launch.status and the evidence operations). A host with no execution backend omits it. */
+export interface ExecutionHostPort {
+  startRun(request: StartRunRequest): Promise<StartRunResult>;
+  state(): Promise<ExecutionState>;
+}
+
 export interface HostAdapter {
   workspace?: WorkspaceHost;
+  execution?: ExecutionHostPort;
   query(request: KupRequest, signal?: AbortSignal): Promise<KupEnvelope>;
   openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult>;
   copyToClipboard(text: string): Promise<void>;

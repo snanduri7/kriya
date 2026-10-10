@@ -4,7 +4,7 @@ package kup;
 
 import com.fasterxml.jackson.annotation.*;
 
-public class StateClass {
+public class ExecutionPreflightState {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter
@@ -12,22 +12,28 @@ public class StateClass {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
+    private String cockpitDirectory;
     private String directory;
+    private Boolean observableByCockpit;
     private Source source;
-    private boolean traceDatabasePresent;
+
+    @JsonProperty("cockpit_directory")
+    public String getCockpitDirectory() { return cockpitDirectory; }
+    @JsonProperty("cockpit_directory")
+    public void setCockpitDirectory(String value) { this.cockpitDirectory = value; }
 
     @JsonProperty("directory")
     public String getDirectory() { return directory; }
     @JsonProperty("directory")
     public void setDirectory(String value) { this.directory = value; }
 
+    @JsonProperty("observable_by_cockpit")
+    public Boolean getObservableByCockpit() { return observableByCockpit; }
+    @JsonProperty("observable_by_cockpit")
+    public void setObservableByCockpit(Boolean value) { this.observableByCockpit = value; }
+
     @JsonProperty("source")
     public Source getSource() { return source; }
     @JsonProperty("source")
     public void setSource(Source value) { this.source = value; }
-
-    @JsonProperty("trace_database_present")
-    public boolean getTraceDatabasePresent() { return traceDatabasePresent; }
-    @JsonProperty("trace_database_present")
-    public void setTraceDatabasePresent(boolean value) { this.traceDatabasePresent = value; }
 }

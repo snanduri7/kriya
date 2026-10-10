@@ -45,6 +45,8 @@ export const SERVICE_ARGUMENTS: Readonly<Record<KupRequest['operation'], readonl
   'history.prompt': ['snapshot_id', 'run_id'],
   'workspace.status': ['workspace'],
   'workspace.describe': ['workspace'],
+  'execution.preflight': ['workspace'],
+  'launch.status': ['workspace', 'launch_id'],
   'evidence.manifest': ['run_id', 'snapshot_id', 'from_trace'],
   'evidence.verify': ['run_id'],
   'evidence.records': ['run_id', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'kind', 'limit', 'cursor'],

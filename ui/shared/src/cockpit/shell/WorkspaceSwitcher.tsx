@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useWorkspace } from '../core';
+import { useExecution, useWorkspace } from '../core';
 import { OPEN_FOLDER_SHORTCUT, folderLabels } from './WelcomeScreen';
 
 /** The toolbar's workspace control: the open workspace's NAME (the exact path belongs to the Workspace page), with Open Folder, the recent folders and Close. */
 export function WorkspaceSwitcher() {
   const ws = useWorkspace();
+  const { locked } = useExecution();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -21,7 +22,7 @@ export function WorkspaceSwitcher() {
   const choose = (action: () => Promise<void>) => { setOpen(false); void action(); };
   return (
     <div className="ck-switcher" ref={root}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label="Switch workspace" onClick={() => setOpen(!open)} disabled={!ws.ready}>
+      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label="Switch workspace" onClick={() => setOpen(!open)} disabled={!ws.ready || locked} title={locked ? "A run is in progress; the workspace cannot change until it ends." : undefined}>
         {name ?? 'Open Folder…'} <span aria-hidden="true">▾</span>
       </button>
       {open ? (

@@ -1750,6 +1750,9 @@ class ConfigResolutionState:
     config_dict: Dict[str, Any]
     workspace_root: str
     violations: List[Any]  # List[ConfigAuthorityViolation] - Any to avoid a module-level authority.py import
+    # GUI M6 (execution preflight): which file, if any, supplied the user layer and how it was found, as resolved here - reported, never re-derived.
+    config_path: Optional[str] = None
+    config_source: Optional[str] = None
 
 
 def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionState:
@@ -2121,7 +2124,9 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
             provenance[(top, leaf)] = derived_source
 
     violations = compute_violations(provenance, classification_overrides)
-    return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations)
+    return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations,
+                                 config_path=config_path if config_path and os.path.exists(config_path) else None,
+                                 config_source=source.value if source is not None and config_path and os.path.exists(config_path) else None)
 
 
 def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = None) -> AppConfig:

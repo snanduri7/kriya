@@ -58,6 +58,8 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _workspace_status(request, request_id)
         if operation == "workspace.describe":
             return _workspace_describe(cfg, request, request_id)
+        if operation in ("execution.preflight", "launch.status"):
+            return _execution(cfg, operation, request, request_id)
         if operation in ("evidence.manifest", "evidence.verify", "evidence.records", "evidence.change_content", "evidence.call_content"):
             return _evidence(cfg, operation, request, request_id)
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")
@@ -70,6 +72,15 @@ def _evidence(cfg, operation: str, request: Dict[str, Any], request_id: str) -> 
     try:
         return handler(cfg, request, request_id)
     except StateDirectoryError as error:  # the configured state directory is unusable: a configuration failure, typed
+        return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
+
+
+def _execution(cfg, operation: str, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    from kriya.kup import execution
+
+    try:
+        return (execution.preflight if operation == "execution.preflight" else execution.launch_status)(cfg, request, request_id)
+    except StateDirectoryError as error:
         return error_envelope(operation, request_id, policy.CONFIG_LOAD_FAILED, str(error))
 
 

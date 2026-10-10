@@ -20,6 +20,7 @@ public class KupRequest {
     private String cursor;
     private Long limit;
     private String runid;
+    private String launchid;
     private Boolean fromTrace;
     private Long attempt;
     private Long fromSeq;
@@ -75,6 +76,14 @@ public class KupRequest {
     public String getRunid() { return runid; }
     @JsonProperty("run_id")
     public void setRunid(String value) { this.runid = value; }
+
+    /**
+     * The shape of a Kriya run id; the launch id IS the run id.
+     */
+    @JsonProperty("launch_id")
+    public String getLaunchid() { return launchid; }
+    @JsonProperty("launch_id")
+    public void setLaunchid(String value) { this.launchid = value; }
 
     /**
      * run_id is a trace row id; needs snapshot_id.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KupRequest } from '@kriya-ui/kup';
-import { LIMITS, validateKupRequest, validateOpenInIde, validateSettingValue } from '../src/main/ipc_contract';
+import { LIMITS, validateKupRequest, validateOpenInIde, validateSettingValue, validateStartRun } from '../src/main/ipc_contract';
 import { ALLOWED_ARGV_PREFIXES, argvIsAllowed, buildKriyaArgv } from '../src/main/kriya_argv';
 
 const SID = '20261004T093000000000Z-f1c70001';
@@ -68,6 +68,35 @@ const EVIDENCE_REQUESTS = [
   { operation: 'evidence.records', run_id: 'r1' }, { operation: 'evidence.records', run_id: 'r1', unit: '-u', phase: 'attempt', role: 'developer', attempt: 2, kind: ['gate.result', 'model.request'], from_seq: 3, limit: 50, cursor: 'abc' },
 ] as const;
 
+describe('M6 request grammar', () => {
+  const LAUNCH = '20261010T101010-abcdef01';
+  it('execution.preflight takes exactly an absolute workspace; launch.status exactly workspace + a launch id', () => {
+    expect(validateKupRequest({ operation: 'execution.preflight', workspace: '/w' }).ok).toBe(true);
+    expect(validateKupRequest({ operation: 'launch.status', workspace: '/w', launch_id: LAUNCH }).ok).toBe(true);
+    for (const bad of [{ operation: 'execution.preflight' }, { operation: 'execution.preflight', workspace: 'w' }, { operation: 'execution.preflight', workspace: '/w', extra: 1 },
+      { operation: 'launch.status', workspace: '/w' }, { operation: 'launch.status', launch_id: LAUNCH }, { operation: 'launch.status', workspace: '/w', launch_id: 'latest' },
+      { operation: 'launch.status', workspace: '/w', launch_id: `${LAUNCH}/../x` }, { operation: 'launch.status', workspace: '/w', launch_id: LAUNCH, run_id: 'x' }]) {
+      expect(validateKupRequest(bad).ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it('their argv are fixed and allowlisted, the values attached as data', () => {
+    const pre = buildKriyaArgv({ operation: 'execution.preflight', workspace: '/w x' });
+    expect(pre).toEqual(['traces', '--json', '--execution-preflight', '/w x']);
+    const status = buildKriyaArgv({ operation: 'launch.status', workspace: '/w', launch_id: LAUNCH });
+    expect(status).toEqual(['traces', '--json', '--launch-status', LAUNCH, '--workspace', '/w']);
+    expect(argvIsAllowed(pre) && argvIsAllowed(status)).toBe(true);
+    expect(argvIsAllowed(['generate', '--json', '--launch-id', LAUNCH])).toBe(false); // an execution command line is never a READ argv
+  });
+  it('Start Run is exactly {workspace, goal}', () => {
+    expect(validateStartRun({ workspace: '/w', goal: 'do it' })).toEqual({ ok: true, value: { workspace: '/w', goal: 'do it' } });
+    for (const bad of [{ workspace: '/w' }, { goal: 'x' }, { workspace: '/w', goal: 'x', options: {} }, { workspace: '/w', goal: '' }, { workspace: '/w', goal: ' ' }, { workspace: '/w', goal: 5 }, { workspace: 'w', goal: 'x' }, { workspace: '/w', goal: 'a\0b' }, { workspace: '/w', goal: 'x'.repeat(LIMITS.goalMax + 1) }, null, 'x']) {
+      expect(validateStartRun(bad).ok, JSON.stringify(bad)).toBe(false);
+    }
+    expect(validateStartRun({ workspace: '/w', goal: 'x'.repeat(LIMITS.goalMax) }).ok).toBe(true);
+    expect(validateStartRun({ workspace: '/w', goal: 'multi\nline\ttext' }).ok).toBe(true);
+  });
+});
+
 describe('evidence argv (Run Cockpit v1.1)', () => {
   it('builds the exact CLI grammar, values attached with = so a value can never be read as an option', () => {
     expect(buildKriyaArgv({ operation: 'evidence.verify', run_id: 'r1' })).toEqual(['evidence', 'verify', 'r1', '--json', '--kup-version', '1']);
@@ -101,7 +130,7 @@ describe('argv builder (the only command-line source)', () => {
     for (const r of [{ operation: 'capabilities' }, { operation: 'snapshot.acquire' }, { operation: 'snapshot.list' }, { operation: 'snapshot.prune' }, { operation: 'snapshot.verify', snapshot_id: SID }, { operation: 'history.list', snapshot_id: SID, limit: 3 }, { operation: 'history.detail', snapshot_id: SID, run_id: 'x' }, { operation: 'workspace.status', workspace: '/w' }, { operation: 'workspace.describe', workspace: '/w' }, { operation: 'history.list', snapshot_id: SID, workspace: '/w' }] as const) expect(argvIsAllowed(buildKriyaArgv(r))).toBe(true);
     for (const r of EVIDENCE_REQUESTS) expect(argvIsAllowed(buildKriyaArgv(r as unknown as KupRequest)), r.operation).toBe(true);
     for (const bad of [['generate', 'goal'], ['fix'], ['traces', '--migrate-legacy'], ['traces', '--all'], ['traces', '--json', '-n', '5'], ['traces', '--json', '--run-id', 'r'], ['traces', '--json', '--verify'], ['runs', 'resume'], [], ['sh', '-c', 'traces']]) expect(argvIsAllowed(bad), bad.join(' ')).toBe(false);
-    expect(ALLOWED_ARGV_PREFIXES.length).toBe(8);
+    expect(ALLOWED_ARGV_PREFIXES.length).toBe(10);
     expect(buildKriyaArgv({ operation: 'workspace.describe', workspace: '/w' })).toEqual(['traces', '--json', '--describe-workspace', '/w']);
     expect(buildKriyaArgv({ operation: 'history.list', snapshot_id: SID, limit: 5, workspace: '/w' })).toEqual(['traces', '--json', '--snapshot-id', SID, '-n', '5', '--workspace', '/w']);
   });

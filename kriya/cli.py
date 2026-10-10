@@ -2860,14 +2860,71 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--requirements', 'requirements_file', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement contract (JSON kriya.requirements/1, outside the workspace): the complete, closed set of requirements that must close before success, instead of the requirements derived from the goal's sentences. The goal stays the planning context.")
 @click.option('--requirement-disposition', 'requirement_disposition', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator requirement disposition (JSON kriya.requirement_disposition/1, outside the workspace): statements or single claims the operator removes from the obligation set with a sealed reason (REJECTED_FALSE_PREMISE, HISTORICAL_CONTEXT, INFORMATIONAL_CONTEXT, OUT_OF_SCOPE). Bound to the goal, requirement set, exact text and base revision before any model call; reported, never satisfied; its digest joins the verification contract.")
 @click.option('--verification-authority', 'verification_authority', type=click.Path(exists=True, dir_okay=False), default=None, help="Operator verification authority (JSON kriya.verification_authority/1 beside its assets, outside the workspace): a sealed external acceptance command Kriya runs under its containment against a copy of the candidate, covering the requirements it declares (operator sufficiency, never a proof). Bound before any model call; its digest joins the verification contract.")
+@click.option('--launch-id', 'launch_id', default=None, hidden=True,
+              help="GUI M6 (desktop host): run this goal as a recorded launch with this id. The goal is read from stdin; the run is non-interactive "
+                   "(knowledge-policy strict, no auto-approval) and the launch is recorded in the workspace (kriya/control/launch.py). Requires --json.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str], requirement_disposition: Optional[str], verification_authority: Optional[str]) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str], acceptance: Optional[str], acceptance_approval: Optional[str], requirements_file: Optional[str], requirement_disposition: Optional[str], verification_authority: Optional[str], launch_id: Optional[str] = None) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
+    if launch_id is not None:
+        _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_knowledge_gap, resume, resume_id, json_output, from_milestones,
+                           acceptance, acceptance_approval, requirements_file, requirement_disposition, verification_authority)
+        return
     with GenerateOutput(json_output) as output:
         _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                        resume, resume_id, json_output, from_milestones, output, acceptance=acceptance,
                        acceptance_approval=acceptance_approval, requirements_file=requirements_file,
                        verification_authority=verification_authority, requirement_disposition=requirement_disposition)
+
+
+def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_knowledge_gap, resume, resume_id, json_output, from_milestones,
+                       acceptance, acceptance_approval, requirements_file, requirement_disposition, verification_authority) -> None:
+    """GUI M6: `kriya generate` as a RECORDED, NON-INTERACTIVE launch for the desktop host.
+
+    The real path is unchanged (`_generate_impl`); this adds only what a desktop launch needs around it: the goal comes from stdin (never argv),
+    the preflight is re-resolved HERE (the host's copy is never trusted), the launch record exists before the workflow starts - so even a
+    refused or failing launch is linked to its workspace - and it is sealed whatever happens. Nothing is auto-approved: no -y, knowledge
+    policy strict, and an approval prompt finds no terminal and stops the run."""
+    from kriya.control.launch import LaunchRefused, LaunchSession, validate_goal
+    from kriya.control.workspace_identity import canonical_workspace, workspace_identity
+    from kriya.kup.execution import KNOWLEDGE_POLICY, build_preflight
+
+    extra = [name for name, value in (("GOAL", goal), ("--file", file), ("--yes", yes), ("--resume", resume), ("--resume-id", resume_id),
+                                      ("--from-milestones", from_milestones), ("--acceptance", acceptance), ("--acceptance-approval", acceptance_approval),
+                                      ("--requirements", requirements_file), ("--requirement-disposition", requirement_disposition),
+                                      ("--verification-authority", verification_authority), ("--ack-knowledge-gap", ack_knowledge_gap)) if value]
+    if not json_output or extra or knowledge_policy != "warn":
+        raise click.UsageError("--launch-id takes the goal on stdin and requires --json; it cannot be combined with "
+                               + ", ".join(extra or ["--knowledge-policy (a launch is always strict)"]))
+    with GenerateOutput(True) as output:
+        session = None
+        try:
+            goal_text = validate_goal(sys.stdin.read(16001))
+            workspace = canonical_workspace(os.getcwd())
+            preflight = build_preflight(workspace, None)
+            session = LaunchSession(workspace, workspace_identity(workspace), launch_id, goal_text, preflight,
+                                    {"knowledge_policy": KNOWLEDGE_POLICY, "interactive": False})
+            session.open()
+        except LaunchRefused as refusal:
+            output.result = {"status": "refused", "quality_gates_passed": False, "code": refusal.code, "error": refusal.message, "launch_id": launch_id}
+            sys.exit(2)
+        if not preflight["ready"]:
+            first = preflight["blockers"][0]
+            output.result = {"status": "refused", "quality_gates_passed": False, "code": first["code"], "error": first["message"],
+                             "launch_id": launch_id, "blockers": preflight["blockers"]}
+            session.finish(2, output.result, None)
+            sys.exit(2)
+        exit_code, failure = 0, None
+        try:
+            _generate_impl(ctx, goal_text, None, False, KNOWLEDGE_POLICY, (), False, None, True, None, output)
+        except SystemExit as stop:
+            exit_code = stop.code if isinstance(stop.code, int) else (0 if stop.code is None else 1)
+            raise
+        except BaseException as error:  # KeyboardInterrupt (the terminal's Ctrl-C) included: sealed, then propagated
+            exit_code, failure = (130 if isinstance(error, KeyboardInterrupt) else 1), f"{type(error).__name__}: {error}"
+            raise
+        finally:
+            session.finish(exit_code, output.result, failure)
 
 
 def _bind_requirement_contract(cfg: AppConfig, contract_path: str, requirement_goal: str) -> Any:
@@ -5182,6 +5239,10 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                    "evidence manifest records this workspace.")
 @click.option("--describe-workspace", "describe_workspace", type=click.Path(), default=None,
               help="KUP (GUI M5): read-only facts Kriya reports about this folder (identity, Git, recovery status, state directory). Opens nothing for writing.")
+@click.option("--execution-preflight", "execution_preflight", type=click.Path(), default=None,
+              help="KUP (GUI M6): what a run in this folder would be (configuration, state directory, models, authority). Read-only.")
+@click.option("--launch-status", "launch_status", default=None,
+              help="KUP (GUI M6): one desktop launch read back from durable records; requires --workspace.")
 @click.option("--snapshots", "list_snaps", is_flag=True, help="KUP: list the published snapshots.")
 @click.option("--verify", is_flag=True, help="With --snapshots: also verify every snapshot's digest.")
 @click.option("--snapshot-verify", "verify_id", default=None,
@@ -5198,7 +5259,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_legacy: bool, legacy_path: Optional[str],
            as_json: bool, capabilities: bool, acquire: bool, workspace: Optional[str], list_snaps: bool, verify: bool,
            verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str], cursor: Optional[str],
-           run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str]) -> None:
+           run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str],
+           execution_preflight: Optional[str] = None, launch_status: Optional[str] = None) -> None:
     """Show persistent run trace logs and metrics of past runs.
 
     With --json this is the KUP v1 read path (GUI M1 Phase C, handover/GUI-D4-READ-STRATEGY/03_GATE.md): it never
@@ -5215,14 +5277,15 @@ def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_leg
     if config_error is not None and not as_json:
         click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
         sys.exit(1)
-    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace, describe_workspace])
+    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace, describe_workspace, execution_preflight, launch_status])
     if as_json:
         if migrate_legacy or legacy_path is not None or show_all:
             raise click.UsageError("--json (KUP) cannot be combined with --migrate-legacy, --legacy-path or --all")
         if config_error is not None:
             _traces_kup_config_error(config_error)
             return
-        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt, describe_workspace)
+        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt, describe_workspace,
+                    execution_preflight, launch_status)
         return
     cfg: AppConfig = ctx.obj['config']
     if kup_flags:
@@ -5331,7 +5394,8 @@ def _traces_kup_config_error(error: Exception) -> None:
 
 def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquire: bool, workspace: Optional[str],
                 list_snaps: bool, verify: bool, verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str],
-                cursor: Optional[str], run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str] = None) -> None:
+                cursor: Optional[str], run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str] = None,
+                execution_preflight: Optional[str] = None, launch_status: Optional[str] = None) -> None:
     """Translate the KUP flag grammar into one operation request and print its envelope (exit 0; typed errors are
     envelopes, so the host can tell a protocol refusal from a crash)."""
     sys.dont_write_bytecode = True  # nothing the KUP path imports from here on writes bytecode
@@ -5342,12 +5406,14 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
     modes = [name for name, flag in (("capabilities", capabilities), ("snapshot.acquire", acquire), ("snapshot.list", list_snaps),
                                      ("snapshot.prune", prune), ("snapshot.verify", bool(verify_id)),
                                      ("workspace.describe", bool(describe_workspace)),
+                                     ("execution.preflight", bool(execution_preflight)),
+                                     ("launch.status", bool(launch_status)),
                                      ("history", bool(snapshot_id or run_id or cursor or include_prompt))) if flag]
     if not modes:
         modes = ["history"]  # plain `--json [-n N]`: a history read, which requires --snapshot-id (typed below)
     if len(modes) != 1:
         click.echo(encode_response(error_envelope("unknown", "cli", INVALID_REQUEST,
-                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, --describe-workspace, or a history read (--snapshot-id ...)")))
+                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, --describe-workspace, --execution-preflight, --launch-status, or a history read (--snapshot-id ...)")))
         return
     mode = modes[0]
     request: Dict[str, Any]
@@ -5363,6 +5429,10 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
         request = {"operation": "snapshot.verify", "snapshot_id": verify_id}
     elif mode == "workspace.describe":
         request = {"operation": "workspace.describe", "workspace": describe_workspace}
+    elif mode == "execution.preflight":
+        request = {"operation": "execution.preflight", "workspace": execution_preflight}
+    elif mode == "launch.status":
+        request = {"operation": "launch.status", "workspace": os.path.abspath(workspace) if workspace else None, "launch_id": launch_status}
     else:
         if run_id is not None:
             if cursor is not None or limit is not None:

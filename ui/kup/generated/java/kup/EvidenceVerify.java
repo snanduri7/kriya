@@ -22,7 +22,7 @@ public class EvidenceVerify {
     private String runid;
     private Map<String, Object> seal;
     private boolean sealed;
-    private Status status;
+    private EvidenceVerifyStatus status;
     private String verifiedAt;
 
     @JsonProperty("blob_problems")
@@ -70,9 +70,9 @@ public class EvidenceVerify {
     public void setSealed(boolean value) { this.sealed = value; }
 
     @JsonProperty("status")
-    public Status getStatus() { return status; }
+    public EvidenceVerifyStatus getStatus() { return status; }
     @JsonProperty("status")
-    public void setStatus(Status value) { this.status = value; }
+    public void setStatus(EvidenceVerifyStatus value) { this.status = value; }
 
     @JsonProperty("verified_at")
     public String getVerifiedAt() { return verifiedAt; }

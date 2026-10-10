@@ -4,9 +4,9 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus,
 } from '../../model/kup';
-import type { HostSettings, WorkspaceHost } from '../../host/HostAdapter';
+import type { ExecutionHostPort, HostSettings, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
 
 export type ProviderKind = 'kriya' | 'fixture';
@@ -44,6 +44,12 @@ export interface UIProvider {
   workspaceStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceStatus>>;
   /** Kriya's read-only facts about a folder (identity, Git, recovery status, state directory). Never classifies the folder. */
   describeWorkspace(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceDescribe>>;
+  /** What a run in this folder would be, resolved by Kriya as a terminal `kriya generate` there would be (configuration, state directory, models, authority). */
+  executionPreflight(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionPreflight>>;
+  /** One desktop launch read back from Kriya's durable records (launch record, RunRecord, evidence store, workspace lock). */
+  launchStatus(workspace: string, launchId: string, signal?: AbortSignal): Promise<ProviderResult<LaunchStatus>>;
+  /** The host's Start Run port; null when this host cannot execute (a browser test host, the fixture stand-in). */
+  readonly execution: ExecutionHostPort | null;
   /** The desktop folder lifecycle (native chooser, remembered folders, menu commands); null when the host has none. */
   readonly desktop: WorkspaceHost | null;
   /** `fromTrace`: `runId` is a trace row id (as listRuns returns it) and the evidence run id is resolved by Kriya from that row's recorded

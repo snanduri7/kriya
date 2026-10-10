@@ -15,33 +15,55 @@ export interface WorkspaceStore {
   setCurrent(path: string | null): void;
 }
 
-export interface WorkspaceChoice { chosen: boolean; path: string | null }
+export interface WorkspaceChoice { chosen: boolean; path: string | null; refused: 'RUN_ACTIVE' | null }
+
+export interface RegistryOptions {
+  /** The M1 inspector build only (ui_mode.ts): its typed "Recovery workspace" setting keeps working (see isApproved / refuseSetting / close). Never true for the cockpit. */
+  legacyInspector?: boolean;
+  /** true while a run this host started is in progress: the workspace cannot change then (M6-H). */
+  runActive?: () => boolean;
+}
 
 export class WorkspaceRegistry {
   private readonly picked = new Set<string>();
 
-  constructor(private readonly store: WorkspaceStore, private readonly max: number = RECENT_WORKSPACES_MAX) {}
+  private readonly legacyInspector: boolean;
+  private readonly runActive: () => boolean;
+
+  constructor(private readonly store: WorkspaceStore, private readonly max: number = RECENT_WORKSPACES_MAX, options: RegistryOptions = {}) {
+    this.legacyInspector = options.legacyInspector === true;
+    this.runActive = options.runActive ?? (() => false);
+  }
 
   recent(): string[] { return this.store.getRecent().slice(0, this.max); }
   current(): string | null { return this.store.getCurrent(); }
 
   /** Runs the native chooser. Cancellation is a normal outcome and changes nothing. */
   async choose(chooser: () => Promise<string | null>): Promise<WorkspaceChoice> {
+    // M6-H: with a run in progress the dialog is not even shown - the workspace that owns the run stays the open one.
+    if (this.runActive()) return { chosen: false, path: null, refused: 'RUN_ACTIVE' };
     const path = await chooser();
-    if (path === null) return { chosen: false, path: null };
+    if (path === null) return { chosen: false, path: null, refused: null };
     const valid = validateWorkspacePath(path);
-    if (!valid.ok) return { chosen: false, path: null };
+    if (!valid.ok) return { chosen: false, path: null, refused: null };
     this.picked.add(valid.value);
-    return { chosen: true, path: valid.value };
+    return { chosen: true, path: valid.value, refused: null };
   }
 
-  isApproved(path: string): boolean { return this.picked.has(path) || this.recent().includes(path); }
+  /**
+   * Approved = the person chose it with the native chooser this session, or it is remembered. M1 COMPATIBILITY (legacyInspector builds only): the
+   * folder the person typed into the inspector's own "Recovery workspace" setting, as the accepted M1 behaved. A cockpit build never takes this branch.
+   */
+  isApproved(path: string): boolean {
+    return this.picked.has(path) || this.recent().includes(path) || (this.legacyInspector && this.store.getCurrent() === path);
+  }
 
   /** Makes an approved folder the current workspace and the most recent one. Kriya has already validated it (the renderer calls this after workspace.describe). */
   remember(path: unknown): ValidationResult<string[]> {
     const valid = validateWorkspacePath(path);
     if (!valid.ok) return valid;
     if (!this.isApproved(valid.value)) return { ok: false, message: 'that folder was not chosen with Open Folder' };
+    if (this.runActive() && this.store.getCurrent() !== valid.value) return { ok: false, message: 'a run is in progress; the workspace cannot change until it ends' };
     const list = [valid.value, ...this.recent().filter((p) => p !== valid.value)].slice(0, this.max);
     this.store.setRecent(list);
     this.store.setCurrent(valid.value);
@@ -52,6 +74,7 @@ export class WorkspaceRegistry {
   forget(path: unknown): ValidationResult<string[]> {
     const valid = validateWorkspacePath(path);
     if (!valid.ok) return valid;
+    if (this.runActive() && this.store.getCurrent() === valid.value) return { ok: false, message: 'a run is in progress; the workspace cannot be closed until it ends' };
     const list = this.recent().filter((p) => p !== valid.value);
     this.store.setRecent(list);
     this.picked.delete(valid.value);
@@ -71,12 +94,17 @@ export class WorkspaceRegistry {
     return `${request.operation}: that folder was not chosen with Open Folder (a workspace argument must come from the native chooser or the recent list)`;
   }
 
-  /** No folder is open (application launch, or the person closed the workspace). Recent entries are kept. */
-  close(): void { this.store.setCurrent(null); }
+  /** Application launch: no folder is open until the person opens one. Recent entries are kept. (The M1 inspector keeps its saved setting, as it always did.) */
+  close(): void { if (!this.legacyInspector) this.store.setCurrent(null); }
 
-  /** The current-workspace setting may be cleared at any time but only set through remember(). */
+  /**
+   * The current-workspace setting is set only through remember() - except in the M1 inspector build, whose typed setting is accepted M1 behaviour.
+   * Clearing it (closing the workspace) is always allowed, but never while a run this host started is in progress.
+   */
   refuseSetting(value: string | null): string | null {
-    return value === null ? null : 'the workspace is chosen with Open Folder';
+    if (this.runActive() && value !== this.store.getCurrent()) return 'a run is in progress; the workspace cannot change until it ends';
+    if (value === null || this.legacyInspector) return null;
+    return 'the workspace is chosen with Open Folder';
   }
 }
 

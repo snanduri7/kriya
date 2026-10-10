@@ -9,17 +9,21 @@
  */
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, session, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
 import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
 import { isFixtureMode, resolveHostMode } from './host_mode';
 import { PRODUCT_NAME, WINDOW_TITLE, aboutPanelOptions, applicationMenuTemplate, resolveUserData } from './identity';
-import { IPC_CHANNELS, LIMITS, MENU_CHANNEL, type MenuCommand, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
+import { IPC_CHANNELS, LIMITS, MENU_CHANNEL, type MenuCommand, type KupRequest, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
+import { ExecutionHost } from './execution_host';
+import { launchExecution } from './execution_process';
+import { resolveUiMode } from './ui_mode';
 import { runCapture } from './capture';
 import { runMeasurement } from './measure';
 import { DEFAULT_SOAK, runSoak } from './soak';
@@ -42,7 +46,10 @@ const CAPTURE_CHOICES: Array<string | null> | null = CAPTURE_DIR && process.env.
 const TRACE = process.env.KRIYA_UI_TRACE === '1'; // per-request timings and service lifecycle on stderr (measurement)
 const ALLOW_REAL = process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1';
 const FAKE_KRIYA = join(__dirname, '..', '..', 'fake-kriya', 'fake_kriya.mjs');
-const RENDERER_INDEX = join(__dirname, '..', 'renderer', 'index.html');
+const RENDERER_DIR = join(__dirname, '..', 'renderer');
+const RENDERER_INDEX = join(RENDERER_DIR, 'index.html');
+// Which bundle this is (the Vite build records it): only an explicit M1-inspector build gets the narrow M1 workspace-setting compatibility.
+const UI_MODE = resolveUiMode(() => { try { return readFileSync(join(RENDERER_DIR, 'ui-mode.json'), 'utf8'); } catch { return null; } });
 const HOST_VERSION = '0.0.1';
 
 // M5: real-mode reads go through ONE persistent `kriya kup-stdio` child (kriya_service.ts). KRIYA_UI_TRANSPORT=spawn keeps the one-shot
@@ -52,6 +59,7 @@ const services = new KriyaServiceHolder();
 
 let settings: SettingsStore;
 let workspaces: WorkspaceRegistry;
+let execution: ExecutionHost;
 let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
 
@@ -73,6 +81,36 @@ function fromOwnedRenderer(event: IpcMainInvokeEvent): boolean { return ownedWeb
 const isDirectory = (p: string) => { try { return statSync(p).isDirectory(); } catch { return false; } };
 /** The explicit configuration directory (F-5): every kriya child runs with this cwd; Electron's own cwd is never used. */
 function configDirectory() { return resolveConfigDirectory(settings.get('configDirectory'), process.env, isDirectory); }
+
+/** One KUP request through the SAME path the renderer's queries take (validation, workspace gate, persistent service), for host-initiated asks (the Start Run preflight). */
+async function kupQuery(request: KupRequest): Promise<unknown> {
+  const refused = workspaces.refuse(request);
+  if (refused) return errorEnvelope(request.operation, 'INVALID_REQUEST', refused);
+  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+  if (host.mode !== 'real') return errorEnvelope(request.operation, 'HOST_ERROR', 'kriya not launched: no real Kriya executable is configured');
+  const dir = configDirectory();
+  if (!dir.ok) return errorEnvelope(request.operation, 'HOST_ERROR', `kriya not launched: ${dir.message}`);
+  const childEnv = buildKriyaChildEnv(process.env);
+  if (!childEnv.ok) return errorEnvelope(request.operation, 'HOST_ERROR', `kriya not launched: ${childEnv.message}`);
+  const served = await services.get({ executable: host.executable, cwd: dir.directory, env: childEnv.env }).request(request);
+  return served.kind === 'json' ? served.json : errorEnvelope(request.operation, served.code, served.message);
+}
+
+/** The executable and fixed child environment for an EXECUTION process (null = fixture stand-in: no execution backend). */
+function prepareExecution() {
+  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+  if (host.mode === 'fixture') return null;
+  if (host.mode === 'error') return { ok: false as const, message: host.message };
+  const childEnv = buildKriyaChildEnv(process.env);
+  return childEnv.ok ? { ok: true as const, executable: host.executable, env: childEnv.env } : { ok: false as const, message: childEnv.message };
+}
+
+/** Launch ids have the shape of a Kriya run id (YYYYMMDDTHHMMSS-xxxxxxxx); Kriya validates the shape and refuses a reused id. */
+function mintLaunchId(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}T${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${randomBytes(4).toString('hex')}`;
+}
 
 function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.hostInfo, (event) => {
@@ -172,6 +210,18 @@ function registerIpc() {
     const r = workspaces.remember(path); if (!r.ok) throw new Error(r.message);
     return r.value;
   });
+  // M6 execution: the renderer can only ask the host to start THE run (typed {workspace, goal}) and read what the host knows about the process.
+  ipcMain.handle(IPC_CHANNELS.startRun, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    const startedAt = Date.now();
+    const result = await execution.start(raw);
+    if (TRACE) process.stderr.write(`[kriya-ui] startRun ${result.started ? `launched ${result.launch_id}` : `refused ${result.refusal?.code}`} in ${Date.now() - startedAt} ms\n`);
+    return result;
+  });
+  ipcMain.handle(IPC_CHANNELS.executionState, (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return execution.state();
+  });
   ipcMain.handle(IPC_CHANNELS.forgetWorkspace, (event, path: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     const r = workspaces.forget(path); if (!r.ok) throw new Error(r.message);
@@ -218,10 +268,15 @@ function createWindow() {
 app.whenReady().then(async () => {
   app.setAboutPanelOptions(aboutPanelOptions(app.getVersion()));
   settings = new SettingsStore(join(app.getPath('userData'), 'kriya-ui-settings.json'));
+  execution = new ExecutionHost({
+    launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
+    preflight: (workspace) => kupQuery({ operation: 'execution.preflight', workspace }),
+    log: TRACE ? (line) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
+  });
   workspaces = new WorkspaceRegistry({
     getRecent: () => settings.get('recentWorkspaces'), setRecent: (list) => settings.set('recentWorkspaces', list),
     getCurrent: () => settings.get('workspacePath'), setCurrent: (path) => settings.set('workspacePath', path),
-  });
+  }, undefined, { legacyInspector: UI_MODE === 'inspector', runActive: () => execution.active() });
   workspaces.close(); // a launch starts at the welcome screen: no folder is open until the person opens one
   const command = (name: MenuCommand) => { if (ownedWindow && !ownedWindow.isDestroyed()) ownedWindow.webContents.send(MENU_CHANNEL, name); };
   Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', PRODUCT_NAME, { openFolder: () => command('openFolder') })));
@@ -259,7 +314,29 @@ app.whenReady().then(async () => {
 });
 app.on('window-all-closed', () => app.quit());
 // Ends the persistent child cleanly (EOF on its stdin); if the application dies instead, the closed pipe ends the child anyway.
-app.on('before-quit', () => { void services.stop(); });
+// M6: quitting while a run this host started is in progress asks first; confirming interrupts it the way a terminal's Ctrl-C does (SIGINT: Kriya seals
+// the run and the launch as interrupted), with a SIGKILL after the grace period. Nothing is left running unobserved.
+let quitting = false;
+app.on('before-quit', (event) => {
+  if (!quitting && execution && execution.active()) {
+    event.preventDefault();
+    void (async () => {
+      const options = {
+        type: 'warning' as const, buttons: ['Interrupt run and quit', 'Keep running'], defaultId: 1, cancelId: 1, message: 'A Kriya run is in progress',
+        detail: 'Quitting interrupts it, the same as pressing Ctrl-C in a terminal. Kriya records the interruption; nothing is reported as finished.',
+      };
+      const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
+      const proceed = CAPTURE_DIR ? true : (parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)).response === 0;
+      if (!proceed) return;
+      quitting = true;
+      await execution.shutdown();
+      await services.stop();
+      app.quit();
+    })();
+    return;
+  }
+  void services.stop();
+});
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (e) => e.preventDefault());
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));

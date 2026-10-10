@@ -1,0 +1,419 @@
+"""GUI M6: ``execution.preflight``, ``launch.status`` and the recorded, non-interactive ``kriya generate --launch-id``.
+
+These pin the authority split of a desktop launch: Kriya resolves configuration/state/models/authority exactly as a terminal run in that folder
+would (the process working directory decides), the launch id IS the run id and is claimed once by the first top-level run in the launch's own
+workspace, the launch record links the run to its workspace before anything can fail, nothing is auto-approved, and no outcome is ever inferred
+from a process exit."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+from click.testing import CliRunner
+
+from kriya.cli import main
+from kriya.config import AppConfig
+from kriya.control import launch as launch_module
+from kriya.control.launch import GOAL_MAX_CHARS, LaunchRefused, LaunchSession, goal_digest, valid_launch_id
+from kriya.control.persistence import launch_record_path, load_launch_record, load_run_record
+from kriya.control.run_coordinator import begin_mutating_run, coordinated_mutation
+from kriya.control.run_ownership import acquire_run_lock
+from kriya.control.workspace_identity import canonical_workspace, workspace_identity
+from kriya.kup import policy, serve
+from kriya.kup.cli_ops import run_kup_operation
+
+LID = "20261010T101010-abcdef01"
+GOAL = "Create a utility library with a slugify function and tests.\nSecond line; $(touch /tmp/pwned) `x`"
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def _preflight(path, cfg=None):
+    return run_kup_operation(cfg or AppConfig(), {"operation": "execution.preflight", "workspace": str(path)})
+
+
+def _status(path, launch_id=LID, cfg=None):
+    return run_kup_operation(cfg or AppConfig(), {"operation": "launch.status", "workspace": str(path), "launch_id": launch_id})
+
+
+@pytest.fixture
+def ws(tmp_path):
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    return folder
+
+
+def _tree(path):
+    return sorted((os.path.relpath(os.path.join(d, n), path), os.stat(os.path.join(d, n)).st_mtime_ns) for d, _dirs, names in os.walk(path) for n in names)
+
+
+# ------------------------------------------------------------------ preflight
+
+def test_preflight_describes_the_run_exactly_and_is_read_only(ws):
+    (ws / "a.txt").write_text("a")
+    before, cwd = _tree(ws), os.getcwd()
+    env = _preflight(ws)
+    assert env["error"] is None and env["operation"] == "execution.preflight"
+    data = env["data"]
+    assert data["ready"] is True and data["blockers"] == []
+    assert data["workspace"] == {"path": canonical_workspace(str(ws)), "identity": workspace_identity(canonical_workspace(str(ws))), "name": "proj"}
+    cfg = data["configuration"]
+    assert cfg["status"] == "loaded" and cfg["source"] == "packaged_default" and cfg["file"] is None and cfg["authority"]["status"] == "no_findings"
+    assert cfg["directory"] == canonical_workspace(str(ws)) and len(cfg["fingerprint"]) == 64
+    assert data["state"]["observable_by_cockpit"] is True and data["state"]["directory"] == data["state"]["cockpit_directory"]
+    assert data["model"]["model"] and data["model"]["provider"] and "api_key" not in json.dumps(data)
+    assert data["interaction"]["approvals"] == "unavailable" and data["interaction"]["knowledge_policy"] == "strict"
+    assert os.getcwd() == cwd, "the preflight must restore the process working directory"
+    assert _tree(ws) == before and not (ws / ".kriya").exists(), "a preflight writes nothing into the folder"
+
+
+def test_configuration_is_resolved_from_the_folder_like_a_terminal_run_there(ws):
+    (ws / "kriya.yaml").write_text("llm:\n  context_window: 12345\n")
+    data = _preflight(ws)["data"]
+    assert data["configuration"]["source"] == "auto_discovered_cwd"
+    assert os.path.samefile(data["configuration"]["file"], ws / "kriya.yaml")
+    assert data["model"]["context_window"] == 12345, "the folder's own repository-safe setting is the one a run would use"
+
+
+def test_a_field_only_the_operator_may_set_blocks_the_start_with_the_field_named(ws):
+    (ws / "kriya.yaml").write_text("execution_policy:\n  enabled: true\n")
+    data = _preflight(ws)["data"]
+    assert data["ready"] is False
+    assert [b["code"] for b in data["blockers"]] == ["CONFIG_AUTHORITY_REFUSED"]
+    assert data["configuration"]["status"] == "refused" and data["configuration"]["authority"]["status"] == "refused"
+    assert any(f["field"].startswith("execution_policy") for f in data["configuration"]["authority"]["fields"])
+    assert data["model"] is None and data["state"]["directory"] is None
+
+
+def test_a_state_directory_the_cockpit_does_not_read_blocks_the_start(ws, tmp_path, monkeypatch):
+    monkeypatch.delenv("KRIYA_STATE_DIR")  # the environment override would (correctly) win on both sides; this is the configured-path case
+    (ws / "kriya.yaml").write_text("paths:\n  state: .kriya/state\n")
+    data = _preflight(ws, AppConfig(paths={"state": str(tmp_path / "cockpit-state")}))["data"]
+    assert data["ready"] is False and data["state"]["observable_by_cockpit"] is False
+    assert [b["code"] for b in data["blockers"]] == ["STATE_DIRECTORY_NOT_OBSERVABLE"]
+    assert data["state"]["directory"].endswith(os.path.join(".kriya", "state")) and data["state"]["cockpit_directory"] != data["state"]["directory"]
+
+
+def test_an_active_run_in_the_folder_blocks_the_start(ws):
+    with acquire_run_lock(canonical_workspace(str(ws)), run_id=LID):
+        data = _preflight(ws)["data"]
+    assert data["ready"] is False and data["blockers"][0]["code"] == "RUN_ACTIVE" and LID in data["blockers"][0]["message"]
+    assert _preflight(ws)["data"]["ready"] is True, "the lock is released: nothing is remembered"
+
+
+def test_preflight_is_not_cached_between_calls(ws):
+    assert _preflight(ws)["data"]["configuration"]["source"] == "packaged_default"
+    (ws / "kriya.yaml").write_text("llm:\n  context_window: 4096\n")
+    assert _preflight(ws)["data"]["configuration"]["source"] == "auto_discovered_cwd"
+    (ws / "kriya.yaml").unlink()
+    assert _preflight(ws)["data"]["configuration"]["source"] == "packaged_default"
+
+
+@pytest.mark.parametrize("workspace", ["relative/path", "", "/tmp/with\nnewline"])
+def test_preflight_refuses_a_workspace_that_is_not_a_clean_absolute_path(workspace):
+    env = run_kup_operation(AppConfig(), {"operation": "execution.preflight", "workspace": workspace})
+    assert env["error"]["code"] == policy.INVALID_REQUEST
+
+
+def test_preflight_of_a_missing_folder_is_workspace_unavailable(tmp_path):
+    env = _preflight(tmp_path / "nope")
+    assert env["error"]["code"] == policy.WORKSPACE_UNAVAILABLE and env["error"]["reason"] == "not_found"
+
+
+# ------------------------------------------------------------------ the launch id is the run id
+
+def test_the_launch_id_is_claimed_once_by_the_first_top_level_run_in_its_workspace(ws):
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    try:
+        with begin_mutating_run(str(ws)) as first:
+            assert first.run_id == LID
+            assert load_run_record(canonical, LID) is not None
+        with begin_mutating_run(str(ws)) as second:
+            assert second.run_id != LID, "a second run in the same process gets its own id"
+    finally:
+        launch_module.deactivate(session)
+
+
+def test_a_launch_is_not_claimed_by_a_run_in_another_workspace(ws, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    try:
+        with begin_mutating_run(str(other)) as run:
+            assert run.run_id != LID
+    finally:
+        launch_module.deactivate(session)
+
+
+def test_the_real_coordinated_mutation_decorator_adopts_the_launch_id(ws):
+    class Engine:
+        seen = None
+
+        @coordinated_mutation
+        async def run_generation_workflow(self, goal, workspace_path):
+            from kriya.control.run_coordinator import current_run_context
+            Engine.seen = current_run_context().run_id
+            return {"status": "success"}
+
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    try:
+        asyncio.run(Engine().run_generation_workflow(GOAL, str(ws)))
+    finally:
+        launch_module.deactivate(session)
+    assert Engine.seen == LID
+    record = load_launch_record(canonical, LID)
+    assert record["phase"] == "RUNNING" and record["run"]["run_id"] == LID
+
+
+@pytest.mark.parametrize("bad", ["", "x", "../escape", "20261010T101010-ABCDEF01", "20261010T101010-abcdef0", "20261010T101010-abcdef01/../x", None, 5])
+def test_only_the_run_id_shape_is_a_launch_id(bad):
+    assert not valid_launch_id(bad)
+    with pytest.raises(LaunchRefused) as refused:
+        LaunchSession("/w", "i", bad, GOAL, {}, {})
+    assert refused.value.code == "LAUNCH_ID_INVALID"
+
+
+def test_a_launch_id_already_recorded_is_refused_not_overwritten(ws):
+    canonical = canonical_workspace(str(ws))
+    first = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    first.open()
+    launch_module.deactivate(first)
+    with pytest.raises(LaunchRefused) as refused:
+        LaunchSession(canonical, workspace_identity(canonical), LID, "another goal", {"ready": True}, {}).open()
+    assert refused.value.code == "LAUNCH_ID_IN_USE"
+    assert load_launch_record(canonical, LID)["goal"] == goal_digest(GOAL)
+
+
+def test_the_record_holds_a_digest_of_the_goal_never_the_text(ws):
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    launch_module.deactivate(session)
+    raw = open(launch_record_path(canonical, LID), encoding="utf-8").read()
+    assert "slugify" not in raw and "pwned" not in raw
+    assert json.loads(raw)["goal"] == goal_digest(GOAL) and json.loads(raw)["workspace"]["identity"] == workspace_identity(canonical)
+
+
+# ------------------------------------------------------------------ the recorded launch through the real CLI
+
+def _install_fake_workflow(monkeypatch, outcome, seen=None):
+    """Replaces ONLY the workflow body: the click command, the preflight, the launch record, the run coordinator and GenerateOutput are real."""
+    import kriya.cli as cli
+
+    def fake(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
+        if seen is not None:
+            seen.update(goal=goal, yes=yes, knowledge_policy=knowledge_policy, file=file, resume=resume, cwd=os.getcwd())
+        with begin_mutating_run(os.getcwd()) as context:
+            if seen is not None:
+                seen["run_id"] = context.run_id
+            if isinstance(outcome, BaseException):
+                raise outcome
+            output.result = outcome
+        sys.exit(0 if outcome.get("status") == "success" else 1)
+
+    monkeypatch.setattr(cli, "_generate_impl", fake)
+
+
+def _launch(ws, monkeypatch, goal=GOAL, launch_id=LID, extra=()):
+    monkeypatch.chdir(ws)
+    result = CliRunner().invoke(main, ["generate", "--json", "--launch-id", launch_id, *extra], input=goal)
+    return result
+
+
+def _last_json(result):
+    return json.loads(result.stdout[result.stdout.index("{"):])
+
+
+def test_a_launch_runs_the_real_path_noninteractively_and_seals_its_record(ws, monkeypatch):
+    seen = {}
+    _install_fake_workflow(monkeypatch, {"status": "success", "quality_gates_passed": True, "run_id": "ab12cd34", "files": ["a.py"]}, seen)
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert seen["goal"] == GOAL and seen["yes"] is False and seen["knowledge_policy"] == "strict" and seen["file"] is None and seen["resume"] is False
+    assert os.path.samefile(seen["cwd"], ws), "the workspace is the process working directory, as for a terminal run"
+    assert seen["run_id"] == LID
+    canonical = canonical_workspace(str(ws))
+    record = load_launch_record(canonical, LID)
+    assert record["phase"] == "ENDED" and [h["phase"] for h in record["history"]] == ["STARTING", "RUNNING", "ENDED"]
+    assert record["workspace"] == {"path": canonical, "identity": workspace_identity(canonical)}
+    assert record["run"]["run_id"] == LID and record["preflight"]["ready"] is True and record["options"] == {"knowledge_policy": "strict", "interactive": False}
+    assert record["ended"]["exit_code"] == 0 and record["ended"]["workflow_status"] == "success" and record["ended"]["trace_run_id"] == "ab12cd34"
+    assert _last_json(result)["status"] == "success"
+
+
+def test_a_workflow_failure_is_sealed_as_the_workflows_own_words_not_as_success(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, {"status": "failure", "quality_gates_passed": False, "failure_category": "knowledge_gap", "error": "gap", "run_id": "ee00ee00"})
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code == 1
+    ended = load_launch_record(canonical_workspace(str(ws)), LID)["ended"]
+    assert ended["exit_code"] == 1 and ended["workflow_status"] == "failure" and ended["quality_gates_passed"] is False and ended["failure_category"] == "knowledge_gap"
+
+
+def test_a_crash_inside_the_run_is_sealed_with_the_error_and_the_run_record_fails_too(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, RuntimeError("boom"))
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code == 1
+    canonical = canonical_workspace(str(ws))
+    ended = load_launch_record(canonical, LID)["ended"]
+    assert ended["exit_code"] == 1 and "RuntimeError: boom" in ended["error"] and ended["workflow_status"] is None  # no workflow result existed: none is invented
+    assert load_run_record(canonical, LID).terminal_status == "FAILURE"
+
+
+def test_an_interrupt_is_sealed_as_130(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, KeyboardInterrupt())
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code == 130
+    assert load_launch_record(canonical_workspace(str(ws)), LID)["ended"]["exit_code"] == 130
+
+
+def test_a_refused_preflight_is_a_recorded_launch_that_never_starts_the_workflow(ws, monkeypatch):
+    (ws / "kriya.yaml").write_text("execution_policy:\n  enabled: true\n")
+    seen = {}
+    _install_fake_workflow(monkeypatch, {"status": "success"}, seen)
+    # main() itself refuses a configuration with unapproved authority fields before the command runs: no launch, no workflow, a typed refusal
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code != 0 and seen == {}
+
+
+def test_a_blocked_launch_is_recorded_and_sealed_as_refused(ws, monkeypatch):
+    seen = {}
+    _install_fake_workflow(monkeypatch, {"status": "success"}, seen)
+    canonical = canonical_workspace(str(ws))
+    monkeypatch.chdir(ws)
+    with acquire_run_lock(canonical, run_id="20261010T000000-00000000"):
+        result = CliRunner().invoke(main, ["generate", "--json", "--launch-id", LID], input=GOAL)
+    assert result.exit_code == 2 and seen == {}
+    body = _last_json(result)
+    assert body["status"] == "refused" and body["code"] == "RUN_ACTIVE" and body["launch_id"] == LID
+    record = load_launch_record(canonical, LID)
+    assert record["phase"] == "ENDED" and record["ended"]["exit_code"] == 2 and record["run"] is None, "linked to the workspace although no run started"
+
+
+@pytest.mark.parametrize("goal", ["", "   \n", "x" * (GOAL_MAX_CHARS + 1), "a\x00b"])
+def test_an_invalid_goal_is_refused_before_anything_is_recorded(ws, monkeypatch, goal):
+    _install_fake_workflow(monkeypatch, {"status": "success"})
+    result = _launch(ws, monkeypatch, goal=goal)
+    assert result.exit_code == 2 and _last_json(result)["status"] == "refused"
+    assert not os.path.exists(launch_record_path(canonical_workspace(str(ws)), LID))
+
+
+def test_a_launch_id_in_use_is_refused_and_the_first_record_is_untouched(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, {"status": "success", "quality_gates_passed": True})
+    assert _launch(ws, monkeypatch).exit_code == 0
+    first = open(launch_record_path(canonical_workspace(str(ws)), LID), "rb").read()
+    result = _launch(ws, monkeypatch, goal="different")
+    assert result.exit_code == 2 and _last_json(result)["code"] == "LAUNCH_ID_IN_USE"
+    assert open(launch_record_path(canonical_workspace(str(ws)), LID), "rb").read() == first
+
+
+@pytest.mark.parametrize("extra", [["--yes"], ["--resume"], ["--file", __file__], ["--from-milestones", __file__], ["--knowledge-policy", "permissive"], ["GOAL"]])
+def test_a_launch_cannot_carry_options_that_would_broaden_it(ws, monkeypatch, extra):
+    seen = {}
+    _install_fake_workflow(monkeypatch, {"status": "success"}, seen)
+    result = _launch(ws, monkeypatch, extra=extra)
+    assert result.exit_code == 2 and seen == {}
+    assert not os.path.exists(launch_record_path(canonical_workspace(str(ws)), LID))
+
+
+def test_a_launch_requires_json_output(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, {"status": "success"})
+    monkeypatch.chdir(ws)
+    result = CliRunner().invoke(main, ["generate", "--launch-id", LID], input=GOAL)
+    assert result.exit_code == 2
+
+
+def test_the_goal_is_never_placed_in_a_shell_or_a_file(ws, monkeypatch, tmp_path):
+    marker = tmp_path / "pwned"
+    goal = f"x; touch {marker}; $(touch {marker}) `touch {marker}`"
+    _install_fake_workflow(monkeypatch, {"status": "success", "quality_gates_passed": True})
+    assert _launch(ws, monkeypatch, goal=goal).exit_code == 0
+    assert not marker.exists()
+    assert goal not in open(launch_record_path(canonical_workspace(str(ws)), LID), encoding="utf-8").read()
+
+
+# ------------------------------------------------------------------ launch.status
+
+def test_launch_status_reads_durable_records_only(ws, monkeypatch):
+    _install_fake_workflow(monkeypatch, {"status": "success", "quality_gates_passed": True, "run_id": "ab12cd34"})
+    assert _launch(ws, monkeypatch).exit_code == 0
+    data = _status(ws)["data"]
+    assert data["liveness"] == "ended" and data["launch"]["phase"] == "ENDED"
+    assert data["run_record"]["found"] is True and data["run_record"]["lifecycle_state"] in ("SUCCESS", "FAILURE", "RUNNING", "NEW", "PLANNING")
+    assert data["workspace_lock"] == {"held": False, "held_by_this_launch": False}
+    assert data["evidence"]["state"] == "absent", "no evidence configuration in this test: absent is reported, not invented"
+    assert "pid" in data["launch"]["process"] and "DERIVED" in data["liveness_note"]
+    assert "goal" in data["launch"] and "slugify" not in json.dumps(data)
+
+
+def test_a_running_launch_is_live_while_the_lock_is_held_and_interrupted_when_it_is_not(ws):
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    try:
+        assert _status(ws)["data"]["liveness"] == "starting"
+        with acquire_run_lock(canonical, run_id=LID):
+            session.run_started(LID, None)
+            live = _status(ws)["data"]
+            assert live["liveness"] == "live" and live["workspace_lock"]["held_by_this_launch"] is True
+        assert _status(ws)["data"]["liveness"] == "interrupted", "RUNNING but the lock is free: the process died without sealing - not success"
+    finally:
+        launch_module.deactivate(session)
+
+
+def test_another_runs_lock_does_not_make_this_launch_live(ws):
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    launch_module.deactivate(session)
+    session.run_started(LID, None)
+    with acquire_run_lock(canonical, run_id="20261010T000000-00000000"):
+        data = _status(ws)["data"]
+    assert data["workspace_lock"]["held"] is True and data["workspace_lock"]["held_by_this_launch"] is False and data["liveness"] == "interrupted"
+
+
+def test_an_unknown_launch_is_launch_not_found_and_a_bad_id_is_invalid(ws):
+    assert _status(ws, "20261010T101010-00000000")["error"]["code"] == policy.LAUNCH_NOT_FOUND
+    assert _status(ws, "../../etc/passwd")["error"]["code"] == policy.INVALID_REQUEST
+
+
+def test_a_launch_record_owned_by_another_workspace_is_not_trusted(ws, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    canonical = canonical_workspace(str(ws))
+    session = LaunchSession(canonical, workspace_identity(canonical), LID, GOAL, {"ready": True}, {})
+    session.open()
+    launch_module.deactivate(session)
+    target = launch_record_path(canonical_workspace(str(other)), LID)
+    os.makedirs(os.path.dirname(target))
+    os.replace(launch_record_path(canonical, LID), target)
+    assert _status(other)["error"]["code"] == policy.EVIDENCE_STORE_UNREADABLE
+
+
+# ------------------------------------------------------------------ transports
+
+def test_the_new_operations_are_allowlisted_with_typed_arguments_and_answer_the_same_through_both_transports(ws):
+    assert {"execution.preflight", "launch.status"} <= set(policy.OPERATIONS)
+    assert serve.ARGUMENTS["execution.preflight"] == frozenset({"workspace"})
+    assert serve.ARGUMENTS["launch.status"] == frozenset({"workspace", "launch_id"})
+    assert policy.LAUNCH_NOT_FOUND in policy.ERROR_CODES
+    one_shot = CliRunner().invoke(main, ["traces", "--json", "--execution-preflight", str(ws)])
+    assert one_shot.exit_code == 0
+    served = json.loads(serve.answer({"id": "r1", "operation": "execution.preflight", "arguments": {"workspace": str(ws)}}, None, None))
+    assert served["ok"] is True and served["id"] == "r1"
+    assert json.loads(one_shot.output)["data"] == served["envelope"]["data"], "the same operation implementation answers both transports"
+    one_status = CliRunner().invoke(main, ["traces", "--json", "--launch-status", LID, "--workspace", str(ws)])
+    served_status = json.loads(serve.answer({"id": "r2", "operation": "launch.status", "arguments": {"workspace": str(ws), "launch_id": LID}}, None, None))
+    assert json.loads(one_status.output)["error"] == served_status["envelope"]["error"] and served_status["envelope"]["error"]["code"] == policy.LAUNCH_NOT_FOUND

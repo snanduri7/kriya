@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitProviders, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type SelectionStore, type UIProvider } from '../core';
+import { CockpitProviders, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
 import type { Selection } from '../../state/selection';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
@@ -23,15 +23,17 @@ export interface AppShellProps {
   initialSelection?: Selection;
   /** Overrides the measured viewport width (tests, screenshots). */
   viewportWidth?: number;
+  /** Tests only: how often a started run is polled. */
+  pollIntervals?: PollIntervals;
 }
 
 /**
  * Composition and layout only. It knows pages, surfaces and capabilities, never a feature: which modules exist, what they show and
  * what they interpret is the registry's business. Adding or removing a module changes the registry input, not this file.
  */
-export function AppShell({ provider, registry, selection, initialSelection, viewportWidth }: AppShellProps) {
+export function AppShell({ provider, registry, selection, initialSelection, viewportWidth, pollIntervals }: AppShellProps) {
   const store = useMemo(() => selection ?? createSelectionStore(initialSelection), [selection, initialSelection]);
-  const services = useMemo(() => ({ provider, selection: store, registry }), [provider, store, registry]);
+  const services = useMemo(() => ({ provider, selection: store, registry, pollIntervals }), [provider, store, registry, pollIntervals]);
   return <CockpitProviders services={services}><Shell registry={registry} viewportWidth={viewportWidth} /></CockpitProviders>;
 }
 

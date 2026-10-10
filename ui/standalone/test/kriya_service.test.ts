@@ -62,7 +62,7 @@ describe('allowlist (nothing but typed KUP requests reaches the child)', () => {
     expect(() => toServiceRequest('q1', { operation: 'history.list', snapshot_id: SID, shell: 'x' } as unknown as KupRequest)).toThrow(/does not take: shell/);
   });
   it('the table covers exactly the operations the host validator accepts', () => {
-    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'];
+    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'];
     expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted].sort());
     for (const op of ['recover', 'generate', 'fix', 'evidence.blob', 'history.delete', 'shell', '']) expect(validateKupRequest({ operation: op }).ok, op).toBe(false);
     expect(SERVICE_ARGV).toEqual(['kup-stdio']);

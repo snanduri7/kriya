@@ -4,7 +4,7 @@ package kup;
 
 import com.fasterxml.jackson.annotation.*;
 
-public class Recovery {
+public class History {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter
@@ -12,16 +12,16 @@ public class Recovery {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private boolean runActive;
-    private String status;
+    private String at;
+    private String phase;
 
-    @JsonProperty("run_active")
-    public boolean getRunActive() { return runActive; }
-    @JsonProperty("run_active")
-    public void setRunActive(boolean value) { this.runActive = value; }
+    @JsonProperty("at")
+    public String getAt() { return at; }
+    @JsonProperty("at")
+    public void setAt(String value) { this.at = value; }
 
-    @JsonProperty("status")
-    public String getStatus() { return status; }
-    @JsonProperty("status")
-    public void setStatus(String value) { this.status = value; }
+    @JsonProperty("phase")
+    public String getPhase() { return phase; }
+    @JsonProperty("phase")
+    public void setPhase(String value) { this.phase = value; }
 }

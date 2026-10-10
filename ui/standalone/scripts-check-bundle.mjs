@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), 'dist', 'renderer', 'assets');
-const markers = ['createFixtureProvider', 'FixtureHost', 'fx-greenfield-success', 'fx-brownfield-modify', 'Create a utility library'];
+const markers = ['createFixtureProvider', 'FixtureHost', 'fx-greenfield-success', 'fx-brownfield-modify', 'Create a utility library', 'FixtureExecution', 'fx-launched', 'fixture-model:7b', '20261010T101010-abcdef01'];
 const bad = [];
 for (const f of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
   const text = readFileSync(join(dir, f), 'utf8');

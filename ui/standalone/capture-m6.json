@@ -1,0 +1,95 @@
+[
+ {
+  "wait": 800,
+  "file": "01-welcome.png",
+  "width": 1600,
+  "height": 1000
+ },
+ {
+  "name": "open_empty_to_workspace_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "preflight_ready_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();const t0=performance.now();const ok=await W(()=>document.body.innerText.includes('Configuration digest'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500,
+  "file": "02-goal-preflight-empty-folder.png"
+ },
+ {
+  "js": "(()=>{const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Create a utility library with a clamp(value, low, high) function and unit tests.\");ta.dispatchEvent(new Event('input',{bubbles:true}));})()",
+  "wait": 500,
+  "file": "03-goal-entered.png"
+ },
+ {
+  "name": "start_click_to_banner_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 200,
+  "file": "04-launching.png"
+ },
+ {
+  "name": "launch_record_seen_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='running');return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 2200,
+  "file": "05-running.png"
+ },
+ {
+  "name": "switch_disabled_while_running",
+  "js": "(()=>{const b=document.querySelector('button[aria-label=\"Switch workspace\"]');return [b.disabled,b.title]})()",
+  "wait": 2500,
+  "file": "06-running-more-records-switch-disabled.png"
+ },
+ {
+  "name": "terminal_after_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished');return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 1500,
+  "file": "07-terminal-success.png"
+ },
+ {
+  "name": "timing_run_1",
+  "js": "(()=>JSON.parse(document.querySelector('[aria-label=\"Active run\"]').dataset.timing))()",
+  "wait": 100
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700,
+  "file": "08-runs-after-terminal.png"
+ },
+ {
+  "name": "terminal_to_timeline_ms",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const ok=await W(()=>document.querySelector('[aria-label=\"Execution timeline\"] li'));return ok})()",
+  "wait": 600,
+  "file": "09-finished-run-inspected.png"
+ },
+ {
+  "name": "open_existing_menu",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('button[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent.startsWith('Open Folder')).click();const ok=await W(()=>document.querySelector('button[aria-label=\"Switch workspace\"]').textContent.includes('existing'));return ok})()",
+  "wait": 600
+ },
+ {
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();await W(()=>document.body.innerText.includes('Configuration digest'));const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Add input validation to the importer. [controlled:failure]\");ta.dispatchEvent(new Event('input',{bubbles:true}));})()",
+  "wait": 700,
+  "file": "10-goal-preflight-existing-project.png"
+ },
+ {
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished')})()",
+  "wait": 1200,
+  "file": "11-terminal-failure.png"
+ },
+ {
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});[...document.querySelectorAll('button')].find(b=>b.textContent==='Dismiss').click();const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Refactor the parser. [controlled:die]\");ta.dispatchEvent(new Event('input',{bubbles:true}));await W(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')&&![...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').disabled);[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();await W(()=>document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished')})()",
+  "wait": 1500,
+  "file": "12-terminal-interrupted.png"
+ },
+ {
+  "name": "preflight_after_interruption",
+  "js": "(async()=>{const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});[...document.querySelectorAll('button')].find(b=>b.textContent==='Dismiss').click();await W(()=>document.body.innerText.includes('Kriya will not start a run here yet'));return document.querySelector('[role=alert]').innerText})()",
+  "wait": 700,
+  "file": "13-preflight-blocked-after-interruption.png"
+ },
+ {
+  "name": "banner_text_final",
+  "js": "(()=>document.body.innerText.length)()",
+  "wait": 100
+ }
+]

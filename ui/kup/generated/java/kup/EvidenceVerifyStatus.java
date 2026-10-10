@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Status {
+public enum EvidenceVerifyStatus {
     BLOB_CORRUPT, CHAIN_BROKEN, NOT_FOUND, SEAL_MISMATCH, TRUNCATED_TAIL, UNSEALED, VERIFIED;
 
     @JsonValue
@@ -23,7 +23,7 @@ public enum Status {
     }
 
     @JsonCreator
-    public static Status forValue(String value) throws IOException {
+    public static EvidenceVerifyStatus forValue(String value) throws IOException {
         if (value.equals("BLOB_CORRUPT")) return BLOB_CORRUPT;
         if (value.equals("CHAIN_BROKEN")) return CHAIN_BROKEN;
         if (value.equals("NOT_FOUND")) return NOT_FOUND;
@@ -31,6 +31,6 @@ public enum Status {
         if (value.equals("TRUNCATED_TAIL")) return TRUNCATED_TAIL;
         if (value.equals("UNSEALED")) return UNSEALED;
         if (value.equals("VERIFIED")) return VERIFIED;
-        throw new IOException("Cannot deserialize Status");
+        throw new IOException("Cannot deserialize EvidenceVerifyStatus");
     }
 }

@@ -121,6 +121,11 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
   const openFolder = useCallback(async () => {
     if (!desktop || openingRef.current) return;
     const choice = await desktop.choose();
+    if (choice.refused === 'RUN_ACTIVE') {
+      // A run this host started owns the open workspace: the dialog was not shown and nothing changes.
+      setState((s) => ({ ...s, notice: { code: 'RUN_ACTIVE', message: 'A run is in progress; the workspace cannot change until it ends.', path: s.current?.path ?? '' } }));
+      return;
+    }
     if (!choice.chosen || choice.path === null) return; // cancelling is normal: nothing changes
     await open(choice.path, { remember: true });
   }, [desktop, open]);

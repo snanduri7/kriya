@@ -1,4 +1,5 @@
 import { Badge, KeyValue, Panel, useSession, useWorkspace, type ModuleDefinition } from '../../core';
+import { RunPanel } from './RunPanel';
 import type { WorkspaceDescribe } from '../../../model/kup';
 
 type Checkout = WorkspaceDescribe['checkout'];
@@ -32,6 +33,8 @@ function Workspace() {
   if (!open) return <Panel title="Workspace"><div className="ck-state"><strong>No workspace is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div></Panel>;
   const f = open.facts;
   return (
+    <>
+    <RunPanel />
     <Panel title="Workspace">
       <KeyValue items={[
         ['Name', f.name],
@@ -53,6 +56,7 @@ function Workspace() {
       {f.configuration.file_in_workspace ? <p className="muted small" role="note">{f.configuration.note}</p> : null}
       <p className="muted small">Opening a folder only reads it. Nothing was written to it and no run was started.</p>
     </Panel>
+    </>
   );
 }
 

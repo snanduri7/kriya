@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum StateEnum {
+public enum CheckoutState {
     CHECKOUT_ROOT, GIT_UNAVAILABLE, INSIDE_REPOSITORY, NOT_A_REPOSITORY;
 
     @JsonValue
@@ -20,11 +20,11 @@ public enum StateEnum {
     }
 
     @JsonCreator
-    public static StateEnum forValue(String value) throws IOException {
+    public static CheckoutState forValue(String value) throws IOException {
         if (value.equals("checkout_root")) return CHECKOUT_ROOT;
         if (value.equals("git_unavailable")) return GIT_UNAVAILABLE;
         if (value.equals("inside_repository")) return INSIDE_REPOSITORY;
         if (value.equals("not_a_repository")) return NOT_A_REPOSITORY;
-        throw new IOException("Cannot deserialize StateEnum");
+        throw new IOException("Cannot deserialize CheckoutState");
     }
 }

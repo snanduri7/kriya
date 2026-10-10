@@ -235,6 +235,7 @@ def test_every_error_code_is_producible():
             res = CliRunner().invoke(main, ["evidence", "change-content", rid, "--json", "--kup-version", "1", f"--seq={seq}", "--part=diff"])
             produced.add(json.loads(res.output)["error"]["code"])  # EVIDENCE_CONTENT_UNAVAILABLE / EVIDENCE_BLOB_TOO_LARGE
     produced.add(_json(["traces", "--json", "--describe-workspace", os.path.join(os.path.dirname(os.path.abspath(__file__)), "no-such-folder")])["error"]["code"])  # WORKSPACE_UNAVAILABLE
+    produced.add(_json(["traces", "--json", "--launch-status", "20261010T101010-00000000", "--workspace", os.path.dirname(os.path.abspath(__file__))])["error"]["code"])  # LAUNCH_NOT_FOUND
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced

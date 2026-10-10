@@ -48,6 +48,8 @@ ARGUMENTS: Dict[str, frozenset] = {
     "history.prompt": frozenset({"snapshot_id", "run_id"}),
     "workspace.status": frozenset({"workspace"}),
     "workspace.describe": frozenset({"workspace"}),
+    "execution.preflight": frozenset({"workspace"}),
+    "launch.status": frozenset({"workspace", "launch_id"}),
     "evidence.manifest": frozenset({"run_id", "snapshot_id", "from_trace"}),
     "evidence.verify": frozenset({"run_id"}),
     "evidence.records": _EVIDENCE_RECORDS,

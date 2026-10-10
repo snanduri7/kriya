@@ -1,6 +1,7 @@
 import { Badge, ProviderBanner, useProvider } from '../core';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { WorkspaceNotice } from './WelcomeScreen';
+import { ActiveRunBanner } from './ActiveRunBanner';
 
 export interface ToolbarToggles { secondary: boolean; inspector: boolean; drawer: boolean }
 
@@ -20,6 +21,7 @@ export function GlobalToolbar({ showSecondaryToggle, open, onToggle, bare = fals
         {provider.kind === 'fixture' ? <Badge tone="warn">fixture</Badge> : null}
       </header>
       {bare ? null : <WorkspaceNotice />}
+      {bare ? null : <ActiveRunBanner />}
     </div>
   );
 }

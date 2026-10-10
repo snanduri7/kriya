@@ -68,3 +68,10 @@
 .ck-switcher { position: relative; } .ck-menu { position: absolute; z-index: 5; top: 100%; left: 0; min-width: 220px; margin-top: 4px; padding: 4px; display: flex; flex-direction: column; gap: 2px; background: var(--ck-raised); border: 1px solid var(--ck-line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
 .ck-menu button { text-align: left; border-color: transparent; background: transparent; } .ck-menu button:hover, .ck-menu button:focus-visible { background: var(--ck-accent-bg); }
 .ck-notice { margin: 6px 12px 0; }
+
+.ck-label { display: block; margin: 0 0 4px; font-weight: 600; }
+.ck-goal { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 6px 8px; font: inherit; color: var(--ck-fg); background: var(--ck-bg); border: 1px solid var(--ck-line); border-radius: 5px; }
+.ck-goal:disabled { opacity: .6; }
+.ck-primary { background: var(--ck-accent-bg); border-color: var(--ck-accent); }
+.ck-runbar { margin: 6px 12px 0; display: flex; flex-direction: column; gap: 4px; }
+.ck-runbar-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .ck-runbar-head .grow { flex: 1; }

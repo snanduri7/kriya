@@ -1,4 +1,4 @@
-import type { HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '@kriya-ui/shared';
+import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -11,6 +11,8 @@ export interface KriyaHostBridge {
   recentWorkspaces(): Promise<unknown>;
   rememberWorkspace(path: string): Promise<unknown>;
   forgetWorkspace(path: string): Promise<unknown>;
+  startRun(request: unknown): Promise<unknown>;
+  executionState(): Promise<unknown>;
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
   measureMode: boolean;
 }
@@ -18,6 +20,7 @@ export interface KriyaHostBridge {
 /** HostAdapter over the preload bridge. The renderer has no other capability (contextIsolation + sandbox). */
 export class ElectronHostAdapter implements HostAdapter {
   readonly workspace: WorkspaceHost;
+  readonly execution: ExecutionHostPort;
   constructor(private bridge: KriyaHostBridge, private info: HostInfo) {
     this.workspace = {
       choose: () => bridge.chooseWorkspace() as Promise<WorkspaceChoice>,
@@ -25,6 +28,10 @@ export class ElectronHostAdapter implements HostAdapter {
       remember: (path) => bridge.rememberWorkspace(path) as Promise<string[]>,
       forget: (path) => bridge.forgetWorkspace(path) as Promise<string[]>,
       onMenuCommand: (listener) => bridge.onMenuCommand(listener),
+    };
+    this.execution = {
+      startRun: (request: StartRunRequest) => bridge.startRun(request) as Promise<StartRunResult>,
+      state: () => bridge.executionState() as Promise<ExecutionState>,
     };
   }
   static async create(bridge: KriyaHostBridge): Promise<ElectronHostAdapter> {

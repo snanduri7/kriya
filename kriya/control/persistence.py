@@ -47,6 +47,7 @@ _ARTIFACTS_FILENAME = "artifacts.json"
 _DECISIONS_FILENAME = "decisions.jsonl"
 _APPROVED_PLANS_DIRNAME = "plans"
 _RUNS_DIRNAME = "runs"
+_LAUNCHES_DIRNAME = "launches"
 
 
 class StaleRunRecordError(RuntimeError):
@@ -92,6 +93,37 @@ def run_record_path(workspace_path: str, run_id: str) -> str:
     if not _valid_run_id(run_id):
         raise ValueError("run_id must contain only letters, digits, '-' or '_'")
     return os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME, f"{run_id}.json")
+
+
+def launch_record_path(workspace_path: str, launch_id: str) -> str:
+    """GUI M6: the durable launch record of one desktop-started run (kriya/control/launch.py), beside the run records."""
+    if not _valid_run_id(launch_id):
+        raise ValueError("launch_id must contain only letters, digits, '-' or '_'")
+    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.json")
+
+
+def save_launch_record(workspace_path: str, launch_id: str, payload: Dict[str, Any]) -> None:
+    """Atomically (re)write one launch record; ownership-stamped like every control document, revision-grounded on what is on disk."""
+    _save_json_document(workspace_path, launch_record_path(workspace_path, launch_id), payload, derived_from_active_run=False)
+
+
+def load_launch_record(workspace_path: str, launch_id: str) -> Optional[Dict[str, Any]]:
+    """None when no record exists; raises UnreadableRunRecordError when one exists but is not trustworthy (corrupt or owned by another workspace)."""
+    path = launch_record_path(workspace_path, launch_id)
+    try:
+        with open(path, "rb") as handle:
+            payload = json.loads(handle.read().decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+    if not isinstance(payload, dict):
+        raise UnreadableRunRecordError(path, "launch record is not a JSON object")
+    try:
+        validate_ownership(workspace_path, payload, path)
+    except WorkspaceOwnershipError as error:
+        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+    return payload
 
 
 class UnreadableRunRecordError(RuntimeError):

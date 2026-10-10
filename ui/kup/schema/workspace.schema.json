@@ -64,6 +64,181 @@
         }
       },
       "additionalProperties": true
+    },
+    "ExecutionPreflight": {
+      "description": "data of `execution.preflight` (GUI M6): what a run in this folder would be, resolved by Kriya exactly as a terminal `kriya generate` run there would be. The host displays it and decides nothing from it; the launched process re-resolves it and refuses on any blocker.",
+      "type": "object",
+      "required": ["ready", "blockers", "workspace", "configuration", "state", "model", "recovery", "interaction"],
+      "properties": {
+        "ready": { "type": "boolean" },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+            "additionalProperties": true
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "required": ["path", "identity", "name"],
+          "properties": { "path": { "type": "string" }, "identity": { "type": "string" }, "name": { "type": "string" } },
+          "additionalProperties": true
+        },
+        "configuration": {
+          "type": "object",
+          "required": ["status", "source", "file", "directory", "discovery", "authority", "fingerprint"],
+          "properties": {
+            "status": { "type": "string", "enum": ["loaded", "refused", "failed"] },
+            "source": { "type": "string", "description": "Kriya's ConfigSource value for the user layer (packaged_default when no file was found)." },
+            "file": { "type": ["string", "null"] },
+            "directory": { "type": "string", "description": "The directory configuration was discovered from (the folder itself)." },
+            "discovery": { "type": "string" },
+            "fingerprint": { "type": ["string", "null"], "description": "Digest of the effective configuration (the resume checkpoint's own fingerprint); null when it did not load." },
+            "authority": {
+              "type": "object",
+              "required": ["status", "fields"],
+              "properties": {
+                "status": { "type": "string", "enum": ["no_findings", "approved", "refused", "failed"] },
+                "fields": { "type": "array", "items": {} }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "state": {
+          "type": "object",
+          "required": ["directory", "source", "cockpit_directory", "observable_by_cockpit"],
+          "properties": {
+            "directory": { "type": ["string", "null"] },
+            "source": { "type": ["string", "null"], "enum": ["env", "config", "default", null] },
+            "cockpit_directory": { "type": ["string", "null"] },
+            "observable_by_cockpit": { "type": ["boolean", "null"] }
+          },
+          "additionalProperties": true
+        },
+        "model": {
+          "type": ["object", "null"],
+          "required": ["provider", "model", "endpoint", "context_window", "fallback_chain", "role_overrides"],
+          "properties": {
+            "provider": { "type": "string" },
+            "model": { "type": "string" },
+            "endpoint": { "type": "string" },
+            "context_window": { "type": "integer" },
+            "fallback_chain": { "type": "array", "items": { "type": "string" } },
+            "role_overrides": { "type": "object", "additionalProperties": { "type": "string" } }
+          },
+          "additionalProperties": true
+        },
+        "recovery": {
+          "type": "object",
+          "required": ["status", "run_active"],
+          "properties": { "status": { "type": "string" }, "run_active": { "type": "boolean" } },
+          "additionalProperties": true
+        },
+        "interaction": {
+          "type": "object",
+          "required": ["approvals", "knowledge_policy", "note"],
+          "properties": { "approvals": { "type": "string", "enum": ["unavailable"] }, "knowledge_policy": { "type": "string" }, "note": { "type": "string" } },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "LaunchStatus": {
+      "description": "data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.",
+      "type": "object",
+      "required": ["launch", "run_record", "evidence", "workspace_lock", "liveness", "liveness_note"],
+      "properties": {
+        "launch": {
+          "type": "object",
+          "required": ["launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "process"],
+          "properties": {
+            "launch_id": { "type": "string" },
+            "workspace": {
+              "type": "object",
+              "required": ["path", "identity"],
+              "properties": { "path": { "type": "string" }, "identity": { "type": "string" } },
+              "additionalProperties": true
+            },
+            "requested_at": { "type": "string" },
+            "goal": {
+              "type": "object",
+              "required": ["sha256", "chars"],
+              "properties": { "sha256": { "type": "string" }, "chars": { "type": "integer" } },
+              "additionalProperties": true
+            },
+            "options": { "type": "object", "additionalProperties": true },
+            "phase": { "type": "string", "enum": ["STARTING", "RUNNING", "ENDED"] },
+            "run": {
+              "type": ["object", "null"],
+              "required": ["run_id", "started_at", "base_revision"],
+              "properties": { "run_id": { "type": "string" }, "started_at": { "type": "string" }, "base_revision": { "type": ["string", "null"] } },
+              "additionalProperties": true
+            },
+            "ended": {
+              "type": ["object", "null"],
+              "required": ["at", "exit_code", "workflow_status", "quality_gates_passed", "failure_category", "trace_run_id", "error", "note"],
+              "properties": {
+                "at": { "type": "string" },
+                "exit_code": { "type": "integer" },
+                "workflow_status": { "type": ["string", "null"] },
+                "quality_gates_passed": { "type": ["boolean", "null"] },
+                "failure_category": { "type": ["string", "null"] },
+                "trace_run_id": { "type": ["string", "null"] },
+                "error": { "type": ["string", "null"] },
+                "note": { "type": "string" }
+              },
+              "additionalProperties": true
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["phase", "at"],
+                "properties": { "phase": { "type": "string" }, "at": { "type": "string" } },
+                "additionalProperties": true
+              }
+            },
+            "process": { "type": ["object", "null"], "additionalProperties": true }
+          },
+          "additionalProperties": true
+        },
+        "run_record": {
+          "type": "object",
+          "required": ["found", "unreadable"],
+          "properties": {
+            "found": { "type": "boolean" },
+            "unreadable": { "type": ["string", "null"] },
+            "lifecycle_state": { "type": "string" },
+            "terminal_status": { "type": ["string", "null"] },
+            "commit_result": { "type": ["string", "null"] },
+            "revision": { "type": "integer" }
+          },
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["state", "line_count", "sealed"],
+          "properties": {
+            "state": { "type": "string", "enum": ["absent", "open", "sealed", "unreadable"] },
+            "line_count": { "type": ["integer", "null"] },
+            "sealed": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
+        "workspace_lock": {
+          "type": "object",
+          "required": ["held", "held_by_this_launch"],
+          "properties": { "held": { "type": "boolean" }, "held_by_this_launch": { "type": "boolean" } },
+          "additionalProperties": true
+        },
+        "liveness": { "type": "string", "enum": ["starting", "live", "interrupted", "ended"], "description": "DERIVED from the launch phase and the workspace run lock." },
+        "liveness_note": { "type": "string" }
+      },
+      "additionalProperties": true
     }
   }
 }

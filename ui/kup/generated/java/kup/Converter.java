@@ -26,6 +26,8 @@
 //     Prompt data = Converter.PromptFromJsonString(jsonString);
 //     WorkspaceStatus data = Converter.WorkspaceStatusFromJsonString(jsonString);
 //     WorkspaceDescribe data = Converter.WorkspaceDescribeFromJsonString(jsonString);
+//     ExecutionPreflight data = Converter.ExecutionPreflightFromJsonString(jsonString);
+//     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
 //     Consistency data = Converter.ConsistencyFromJsonString(jsonString);
 //     SnapshotSummary data = Converter.SnapshotSummaryFromJsonString(jsonString);
 //     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
@@ -42,6 +44,9 @@
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
 //     HostInfo data = Converter.HostInfoFromJsonString(jsonString);
 //     WorkspaceChoice data = Converter.WorkspaceChoiceFromJsonString(jsonString);
+//     StartRunRequest data = Converter.StartRunRequestFromJsonString(jsonString);
+//     StartRunResult data = Converter.StartRunResultFromJsonString(jsonString);
+//     ExecutionState data = Converter.ExecutionStateFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
 
 package kup;
@@ -213,6 +218,22 @@ public class Converter {
         return getWorkspaceDescribeObjectWriter().writeValueAsString(obj);
     }
 
+    public static ExecutionPreflight ExecutionPreflightFromJsonString(String json) throws IOException {
+        return getExecutionPreflightObjectReader().readValue(json);
+    }
+
+    public static String ExecutionPreflightToJsonString(ExecutionPreflight obj) throws JsonProcessingException {
+        return getExecutionPreflightObjectWriter().writeValueAsString(obj);
+    }
+
+    public static LaunchStatus LaunchStatusFromJsonString(String json) throws IOException {
+        return getLaunchStatusObjectReader().readValue(json);
+    }
+
+    public static String LaunchStatusToJsonString(LaunchStatus obj) throws JsonProcessingException {
+        return getLaunchStatusObjectWriter().writeValueAsString(obj);
+    }
+
     public static Consistency ConsistencyFromJsonString(String json) throws IOException {
         return getConsistencyObjectReader().readValue(json);
     }
@@ -339,6 +360,30 @@ public class Converter {
 
     public static String WorkspaceChoiceToJsonString(WorkspaceChoice obj) throws JsonProcessingException {
         return getWorkspaceChoiceObjectWriter().writeValueAsString(obj);
+    }
+
+    public static StartRunRequest StartRunRequestFromJsonString(String json) throws IOException {
+        return getStartRunRequestObjectReader().readValue(json);
+    }
+
+    public static String StartRunRequestToJsonString(StartRunRequest obj) throws JsonProcessingException {
+        return getStartRunRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static StartRunResult StartRunResultFromJsonString(String json) throws IOException {
+        return getStartRunResultObjectReader().readValue(json);
+    }
+
+    public static String StartRunResultToJsonString(StartRunResult obj) throws JsonProcessingException {
+        return getStartRunResultObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ExecutionState ExecutionStateFromJsonString(String json) throws IOException {
+        return getExecutionStateObjectReader().readValue(json);
+    }
+
+    public static String ExecutionStateToJsonString(ExecutionState obj) throws JsonProcessingException {
+        return getExecutionStateObjectWriter().writeValueAsString(obj);
     }
 
     public static List<String> RecentWorkspacesFromJsonString(String json) throws IOException {
@@ -781,6 +826,68 @@ public class Converter {
     private static ObjectWriter getWorkspaceDescribeObjectWriter() {
         if (WorkspaceDescribeWriter == null) instantiateWorkspaceDescribeMapper();
         return WorkspaceDescribeWriter;
+    }
+
+    private static ObjectReader ExecutionPreflightReader;
+    private static ObjectWriter ExecutionPreflightWriter;
+
+    private static void instantiateExecutionPreflightMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ExecutionPreflightReader = mapper.readerFor(ExecutionPreflight.class);
+        ExecutionPreflightWriter = mapper.writerFor(ExecutionPreflight.class);
+    }
+
+    private static ObjectReader getExecutionPreflightObjectReader() {
+        if (ExecutionPreflightReader == null) instantiateExecutionPreflightMapper();
+        return ExecutionPreflightReader;
+    }
+
+    private static ObjectWriter getExecutionPreflightObjectWriter() {
+        if (ExecutionPreflightWriter == null) instantiateExecutionPreflightMapper();
+        return ExecutionPreflightWriter;
+    }
+
+    private static ObjectReader LaunchStatusReader;
+    private static ObjectWriter LaunchStatusWriter;
+
+    private static void instantiateLaunchStatusMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        LaunchStatusReader = mapper.readerFor(LaunchStatus.class);
+        LaunchStatusWriter = mapper.writerFor(LaunchStatus.class);
+    }
+
+    private static ObjectReader getLaunchStatusObjectReader() {
+        if (LaunchStatusReader == null) instantiateLaunchStatusMapper();
+        return LaunchStatusReader;
+    }
+
+    private static ObjectWriter getLaunchStatusObjectWriter() {
+        if (LaunchStatusWriter == null) instantiateLaunchStatusMapper();
+        return LaunchStatusWriter;
     }
 
     private static ObjectReader ConsistencyReader;
@@ -1277,6 +1384,99 @@ public class Converter {
     private static ObjectWriter getWorkspaceChoiceObjectWriter() {
         if (WorkspaceChoiceWriter == null) instantiateWorkspaceChoiceMapper();
         return WorkspaceChoiceWriter;
+    }
+
+    private static ObjectReader StartRunRequestReader;
+    private static ObjectWriter StartRunRequestWriter;
+
+    private static void instantiateStartRunRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        StartRunRequestReader = mapper.readerFor(StartRunRequest.class);
+        StartRunRequestWriter = mapper.writerFor(StartRunRequest.class);
+    }
+
+    private static ObjectReader getStartRunRequestObjectReader() {
+        if (StartRunRequestReader == null) instantiateStartRunRequestMapper();
+        return StartRunRequestReader;
+    }
+
+    private static ObjectWriter getStartRunRequestObjectWriter() {
+        if (StartRunRequestWriter == null) instantiateStartRunRequestMapper();
+        return StartRunRequestWriter;
+    }
+
+    private static ObjectReader StartRunResultReader;
+    private static ObjectWriter StartRunResultWriter;
+
+    private static void instantiateStartRunResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        StartRunResultReader = mapper.readerFor(StartRunResult.class);
+        StartRunResultWriter = mapper.writerFor(StartRunResult.class);
+    }
+
+    private static ObjectReader getStartRunResultObjectReader() {
+        if (StartRunResultReader == null) instantiateStartRunResultMapper();
+        return StartRunResultReader;
+    }
+
+    private static ObjectWriter getStartRunResultObjectWriter() {
+        if (StartRunResultWriter == null) instantiateStartRunResultMapper();
+        return StartRunResultWriter;
+    }
+
+    private static ObjectReader ExecutionStateReader;
+    private static ObjectWriter ExecutionStateWriter;
+
+    private static void instantiateExecutionStateMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ExecutionStateReader = mapper.readerFor(ExecutionState.class);
+        ExecutionStateWriter = mapper.writerFor(ExecutionState.class);
+    }
+
+    private static ObjectReader getExecutionStateObjectReader() {
+        if (ExecutionStateReader == null) instantiateExecutionStateMapper();
+        return ExecutionStateReader;
+    }
+
+    private static ObjectWriter getExecutionStateObjectWriter() {
+        if (ExecutionStateWriter == null) instantiateExecutionStateMapper();
+        return ExecutionStateWriter;
     }
 
     private static ObjectReader RecentWorkspacesReader;

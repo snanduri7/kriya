@@ -3,8 +3,9 @@
  * (full KUP envelopes with typed errors), and the provider layer validates every answer against the same generated schemas, so
  * FixtureProvider = HostProvider over this host. DEV/TEST ONLY: nothing outside fixture code and tests may import this file.
  */
-import type { HostAdapter, HostInfo, HostSettings, MenuCommand, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '../../../host/HostAdapter';
+import type { ExecutionHostPort, HostAdapter, HostInfo, HostSettings, MenuCommand, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '../../../host/HostAdapter';
 import type { KupEnvelope, KupRequest } from '../../../model/kup';
+import { FixtureExecution, LAUNCHED_TRACE_ID, LAUNCH_ID, type FixtureExecutionOptions } from './fixtureExecution';
 import { SCENARIOS, type Scenario, type SeedRecord } from './scenarios';
 
 // The content classes Kriya's SECURITY_AUTHORITY table knows (kriya/kup/policy.py BLOB_CLASSES); anything else is unclassified and never served.
@@ -37,12 +38,17 @@ export interface FixtureHostOptions {
   /** capabilities.features.evidence_content. false (the production default) = content is not authorized. */
   evidenceContent?: boolean;
   scenarios?: readonly Scenario[];
+  /** Scripted Start Run (fixtureExecution.ts). Omit for the default scripted successful run; false = a host that cannot execute. */
+  execution?: FixtureExecutionOptions | false;
 }
 
 type Json = Record<string, unknown>;
 
 export class FixtureHost implements HostAdapter {
-  private readonly scenarios: readonly Scenario[];
+  private readonly baseScenarios: readonly Scenario[];
+  /** The scripted execution (null when the host cannot execute). Tests advance its frames. */
+  readonly exec: FixtureExecution | null;
+  readonly execution?: ExecutionHostPort;
   private readonly evidenceContent: boolean;
   private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', configDirectory: null, kriyaExecutable: null };
   private readonly choices: (string | null)[];
@@ -54,7 +60,9 @@ export class FixtureHost implements HostAdapter {
   calls: KupRequest[] = [];
 
   constructor(options: FixtureHostOptions = {}) {
-    this.scenarios = options.scenarios ?? SCENARIOS;
+    this.baseScenarios = options.scenarios ?? SCENARIOS;
+    this.exec = options.execution === false ? null : new FixtureExecution(options.execution ?? {});
+    if (this.exec) this.execution = this.exec.port;
     this.evidenceContent = options.evidenceContent ?? false;
     this.choices = [...(options.choices ?? [])];
     this.recentList = [...(options.recent ?? [])];
@@ -63,6 +71,7 @@ export class FixtureHost implements HostAdapter {
       choose: async (): Promise<WorkspaceChoice> => {
         this.workspaceCalls.push('choose');
         const next = this.choices.shift();
+        if (this.exec?.active()) return { chosen: false, path: null, refused: 'RUN_ACTIVE' };
         return next === undefined || next === null ? { chosen: false, path: null } : { chosen: true, path: next };
       },
       recent: async () => [...this.recentList],
@@ -70,6 +79,14 @@ export class FixtureHost implements HostAdapter {
       forget: async (path) => { this.workspaceCalls.push(`forget:${path}`); this.recentList = this.recentList.filter((p) => p !== path); if (this.settings.workspacePath === path) this.settings.workspacePath = null; return [...this.recentList]; },
       onMenuCommand: (listener) => { this.menuListeners.add(listener); return () => { this.menuListeners.delete(listener); }; },
     };
+  }
+
+  /** The scenarios the store holds now: the base set, plus the run this fixture launched once its records are durable (sealed, in history). */
+  private get scenarios(): readonly Scenario[] {
+    if (!this.exec || !this.exec.ended()) return this.baseScenarios;
+    const template = this.baseScenarios.find((s) => s.id === 'fx-greenfield-success') ?? this.baseScenarios[0]!;
+    const launched: Scenario = { ...template, id: LAUNCHED_TRACE_ID, evidenceId: LAUNCH_ID, goal: this.exec.goal(), timestamp: '2026-10-10T10:12:00Z', title: 'Run started from the cockpit' };
+    return [...this.baseScenarios, launched];
   }
 
   /** Test hook: the application menu asks the renderer to open the chooser. */
@@ -100,7 +117,7 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
@@ -245,13 +262,31 @@ export class FixtureHost implements HostAdapter {
       case 'history.prompt': return this.err('history.prompt', 'INVALID_REQUEST', 'the fixture host stores no prompts');
       case 'workspace.status': return this.env('workspace.status', { workspace: request.workspace, run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
       case 'workspace.describe': return this.describeFolder(request.workspace);
+      case 'execution.preflight': {
+        const known = FIXTURE_FOLDERS[request.workspace];
+        if (!known || !this.exec) return this.err('execution.preflight', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const blocked = known.recovery && known.recovery !== 'CLEAN' ? { code: 'RECOVERY_REQUIRED', message: `the folder's last run left it in state ${known.recovery}; recover it (kriya runs recover) before starting another` } : null;
+        return this.env('execution.preflight', this.exec.preflight(request.workspace, SOURCE.state_directory, blocked), this.live, SOURCE);
+      }
+      case 'launch.status': {
+        const status = this.exec?.launchStatus() ?? null;
+        if (!status || request.launch_id !== LAUNCH_ID) return this.err('launch.status', 'LAUNCH_NOT_FOUND', `no launch ${request.launch_id} is recorded for this folder`, { reason: 'not_recorded' });
+        return this.env('launch.status', status, this.live, SOURCE);
+      }
       case 'evidence.manifest':
         if (request.from_trace === true && !request.snapshot_id) return this.err('evidence.manifest', 'INVALID_REQUEST', 'from_trace needs the snapshot_id the trace row is read from');
         return request.from_trace === true ? this.manifest(find(request.run_id), request.run_id, true, true) : this.manifest(findEvidence(request.run_id), request.run_id, request.snapshot_id !== undefined, false);
       case 'evidence.verify': return this.verify(request.run_id, findEvidence(request.run_id));
       case 'evidence.change_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.change_content');
       case 'evidence.call_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.call_content');
-      case 'evidence.records': return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
+      case 'evidence.records': {
+        if (this.exec && request.run_id === LAUNCH_ID && !this.exec.ended()) {
+          const page = this.exec.records(request.from_seq ?? 1, request.limit ?? 200);
+          const head = 'sha256:' + String(this.exec.lineCount()).padStart(2, '0').repeat(32).slice(0, 64);
+          return this.env('evidence.records', { run_id: LAUNCH_ID, head_digest: head, records: page, next_cursor: null, filters_applied: {}, truncated: false, truncated_tail: false }, this.live, EVIDENCE_SOURCE);
+        }
+        return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
+      }
       default: { const never: never = request; return this.err('unknown', 'INVALID_REQUEST', `fixture host does not answer ${JSON.stringify(never)}`); }
     }
   }

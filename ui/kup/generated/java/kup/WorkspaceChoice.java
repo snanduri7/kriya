@@ -18,6 +18,7 @@ public class WorkspaceChoice {
 
     private boolean chosen;
     private String path;
+    private Refused refused;
 
     /**
      * false when the person cancelled (a normal outcome: nothing changes).
@@ -31,4 +32,12 @@ public class WorkspaceChoice {
     public String getPath() { return path; }
     @JsonProperty("path")
     public void setPath(String value) { this.path = value; }
+
+    /**
+     * RUN_ACTIVE: the workspace cannot change while a run this host started is in progress.
+     */
+    @JsonProperty("refused")
+    public Refused getRefused() { return refused; }
+    @JsonProperty("refused")
+    public void setRefused(Refused value) { this.refused = value; }
 }

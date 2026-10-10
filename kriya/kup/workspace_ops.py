@@ -40,7 +40,8 @@ def _workspace_argument(request: Dict[str, Any]) -> str:
     return workspace
 
 
-def describe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+def validated_workspace(request: Dict[str, Any]) -> tuple:
+    """(requested, canonical) for a ``workspace`` argument, or a typed WORKSPACE_UNAVAILABLE: the one admission rule for opening a folder."""
     requested = _workspace_argument(request)
     if not os.path.lexists(requested):
         raise SnapshotError(policy.WORKSPACE_UNAVAILABLE, f"no such folder: {requested}", reason="not_found")
@@ -48,7 +49,11 @@ def describe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
         raise SnapshotError(policy.WORKSPACE_UNAVAILABLE, f"not a folder: {requested}", reason="not_a_directory")
     if not os.access(requested, os.R_OK | os.X_OK):
         raise SnapshotError(policy.WORKSPACE_UNAVAILABLE, f"the folder cannot be read: {requested}", reason="unreadable")
-    workspace = canonical_workspace(requested)
+    return requested, canonical_workspace(requested)
+
+
+def describe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    requested, workspace = validated_workspace(request)
     checkout = describe_checkout(workspace)
     assessment = assess_recovery(workspace)
     state_directory, state_source = resolve_state_directory(cfg)

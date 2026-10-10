@@ -97,6 +97,20 @@ def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, snapshot), consistency=live_consistency())
 
 
+def store_summary(cfg, run_id: str) -> Dict[str, Any]:
+    """{state: absent|open|sealed|unreadable, line_count, sealed} of a run's store, for ``launch.status``. Cheap (a line count, no verification):
+    the cockpit reads the records themselves through evidence.records, which verifies."""
+    run = _store_run(cfg, run_id)
+    if not run.exists:
+        return {"state": "absent", "line_count": None, "sealed": False}
+    try:
+        sealed = run.seal() is not None
+        lines = run.measure()[0]
+    except (OSError, ValueError):
+        return {"state": "unreadable", "line_count": None, "sealed": False}
+    return {"state": "sealed" if sealed else "open", "line_count": lines, "sealed": sealed}
+
+
 def recorded_workspace_identity(cfg, evidence_id: Optional[str]) -> Tuple[str, Optional[str]]:
     """(state, identity) of the workspace an evidence manifest records: state is ``recorded`` (identity is the manifest's own
     ``workspace_identity``) or ``unattributed`` - no id, no store, an unsupported schema, an unreadable manifest or one that names no workspace.
