@@ -75,11 +75,30 @@ def test_manifest_kup_envelope_with_and_without_a_snapshot_id():
     assert env["error"]["code"] == policy.SNAPSHOT_MISSING
 
 
-def test_kup_flags_require_json_and_manifest_is_kup_only():
+def test_kup_flags_require_json_and_manifest_and_records_are_kup_only():
     write_store("k-use")
-    assert _invoke(["evidence", "verify", "k-use", "--kup-version", "1"]).exit_code == 2
-    assert _invoke(["evidence", "manifest", "k-use"]).exit_code == 2
-    assert _invoke(["evidence", "manifest", "k-use", "--json"]).exit_code == 2
+    res = _invoke(["evidence", "verify", "k-use", "--kup-version", "1"])
+    assert res.exit_code == 2 and "--kup-version requires --json" in res.output
+    for command in ("manifest", "records"):
+        for extra in ([], ["--json"], ["--kup-version", "1"]):
+            res = _invoke(["evidence", command, "k-use", *extra])
+            assert res.exit_code == 2 and "pass --json --kup-version 1" in res.output, (command, extra)
+
+
+def test_records_grammar_maps_every_flag_into_the_request():
+    from _kup_evidence_fixtures import rich_store
+    rich_store("k-rec")
+    argv = ["evidence", "records", "k-rec", "--json", "--kup-version", "1"]
+    env = _env([*argv, "--unit", "u1", "--attempt", "1", "--kind", "gate.result", "--kind", "attempt.opened", "-n", "2"])
+    assert env["operation"] == "evidence.records" and env["data"]["filters_applied"] == {"unit": "u1", "attempt": 1, "kind": ["attempt.opened", "gate.result"]}
+    assert [r["seq"] for r in env["data"]["records"]] == [5, 8] and env["data"]["next_cursor"] is None
+    page = _env([*argv, "-n", "4", "--phase", "attempt", "--role", "developer", "--from-seq", "2"])
+    assert page["data"]["filters_applied"] == {"phase": "attempt", "role": "developer", "from_seq": 2} and [r["seq"] for r in page["data"]["records"]] == [6, 7]
+    first = _env([*argv, "-n", "4"])
+    second = _env([*argv, "-n", "4", "--cursor", first["data"]["next_cursor"]])
+    assert [r["seq"] for r in first["data"]["records"]] + [r["seq"] for r in second["data"]["records"]][:1] == [1, 2, 3, 4, 5]
+    assert _invoke([*argv, "--attempt", "x"]).exit_code == 2                      # click refuses a non-integer
+    assert _env([*argv, "-n", "0"])["error"]["code"] == policy.INVALID_REQUEST       # Kriya refuses an out-of-range one, typed
 
 
 def test_an_unsupported_schema_version_is_the_typed_envelope():
@@ -116,7 +135,7 @@ def test_config_authority_refusal_and_load_failure_are_typed_for_the_evidence_ku
 
 def test_capabilities_advertise_set_1_1_and_only_what_exists():
     data = _env(["traces", "--json", "--capabilities"])["data"]
-    assert data["kup_versions"] == [1] and {"evidence.manifest", "evidence.verify"} <= set(data["operations"])
+    assert data["kup_versions"] == [1] and {"evidence.manifest", "evidence.verify", "evidence.records"} <= set(data["operations"])
     features = data["features"]
     assert features["capability_set"] == "1.1" and features["evidence"] is True
     for absent in ("evidence_content", "qualification", "authority", "knowledge", "tools", "experiments", "live", "actions"):
@@ -185,6 +204,16 @@ def test_real_responses_validate_against_the_json_schemas_the_ui_is_generated_fr
         _validate("evidence.schema.json", "EvidenceVerify", env["data"])
         seen_statuses.add(env["data"]["status"])
     assert seen_statuses == {"VERIFIED", "UNSEALED", "CHAIN_BROKEN", "NOT_FOUND"}
+    from _kup_evidence_fixtures import rich_store
+    rich_store("s-rich")
+    for argv in (["evidence", "records", "s-rich", "--json", "--kup-version", "1", "-n", "5"], ["evidence", "records", "s-un", "--json", "--kup-version", "1"]):
+        env = _env(argv)
+        _validate("common.schema.json", "Envelope", env)
+        _validate("evidence.schema.json", "EvidenceRecords", env["data"])
+    for argv in (["evidence", "records", "s-none", "--json", "--kup-version", "1"], ["evidence", "records", "s-br", "--json", "--kup-version", "1"]):
+        env = _env(argv)
+        _validate("common.schema.json", "Envelope", env)
+        assert env["error"]["code"] in ("EVIDENCE_STORE_NOT_FOUND", "EVIDENCE_VERIFY_FAILED")
     for run_id, extra in (("s-ok", []), ("s-pruned", ["--snapshot-id", snapshot_id]), ("s-none", [])):
         env = _env(["evidence", "manifest", run_id, "--json", "--kup-version", "1", *extra])
         _validate("common.schema.json", "Envelope", env)

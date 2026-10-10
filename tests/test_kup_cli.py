@@ -209,6 +209,15 @@ def test_every_error_code_is_producible():
         with open(os.path.join(write_store(run_id), "manifest.json"), "wb") as f:
             f.write(content)
         produced.add(_json(["evidence", "manifest", run_id, "--json", "--kup-version", "1"])["error"]["code"])
+    from _kup_evidence_fixtures import rewrite_record_line, rich_store
+    produced.add(_json(["evidence", "records", "no-such-run", "--json", "--kup-version", "1"])["error"]["code"])  # EVIDENCE_STORE_NOT_FOUND
+    directory, _ = rich_store("brk")
+    rewrite_record_line(directory, 3, lambda r: json.dumps({**r, "payload": {"x": 1}}, sort_keys=True, separators=(",", ":")).encode())
+    produced.add(_json(["evidence", "records", "brk", "--json", "--kup-version", "1"])["error"]["code"])  # EVIDENCE_VERIFY_FAILED
+    _directory, writer = rich_store("grow", keep_open=True)
+    cursor = _json(["evidence", "records", "grow", "--json", "--kup-version", "1", "-n", "3"])["data"]["next_cursor"]
+    writer.append("model.request", {"n": 1}, identity={"role": "planner", "phase": "planning"})
+    produced.add(_json(["evidence", "records", "grow", "--json", "--kup-version", "1", "-n", "3", "--cursor", cursor])["error"]["code"])  # EVIDENCE_HEAD_CHANGED
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced

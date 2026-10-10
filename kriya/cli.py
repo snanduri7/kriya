@@ -1514,6 +1514,28 @@ def evidence_manifest(ctx: click.Context, run_id: str, json_output: bool, kup_ve
     _evidence_kup(ctx, "evidence.manifest", {"run_id": run_id, "snapshot_id": snapshot_id}, kup_version)
 
 
+@evidence_group.command(name="records")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@_KUP_VERSION_OPTION
+@click.option("--unit", "unit", default=None, help="Only records of this unit id.")
+@click.option("--phase", "phase", default=None, help="Only records whose stored phase equals this (verbatim).")
+@click.option("--attempt", "attempt", type=int, default=None, help="Only records of this attempt number.")
+@click.option("--role", "role", default=None, help="Only records of this model role.")
+@click.option("--kind", "kinds", multiple=True, help="Only these record kinds (repeatable).")
+@click.option("--from-seq", "from_seq", type=int, default=None, help="Only records with seq >= this.")
+@click.option("-n", "--limit", "limit", type=int, default=None, help="Page size (default 200, maximum 1000).")
+@click.option("--cursor", "cursor", default=None, help="The next_cursor of the previous page (bound to the run, the filters and the chain head).")
+@click.pass_context
+def evidence_records(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], unit: Optional[str], phase: Optional[str],
+                     attempt: Optional[int], role: Optional[str], kinds: tuple, from_seq: Optional[int], limit: Optional[int], cursor: Optional[str]) -> None:
+    """Read-only KUP: one page of a verified store's records, verbatim, with reader-computed phase provenance."""
+    if not json_output or kup_version is None:
+        raise click.UsageError("evidence records is a KUP operation: pass --json --kup-version 1")
+    _evidence_kup(ctx, "evidence.records", {"run_id": run_id, "unit": unit, "phase": phase, "attempt": attempt, "role": role,
+                                            "kind": list(kinds) or None, "from_seq": from_seq, "limit": limit, "cursor": cursor}, kup_version)
+
+
 @evidence_group.command(name="verify")
 @click.argument("run_id")
 @click.option("--json", "json_output", is_flag=True)

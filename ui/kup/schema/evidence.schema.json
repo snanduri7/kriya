@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kriya.local/kup/v1/evidence.schema.json",
   "title": "Attempt-evidence operations",
-  "description": "evidence.manifest / evidence.verify payloads (Run Cockpit v1.1, capability set 1.1; handover/GUI-RUN-COCKPIT-V1_1/04 sections 4.1, 4.2). Values the recorder wrote are carried verbatim and unknown fields are preserved; nothing is normalized or reconstructed.",
+  "description": "evidence.manifest / evidence.verify / evidence.records payloads (Run Cockpit v1.1, capability set 1.1; handover/GUI-RUN-COCKPIT-V1_1/04 sections 4.1 - 4.3). Values the recorder wrote are carried verbatim and unknown fields are preserved; nothing is normalized or reconstructed.",
   "$defs": {
     "EvidenceAbsence": {
       "type": "object",
@@ -223,6 +223,177 @@
         },
         "verified_at": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "EvidenceRecord": {
+      "type": "object",
+      "description": "One record exactly as the recorder stored it (envelope keys in the evidence schema; unknown fields preserved) plus phase_provenance, which the reader computes and never stores.",
+      "required": [
+        "schema",
+        "seq",
+        "prev",
+        "kind",
+        "run_id",
+        "provenance",
+        "payload",
+        "content_digests",
+        "blobs",
+        "phase_provenance"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prev": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "unit_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "invocation_seq": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt_number": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "call_seq": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wire_seq": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "t_wall": {
+          "type": "string"
+        },
+        "t_mono_ms": {
+          "type": "integer"
+        },
+        "provenance": {
+          "type": "string",
+          "description": "OBSERVED, DERIVED, MODEL_CLAIMED, MIRRORED, NOT_RECORDED or LEGACY_RECONSTRUCTED (capabilities.features.evidence_provenances); an unknown value is shown literally."
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "content_digests": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "blobs": {
+          "type": "object",
+          "description": "Blob references (sha256:...) only; content is never inlined.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "phase_provenance": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "explicit",
+            "derived_from_attempt_scope",
+            "derived_from_role",
+            "role_name_fallback",
+            null
+          ],
+          "description": "How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded."
+        }
+      },
+      "additionalProperties": true
+    },
+    "EvidenceRecords": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "head_digest",
+        "records",
+        "next_cursor",
+        "filters_applied",
+        "truncated",
+        "truncated_tail"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "head_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRecord"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque; bound to the run, the filters and head_digest. null: no further matching record."
+        },
+        "filters_applied": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "true: the page stopped at the response byte budget before the requested limit; next_cursor continues."
+        },
+        "truncated_tail": {
+          "type": "boolean",
+          "description": "true: an unsealed store ends in a partial record line, which is not served."
         }
       },
       "additionalProperties": true

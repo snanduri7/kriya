@@ -147,7 +147,9 @@ class EvidenceRun:
             raise BlobCorrupt(f"{ref}: content re-hashes to {model.digest(data)}")
         return data
 
-    def verify(self) -> Verification:
+    def verify(self, records_out: Optional[List[Dict[str, Any]]] = None) -> Verification:
+        """Recompute the chain, blobs and seal. When ``records_out`` is given, every complete record that passed the chain checks is
+        appended to it in seq order (so a consumer that needs both verifies and reads in one pass over the file)."""
         if not self.exists:
             return Verification(self.run_id, NOT_FOUND, 0, False, detail="no store for this run")
         self.manifest()
@@ -173,6 +175,8 @@ class EvidenceRun:
                                     detail="record bytes are not canonical")
             prev, count = model.digest(raw), count + 1
             blob_refs.extend(record.get("blobs", {}).values())
+            if records_out is not None:
+                records_out.append(record)
         seal = self.seal()
         if tail:
             return Verification(self.run_id, TRUNCATED_TAIL, count, seal is not None, seal=seal,
@@ -193,6 +197,53 @@ class EvidenceRun:
                                 detail=f"seal names seq {seal.get('final_seq')}, chain head is seq {count}",
                                 head_digest=prev)
         return Verification(self.run_id, VERIFIED, count, True, seal=seal, head_digest=prev)
+
+
+# The role -> phase map the recorder's call scope applies (scope._ROLE_PHASES), copied here because consumers never import the
+# writer side; tests/test_kup_evidence_records.py fails if the two ever differ.
+ROLE_PHASES = {
+    "planner": "planning", "planner_shadow": "planning", "architect": "architect", "reviewer": "review",
+    "spec_compliance": "requirement_verification", "run_verifier": "requirement_verification",
+    "localization": "localization", "milestone_planner": "milestone_planning",
+}
+PHASE_EXPLICIT = "explicit"
+PHASE_FROM_ATTEMPT = "derived_from_attempt_scope"
+PHASE_FROM_ROLE = "derived_from_role"
+PHASE_FROM_ROLE_NAME = "role_name_fallback"
+
+
+def explicit_phase_ranges(records: List[Dict[str, Any]]) -> List[Tuple[int, float]]:
+    """Inclusive ``(opened_seq, closed_seq)`` ranges of explicit ``phase.opened`` .. ``phase.closed`` pairs of one chain (an unclosed
+    phase runs to the end). No producer writes these today, so this is normally empty."""
+    ranges: List[Tuple[int, float]] = []
+    opened: Optional[int] = None
+    for record in records:
+        kind = record.get("kind")
+        if kind == "phase.opened" and opened is None:
+            opened = record["seq"]
+        elif kind == "phase.closed" and opened is not None:
+            ranges.append((opened, record["seq"]))
+            opened = None
+    if opened is not None:
+        ranges.append((opened, float("inf")))
+    return ranges
+
+
+def phase_provenance(record: Dict[str, Any], ranges: List[Tuple[int, float]]) -> Optional[str]:
+    """How a record's phase is known (computed here, never stored): ``explicit`` inside a recorded phase range, else
+    ``derived_from_attempt_scope`` when it carries an attempt number, ``derived_from_role`` when its role is in the recorder's role
+    map, ``role_name_fallback`` when the phase is an unmapped raw role name, and None when no phase was recorded at all."""
+    seq = record.get("seq")
+    if any(start <= seq <= end for start, end in ranges):
+        return PHASE_EXPLICIT
+    if record.get("attempt_number") is not None:
+        return PHASE_FROM_ATTEMPT
+    role = record.get("role")
+    if role in ROLE_PHASES:
+        return PHASE_FROM_ROLE
+    if record.get("phase") is not None and role is not None:
+        return PHASE_FROM_ROLE_NAME
+    return None
 
 
 def store_directory(state_dir: str) -> str:

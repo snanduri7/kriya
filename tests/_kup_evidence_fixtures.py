@@ -58,3 +58,33 @@ def acquire_snapshot_id(cfg=None) -> str:
     env = run_kup_operation(cfg or AppConfig(), {"operation": "snapshot.acquire"})
     assert env["error"] is None, env
     return env["data"]["snapshot_id"]
+
+
+def rich_store(run_id: str, *, seal: bool = True, keep_open: bool = False, phase_events: bool = False):
+    """A store with several units, attempts, roles and kinds (15 records, or 17 with explicit phase events). Returns (directory, writer):
+    the writer is sealed unless ``keep_open`` (an active-looking store the test can keep appending to)."""
+    writer = AttemptEvidenceWriter(state_dir(), run_id, capture=model.CAPTURE_FULL, manifest={"workspace_name": "fixture"})
+    attempt = {"unit_id": "u1", "unit_kind": "task", "invocation_seq": 1, "phase": "attempt"}
+    other = {"unit_id": "u2", "unit_kind": "task", "invocation_seq": 1, "phase": "attempt"}
+    writer.append("run.opened", {"goal_digest": "sha256:" + "1" * 64})
+    writer.append("model.request", {"n": 1}, identity={"phase": "planning", "role": "planner", "call_seq": 1}, content={"messages": "plan please"})
+    writer.append("model.response", {"n": 1}, identity={"phase": "planning", "role": "planner", "call_seq": 1}, content={"wire_body": "plan"})
+    writer.append("unit.opened", {"unit_id": "u1"}, identity={"unit_id": "u1", "unit_kind": "task", "invocation_seq": 1})
+    if phase_events:
+        writer.append("phase.opened", {"phase_id": "development"}, identity={"unit_id": "u1"})
+    writer.append("attempt.opened", {"attempt": 1}, identity={**attempt, "attempt_number": 1})
+    writer.append("model.request", {"n": 2}, identity={**attempt, "attempt_number": 1, "role": "developer", "call_seq": 2}, content={"messages": "write code"})
+    writer.append("model.response", {"n": 2}, identity={**attempt, "attempt_number": 1, "role": "developer", "call_seq": 2}, content={"wire_body": "code"})
+    writer.append("gate.result", {"gate": "compile", "success": False}, identity={**attempt, "attempt_number": 1}, content={"output": "boom"})
+    if phase_events:
+        writer.append("phase.closed", {"phase_id": "development"}, identity={"unit_id": "u1"})
+    writer.append("attempt.opened", {"attempt": 2}, identity={**attempt, "attempt_number": 2})
+    writer.append("gate.result", {"gate": "compile", "success": True}, identity={**attempt, "attempt_number": 2})
+    writer.append("unit.closed", {"outcome": "SUCCESS"}, identity={"unit_id": "u1", "unit_kind": "task", "invocation_seq": 1})
+    writer.append("unit.opened", {"unit_id": "u2"}, identity={"unit_id": "u2", "unit_kind": "task", "invocation_seq": 1})
+    writer.append("model.request", {"n": 3}, identity={**other, "attempt_number": 1, "role": "reviewer", "call_seq": 3}, content={"messages": "review"})
+    writer.append("model.request", {"n": 4}, identity={"phase": "custom_role", "role": "custom_role", "call_seq": 4})
+    writer.append("run.closed", {"outcome": "SUCCESS"})
+    if seal and not keep_open:
+        assert writer.seal("run_closed")
+    return run_directory(state_dir(), run_id), writer

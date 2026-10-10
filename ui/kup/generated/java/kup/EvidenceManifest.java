@@ -12,7 +12,7 @@ public class EvidenceManifest {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private EvidenceSchema absence;
+    private AbsenceClass absence;
     private Long blobFileCount;
     private Long bytesOnDisk;
     private Long lineCount;
@@ -22,9 +22,9 @@ public class EvidenceManifest {
     private Store store;
 
     @JsonProperty("absence")
-    public EvidenceSchema getAbsence() { return absence; }
+    public AbsenceClass getAbsence() { return absence; }
     @JsonProperty("absence")
-    public void setAbsence(EvidenceSchema value) { this.absence = value; }
+    public void setAbsence(AbsenceClass value) { this.absence = value; }
 
     @JsonProperty("blob_file_count")
     public Long getBlobFileCount() { return blobFileCount; }

@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.*;
  * DERIVED (never recorded) reason a run has no store on disk, from the run's recorded
  * evidence.attempt_store event.
  */
-public class EvidenceSchema {
+public class AbsenceClass {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter

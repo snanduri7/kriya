@@ -23,6 +23,9 @@ export type ErrorCode =
   | 'ACQUISITION_REFUSED_RUN_ACTIVE'
   | 'EVIDENCE_STORE_UNREADABLE'
   | 'EVIDENCE_SCHEMA_UNSUPPORTED'
+  | 'EVIDENCE_STORE_NOT_FOUND'
+  | 'EVIDENCE_VERIFY_FAILED'
+  | 'EVIDENCE_HEAD_CHANGED'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -46,7 +49,8 @@ export interface Envelope {
     | 'snapshot.prune'
     | 'snapshot.verify'
     | 'evidence.manifest'
-    | 'evidence.verify';
+    | 'evidence.verify'
+    | 'evidence.records';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -540,6 +544,70 @@ export interface EvidenceVerify {
    */
   head_digest: string | null;
   verified_at: string;
+  [k: string]: unknown;
+}
+
+// ---- EvidenceRecords (evidence.schema.json#/$defs/EvidenceRecords) ----
+export interface EvidenceRecords {
+  run_id: string;
+  head_digest: string | null;
+  records: EvidenceRecord[];
+  /**
+   * Opaque; bound to the run, the filters and head_digest. null: no further matching record.
+   */
+  next_cursor: string | null;
+  filters_applied: {
+    [k: string]: unknown;
+  };
+  /**
+   * true: the page stopped at the response byte budget before the requested limit; next_cursor continues.
+   */
+  truncated: boolean;
+  /**
+   * true: an unsealed store ends in a partial record line, which is not served.
+   */
+  truncated_tail: boolean;
+  [k: string]: unknown;
+}
+/**
+ * One record exactly as the recorder stored it (envelope keys in the evidence schema; unknown fields preserved) plus phase_provenance, which the reader computes and never stores.
+ */
+export interface EvidenceRecord {
+  schema: string;
+  seq: number;
+  prev: string;
+  kind: string;
+  run_id: string;
+  unit_id?: string | null;
+  unit_kind?: string | null;
+  invocation_seq?: number | null;
+  phase?: string | null;
+  attempt_number?: number | null;
+  call_seq?: number | null;
+  wire_seq?: number | null;
+  role?: string | null;
+  t_wall?: string;
+  t_mono_ms?: number;
+  /**
+   * OBSERVED, DERIVED, MODEL_CLAIMED, MIRRORED, NOT_RECORDED or LEGACY_RECONSTRUCTED (capabilities.features.evidence_provenances); an unknown value is shown literally.
+   */
+  provenance: string;
+  payload: {
+    [k: string]: unknown;
+  };
+  content_digests: {
+    [k: string]: unknown;
+  };
+  /**
+   * Blob references (sha256:...) only; content is never inlined.
+   */
+  blobs: {
+    [k: string]: string;
+  };
+  /**
+   * How the record's phase is known; everything but explicit is DERIVED. null: no phase was recorded.
+   */
+  phase_provenance: 'explicit' | 'derived_from_attempt_scope' | 'derived_from_role' | 'role_name_fallback' | null;
   [k: string]: unknown;
 }
 

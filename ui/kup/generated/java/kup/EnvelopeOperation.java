@@ -6,13 +6,14 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum EnvelopeOperation {
-    CAPABILITIES, EVIDENCE_MANIFEST, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
+    CAPABILITIES, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case CAPABILITIES: return "capabilities";
             case EVIDENCE_MANIFEST: return "evidence.manifest";
+            case EVIDENCE_RECORDS: return "evidence.records";
             case EVIDENCE_VERIFY: return "evidence.verify";
             case HISTORY_DETAIL: return "history.detail";
             case HISTORY_LIST: return "history.list";
@@ -30,6 +31,7 @@ public enum EnvelopeOperation {
     public static EnvelopeOperation forValue(String value) throws IOException {
         if (value.equals("capabilities")) return CAPABILITIES;
         if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;
+        if (value.equals("evidence.records")) return EVIDENCE_RECORDS;
         if (value.equals("evidence.verify")) return EVIDENCE_VERIFY;
         if (value.equals("history.detail")) return HISTORY_DETAIL;
         if (value.equals("history.list")) return HISTORY_LIST;

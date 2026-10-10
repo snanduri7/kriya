@@ -38,8 +38,9 @@ OPERATIONS = (
     "snapshot.list",
     "snapshot.prune",
     "snapshot.verify",  # SHA-256 of exactly one published snapshot (digest verified at pin; metadata checked per query)
-    "evidence.manifest",  # evidence-store store metadata: capture mode, seal, gaps, DERIVED absence reason
-    "evidence.verify",  # chain, blobs and seal of one run's evidence-store store, recomputed now
+    "evidence.manifest",  # evidence-store metadata: capture mode, seal, gaps, DERIVED absence reason
+    "evidence.verify",  # chain, blobs and seal of one run's evidence store, recomputed now
+    "evidence.records",  # paged, filtered, verbatim records of a verified store
 )
 
 # Error codes (closed vocabulary; the host shows an unknown code literally).
@@ -60,11 +61,14 @@ ACQUISITION_IN_PROGRESS = "ACQUISITION_IN_PROGRESS"
 ACQUISITION_REFUSED_RUN_ACTIVE = "ACQUISITION_REFUSED_RUN_ACTIVE"
 EVIDENCE_STORE_UNREADABLE = "EVIDENCE_STORE_UNREADABLE"      # permission or I/O failure on the store (extra: path_kind)
 EVIDENCE_SCHEMA_UNSUPPORTED = "EVIDENCE_SCHEMA_UNSUPPORTED"  # a manifest/record schema this reader does not support (extra: schema_seen)
+EVIDENCE_STORE_NOT_FOUND = "EVIDENCE_STORE_NOT_FOUND"        # no store for the run (operations that need records, not a manifest)
+EVIDENCE_VERIFY_FAILED = "EVIDENCE_VERIFY_FAILED"            # status other than VERIFIED/UNSEALED (extra: status, broken_seq, blob_problems, detail)
+EVIDENCE_HEAD_CHANGED = "EVIDENCE_HEAD_CHANGED"              # a cursor's chain head is no longer the store's head (extra: head_then, head_now)
 ERROR_CODES = (
     UNSUPPORTED_SCHEMA_VERSION, INVALID_RESPONSE, INVALID_REQUEST, STORE_BUSY, READ_ONLY_UNAVAILABLE,
     RESPONSE_TOO_LARGE, CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED,
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
-    EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED,
+    EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.
@@ -86,7 +90,7 @@ CONSISTENCY_NOT_APPLICABLE = "not_applicable"    # capabilities
 CONSISTENCY_SEALED_STORE = "sealed_store"
 CONSISTENCY_KINDS = (CONSISTENCY_SNAPSHOT_COPY, CONSISTENCY_LIVE_OBSERVATION, CONSISTENCY_NOT_APPLICABLE, CONSISTENCY_SEALED_STORE)
 
-# Attempt-evidence verification states in the order the capabilities list them (the reader's own statuses, 04 section 3).
+# Evidence-store verification states in the order the capabilities list them (the reader's own statuses, 04 section 3).
 EVIDENCE_VERIFICATION_STATES = ("VERIFIED", "UNSEALED", "NOT_FOUND", "CHAIN_BROKEN", "TRUNCATED_TAIL", "BLOB_CORRUPT", "SEAL_MISMATCH")
 # evidence.manifest absence reasons (DERIVED from the S1 evidence.attempt_store event; 03 matrix row 27).
 EVIDENCE_ABSENCE_REASONS = ("pruned", "capture_off", "recorder_unavailable", "pre_recorder", "unknown")
@@ -97,6 +101,10 @@ LIST_MAX = 200
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 RUN_ID_MAX = 256
 CURSOR_MAX = 1024
+EVIDENCE_PAGE_DEFAULT = 200
+EVIDENCE_PAGE_MAX = 1000
+EVIDENCE_PAGE_MAX_BYTES = MAX_RESPONSE_BYTES // 2  # a page stops (truncated: true) before the serialized records exceed this
+EVIDENCE_FILTER_VALUE_MAX = 256
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 RETAIN_SNAPSHOTS = 3
 RETAINED_BYTES_CEILING = RETAIN_SNAPSHOTS * MAX_SNAPSHOT_BYTES
@@ -119,6 +127,9 @@ LIMITS = {
     "max_response_bytes": MAX_RESPONSE_BYTES,
     "run_id_max_chars": RUN_ID_MAX,
     "cursor_max_chars": CURSOR_MAX,
+    "evidence_page_default": EVIDENCE_PAGE_DEFAULT,
+    "evidence_page_max": EVIDENCE_PAGE_MAX,
+    "evidence_page_max_bytes": EVIDENCE_PAGE_MAX_BYTES,
     "max_snapshot_bytes": MAX_SNAPSHOT_BYTES,
     "retain_snapshots": RETAIN_SNAPSHOTS,
     "retained_bytes_ceiling": RETAINED_BYTES_CEILING,

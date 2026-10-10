@@ -8,12 +8,17 @@ from the S1 ``evidence.attempt_store`` run event and says so.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+import base64
+import hashlib
+import json
+from typing import Any, Dict, List, Optional, Tuple
 
+from kriya.core.attempt_evidence import model as evidence_model
 from kriya.core.attempt_evidence import reader
 from kriya.core.state_paths import resolve_state_directory
 from kriya.kup import policy
 from kriya.kup.inspect import (
+    CURSOR_RE,
     envelope,
     live_consistency,
     run_events_of,
@@ -116,3 +121,127 @@ def verify(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
         consistency = live_consistency()
     return envelope("evidence.verify", request_id, data=data, source=_source(cfg), consistency=consistency)
 
+
+
+# ------------------------------------------------------------------ evidence.records
+
+_FILTER_STRINGS = ("unit", "phase", "role")
+
+
+def _int_param(request: Dict[str, Any], name: str, minimum: int, maximum: Optional[int] = None) -> Optional[int]:
+    value = request.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum or (maximum is not None and value > maximum):
+        bound = f"between {minimum} and {maximum}" if maximum is not None else f">= {minimum}"
+        raise SnapshotError(policy.INVALID_REQUEST, f"{name} must be an integer {bound}")
+    return value
+
+
+def _records_filters(request: Dict[str, Any]) -> Dict[str, Any]:
+    """The validated, applied filters (non-null only). Everything is checked before any I/O."""
+    filters: Dict[str, Any] = {}
+    for name in _FILTER_STRINGS:
+        value = request.get(name)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value or len(value) > policy.EVIDENCE_FILTER_VALUE_MAX:
+            raise SnapshotError(policy.INVALID_REQUEST, f"{name} must be a non-empty string of at most {policy.EVIDENCE_FILTER_VALUE_MAX} characters")
+        filters[name] = value
+    attempt = _int_param(request, "attempt", 0)
+    if attempt is not None:
+        filters["attempt"] = attempt
+    from_seq = _int_param(request, "from_seq", 1)
+    if from_seq is not None:
+        filters["from_seq"] = from_seq
+    kinds = request.get("kind")
+    if kinds is not None:
+        if not isinstance(kinds, list) or not kinds or any(not isinstance(k, str) or k not in evidence_model.KINDS for k in kinds):
+            raise SnapshotError(policy.INVALID_REQUEST, "kind must be a non-empty list of record kinds the evidence schema defines")
+        filters["kind"] = sorted(set(kinds))
+    return filters
+
+
+def _fingerprint(filters: Dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(filters, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]
+
+
+def _encode_cursor(run_id: str, head: str, seq: int, fingerprint: str) -> str:
+    raw = json.dumps([run_id, head, seq, fingerprint], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: Any, run_id: str, fingerprint: str) -> Tuple[str, int]:
+    """(head_digest, last_seq) of a cursor issued by this operation for this run and these filters."""
+    if not isinstance(cursor, str) or not cursor or len(cursor) > policy.CURSOR_MAX or not CURSOR_RE.match(cursor):
+        raise SnapshotError(policy.INVALID_REQUEST, "cursor is not an opaque token issued by this protocol")
+    try:
+        parts = json.loads(base64.urlsafe_b64decode((cursor + "=" * (-len(cursor) % 4)).encode("ascii")).decode("utf-8"))
+        bound_run, head, seq, bound_filters = parts
+    except (ValueError, TypeError) as error:
+        raise SnapshotError(policy.INVALID_REQUEST, "cursor does not decode") from error
+    if not (isinstance(head, str) and isinstance(seq, int) and not isinstance(seq, bool) and seq >= 0):
+        raise SnapshotError(policy.INVALID_REQUEST, "cursor payload has an unexpected shape")
+    if bound_run != run_id or bound_filters != fingerprint:
+        raise SnapshotError(policy.INVALID_REQUEST, "cursor was issued for another run or other filters; changing either invalidates it")
+    return head, seq
+
+
+def _matches(record: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    return ((("unit" not in filters or record.get("unit_id") == filters["unit"])
+             and ("phase" not in filters or record.get("phase") == filters["phase"])
+             and ("role" not in filters or record.get("role") == filters["role"])
+             and ("attempt" not in filters or record.get("attempt_number") == filters["attempt"]))
+            and ("kind" not in filters or record.get("kind") in filters["kind"]))
+
+
+def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    run_id = request.get("run_id")
+    validate_run_id(run_id)
+    limit = _int_param(request, "limit", 1, policy.EVIDENCE_PAGE_MAX) or policy.EVIDENCE_PAGE_DEFAULT
+    filters = _records_filters(request)
+    fingerprint = _fingerprint(filters)
+    cursor = request.get("cursor")
+    cursor_head, after_seq = _decode_cursor(cursor, run_id, fingerprint) if cursor is not None else (None, 0)
+    run = _store_run(cfg, run_id)
+    if not run.exists:
+        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
+    chain: List[Dict[str, Any]] = []
+    result = _guard("store", lambda: run.verify(chain))
+    live = result.status == reader.UNSEALED or (result.status == reader.TRUNCATED_TAIL and not result.sealed)
+    if result.status == reader.NOT_FOUND:
+        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
+    if result.status != reader.VERIFIED and not live:
+        raise SnapshotError(policy.EVIDENCE_VERIFY_FAILED, f"the store did not verify ({result.status}); no records are served",
+                            status=result.status, broken_seq=result.broken_seq, detail=result.detail, blob_problems=list(result.blob_problems))
+    head = result.head_digest
+    if cursor_head is not None and cursor_head != head:
+        raise SnapshotError(policy.EVIDENCE_HEAD_CHANGED, "the store's chain head moved since the cursor was issued; start again",
+                            head_then=cursor_head, head_now=head)
+    page, truncated, more = _page(chain, filters, limit, max(filters.get("from_seq", 1), after_seq + 1))
+    next_cursor = _encode_cursor(run_id, head, page[-1]["seq"], fingerprint) if page and more else None
+    data = {"run_id": run_id, "head_digest": head, "records": page, "next_cursor": next_cursor, "filters_applied": filters,
+            "truncated": truncated, "truncated_tail": result.status == reader.TRUNCATED_TAIL}
+    consistency = ({"kind": policy.CONSISTENCY_SEALED_STORE, "live_stream": False, "head_digest": head}
+                   if result.status == reader.VERIFIED else live_consistency())
+    return envelope("evidence.records", request_id, data=data, source=_source(cfg), consistency=consistency)
+
+
+def _page(chain: List[Dict[str, Any]], filters: Dict[str, Any], limit: int, first_seq: int) -> Tuple[List[Dict[str, Any]], bool, bool]:
+    """(records served, stopped-by-byte-budget, more matching records follow) from the verified chain. ``chain[i]["seq"] == i + 1``
+    holds for a verified chain, so the start is a slice, not a scan. The first record is always served, whatever its size."""
+    ranges = reader.explicit_phase_ranges(chain)
+    page: List[Dict[str, Any]] = []
+    used = 0
+    for record in chain[first_seq - 1:]:
+        if not _matches(record, filters):
+            continue
+        if len(page) == limit:
+            return page, False, True
+        served = {**record, "phase_provenance": reader.phase_provenance(record, ranges)}
+        cost = len(json.dumps(served, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        if page and used + cost > policy.EVIDENCE_PAGE_MAX_BYTES:
+            return page, True, True
+        page.append(served)
+        used += cost
+    return page, False, False
