@@ -100,8 +100,9 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
     git_entry = next((t for t in tools if t["tool"] == "git"), None)
     if git_entry is not None and not git_entry["available"]:
         # traced from a real run: every run creates an isolated generation sandbox with git, so a git that does not run fails the run at its first step
-        blockers.append(_blocker("TOOL_UNAVAILABLE", f"git is required for every run and {git_entry.get('reason') or 'is not on this process\'s PATH'}"
-                                 + (f"; a working copy exists later on PATH ({git_entry['alternatives'][0]}) but a run executes the first" if git_entry.get("alternatives") else "")))
+        why = git_entry.get("reason") or "is not on this process's PATH"
+        later = f"; a working copy exists later on PATH ({git_entry['alternatives'][0]}) but a run executes the first" if git_entry.get("alternatives") else ""
+        blockers.append(_blocker("TOOL_UNAVAILABLE", f"git is required for every run and {why}{later}"))
     configuration: Dict[str, Any] = {
         "status": "loaded" if cfg is not None else ("refused" if authority["status"] == "refused" else "failed"),
         "source": state.config_source or "packaged_default", "file": state.config_path, "directory": workspace, "discovery": DISCOVERY,
