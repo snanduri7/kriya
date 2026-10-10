@@ -45,8 +45,8 @@ export class HostProvider implements UIProvider {
   }
   runDetail(snapshotId: string, runId: string, signal?: AbortSignal) { return this.call<RunDetail>({ operation: 'history.detail', snapshot_id: snapshotId, run_id: runId }, signal); }
   workspaceStatus(workspace: string, signal?: AbortSignal) { return this.call<WorkspaceStatus>({ operation: 'workspace.status', workspace }, signal); }
-  evidenceManifest(runId: string, snapshotId?: string, signal?: AbortSignal) {
-    return this.call<EvidenceManifest>({ operation: 'evidence.manifest', run_id: runId, ...(snapshotId ? { snapshot_id: snapshotId } : {}) }, signal);
+  evidenceManifest(runId: string, options: { snapshotId?: string; fromTrace?: boolean } = {}, signal?: AbortSignal) {
+    return this.call<EvidenceManifest>({ operation: 'evidence.manifest', run_id: runId, ...(options.snapshotId ? { snapshot_id: options.snapshotId } : {}), ...(options.fromTrace ? { from_trace: true } : {}) }, signal);
   }
   evidenceVerify(runId: string, signal?: AbortSignal) { return this.call<EvidenceVerify>({ operation: 'evidence.verify', run_id: runId }, signal); }
   evidenceRecords(runId: string, q: RecordsQuery = {}, signal?: AbortSignal) {

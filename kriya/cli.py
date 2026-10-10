@@ -1506,12 +1506,14 @@ def evidence_explain(ctx: click.Context, run_id: str, json_output: bool) -> None
 @_KUP_VERSION_OPTION
 @click.option("--snapshot-id", "snapshot_id", default=None,
               help="A published KUP snapshot: lets the manifest DERIVE why an absent store is absent (from the run's recorded event).")
+@click.option("--from-trace", "from_trace", is_flag=True,
+              help="RUN_ID is a TRACE row id (as history lists it): resolve the evidence run id from that row's recorded evidence.attempt_store event. Needs --snapshot-id.")
 @click.pass_context
-def evidence_manifest(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], snapshot_id: Optional[str]) -> None:
+def evidence_manifest(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], snapshot_id: Optional[str], from_trace: bool) -> None:
     """Read-only KUP: a run's attempt-evidence store metadata (capture mode, seal, gaps) or the derived reason it is absent."""
     if not json_output or kup_version is None:
         raise click.UsageError("evidence manifest is a KUP operation: pass --json --kup-version 1")
-    _evidence_kup(ctx, "evidence.manifest", {"run_id": run_id, "snapshot_id": snapshot_id}, kup_version)
+    _evidence_kup(ctx, "evidence.manifest", {"run_id": run_id, "snapshot_id": snapshot_id, "from_trace": from_trace}, kup_version)
 
 
 @evidence_group.command(name="records")

@@ -10,7 +10,10 @@ import type { ProviderError, ProviderResult, UIProvider } from './provider';
 import type { EvidenceRecord } from './records';
 
 export interface RunEvidence {
+  /** The trace row id the user selected (what history lists). */
   runId: string;
+  /** The evidence run id Kriya resolved from that row's recorded event; every evidence read uses it. */
+  evidenceRunId: string;
   manifest: EvidenceManifest;
   verify: EvidenceVerify | null;
   records: readonly EvidenceRecord[];
@@ -30,23 +33,26 @@ function fromError<T>(error: ProviderError): Availability<T> {
 }
 
 export async function loadRunEvidence(provider: UIProvider, runId: string, snapshotId: string | null, signal?: AbortSignal): Promise<Availability<RunEvidence>> {
-  const manifest = await provider.evidenceManifest(runId, snapshotId ?? undefined, signal);
+  if (snapshotId === null) return unavailable('unknown_run', 'No snapshot is pinned, so the run\'s recorded evidence link cannot be read.');
+  // Trace ids and evidence ids differ in every real store: Kriya resolves the link from the row's recorded event.
+  const manifest = await provider.evidenceManifest(runId, { snapshotId, fromTrace: true }, signal);
   if (!manifest.ok) return fromError(manifest.error);
   const m = manifest.data;
-  if (m.store === 'absent') {
+  const evidenceRunId = m.run_id;
+  if (m.store === 'absent' || evidenceRunId === null) {
     const why = m.absence;
     return unavailable(ABSENCE_TO_REASON[why?.reason ?? 'unknown'] ?? 'store_absent', why ? `${why.detail} (derived from the run's recorded event)` : 'no evidence store for this run');
   }
-  const verify: ProviderResult<EvidenceVerify> = await provider.evidenceVerify(runId, signal);
+  const verify: ProviderResult<EvidenceVerify> = await provider.evidenceVerify(evidenceRunId, signal);
   if (!verify.ok) return fromError(verify.error);
   const records: EvidenceRecord[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await provider.evidenceRecords(runId, { limit: PAGE, cursor }, signal);
+    const res = await provider.evidenceRecords(evidenceRunId, { limit: PAGE, cursor }, signal);
     if (!res.ok) return fromError(res.error);
     records.push(...(res.data.records as EvidenceRecord[]));
     if (!res.data.next_cursor) {
-      const base: RunEvidence = { runId, manifest: m, verify: verify.data, records, provenance: { manifest: manifest.provenance, verify: verify.provenance, records: res.provenance } };
+      const base: RunEvidence = { runId, evidenceRunId, manifest: m, verify: verify.data, records, provenance: { manifest: manifest.provenance, verify: verify.provenance, records: res.provenance } };
       const reasons: string[] = [];
       if (!verify.data.sealed) reasons.push('The store is unsealed: the run crashed or is still writing; which one is not recorded.');
       if (res.data.truncated_tail) reasons.push('The store ends in a partial record, which is not shown.');

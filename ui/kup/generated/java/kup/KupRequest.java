@@ -20,6 +20,7 @@ public class KupRequest {
     private String cursor;
     private Long limit;
     private String runid;
+    private Boolean fromTrace;
     private Long attempt;
     private Long fromSeq;
     private List<String> kind;
@@ -69,6 +70,14 @@ public class KupRequest {
     public String getRunid() { return runid; }
     @JsonProperty("run_id")
     public void setRunid(String value) { this.runid = value; }
+
+    /**
+     * run_id is a trace row id; needs snapshot_id.
+     */
+    @JsonProperty("from_trace")
+    public Boolean getFromTrace() { return fromTrace; }
+    @JsonProperty("from_trace")
+    public void setFromTrace(Boolean value) { this.fromTrace = value; }
 
     @JsonProperty("attempt")
     public Long getAttempt() { return attempt; }

@@ -95,6 +95,7 @@ def test_absent_store_without_a_snapshot_is_store_absent_with_unknown_reason():
     ({"run_id": "r", "status": "OPEN", "capture": "full"}, "unknown"),
 ])
 def test_absence_is_derived_from_the_recorded_event_and_labelled_derived(details, reason):
+    details = None if details is None else ({**details, "run_id": "run-f"} if "run_id" in details else details)
     seed_trace_run("run-f", details, with_event=details is not None)
     snapshot_id = acquire_snapshot_id()
     env = _manifest("run-f", snapshot_id)
@@ -164,3 +165,67 @@ def test_an_unreadable_directory_is_a_typed_error(monkeypatch):
     monkeypatch.setattr("builtins.open", deny)
     env = _manifest("run-k")
     assert env["error"]["code"] == policy.EVIDENCE_STORE_UNREADABLE and env["error"]["path_kind"] == "manifest"
+
+
+# ------------------------------------------------------------------ the trace row id is NOT the evidence run id (MEASURED on a real store)
+# A trace row (S1) has its own run id; its evidence.attempt_store event records the evidence run id (S2) and the path. The two
+# differ in every real store, so the link is the recorded event, and absence must be derived from THAT event for THAT store.
+
+def _linked(trace_id, evidence_id, status="OPEN", path=True):
+    seed_trace_run(trace_id, {"run_id": evidence_id, "status": status, "capture": "full", "seq_at_row": 4, **({"path": f"/gone/{evidence_id}"} if path else {})})
+
+
+def _from_trace(trace_id, snapshot_id=None):
+    request = {"operation": "evidence.manifest", "run_id": trace_id, "from_trace": True}
+    if snapshot_id is not None:
+        request["snapshot_id"] = snapshot_id
+    return run_kup_operation(strict_config(), request)
+
+
+def test_from_trace_resolves_the_evidence_run_id_from_the_recorded_event_and_reads_that_store():
+    write_store("ev-1")
+    _linked("t-1", "ev-1")
+    env = _from_trace("t-1", acquire_snapshot_id())
+    data = env["data"]
+    assert env["error"] is None and data["run_id"] == "ev-1" and data["store"] == "present" and data["absence"] is None
+    assert data["link"] == {"trace_run_id": "t-1", "evidence_run_id": "ev-1", "resolved_from": "history.detail run_events[evidence.attempt_store]",
+                            "recorded_event": {"run_id": "ev-1", "status": "OPEN", "capture": "full", "seq_at_row": 4, "path": "/gone/ev-1"}}
+
+
+def test_from_trace_with_a_store_that_is_gone_is_pruned_for_the_store_the_event_names():
+    _linked("t-2", "ev-2")
+    data = _from_trace("t-2", acquire_snapshot_id())["data"]
+    assert data["run_id"] == "ev-2" and data["store"] == "absent" and data["absence"]["reason"] == "pruned" and data["link"]["evidence_run_id"] == "ev-2"
+
+
+@pytest.mark.parametrize("details,reason", [
+    (None, "pre_recorder"),
+    ({"status": "DISABLED", "capture": "off", "reason": "capture off"}, "capture_off"),
+    ({"status": "RECORDER_UNAVAILABLE", "capture": "full", "reason": "disk full"}, "recorder_unavailable"),
+])
+def test_from_trace_without_an_evidence_run_id_names_no_store(details, reason):
+    seed_trace_run("t-3", details, with_event=details is not None)
+    data = _from_trace("t-3", acquire_snapshot_id())["data"]
+    assert data["run_id"] is None and data["store"] == "absent" and data["absence"]["reason"] == reason
+    assert data["link"] is None or data["link"]["evidence_run_id"] is None
+
+
+def test_from_trace_needs_a_snapshot_and_a_row_in_it():
+    assert _from_trace("t-4")["error"]["code"] == policy.INVALID_REQUEST
+    seed_trace_run("t-4b", None, with_event=False)
+    data = _from_trace("t-missing", acquire_snapshot_id())["data"]
+    assert data["run_id"] is None and data["absence"]["reason"] == "unknown" and "not in snapshot" in data["absence"]["detail"]
+
+
+def test_a_trace_id_used_as_an_evidence_id_never_derives_pruned_from_another_stores_event():
+    write_store("ev-5")
+    _linked("t-5", "ev-5")
+    absence = _manifest("t-5", acquire_snapshot_id())["data"]["absence"]
+    assert absence["reason"] == "unknown" and "ev-5" in absence["detail"] and "from_trace" in absence["detail"]
+
+
+def test_from_trace_rejects_a_malformed_trace_id_and_a_malformed_recorded_run_id():
+    assert _from_trace(".hidden", None)["error"]["code"] == policy.INVALID_REQUEST
+    seed_trace_run("t-6", {"run_id": "../../etc", "status": "OPEN", "path": "/x"})
+    data = _from_trace("t-6", acquire_snapshot_id())["data"]
+    assert data["run_id"] is None and data["store"] == "absent" and data["absence"]["reason"] == "unknown"

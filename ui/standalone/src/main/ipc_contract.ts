@@ -48,7 +48,7 @@ export type KupRequest =
   | { operation: 'history.detail'; snapshot_id: string; run_id: string }
   | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
   | { operation: 'workspace.status'; workspace: string }
-  | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string }
+  | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
   | { operation: 'evidence.records'; run_id: string; unit?: string; phase?: string; role?: string; attempt?: number; from_seq?: number; kind?: string[]; limit?: number; cursor?: string };
 
@@ -124,10 +124,11 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       return { ok: true, value: { operation: v.operation, snapshot_id: sid.value, run_id: r.value } };
     }
     case 'evidence.manifest': {
-      if (!keys.every((k) => ['operation', 'run_id', 'snapshot_id'].includes(k))) return { ok: false, message: 'evidence.manifest accepts only run_id and snapshot_id' };
+      if (!keys.every((k) => ['operation', 'run_id', 'snapshot_id', 'from_trace'].includes(k))) return { ok: false, message: 'evidence.manifest accepts only run_id, snapshot_id and from_trace' };
       const r = validateRunId(v.run_id); if (!r.ok) return r;
       const out: KupRequest = { operation: 'evidence.manifest', run_id: r.value };
       if ('snapshot_id' in v) { const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid; out.snapshot_id = sid.value; }
+      if ('from_trace' in v) { if (typeof v.from_trace !== 'boolean') return { ok: false, message: 'from_trace must be a boolean' }; out.from_trace = v.from_trace; }
       return { ok: true, value: out };
     }
     case 'evidence.verify': {

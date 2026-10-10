@@ -52,36 +52,47 @@ describe.each(makers)('UIProvider contract: %s', (_name, kind, make) => {
 
   it('evidence manifest: present, absent with a derived reason, never a generic "no data"', async () => {
     const p = make();
-    const present = await p.evidenceManifest('fx-greenfield-success', FIXTURE_SNAPSHOT_ID);
+    const present = await p.evidenceManifest('fx-greenfield-success', { snapshotId: FIXTURE_SNAPSHOT_ID, fromTrace: true });
     expect(present.ok && present.data.store).toBe('present');
+    expect(present.ok && present.data.run_id).toBe('ev-fx-greenfield-success'); // the evidence id, resolved from the trace row's recorded event
+    expect(present.ok && present.data.link).toMatchObject({ trace_run_id: 'fx-greenfield-success', evidence_run_id: 'ev-fx-greenfield-success' });
+    const direct = await p.evidenceManifest('ev-fx-greenfield-success');
+    expect(direct.ok && direct.data.store).toBe('present');
     expect(present.ok && present.data.manifest?.capture).toBe('full');
-    const pruned = await p.evidenceManifest('fx-pruned', FIXTURE_SNAPSHOT_ID);
+    const pruned = await p.evidenceManifest('fx-pruned', { snapshotId: FIXTURE_SNAPSHOT_ID, fromTrace: true });
     expect(pruned.ok && pruned.data.absence?.reason).toBe('pruned');
+    expect(pruned.ok && pruned.data.run_id).toBe('ev-fx-pruned');
+    for (const [id, reason] of [['fx-pre-recorder', 'pre_recorder'], ['fx-capture-off', 'capture_off']] as const) {
+      const m = await p.evidenceManifest(id, { snapshotId: FIXTURE_SNAPSHOT_ID, fromTrace: true });
+      expect(m.ok && [m.data.absence?.reason, m.data.run_id]).toEqual([reason, null]);
+    }
+    const noSnapshot = await p.evidenceManifest('fx-pruned', { fromTrace: true });
+    expect(!noSnapshot.ok && noSnapshot.error.code).toBe('INVALID_REQUEST');
     expect(pruned.ok && pruned.data.absence?.derived_from).toContain('evidence.attempt_store');
   });
 
   it('evidence verify: sealed_store consistency only for VERIFIED', async () => {
     const p = make();
-    const sealed = await p.evidenceVerify('fx-greenfield-success');
+    const sealed = await p.evidenceVerify('ev-fx-greenfield-success');
     expect(sealed.ok && sealed.data.status).toBe('VERIFIED');
     expect(sealed.ok && sealed.provenance.consistency?.kind).toBe('sealed_store');
-    const open = await p.evidenceVerify('fx-unsealed');
+    const open = await p.evidenceVerify('ev-fx-unsealed');
     expect(open.ok && open.data.status).toBe('UNSEALED');
     expect(open.ok && open.provenance.consistency?.kind).toBe('live_observation');
-    const none = await p.evidenceVerify('fx-pruned');
+    const none = await p.evidenceVerify('ev-fx-pruned');
     expect(none.ok && none.data.status).toBe('NOT_FOUND');
   });
 
   it('evidence records: filters, paging by cursor without loss, typed error for a missing store', async () => {
     const p = make();
-    const all = await p.evidenceRecords('fx-greenfield-compile-retry', { limit: 1000 });
+    const all = await p.evidenceRecords('ev-fx-greenfield-compile-retry', { limit: 1000 });
     expect(all.ok).toBe(true);
     if (!all.ok) return;
     const total = all.data.records.length;
     const seen: number[] = [];
     let cursor: string | undefined;
     for (let i = 0; i < 50; i++) {
-      const page = await p.evidenceRecords('fx-greenfield-compile-retry', { limit: 4, cursor });
+      const page = await p.evidenceRecords('ev-fx-greenfield-compile-retry', { limit: 4, cursor });
       expect(page.ok).toBe(true);
       if (!page.ok) return;
       seen.push(...page.data.records.map((r) => r.seq));
@@ -89,10 +100,10 @@ describe.each(makers)('UIProvider contract: %s', (_name, kind, make) => {
       cursor = page.data.next_cursor;
     }
     expect(seen).toEqual(Array.from({ length: total }, (_, i) => i + 1));
-    const gates = await p.evidenceRecords('fx-greenfield-compile-retry', { kind: ['gate.result'], attempt: 1 });
+    const gates = await p.evidenceRecords('ev-fx-greenfield-compile-retry', { kind: ['gate.result'], attempt: 1 });
     expect(gates.ok && gates.data.records.every((r) => r.kind === 'gate.result' && r.attempt_number === 1)).toBe(true);
     expect(gates.ok && gates.data.filters_applied).toEqual({ attempt: 1, kind: ['gate.result'] });
-    const missing = await p.evidenceRecords('fx-pruned', {});
+    const missing = await p.evidenceRecords('ev-fx-pruned', {});
     expect(!missing.ok && missing.error.code).toBe('EVIDENCE_STORE_NOT_FOUND');
   });
 
@@ -122,7 +133,7 @@ describe('KriyaProvider failure semantics: typed errors, never fixture data', ()
     const real = new FixtureHost();
     const wrongOp = await createKriyaProvider(hostWith(async (req) => ({ ...(await real.query({ operation: 'capabilities' })), operation: req.operation === 'capabilities' ? 'snapshot.list' : req.operation }))).capabilities();
     expect(!wrongOp.ok && wrongOp.error.code).toBe('INVALID_RESPONSE');
-    const badData = await createKriyaProvider(hostWith(async (req) => ({ ...(await real.query(req)) as KupEnvelope, data: { run_id: 'x' } }))).evidenceVerify('fx-greenfield-success');
+    const badData = await createKriyaProvider(hostWith(async (req) => ({ ...(await real.query(req)) as KupEnvelope, data: { run_id: 'x' } }))).evidenceVerify('ev-fx-greenfield-success');
     expect(!badData.ok && badData.error.code).toBe('INVALID_RESPONSE');
   });
 

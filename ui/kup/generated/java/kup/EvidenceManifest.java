@@ -16,6 +16,7 @@ public class EvidenceManifest {
     private Long blobFileCount;
     private Long bytesOnDisk;
     private Long lineCount;
+    private Link link;
     private Manifest manifest;
     private String runid;
     private Seal seal;
@@ -44,6 +45,11 @@ public class EvidenceManifest {
     @JsonProperty("line_count")
     public void setLineCount(Long value) { this.lineCount = value; }
 
+    @JsonProperty("link")
+    public Link getLink() { return link; }
+    @JsonProperty("link")
+    public void setLink(Link value) { this.link = value; }
+
     /**
      * manifest.json verbatim: schema, writer_version, redaction_policy_version, capture, run_id
      * and the run manifest keys.
@@ -53,6 +59,10 @@ public class EvidenceManifest {
     @JsonProperty("manifest")
     public void setManifest(Manifest value) { this.manifest = value; }
 
+    /**
+     * The EVIDENCE run id. null when from_trace could not resolve one (the trace row records no
+     * store).
+     */
     @JsonProperty("run_id")
     public String getRunid() { return runid; }
     @JsonProperty("run_id")

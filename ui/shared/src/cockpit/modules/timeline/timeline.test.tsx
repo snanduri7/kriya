@@ -21,6 +21,29 @@ describe('Timeline: the only hierarchical navigator', () => {
     expect(tree.units[0]!.attempts.map((a) => [a.number, a.nodes.map((n) => n.seq)])).toEqual([[1, [2, 3]], [2, [4]]]);
     expect(tree.units[0]!.attempts[0]!.nodes[0]).toMatchObject({ gateId: '1:compile', attempt: '1', tone: 'bad' });
   });
+  it('real recorder vocabulary (shape MEASURED on a real store): model.result calls, mirrored gate outcomes and events, fallback decisions', () => {
+    const tree = buildTree([
+      rec(1, 'run.opened'),
+      rec(2, 'unit.opened', { unit_id: 'direct' }),
+      rec(3, 'mirror.event', { unit_id: 'direct', payload: { kind: 'attempt.started', attempt: 0 } }),
+      rec(4, 'attempt.opened', { unit_id: 'direct', attempt_number: 1 }),
+      rec(5, 'fallback.decision', { unit_id: 'direct', attempt_number: 1, payload: { phase: 'call' } }),
+      rec(6, 'model.request', { unit_id: 'direct', attempt_number: 1, role: 'developer', call_seq: 1 }),
+      rec(7, 'model.result', { unit_id: 'direct', attempt_number: 1, role: 'developer', call_seq: 1, payload: { finish_reason: 'stop' } }),
+      rec(8, 'mirror.gate_outcome', { unit_id: 'direct', attempt_number: 1, payload: { attempt: 1, index: 0, success: true, type: 'compile' } }),
+      rec(9, 'attempt.closed', { unit_id: 'direct', attempt_number: 1, payload: { outcome: 'success' } }),
+      rec(10, 'model.result', { unit_id: 'direct', role: 'reviewer', call_seq: 2, phase: 'review' }),
+    ]);
+    const unit = tree.units[0]!;
+    expect(unit.loose.map((n) => n.label)).toEqual(['event: attempt.started', 'model call #2 (reviewer)']);
+    const nodes = unit.attempts[0]!.nodes;
+    expect(nodes.map((n) => n.seq)).toEqual([5, 7, 8, 9]); // the request of an answered call is the same call, not a second node
+    expect(nodes.map((n) => n.label)).toEqual(['fallback decision (call)', 'model call #1 (developer) · stop', 'compile passed (mirrored outcome)', 'attempt closed: success']);
+    expect(nodes[2]).toMatchObject({ gateId: '1:compile', tone: 'ok' });
+  });
+  it('a model.request with no answer is still shown (a call that never returned is evidence too)', () => {
+    expect(buildTree([rec(1, 'model.request', { unit_id: 'u', attempt_number: 1, role: 'developer', call_seq: 4 })]).units[0]!.attempts[0]!.nodes.map((n) => n.label)).toEqual(['model call #4 (developer)']);
+  });
   it('a gate result without a recorded outcome says so instead of passing', () => {
     expect(buildTree([rec(1, 'gate.result', { unit_id: 'u', attempt_number: 1, payload: { gate: 'tests' } })]).units[0]!.attempts[0]!.nodes[0]!.label).toMatch(/result not recorded/);
   });

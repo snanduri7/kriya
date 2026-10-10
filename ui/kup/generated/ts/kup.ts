@@ -472,7 +472,10 @@ export interface SnapshotVerify {
 
 // ---- EvidenceManifest (evidence.schema.json#/$defs/EvidenceManifest) ----
 export interface EvidenceManifest {
-  run_id: string;
+  /**
+   * The EVIDENCE run id. null when from_trace could not resolve one (the trace row records no store).
+   */
+  run_id: string | null;
   store: 'present' | 'absent';
   /**
    * manifest.json verbatim: schema, writer_version, redaction_policy_version, capture, run_id and the run manifest keys.
@@ -508,6 +511,18 @@ export interface EvidenceManifest {
   bytes_on_disk: number | null;
   blob_file_count: number | null;
   absence: EvidenceAbsence | null;
+  link: null | {
+    trace_run_id: string;
+    evidence_run_id: string | null;
+    resolved_from: string;
+    /**
+     * The event details exactly as stored.
+     */
+    recorded_event: {
+      [k: string]: unknown;
+    };
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }
 /**
@@ -665,6 +680,10 @@ export type KupRequest =
       operation: 'evidence.manifest';
       run_id: RunId;
       snapshot_id?: string;
+      /**
+       * run_id is a trace row id; needs snapshot_id.
+       */
+      from_trace?: boolean;
     }
   | {
       operation: 'evidence.verify';

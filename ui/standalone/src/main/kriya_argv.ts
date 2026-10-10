@@ -32,7 +32,7 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     case 'history.prompt':
       return ['traces', '--json', '--snapshot-id', request.snapshot_id, '--run-id', request.run_id, '--include-prompt'];
     case 'evidence.manifest':
-      return [...evidenceHead('manifest', request.run_id), ...(request.snapshot_id !== undefined ? [`--snapshot-id=${request.snapshot_id}`] : [])];
+      return [...evidenceHead('manifest', request.run_id), ...(request.snapshot_id !== undefined ? [`--snapshot-id=${request.snapshot_id}`] : []), ...(request.from_trace === true ? ['--from-trace'] : [])];
     case 'evidence.verify':
       return evidenceHead('verify', request.run_id);
     case 'evidence.records': {

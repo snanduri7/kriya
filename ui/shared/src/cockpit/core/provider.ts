@@ -34,7 +34,9 @@ export interface UIProvider {
   listRuns(snapshotId: string, page?: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<ProviderResult<HistoryList>>;
   runDetail(snapshotId: string, runId: string, signal?: AbortSignal): Promise<ProviderResult<RunDetail>>;
   workspaceStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceStatus>>;
-  evidenceManifest(runId: string, snapshotId?: string, signal?: AbortSignal): Promise<ProviderResult<EvidenceManifest>>;
+  /** `fromTrace`: `runId` is a trace row id (as listRuns returns it) and the evidence run id is resolved by Kriya from that row's recorded
+   * event (needs `snapshotId`). Trace ids and evidence ids differ in every real store, so a module never assumes they are equal. */
+  evidenceManifest(runId: string, options?: { snapshotId?: string; fromTrace?: boolean }, signal?: AbortSignal): Promise<ProviderResult<EvidenceManifest>>;
   evidenceVerify(runId: string, signal?: AbortSignal): Promise<ProviderResult<EvidenceVerify>>;
   evidenceRecords(runId: string, query?: RecordsQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceRecords>>;
   getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined>;

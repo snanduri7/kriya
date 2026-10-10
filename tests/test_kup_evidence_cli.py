@@ -224,3 +224,13 @@ def test_real_responses_validate_against_the_json_schemas_the_ui_is_generated_fr
     env = _env(["evidence", "manifest", "s-cor", "--json", "--kup-version", "1"])
     _validate("common.schema.json", "Envelope", env)
     assert env["error"]["code"] == "EVIDENCE_STORE_UNREADABLE"
+
+
+def test_from_trace_flag_resolves_through_the_cli():
+    from _kup_evidence_fixtures import acquire_snapshot_id, seed_trace_run
+    write_store("ev-cli")
+    seed_trace_run("t-cli", {"run_id": "ev-cli", "status": "OPEN", "capture": "full", "path": "/x"})
+    sid = acquire_snapshot_id()
+    env = _env(["evidence", "manifest", "t-cli", "--json", "--kup-version", "1", "--snapshot-id", sid, "--from-trace"])
+    assert env["data"]["run_id"] == "ev-cli" and env["data"]["store"] == "present" and env["data"]["link"]["trace_run_id"] == "t-cli"
+    assert _env(["evidence", "manifest", "t-cli", "--json", "--kup-version", "1", "--from-trace"])["error"]["code"] == policy.INVALID_REQUEST

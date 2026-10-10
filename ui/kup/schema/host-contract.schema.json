@@ -205,6 +205,10 @@
             },
             "snapshot_id": {
               "$ref": "snapshot.schema.json#/$defs/SnapshotId"
+            },
+            "from_trace": {
+              "type": "boolean",
+              "description": "run_id is a trace row id; needs snapshot_id."
             }
           },
           "additionalProperties": false

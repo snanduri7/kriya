@@ -62,40 +62,82 @@ def _guard(path_kind: str, call):
 # ------------------------------------------------------------------ evidence.manifest
 
 def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
-    run_id = request.get("run_id")
-    run = _store_run(cfg, run_id)
+    """Store metadata for an evidence run id, or - with ``from_trace`` - for the store a TRACE row recorded. The two ids differ in every
+    real store (MEASURED): a trace row has its own id and its ``evidence.attempt_store`` event names the evidence run id, so the link
+    is that recorded event and is resolved here, on the reading side, never guessed by the host."""
     snapshot = require_snapshot(snapshot_directory(cfg), str(request["snapshot_id"])) if request.get("snapshot_id") else None
-    if not run.exists:
+    link: Optional[Dict[str, Any]] = None
+    if request.get("from_trace"):
+        trace_id = request.get("run_id")
+        validate_run_id(trace_id)
+        if snapshot is None:
+            raise SnapshotError(policy.INVALID_REQUEST, "from_trace needs the snapshot_id the trace row is read from")
+        state, details = _recorded_store_event(snapshot, trace_id)
+        run_id = _recorded_evidence_id(details) if state == "found" else None
+        if state == "found":
+            link = {"trace_run_id": trace_id, "evidence_run_id": run_id, "resolved_from": ABSENCE_DERIVED_FROM, "recorded_event": details}
+        absence_inputs = (trace_id, state, details)
+    else:
+        run_id = request.get("run_id")
+        validate_run_id(run_id)
+        absence_inputs = None
+    run = _store_run(cfg, run_id) if run_id is not None else None
+    if run is None or not run.exists:
+        if absence_inputs is None:
+            absence_inputs = (run_id, *_recorded_store_event(snapshot, run_id)) if snapshot is not None else (run_id, "no_snapshot", None)
         data = {"run_id": run_id, "store": "absent", "manifest": None, "seal": None, "line_count": None, "bytes_on_disk": None,
-                "blob_file_count": None, "absence": _derive_absence(run_id, snapshot)}
+                "blob_file_count": None, "absence": _absence(snapshot, run_id, *absence_inputs[1:], asked=absence_inputs[0]), "link": link}
     else:
         header = _guard("manifest", run.manifest)
         seal = _guard("seal", run.seal)
         line_count, bytes_on_disk, blob_files = _guard("records", run.measure)
         data = {"run_id": run_id, "store": "present", "manifest": header, "seal": seal, "line_count": line_count,
-                "bytes_on_disk": bytes_on_disk, "blob_file_count": blob_files, "absence": None}
+                "bytes_on_disk": bytes_on_disk, "blob_file_count": blob_files, "absence": None, "link": link}
     return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, snapshot), consistency=live_consistency())
 
 
-def _derive_absence(run_id: Any, snapshot) -> Dict[str, Any]:
-    """DERIVED (03 matrix row 27): the reason a store is absent, from the run's recorded ``evidence.attempt_store`` event. Only as good
-    as that event; pre-recorder means the event itself is missing, and a missing trace row proves nothing about the store."""
-    base: Dict[str, Any] = {"derived_from": ABSENCE_DERIVED_FROM, "snapshot_id": snapshot.snapshot_id if snapshot else None, "recorded_event": None}
-    if snapshot is None:
-        return {**base, "reason": "unknown", "detail": "no snapshot_id was supplied, so the run's recorded evidence.attempt_store event cannot be read"}
+def _recorded_evidence_id(details: Any) -> Optional[str]:
+    """The evidence run id a recorded event names, only when it is a safe run id."""
+    value = details.get("run_id") if isinstance(details, dict) else None
+    try:
+        return validate_run_id(value) if isinstance(value, str) else None
+    except SnapshotError:
+        return None
+
+
+def _recorded_store_event(snapshot, run_id: Any) -> Tuple[str, Any]:
+    """(state, details) of the LAST ``evidence.attempt_store`` event of a trace row: state is no_row, no_events, no_event or found."""
     exists, events = run_events_of(snapshot, run_id)
     if not exists:
-        return {**base, "reason": "unknown", "detail": f"run {run_id} is not in snapshot {snapshot.snapshot_id}"}
+        return "no_row", None
     if events is None:
-        return {**base, "reason": "unknown", "detail": "the run's run_events column is NULL or is not JSON"}
-    details = None
-    found = False
+        return "no_events", None
+    details, found = None, False
     for event in events if isinstance(events, list) else []:
         if isinstance(event, dict) and event.get("kind") == "evidence.attempt_store":
             found, details = True, event.get("details")
-    if not found:
+    return ("found", details) if found else ("no_event", None)
+
+
+def _absence(snapshot, evidence_id: Any, state: str, details: Any, asked: Any) -> Dict[str, Any]:
+    """DERIVED (03 matrix row 27): the reason a store is absent, from the recorded ``evidence.attempt_store`` event of the trace row.
+    Only as good as that event. ``asked`` is the id the row was read under; an event that names a DIFFERENT evidence id says nothing about
+    the id asked about (never a derived "pruned" for another store), and the answer says how to resolve it."""
+    base: Dict[str, Any] = {"derived_from": ABSENCE_DERIVED_FROM, "snapshot_id": snapshot.snapshot_id if snapshot else None, "recorded_event": None}
+    if snapshot is None or state == "no_snapshot":
+        return {**base, "reason": "unknown", "detail": "no snapshot_id was supplied, so the run's recorded evidence.attempt_store event cannot be read"}
+    if state == "no_row":
+        return {**base, "reason": "unknown", "detail": f"run {asked} is not in snapshot {snapshot.snapshot_id}"}
+    if state == "no_events":
+        return {**base, "reason": "unknown", "detail": "the run's run_events column is NULL or is not JSON"}
+    if state == "no_event":
         return {**base, "reason": "pre_recorder", "detail": "the run recorded no evidence.attempt_store event (written before the attempt-evidence recorder)"}
     base["recorded_event"] = details
+    recorded_id = _recorded_evidence_id(details)
+    if recorded_id is None and isinstance(details, dict) and isinstance(details.get("run_id"), str):
+        return {**base, "reason": "unknown", "detail": "the recorded event names an evidence run id that is not a usable run id; no store is read for it"}
+    if recorded_id is not None and evidence_id is not None and recorded_id != evidence_id:
+        return {**base, "reason": "unknown", "detail": f"the trace row {asked} recorded a store under another evidence run id ({recorded_id}); ask with from_trace to resolve it"}
     status = details.get("status") if isinstance(details, dict) else None
     if status == "DISABLED":
         return {**base, "reason": "capture_off", "detail": "the recorded event reports status DISABLED (capture off or no evidence configuration)"}

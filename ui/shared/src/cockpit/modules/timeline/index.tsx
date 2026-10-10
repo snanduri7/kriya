@@ -10,7 +10,14 @@ function describe(r: EvidenceRecord): Pick<Node, 'label' | 'tone'> | null {
   switch (r.kind) {
     case 'gate.result': return { label: `${String(p.gate ?? 'gate')} ${p.success === true ? 'passed' : p.success === false ? 'failed' : '(result not recorded)'}`, tone: p.success === true ? 'ok' : p.success === false ? 'bad' : 'neutral' };
     case 'candidate.change': return { label: `${String(p.decision ?? 'change')}: ${String(p.path ?? 'path not recorded')}`, tone: p.decision === 'REFUSED' ? 'warn' : 'neutral' };
-    case 'model.request': return { label: `model call (${r.role ?? 'role not recorded'})`, tone: 'neutral' };
+    case 'model.result': return { label: `model call${r.call_seq != null ? ` #${r.call_seq}` : ''} (${r.role ?? 'role not recorded'})${typeof p.finish_reason === 'string' ? ` · ${p.finish_reason}` : ''}`, tone: 'neutral' };
+    case 'model.request': return { label: `model call${r.call_seq != null ? ` #${r.call_seq}` : ''} (${r.role ?? 'role not recorded'})`, tone: 'neutral' };
+    // The recorder mirrors the trace row's gate outcomes and run events into the store; they are recorded facts, shown as such.
+    case 'mirror.gate_outcome': return { label: `${String(p.type ?? 'gate')} ${p.success === true ? 'passed' : p.success === false ? 'failed' : '(result not recorded)'} (mirrored outcome)`, tone: p.success === true ? 'ok' : p.success === false ? 'bad' : 'neutral' };
+    case 'mirror.event': return { label: `event: ${String(p.kind ?? 'kind not recorded')}`, tone: 'neutral' };
+    case 'fallback.decision': return { label: `fallback decision (${String(p.phase ?? 'phase not recorded')})`, tone: 'warn' };
+    case 'recovery.decision': return { label: 'recovery decision', tone: 'warn' };
+    case 'attempt.closed': return { label: `attempt closed: ${String(p.outcome ?? 'outcome not recorded')}`, tone: 'neutral' };
     case 'diagnosis': return { label: `diagnosis ${String(p.reason_code ?? '')}`.trim(), tone: 'warn' };
     case 'regression.decision': return { label: `regression ${String(p.classification ?? 'decision')}`, tone: 'bad' };
     case 'retry.delta': return { label: 'retry delta', tone: 'neutral' };
@@ -24,12 +31,15 @@ function describe(r: EvidenceRecord): Pick<Node, 'label' | 'tone'> | null {
 export function buildTree(records: readonly EvidenceRecord[]): { units: Unit[]; run: Node[] } {
   const units = new Map<string, Unit>();
   const run: Node[] = [];
+  // A call recorded as model.result is one node; its model.request (when the wire was captured too) is the same call.
+  const answered = new Set(records.filter((r) => r.kind === 'model.result').map((r) => r.call_seq));
   for (const r of records) {
+    if (r.kind === 'model.request' && answered.has(r.call_seq)) continue;
     const d = describe(r);
     if (!d) continue;
     const p = payloadOf(r);
     const attempt = r.attempt_number ?? null;
-    const node: Node = { key: `${r.seq}`, seq: r.seq, ...d, unitId: r.unit_id ?? null, attempt: attempt === null ? null : String(attempt), gateId: r.kind === 'gate.result' && attempt !== null ? `${attempt}:${String(p.gate)}` : null };
+    const node: Node = { key: `${r.seq}`, seq: r.seq, ...d, unitId: r.unit_id ?? null, attempt: attempt === null ? null : String(attempt), gateId: attempt !== null && (r.kind === 'gate.result' || r.kind === 'mirror.gate_outcome') ? `${attempt}:${String(r.kind === 'gate.result' ? p.gate : p.type)}` : null };
     if (!r.unit_id) { run.push(node); continue; }
     const unit = units.get(r.unit_id) ?? { id: r.unit_id, attempts: [], loose: [] };
     units.set(unit.id, unit);

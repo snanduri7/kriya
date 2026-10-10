@@ -71,11 +71,17 @@ export class FixtureHost implements HostAdapter {
     const rec = (col: string, data: unknown): Json => ({ availability: 'recorded', provenance: `runs.${col}`, reason: null, data });
     return {
       run: this.summary(s), fields: {},
-      run_events: rec('run_events', []), evidence_records: absent('fixture', 'evidence_records'), gate_outcomes: absent('fixture', 'gate_outcomes'), model_hops: absent('fixture', 'model_hops'),
+      run_events: rec('run_events', this.storeEvent(s) ? [{ kind: 'evidence.attempt_store', attempt: 0, source: 'workflow.run_generation_workflow', authority: 'auxiliary', message: 'attempt evidence store', failure_type: null, operation: null, details: this.storeEvent(s), created_at: 2 }] : []), evidence_records: absent('fixture', 'evidence_records'), gate_outcomes: absent('fixture', 'gate_outcomes'), model_hops: absent('fixture', 'model_hops'),
       generation_metrics: absent('fixture', 'generation_metrics'), failure_report: absent('fixture', 'failure_report'),
       context: absent('not persisted', 'not_persisted'), attribution: absent('not persisted', 'not_persisted'), diagnostics: absent('not persisted', 'not_persisted'),
       comparisons: absent('not persisted', 'not_persisted'), output: absent('not persisted', 'not_persisted'),
     };
+  }
+
+  /** The details of the trace row's recorded evidence.attempt_store event (what the real workflow writes), or null when none was recorded. */
+  private storeEvent(s: Scenario): Json | null {
+    if (s.seed.store === 'absent') return s.seed.absence.recorded_event;
+    return { run_id: s.evidenceId, status: s.seed.sealed ? 'CLOSED' : 'OPEN', capture: s.seed.capture, seq_at_row: 4, path: `/fixture/state/attempt-evidence/${s.evidenceId}` };
   }
 
   private seal(s: Extract<Scenario['seed'], { store: 'present' }>): Json | null {
@@ -83,16 +89,21 @@ export class FixtureHost implements HostAdapter {
     return { schema: 'kriya.attempt_evidence/1', final_seq: s.records.length, head_digest: HEAD(s.records), record_count: s.records.length, blob_count: s.records.reduce((n, r) => n + Object.keys(r.blobs).length, 0), complete: true, gaps: 0, degraded: [], closed_reason: 'run_closed' };
   }
 
-  private manifest(s: Scenario): KupEnvelope {
-    if (s.seed.store === 'absent') {
-      return this.env('evidence.manifest', { run_id: s.id, store: 'absent', manifest: null, seal: null, line_count: null, bytes_on_disk: null, blob_file_count: null,
-        absence: { reason: s.seed.absence.reason, derived_from: 'history.detail run_events[evidence.attempt_store]', detail: s.seed.absence.detail, snapshot_id: FIXTURE_SNAPSHOT_ID, recorded_event: s.seed.absence.recorded_event } }, this.live, EVIDENCE_SOURCE);
+  private manifest(s: Scenario | undefined, runId: string, snapshotAsked: boolean, fromTrace: boolean): KupEnvelope {
+    const event = s ? this.storeEvent(s) : null;
+    const evidenceId = s?.evidenceId ?? null;
+    const link = fromTrace && s && event ? { trace_run_id: s.id, evidence_run_id: evidenceId, resolved_from: 'history.detail run_events[evidence.attempt_store]', recorded_event: event } : null;
+    const reportedId = fromTrace ? evidenceId : runId;
+    if (!s || s.seed.store === 'absent') {
+      const absence = s?.seed.store === 'absent' ? s.seed.absence : { reason: 'unknown', detail: `run ${runId} is not in snapshot ${FIXTURE_SNAPSHOT_ID}`, recorded_event: null };
+      return this.env('evidence.manifest', { run_id: reportedId, store: 'absent', manifest: null, seal: null, line_count: null, bytes_on_disk: null, blob_file_count: null,
+        absence: { reason: absence.reason, derived_from: 'history.detail run_events[evidence.attempt_store]', detail: absence.detail, snapshot_id: snapshotAsked ? FIXTURE_SNAPSHOT_ID : null, recorded_event: absence.recorded_event }, link }, this.live, EVIDENCE_SOURCE);
     }
     const seed = s.seed;
     return this.env('evidence.manifest', {
-      run_id: s.id, store: 'present',
-      manifest: { schema: 'kriya.attempt_evidence/1', writer_version: '1', redaction_policy_version: '1', capture: seed.capture, run_id: s.id, ...seed.manifestExtra },
-      seal: this.seal(seed), line_count: seed.records.length, bytes_on_disk: 4096 * seed.records.length, blob_file_count: seed.records.reduce((n, r) => n + Object.keys(r.blobs).length, 0), absence: null,
+      run_id: s.evidenceId, store: 'present',
+      manifest: { schema: 'kriya.attempt_evidence/1', writer_version: '1', redaction_policy_version: '1', capture: seed.capture, run_id: s.evidenceId, ...seed.manifestExtra },
+      seal: this.seal(seed), line_count: seed.records.length, bytes_on_disk: 4096 * seed.records.length, blob_file_count: seed.records.reduce((n, r) => n + Object.keys(r.blobs).length, 0), absence: null, link,
     }, this.live, EVIDENCE_SOURCE);
   }
 
@@ -127,6 +138,7 @@ export class FixtureHost implements HostAdapter {
   async query(request: KupRequest): Promise<KupEnvelope> {
     this.calls.push(request);
     const find = (id: string) => this.scenarios.find((s) => s.id === id);
+    const findEvidence = (id: string) => this.scenarios.find((s) => s.evidenceId === id);
     switch (request.operation) {
       case 'capabilities': return this.env('capabilities', this.capabilities(), { kind: 'not_applicable', live_stream: false });
       case 'snapshot.list': return this.env('snapshot.list', { snapshot_directory: '/fixture/state/kup-snapshots', snapshots: [this.snapshotSummary()], retain: 3 }, this.live);
@@ -147,12 +159,11 @@ export class FixtureHost implements HostAdapter {
       }
       case 'history.prompt': return this.err('history.prompt', 'INVALID_REQUEST', 'the fixture host stores no prompts');
       case 'workspace.status': return this.env('workspace.status', { workspace: request.workspace, run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
-      case 'evidence.manifest': {
-        const s = find(request.run_id);
-        return s ? this.manifest(s) : this.env('evidence.manifest', { run_id: request.run_id, store: 'absent', manifest: null, seal: null, line_count: null, bytes_on_disk: null, blob_file_count: null, absence: { reason: 'unknown', derived_from: 'history.detail run_events[evidence.attempt_store]', detail: 'run is not in the snapshot', snapshot_id: null, recorded_event: null } }, this.live, EVIDENCE_SOURCE);
-      }
-      case 'evidence.verify': return this.verify(request.run_id, find(request.run_id));
-      case 'evidence.records': return this.records(request.run_id, find(request.run_id), request as unknown as Json);
+      case 'evidence.manifest':
+        if (request.from_trace === true && !request.snapshot_id) return this.err('evidence.manifest', 'INVALID_REQUEST', 'from_trace needs the snapshot_id the trace row is read from');
+        return request.from_trace === true ? this.manifest(find(request.run_id), request.run_id, true, true) : this.manifest(findEvidence(request.run_id), request.run_id, request.snapshot_id !== undefined, false);
+      case 'evidence.verify': return this.verify(request.run_id, findEvidence(request.run_id));
+      case 'evidence.records': return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
       default: { const never: never = request; return this.err('unknown', 'INVALID_REQUEST', `fixture host does not answer ${JSON.stringify(never)}`); }
     }
   }

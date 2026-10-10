@@ -8,9 +8,9 @@ const mountedModules = () => [...document.querySelectorAll('[data-module]')].map
 const tab = (name: string) => fireEvent.click(screen.getByRole('tab', { name }));
 const trust = async () => within(await screen.findByLabelText('Trust strip'));
 
-describe('the nine fixture scenarios', () => {
+describe('the fixture scenarios', () => {
   it('cover greenfield, brownfield, digest-only, pruned, denied content, unsealed and no-change', () => {
-    expect(SCENARIO_IDS).toEqual(['fx-greenfield-success', 'fx-greenfield-compile-retry', 'fx-brownfield-modify', 'fx-brownfield-regression', 'fx-digest-only', 'fx-pruned', 'fx-denied-content', 'fx-unsealed', 'fx-no-change']);
+    expect(SCENARIO_IDS).toEqual(['fx-greenfield-success', 'fx-greenfield-compile-retry', 'fx-brownfield-modify', 'fx-brownfield-regression', 'fx-digest-only', 'fx-pruned', 'fx-denied-content', 'fx-unsealed', 'fx-no-change', 'fx-pre-recorder', 'fx-capture-off']);
   });
 
   it('greenfield: ADDED files have no baseline (never a fabricated historical file) and no baseline is claimed anywhere', async () => {
@@ -74,6 +74,14 @@ describe('the nine fixture scenarios', () => {
     expect((await screen.findAllByText('Pruned by retention')).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/derived from the run's recorded event/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/no data/i)).toBeNull();
+  });
+
+  it('pre-recorder and capture-off runs are their own states, not a generic empty', async () => {
+    renderShell({ runId: 'fx-pre-recorder', selection: { centralTab: 'changes' } });
+    expect((await screen.findAllByText('Recorded before the recorder')).length).toBeGreaterThanOrEqual(2);
+    document.body.innerHTML = '';
+    renderShell({ runId: 'fx-capture-off', selection: { centralTab: 'changes' } });
+    expect((await screen.findAllByText('Capture was off')).length).toBeGreaterThanOrEqual(2);
   });
 
   it('content denied (the production default): full capture, but the UI says content is not authorized and requests none', async () => {

@@ -1,0 +1,47 @@
+[
+ {
+  "width": 1600,
+  "height": 1000,
+  "wait": 1500,
+  "file": "01-real-before-snapshot.png"
+ },
+ {
+  "name": "acquire_snapshot_to_first_runs_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Acquire snapshot').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('.ck-list button')){clearInterval(i);r()} },20); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 800,
+  "file": "02-real-runs.png"
+ },
+ {
+  "name": "select_verified_sealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[0].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },20); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 1200,
+  "file": "03-real-overview-trust-timeline-verified.png"
+ },
+ {
+  "js": "const n=[...document.querySelectorAll('[aria-label=\"Execution timeline\"] button')].find(b=>/Attempt/.test(b.textContent)); if(n) n.click();",
+  "wait": 800,
+  "file": "04-real-timeline-attempt-selected.png"
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Evidence').click()",
+  "wait": 800,
+  "file": "05-real-evidence-table.png"
+ },
+ {
+  "name": "select_pruned_run_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[4].click();await new Promise(r=>setTimeout(r,2500));return Math.round(performance.now()-t0)})()",
+  "wait": 300,
+  "file": "06-real-pruned-evidence.png"
+ },
+ {
+  "name": "select_unsealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[5].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },20); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 1200,
+  "file": "07-real-unsealed-evidence.png"
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Overview').click();document.querySelectorAll('.ck-list button')[40].click();",
+  "wait": 2500,
+  "file": "08-real-pre-recorder-run.png"
+ }
+]
