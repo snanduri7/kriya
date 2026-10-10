@@ -107,6 +107,30 @@ describe.each(makers)('UIProvider contract: %s', (_name, kind, make) => {
     expect(!missing.ok && missing.error.code).toBe('EVIDENCE_STORE_NOT_FOUND');
   });
 
+  it('change content: refused unless Kriya authorizes it, typed reasons, then the recorded bytes', async () => {
+    const off = make();
+    const records = await off.evidenceRecords('ev-fx-brownfield-modify', { kind: ['candidate.change'] });
+    const seq = records.ok ? records.data.records[0]!.seq : 0;
+    const denied = await off.evidenceChangeContent('ev-fx-brownfield-modify', { seq, part: 'diff' });
+    expect(!denied.ok && denied.error).toMatchObject({ code: 'EVIDENCE_CONTENT_POLICY', extra: { content_class: 'candidate_content', reason: 'content_visibility_off' } });
+    const unclassified = await off.evidenceChangeContent('ev-fx-brownfield-modify', { seq, part: 'analysis_model_claimed' });
+    expect(!unclassified.ok && unclassified.error.extra).toMatchObject({ content_class: 'unclassified', reason: 'unclassified_key' });
+    const on = kind === 'fixture' ? createFixtureProvider({ evidenceContent: true }) : createKriyaProvider(new FixtureHost({ evidenceContent: true }));
+    const caps = await on.capabilities();
+    expect(caps.ok && (caps.data.features as Record<string, unknown>).evidence_content_classes).toEqual(['candidate_content']);
+    const served = await on.evidenceChangeContent('ev-fx-brownfield-modify', { seq, part: 'diff' });
+    expect(served.ok && [served.data.part, served.data.content_class, served.data.digest_ok, served.data.encoding]).toEqual(['diff', 'candidate_content', true, 'utf-8']);
+    expect(served.ok && served.data.content).toContain('--- a/');
+    const digestOnly = await on.evidenceRecords('ev-fx-digest-only', { kind: ['candidate.change'] });
+    const dseq = digestOnly.ok ? digestOnly.data.records[0]!.seq : 0;
+    const unavailable = await on.evidenceChangeContent('ev-fx-digest-only', { seq: dseq, part: 'diff' });
+    expect(!unavailable.ok && unavailable.error).toMatchObject({ code: 'EVIDENCE_CONTENT_UNAVAILABLE', extra: { reason: 'digest_only' } });
+    const notCandidate = await on.evidenceChangeContent('ev-fx-brownfield-modify', { seq: 1, part: 'diff' });
+    expect(!notCandidate.ok && notCandidate.error.code).toBe('INVALID_REQUEST');
+    const gone = await on.evidenceChangeContent('ev-fx-pruned', { seq: 1, part: 'diff' });
+    expect(!gone.ok && gone.error.code).toBe('EVIDENCE_STORE_NOT_FOUND');
+  });
+
   it('settings round-trip through the host', async () => {
     const p = make();
     await p.setSetting('editor', 'intellij');

@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
+  Capabilities, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
 } from '../../model/kup';
 import type { HostSettings } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -25,6 +25,13 @@ export interface RecordsQuery {
   unit?: string; phase?: string; role?: string; attempt?: number; fromSeq?: number; kind?: string[]; limit?: number; cursor?: string;
 }
 
+export interface ChangeContentQuery {
+  /** The seq of the recorded candidate.change record. */
+  seq: number;
+  /** Which kept part of it: diff, before, after, proposed or attempted_edits. Kriya classifies the key; an unlisted key is never served. */
+  part: string;
+}
+
 export interface UIProvider {
   readonly kind: ProviderKind;
   capabilities(signal?: AbortSignal): Promise<ProviderResult<Capabilities>>;
@@ -39,6 +46,8 @@ export interface UIProvider {
   evidenceManifest(runId: string, options?: { snapshotId?: string; fromTrace?: boolean }, signal?: AbortSignal): Promise<ProviderResult<EvidenceManifest>>;
   evidenceVerify(runId: string, signal?: AbortSignal): Promise<ProviderResult<EvidenceVerify>>;
   evidenceRecords(runId: string, query?: RecordsQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceRecords>>;
+  /** ONE authorized part of ONE recorded candidate change. Kriya decides (content_visibility, class table, caps); a refusal is a typed error. */
+  evidenceChangeContent(runId: string, query: ChangeContentQuery, signal?: AbortSignal): Promise<ProviderResult<EvidenceChangeContent>>;
   getSetting<K extends keyof HostSettings>(key: K): Promise<HostSettings[K] | undefined>;
   setSetting<K extends keyof HostSettings>(key: K, value: HostSettings[K]): Promise<void>;
 }

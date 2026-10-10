@@ -20,12 +20,13 @@ export type Availability<T> =
   | { state: 'ready'; data: T; provenance: Provenance }
   /** Data is served but something about it limits trust (an unsealed store, a partial tail). `reasons` are shown verbatim. */
   | { state: 'degraded'; data: T; provenance: Provenance; reasons: readonly string[] }
-  | { state: 'unavailable'; reason: UnavailableReason; detail: string }
+  /** `detail` is the semantic explanation shown by default; `rawDetail` is the exact recorded text (paths and all), shown on request. */
+  | { state: 'unavailable'; reason: UnavailableReason; detail: string; rawDetail?: string }
   | { state: 'not_recorded'; detail: string }
   | { state: 'error'; code: string; message: string };
 
 export const loading = <T,>(): Availability<T> => ({ state: 'loading' });
-export const unavailable = <T,>(reason: UnavailableReason, detail: string): Availability<T> => ({ state: 'unavailable', reason, detail });
+export const unavailable = <T,>(reason: UnavailableReason, detail: string, rawDetail?: string): Availability<T> => ({ state: 'unavailable', reason, detail, ...(rawDetail !== undefined ? { rawDetail } : {}) });
 export const notRecorded = <T,>(detail: string): Availability<T> => ({ state: 'not_recorded', detail });
 export const failed = <T,>(code: string, message: string): Availability<T> => ({ state: 'error', code, message });
 
@@ -45,7 +46,7 @@ export function availabilityTitle<T>(a: Availability<T>): string {
       switch (a.reason) {
         case 'capability_absent': return 'Not supported by this Kriya';
         case 'store_absent': return 'No evidence store';
-        case 'pruned': return 'Pruned by retention';
+        case 'pruned': return 'Evidence pruned by retention';
         case 'capture_off': return 'Capture was off';
         case 'pre_recorder': return 'Recorded before the recorder';
         case 'recorder_unavailable': return 'Recorder was unavailable';

@@ -1,0 +1,65 @@
+[
+ {
+  "width": 1600,
+  "height": 1000,
+  "wait": 800
+ },
+ {
+  "name": "acquire_to_first_runs_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Acquire snapshot').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('.ck-list button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 300
+ },
+ {
+  "name": "select_sealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[0].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600
+ },
+ {
+  "name": "validation_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Validation').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Gates\"] button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "01-real-validation.png"
+ },
+ {
+  "js": "document.querySelector('[aria-label=\"Gates\"] button').click()",
+  "wait": 500,
+  "file": "02-real-validation-gate-selected.png"
+ },
+ {
+  "name": "changes_metadata_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Changes').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Changed files\"] button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 400
+ },
+ {
+  "js": "document.querySelector('[aria-label=\"Changed files\"] button').click()",
+  "wait": 600,
+  "file": "03-real-changes-mode-b-metadata.png"
+ },
+ {
+  "name": "authorized_diff_retrieval_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Show diff').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Unified diff\"]')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 600,
+  "file": "04-real-changes-mode-a-authorized-diff.png"
+ },
+ {
+  "name": "select_unsealed_run_to_timeline_ms",
+  "js": "(async()=>{const t0=performance.now();document.querySelectorAll('.ck-list button')[5].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 500
+ },
+ {
+  "name": "why_first_render_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('[aria-label=\"Execution timeline\"] button')].find(b=>/^Attempt 1/.test(b.textContent)).click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Why\"] [aria-label=\"Why\"], [aria-label=\"Why\"]')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 700,
+  "file": "05-real-why-unsealed-failed-run.png"
+ },
+ {
+  "js": "[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Validation').click();",
+  "wait": 700,
+  "file": "06-real-validation-failed-run.png"
+ },
+ {
+  "js": "document.querySelectorAll('.ck-list button')[4].click();",
+  "wait": 2600,
+  "file": "07-real-pruned-semantic-state.png"
+ }
+]

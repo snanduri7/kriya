@@ -1531,6 +1531,9 @@ class AttemptRecorderConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     capture: Literal["full", "digest_only", "full_with_reasoning", "off"] = "full"
+    # Run Cockpit (GUI): whether the read API may serve stored CONTENT (candidate before/after/diff) to a UI. Default off. Part of the
+    # `evidence` blanket SECURITY_AUTHORITY subtree, so a repository can never turn it on; a host can only narrow it, never widen it.
+    content_visibility: Literal["off", "on"] = "off"
     retention: AttemptEvidenceRetentionConfig = Field(default_factory=AttemptEvidenceRetentionConfig)
 
 

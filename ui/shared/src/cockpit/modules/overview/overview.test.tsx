@@ -19,7 +19,7 @@ describe('Overview', () => {
   });
   it('a pruned run still shows the run row and says the evidence is pruned', async () => {
     renderModule(overviewModule, { runId: 'fx-pruned' });
-    expect(await screen.findByText('Pruned by retention')).toBeInTheDocument();
+    expect(await screen.findByText('Evidence pruned by retention')).toBeInTheDocument();
     expect(screen.getByText('An older run whose store retention removed')).toBeInTheDocument();
   });
 });

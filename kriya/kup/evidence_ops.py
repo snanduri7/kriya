@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.core.attempt_evidence import model as evidence_model
@@ -245,17 +246,7 @@ def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     fingerprint = _fingerprint(filters)
     cursor = request.get("cursor")
     cursor_head, after_seq = _decode_cursor(cursor, run_id, fingerprint) if cursor is not None else (None, 0)
-    run = _store_run(cfg, run_id)
-    if not run.exists:
-        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
-    chain: List[Dict[str, Any]] = []
-    result = _guard("store", lambda: run.verify(chain))
-    live = result.status == reader.UNSEALED or (result.status == reader.TRUNCATED_TAIL and not result.sealed)
-    if result.status == reader.NOT_FOUND:
-        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
-    if result.status != reader.VERIFIED and not live:
-        raise SnapshotError(policy.EVIDENCE_VERIFY_FAILED, f"the store did not verify ({result.status}); no records are served",
-                            status=result.status, broken_seq=result.broken_seq, detail=result.detail, blob_problems=list(result.blob_problems))
+    run, chain, result, live = _verified_chain(cfg, run_id)
     head = result.head_digest
     if cursor_head is not None and cursor_head != head:
         raise SnapshotError(policy.EVIDENCE_HEAD_CHANGED, "the store's chain head moved since the cursor was issued; start again",
@@ -267,6 +258,23 @@ def records(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     consistency = ({"kind": policy.CONSISTENCY_SEALED_STORE, "live_stream": False, "head_digest": head}
                    if result.status == reader.VERIFIED else live_consistency())
     return envelope("evidence.records", request_id, data=data, source=_source(cfg), consistency=consistency)
+
+
+def _verified_chain(cfg, run_id: Any):
+    """(run, records, verification, live): one pass verifying chain, blobs and seal and collecting the records. A store that is not
+    VERIFIED (or an unsealed live store) serves nothing: EVIDENCE_VERIFY_FAILED / EVIDENCE_STORE_NOT_FOUND."""
+    run = _store_run(cfg, run_id)
+    if not run.exists:
+        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
+    chain: List[Dict[str, Any]] = []
+    result = _guard("store", lambda: run.verify(chain))
+    live = result.status == reader.UNSEALED or (result.status == reader.TRUNCATED_TAIL and not result.sealed)
+    if result.status == reader.NOT_FOUND:
+        raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
+    if result.status != reader.VERIFIED and not live:
+        raise SnapshotError(policy.EVIDENCE_VERIFY_FAILED, f"the store did not verify ({result.status}); nothing is served from it",
+                            status=result.status, broken_seq=result.broken_seq, detail=result.detail, blob_problems=list(result.blob_problems))
+    return run, chain, result, live
 
 
 def _page(chain: List[Dict[str, Any]], filters: Dict[str, Any], limit: int, first_seq: int) -> Tuple[List[Dict[str, Any]], bool, bool]:
@@ -287,3 +295,59 @@ def _page(chain: List[Dict[str, Any]], filters: Dict[str, Any], limit: int, firs
         page.append(served)
         used += cost
     return page, False, False
+
+
+# ------------------------------------------------------------------ evidence.change_content
+
+_PART_RE = re.compile(r"^[a-z_]{1,32}$")
+
+
+def change_content(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """ONE part of ONE recorded candidate change, when Kriya authorizes content. Order is fail-closed: (1) parameters, (2) the content
+    class of the requested key and Kriya's visibility setting - before any store access, so a refusal reveals nothing about a store,
+    (3) store verification, (4) the record and what it kept, (5) the recorded size against the cap, (6) the bytes, re-hashed on read."""
+    run_id = request.get("run_id")
+    validate_run_id(run_id)
+    seq, part = request.get("seq"), request.get("part")
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 1:
+        raise SnapshotError(policy.INVALID_REQUEST, "seq must be an integer >= 1")
+    if not isinstance(part, str) or not _PART_RE.match(part):
+        raise SnapshotError(policy.INVALID_REQUEST, "part must be a lowercase blob key name")
+    content_class = policy.BLOB_CLASSES.get(part, policy.CONTENT_CLASS_UNCLASSIFIED)
+    if content_class == policy.CONTENT_CLASS_UNCLASSIFIED:
+        raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, f"{part!r} is not a classified content key; unclassified content is never served",
+                            content_class=content_class, reason="unclassified_key")
+    visibility = getattr(getattr(getattr(cfg, "evidence", None), "attempt_recorder", None), "content_visibility", "off")
+    if visibility != "on":
+        raise SnapshotError(policy.EVIDENCE_CONTENT_POLICY, "Kriya's content visibility policy (evidence.attempt_recorder.content_visibility) is off",
+                            content_class=content_class, reason="content_visibility_off")
+    run, chain, result, _live = _verified_chain(cfg, run_id)
+    record = chain[seq - 1] if seq <= len(chain) else None
+    if record is None or record.get("kind") != "candidate.change":
+        raise SnapshotError(policy.INVALID_REQUEST, f"record {seq} of run {run_id} is not a candidate.change record")
+    ref = (record.get("blobs") or {}).get(part)
+    digest_entry = (record.get("content_digests") or {}).get(part)
+    if ref is None:
+        reason = "digest_only" if digest_entry is not None else "part_not_recorded"
+        raise SnapshotError(policy.EVIDENCE_CONTENT_UNAVAILABLE, f"record {seq} kept no bytes for {part!r} ({reason})", reason=reason)
+    recorded_bytes = digest_entry.get("bytes") if isinstance(digest_entry, dict) else None
+    if isinstance(recorded_bytes, int) and recorded_bytes > policy.EVIDENCE_BLOB_MAX_BYTES:
+        raise SnapshotError(policy.EVIDENCE_BLOB_TOO_LARGE, f"{part!r} is {recorded_bytes} bytes; the response cap is {policy.EVIDENCE_BLOB_MAX_BYTES}", bytes_total=recorded_bytes)
+    try:
+        data = run.blob(ref)
+    except reader.BlobCorrupt as error:
+        raise SnapshotError(policy.EVIDENCE_VERIFY_FAILED, str(error), status="BLOB_CORRUPT", ref=ref) from error
+    except OSError as error:
+        raise SnapshotError(policy.EVIDENCE_STORE_UNREADABLE, f"{type(error).__name__}: {error}", path_kind="blob") from error
+    if len(data) > policy.EVIDENCE_BLOB_MAX_BYTES:
+        raise SnapshotError(policy.EVIDENCE_BLOB_TOO_LARGE, f"{part!r} is {len(data)} bytes; the response cap is {policy.EVIDENCE_BLOB_MAX_BYTES}", bytes_total=len(data))
+    try:
+        content, encoding = data.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        content, encoding = base64.b64encode(data).decode("ascii"), "base64"
+    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+    out = {"run_id": run_id, "seq": seq, "part": part, "content_class": content_class, "path": payload.get("path"), "attempt": record.get("attempt_number"),
+           "ref": ref, "bytes_total": len(data), "encoding": encoding, "content": content, "digest_ok": True, "head_digest": result.head_digest}
+    consistency = ({"kind": policy.CONSISTENCY_SEALED_STORE, "live_stream": False, "head_digest": result.head_digest}
+                   if result.status == reader.VERIFIED else live_consistency())
+    return envelope("evidence.change_content", request_id, data=out, source=_source(cfg), consistency=consistency)

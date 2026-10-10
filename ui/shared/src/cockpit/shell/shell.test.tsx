@@ -92,28 +92,48 @@ describe('AppShell mounts modules through the registry and the shared selection'
     expect(store.getState()).toMatchObject({ drawerOpen: true, bottomTab: 'drawer-raw-events' });
   });
 
-  it('timeline selection drives the same attempt / gate / file context that Changes, Validation and the drawer consume', async () => {
+  it('timeline selection drives the same attempt / gate / file context that Validation, Changes and WHY consume', async () => {
     const { store } = renderShell({ runId: GF });
     const timeline = await screen.findByRole('tree', { name: 'Execution timeline' });
-    // attempt 1 (compile failed)
+    // attempt 1 (compile failed, diagnosed, recovered)
     fireEvent.click(await within(timeline).findByRole('button', { name: 'Attempt 1' }));
     expect(store.getState()).toMatchObject({ unitId: 'unit-1', attempt: '1', gateId: null });
+    const why = await screen.findByLabelText('Why');
+    expect(await within(why).findByText(/What happened · attempt 1/)).toBeInTheDocument();
+    expect(within(why).getByText('Recorded diagnosis')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Validation' }));
-    expect(await screen.findByText(/compile · attempt 1/)).toBeInTheDocument();
-    expect(screen.getByText('failed', { selector: '.ck-badge' })).toBeInTheDocument();
-    // attempt 2 (compile and tests passed): Validation follows without any module-to-module call
+    expect(await screen.findByText(/Validation summary · attempt 1/)).toBeInTheDocument();
+    expect(within(screen.getByRole('list', { name: 'Gates' })).getByText('failed', { selector: '.ck-badge' })).toBeInTheDocument();
+    // attempt 2 (everything passed): all three follow, without any module calling another
     fireEvent.click(within(timeline).getByRole('button', { name: 'Attempt 2' }));
-    expect(await screen.findByText(/compile · attempt 2/)).toBeInTheDocument();
-    expect(screen.queryByText(/compile · attempt 1/)).toBeNull();
-    // a gate node selects the gate and the event; the drawer's raw events narrow to that record
+    expect(await screen.findByText(/Validation summary · attempt 2/)).toBeInTheDocument();
+    expect(within(await screen.findByLabelText('Why')).getByText(/What happened · attempt 2/)).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Why')).getByText('No failure is recorded for this attempt.')).toBeInTheDocument();
+    // a gate node selects exactly that gate record and the event, and does not move the central tab
     fireEvent.click(within(timeline).getByRole('button', { name: /tests passed/ }));
-    expect(store.getState()).toMatchObject({ attempt: '2', gateId: '2:tests' });
+    expect(store.getState()).toMatchObject({ attempt: '2', gateId: expect.stringMatching(/^2:tests@\d+$/), centralTab: 'validation' });
     expect(store.getState().eventSeq).not.toBeNull();
+    expect(await screen.findByText(/Tests · detail/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Changes' }));
     expect(await screen.findByText(/Changes · attempt 2/)).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /src\/Lib\.java/ }));
     expect(store.getState().filePath).toBe('src/Lib.java');
     expect(store.getState().drawerOpen).toBe(false); // a file selection never opens the drawer
+  });
+
+  it('explicit "Open in ..." actions move the central tab; nothing else does', async () => {
+    const { store } = renderShell({ runId: GF });
+    const timeline = await screen.findByRole('tree', { name: 'Execution timeline' });
+    fireEvent.click(await within(timeline).findByRole('button', { name: /compile failed/ }));
+    expect(store.getState().centralTab).toBe('overview');
+    fireEvent.click(within(await screen.findByLabelText('Selected record')).getByRole('button', { name: 'Open in Validation' }));
+    expect(store.getState().centralTab).toBe('validation');
+    expect(store.getState().gateId).toMatch(/^1:compile@\d+$/);
+    fireEvent.click(within(timeline).getAllByRole('button', { name: /STAGED: src\/Lib\.java/ })[0]!);
+    fireEvent.click(within(await screen.findByLabelText('Selected record')).getByRole('button', { name: 'Open in Changes' }));
+    expect(store.getState()).toMatchObject({ centralTab: 'changes', filePath: 'src/Lib.java' });
+    fireEvent.click(within(screen.getByLabelText('Selected record')).getByRole('button', { name: 'Open evidence' }));
+    expect(store.getState().centralTab).toBe('evidence');
   });
 
   it('a module can be removed or added without touching AppShell: only the registry input changes', async () => {

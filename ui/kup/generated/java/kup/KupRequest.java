@@ -27,6 +27,8 @@ public class KupRequest {
     private String phase;
     private String role;
     private String unit;
+    private String part;
+    private Long seq;
 
     @JsonProperty("operation")
     public Operation getOperation() { return operation; }
@@ -108,4 +110,14 @@ public class KupRequest {
     public String getUnit() { return unit; }
     @JsonProperty("unit")
     public void setUnit(String value) { this.unit = value; }
+
+    @JsonProperty("part")
+    public String getPart() { return part; }
+    @JsonProperty("part")
+    public void setPart(String value) { this.part = value; }
+
+    @JsonProperty("seq")
+    public Long getSeq() { return seq; }
+    @JsonProperty("seq")
+    public void setSeq(Long value) { this.seq = value; }
 }

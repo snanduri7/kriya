@@ -77,6 +77,9 @@
         "EVIDENCE_STORE_NOT_FOUND",
         "EVIDENCE_VERIFY_FAILED",
         "EVIDENCE_HEAD_CHANGED",
+        "EVIDENCE_CONTENT_POLICY",
+        "EVIDENCE_CONTENT_UNAVAILABLE",
+        "EVIDENCE_BLOB_TOO_LARGE",
         "HOST_ERROR"
       ]
     },
@@ -247,7 +250,8 @@
             "snapshot.verify",
             "evidence.manifest",
             "evidence.verify",
-            "evidence.records"
+            "evidence.records",
+            "evidence.change_content"
           ]
         },
         "request_id": {

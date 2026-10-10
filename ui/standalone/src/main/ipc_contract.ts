@@ -50,6 +50,7 @@ export type KupRequest =
   | { operation: 'workspace.status'; workspace: string }
   | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
+  | { operation: 'evidence.change_content'; run_id: string; seq: number; part: string }
   | { operation: 'evidence.records'; run_id: string; unit?: string; phase?: string; role?: string; attempt?: number; from_seq?: number; kind?: string[]; limit?: number; cursor?: string };
 
 export function validateSnapshotId(v: unknown): ValidationResult<string> {
@@ -135,6 +136,13 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       if (keys.join() !== 'operation,run_id') return { ok: false, message: 'evidence.verify takes exactly run_id' };
       const r = validateRunId(v.run_id); if (!r.ok) return r;
       return { ok: true, value: { operation: 'evidence.verify', run_id: r.value } };
+    }
+    case 'evidence.change_content': {
+      if (keys.join() !== 'operation,part,run_id,seq') return { ok: false, message: 'evidence.change_content takes exactly run_id, seq and part' };
+      const r = validateRunId(v.run_id); if (!r.ok) return r;
+      if (!boundedInt(v.seq, 1, 1_000_000_000)) return { ok: false, message: 'seq must be an integer >= 1' };
+      if (typeof v.part !== 'string' || !/^[a-z_]{1,32}$/.test(v.part)) return { ok: false, message: 'part must be a lowercase key name' };
+      return { ok: true, value: { operation: 'evidence.change_content', run_id: r.value, seq: v.seq, part: v.part } };
     }
     case 'evidence.records': return validateEvidenceRecords(v, keys);
     case 'workspace.status': {

@@ -13,6 +13,8 @@ export interface RunContext {
   provider: ProviderKind;
   goal: string | null;
   status: string | null;
+  /** The trace row's stored failure_category, verbatim; null when none was stored. */
+  failureCategory: string | null;
   milestone: { groupId: string | null; index: number | null; total: number | null };
   workspace: { identity: string | null; path: string | null };
   baseline: {

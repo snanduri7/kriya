@@ -19,6 +19,7 @@ describe('Trust strip', () => {
   });
   it('a pruned store says why, not "no data"', async () => {
     renderModule(trustModule, { runId: 'fx-pruned' });
-    expect(await screen.findByText('Pruned by retention')).toBeInTheDocument();
+    expect(await screen.findByText('Evidence pruned by retention')).toBeInTheDocument();
+    expect(screen.getByText('The evidence store for this run was removed by retention.')).toBeInTheDocument();
   });
 });

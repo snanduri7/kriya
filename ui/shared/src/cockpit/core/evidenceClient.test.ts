@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FIXTURE_SNAPSHOT_ID as SNAP, createFixtureProvider } from '../providers/fixture';
-import { loadRunEvidence, type ProviderResult, type UIProvider } from '.';
+import { contentAvailability, loadRunEvidence, type ProviderResult, type UIProvider } from '.';
 
 const over = (patch: Partial<UIProvider>): UIProvider => { const base = createFixtureProvider(); return Object.assign(Object.create(base), patch) as UIProvider; };
 const err = (code: string, message = 'm', extra: Record<string, unknown> = {}): ProviderResult<never> => ({ ok: false, error: { code, message, extra } });
@@ -70,5 +70,19 @@ describe('loadRunEvidence', () => {
     expect(seen.length).toBeGreaterThan(1);
     const endless = over({ evidenceRecords: async (id, q, s) => { const r = await base.evidenceRecords(id, { ...q, limit: 1 }, s); return r.ok ? { ...r, data: { ...r.data, next_cursor: 'eyJsIjowfQ' } } : r; } });
     expect(await loadRunEvidence(endless, 'fx-greenfield-success', SNAP)).toMatchObject({ state: 'error', code: 'PAGE_LIMIT' });
+  });
+});
+
+describe('contentAvailability: Kriya\'s refusal reasons become distinct states', () => {
+  const refuse = (code: string, extra: Record<string, unknown> = {}) => contentAvailability({ ok: false, error: { code, message: 'raw', extra } });
+  it('policy, unclassified, digest-only, not recorded, too large, unverified, absent store and unknown errors each say their own thing', () => {
+    expect(refuse('EVIDENCE_CONTENT_POLICY', { reason: 'content_visibility_off' })).toMatchObject({ state: 'unavailable', reason: 'denied', rawDetail: 'raw' });
+    expect(refuse('EVIDENCE_CONTENT_POLICY', { reason: 'unclassified_key' })).toMatchObject({ state: 'unavailable', reason: 'denied', detail: expect.stringMatching(/not classified/) });
+    expect(refuse('EVIDENCE_CONTENT_UNAVAILABLE', { reason: 'digest_only' })).toMatchObject({ state: 'unavailable', reason: 'digest_only' });
+    expect(refuse('EVIDENCE_CONTENT_UNAVAILABLE', { reason: 'part_not_recorded' })).toMatchObject({ state: 'not_recorded' });
+    expect(refuse('EVIDENCE_BLOB_TOO_LARGE', { bytes_total: 5 })).toMatchObject({ state: 'error', code: 'EVIDENCE_BLOB_TOO_LARGE' });
+    expect(refuse('EVIDENCE_VERIFY_FAILED', { status: 'BLOB_CORRUPT' })).toMatchObject({ state: 'unavailable', reason: 'unverified' });
+    expect(refuse('EVIDENCE_STORE_NOT_FOUND')).toMatchObject({ state: 'unavailable', reason: 'store_absent' });
+    expect(refuse('SOMETHING_NEW')).toEqual({ state: 'error', code: 'SOMETHING_NEW', message: 'raw' });
   });
 });

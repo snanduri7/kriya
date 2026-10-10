@@ -1,0 +1,9 @@
+{
+ "acquire_to_first_runs_ms": 2450,
+ "select_sealed_run_to_timeline_ms": 2462,
+ "validation_first_render_ms": 18,
+ "changes_metadata_first_render_ms": 16,
+ "authorized_diff_retrieval_ms": 796,
+ "select_unsealed_run_to_timeline_ms": 2476,
+ "why_first_render_ms": 17
+}

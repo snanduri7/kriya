@@ -116,12 +116,15 @@ describe('Availability', () => {
   });
   it('the view shows the title and the reason verbatim, and hands data to the renderer only when there is some', () => {
     const { rerender } = render(<AvailabilityView value={{ state: 'unavailable', reason: 'pruned', detail: 'retention removed it' }}>{() => <i>DATA</i>}</AvailabilityView>);
-    expect(screen.getByText('Pruned by retention')).toBeInTheDocument();
+    expect(screen.getByText('Evidence pruned by retention')).toBeInTheDocument();
     expect(screen.getByText('retention removed it')).toBeInTheDocument();
     expect(screen.queryByText('DATA')).toBeNull();
     const prov = { operation: 'x', source: null, consistency: null, schemaVersion: 1, requestId: 'r', observedAt: '' };
-    rerender(<AvailabilityView value={{ state: 'degraded', data: 1, provenance: prov, reasons: ['store unsealed'] }}>{(d) => <i>DATA {d}</i>}</AvailabilityView>);
-    expect(screen.getByText('store unsealed')).toBeInTheDocument();
+    const degraded = { state: 'degraded' as const, data: 1, provenance: prov, reasons: ['store unsealed'] };
+    rerender(<AvailabilityView value={degraded}>{(d) => <i>DATA {d}</i>}</AvailabilityView>);
+    expect(screen.queryByText('store unsealed')).toBeNull(); // exactly one surface (the trust strip) owns the degraded notice
     expect(screen.getByText('DATA 1')).toBeInTheDocument();
+    rerender(<AvailabilityView value={degraded} notice>{(d) => <i>DATA {d}</i>}</AvailabilityView>);
+    expect(screen.getByText('store unsealed')).toBeInTheDocument();
   });
 });

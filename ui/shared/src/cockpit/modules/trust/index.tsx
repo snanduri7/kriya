@@ -5,7 +5,7 @@ function Trust() {
   const run = useRunContext();
   return (
     <div className="ck-panel" aria-label="Trust strip">
-      <AvailabilityView value={evidence}>
+      <AvailabilityView value={evidence} notice>
         {(data, notes) => {
           const sealed = data.verify?.sealed;
           const ctx = run.state === 'ready' ? run.data : null;

@@ -50,6 +50,7 @@ const TYPES = [
   ['EvidenceManifest', 'evidence.schema.json', '#/$defs/EvidenceManifest'],
   ['EvidenceVerify', 'evidence.schema.json', '#/$defs/EvidenceVerify'],
   ['EvidenceRecords', 'evidence.schema.json', '#/$defs/EvidenceRecords'],
+  ['EvidenceChangeContent', 'evidence.schema.json', '#/$defs/EvidenceChangeContent'],
   ['KupRequest', 'host-contract.schema.json', '#/$defs/KupRequest'],
   ['OpenInIdeRequest', 'host-contract.schema.json', '#/$defs/OpenInIdeRequest'],
   ['OpenInIdeResult', 'host-contract.schema.json', '#/$defs/OpenInIdeResult'],

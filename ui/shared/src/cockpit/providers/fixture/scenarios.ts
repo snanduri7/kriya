@@ -12,7 +12,7 @@ export interface SeedRecord {
 }
 
 export type StoreSeed =
-  | { store: 'present'; capture: 'full' | 'digest_only'; sealed: boolean; records: SeedRecord[]; manifestExtra: Record<string, unknown> }
+  | { store: 'present'; capture: 'full' | 'digest_only'; sealed: boolean; records: SeedRecord[]; manifestExtra: Record<string, unknown>; texts: Record<string, string> }
   | { store: 'absent'; absence: { reason: string; detail: string; recorded_event: Record<string, unknown> | null } };
 
 export interface Scenario {
@@ -31,23 +31,28 @@ export interface Scenario {
   seed: StoreSeed;
 }
 
+/** A blob reference unique per (record, part): two records never share one, as in a real content-addressed store of distinct bytes. */
+const refOf = (seq: number, part: number) => hex(1000 + seq * 8 + part);
 const hex = (n: number) => 'sha256:' + n.toString(16).padStart(2, '0').repeat(32).slice(0, 64);
 const T0 = '2026-10-10T09:00:00.000000Z';
 
 class Builder {
   private seq = 0;
   readonly records: SeedRecord[] = [];
+  /** Content bytes by blob reference (what a real store keeps under blobs/); only kept when the capture is `full`. */
+  readonly texts: Record<string, string> = {};
   constructor(private readonly runId: string, private readonly capture: 'full' | 'digest_only') {}
   add(kind: string, payload: Record<string, unknown> = {}, who: Partial<Pick<SeedRecord, 'unit_id' | 'unit_kind' | 'invocation_seq' | 'phase' | 'attempt_number' | 'call_seq' | 'role'>> = {}, content: Record<string, string> = {}): this {
     this.seq += 1;
     const names = Object.keys(content);
+    if (this.capture === 'full') names.forEach((n, i) => { this.texts[refOf(this.seq, i)] = content[n] ?? ''; });
     this.records.push({
       schema: 'kriya.attempt_evidence/1', seq: this.seq, prev: hex(this.seq - 1), kind, run_id: this.runId,
       unit_id: who.unit_id ?? null, unit_kind: who.unit_kind ?? null, invocation_seq: who.invocation_seq ?? null, phase: who.phase ?? null,
       attempt_number: who.attempt_number ?? null, call_seq: who.call_seq ?? null, wire_seq: null, role: who.role ?? null,
       t_wall: T0, t_mono_ms: this.seq * 40, provenance: 'OBSERVED', payload,
-      content_digests: Object.fromEntries(names.map((n, i) => [n, { digest: hex(100 + this.seq + i), bytes: 64 + this.seq }])),
-      blobs: this.capture === 'full' ? Object.fromEntries(names.map((n, i) => [n, hex(100 + this.seq + i)])) : {},
+      content_digests: Object.fromEntries(names.map((n, i) => [n, { digest: refOf(this.seq, i), bytes: 64 + this.seq }])),
+      blobs: this.capture === 'full' ? Object.fromEntries(names.map((n, i) => [n, refOf(this.seq, i)])) : {},
       phase_provenance: who.attempt_number != null ? 'derived_from_attempt_scope' : who.role && ['planner', 'architect', 'reviewer'].includes(who.role) ? 'derived_from_role' : null,
     });
     return this;
@@ -66,11 +71,22 @@ function opening(b: Builder, baseRevision: string | null, treeHash: string | nul
 const gate = (b: Builder, attempt: number, name: string, success: boolean, exit: number, stage = 'validator') =>
   b.add('gate.result', { stage, gate: name, success, exit_code: exit, timed_out: false, duration_seconds: name === 'tests' ? 6.2 : 1.4, error_type: null }, att(attempt), { output: `${name} output` });
 
-const staged = (b: Builder, attempt: number, path: string, o: { before: boolean; deleted?: boolean; unchanged?: boolean; added?: number; removed?: number }) =>
-  b.add('candidate.change', {
+const sourceOf = (path: string, lines: number) => `// ${path}\npublic class ${path.split('/').pop()?.replace(/\.[a-z]+$/, '')} {\n${Array.from({ length: lines }, (_, i) => `    int field${i} = ${i};`).join('\n')}\n}\n`;
+
+const staged = (b: Builder, attempt: number, path: string, o: { before: boolean; deleted?: boolean; unchanged?: boolean; added?: number; removed?: number }) => {
+  const before = o.before ? sourceOf(path, 3) : null;
+  const after = o.deleted ? null : o.unchanged ? before : `${sourceOf(path, 3 + (o.added ?? 0))}`.replace('field0 = 0;', 'field0 = 42; // changed');
+  const unified = before !== null && after !== null && before !== after ? `--- a/${path}\n+++ b/${path}\n@@ -1,5 +1,${5 + (o.added ?? 0)} @@\n // ${path}\n public class ${path.split('/').pop()?.replace(/\.[a-z]+$/, '')} {\n-    int field0 = 0;\n+    int field0 = 42; // changed\n     int field1 = 1;\n     int field2 = 2;\n }\n`
+    : before === null && after !== null ? `--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${after.split('\n').length - 1} @@\n${after.split('\n').slice(0, -1).map((l) => `+${l}`).join('\n')}\n` : null;
+  const content: Record<string, string> = {};
+  if (before !== null) content.before = before;
+  if (after !== null) content.after = after;
+  if (unified !== null) content.diff = unified;
+  return b.add('candidate.change', {
     decision: 'STAGED', path, before_digest: o.before ? hex(7) : null, after_digest: o.deleted ? null : o.unchanged ? hex(7) : hex(8),
     created: !o.before, deleted: o.deleted === true, unchanged: o.unchanged === true, lines_added: o.added ?? 0, lines_removed: o.removed ?? 0, text_diff: true,
-  }, att(attempt), { before: 'old', after: 'new', diff: 'diff' });
+  }, att(attempt), content);
+};
 
 function finish(b: Builder, outcome: string): void {
   b.add('unit.closed', { outcome }, UNIT);
@@ -78,7 +94,7 @@ function finish(b: Builder, outcome: string): void {
 }
 
 function present(b: Builder, capture: 'full' | 'digest_only', sealed: boolean, base: { revision: string | null; tree: string | null; identity: string }): StoreSeed {
-  return { store: 'present', capture, sealed, records: b.records, manifestExtra: { workspace_identity: base.identity, workspace_path: `/fixture/${base.identity}`, base_revision: base.revision, base_tree_hash: base.tree } };
+  return { store: 'present', capture, sealed, records: b.records, texts: b.texts, manifestExtra: { workspace_identity: base.identity, workspace_path: `/fixture/${base.identity}`, base_revision: base.revision, base_tree_hash: base.tree } };
 }
 
 function greenfieldSuccess(): Scenario {
@@ -91,7 +107,10 @@ function greenfieldSuccess(): Scenario {
 function greenfieldRetry(): Scenario {
   const b = new Builder('ev-fx-greenfield-compile-retry', 'full'); opening(b, null, null, 'greenfield-lib');
   b.add('attempt.opened', {}, att(1)); staged(b, 1, 'src/Lib.java', { before: false, added: 30 }); gate(b, 1, 'compile', false, 1);
-  b.add('diagnosis', { type: 'compile', reason_code: 'COMPILE_FAILED', likely_files: ['src/Lib.java'] }, att(1)); b.add('attempt.concluded', { succeeded: false }, att(1));
+  b.add('diagnosis', { attempt: 1, type: 'compile', reason_code: 'COMPILE_FAILED', likely_files: ['src/Lib.java'], evidence_class: 'DERIVED_DETERMINISTIC', attribution_kind: 'SOURCE_DEFECT', attribution_tier: 'locator', attribution_confidence: 'high', source: 'orchestrator' }, att(1), { message: 'Lib.java:12: error: cannot find symbol', raw_output: 'raw' });
+  b.add('recovery.decision', { attempt: 1, action: 'retry_same', retry: true, progress_classification: 'PROGRESS', stop_reason_code: null, failure_type: 'compile', retry_decision: { action: 'retry_same', reason: 'The compile failure names a symbol in the authorized file; retrying with the compiler output as evidence.', should_continue: true } }, att(1), { environment_failure: 'none' });
+  b.add('fallback.decision', { fallback: false, phase: 'call', requested: 'dev-model', selected: 'dev-model' }, att(2));
+  b.add('attempt.concluded', { succeeded: false }, att(1));
   b.add('retry.delta', { changed: ['retry_evidence'] }, att(2)); b.add('attempt.opened', {}, att(2)); staged(b, 2, 'src/Lib.java', { before: false, added: 31 });
   gate(b, 2, 'compile', true, 0); gate(b, 2, 'tests', true, 0); b.add('attempt.concluded', { succeeded: true }, att(2)); finish(b, 'SUCCESS');
   return { id: 'fx-greenfield-compile-retry', evidenceId: 'ev-fx-greenfield-compile-retry', title: 'Greenfield: compile failure, then retry', goal: 'Create a utility library', status: 'success', failureCategory: null, timestamp: '2026-10-10 09:10:00', durationSec: 140.5, attempts: 2, milestone: { groupId: 'fx-milestone-1', index: 0, total: 2 }, seed: present(b, 'full', true, { revision: null, tree: null, identity: 'greenfield-lib' }) };
@@ -107,7 +126,9 @@ function brownfieldModify(): Scenario {
 function brownfieldRegression(): Scenario {
   const b = new Builder('ev-fx-brownfield-regression', 'full'); const rev = '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567'; opening(b, rev, hex(10), 'brownfield-svc');
   b.add('attempt.opened', {}, att(1)); staged(b, 1, 'src/main/Matcher.java', { before: true, added: 12, removed: 6 }); gate(b, 1, 'compile', true, 0); gate(b, 1, 'tests', false, 1);
-  b.add('regression.decision', { classification: 'NEW_FAILURE', reason_code: 'REGRESSION_UNATTRIBUTED' }, att(1)); b.add('attempt.concluded', { succeeded: false }, att(1)); finish(b, 'FAILED');
+  b.add('regression.decision', { classification: 'NEW_FAILURE', reason_code: 'REGRESSION_UNATTRIBUTED' }, att(1));
+  b.add('diagnosis', { attempt: 1, type: 'regression_test', reason_code: 'REGRESSION_UNATTRIBUTED', likely_files: ['src/main/Matcher.java'], evidence_class: 'MODEL_CLAIMED', attribution_kind: 'REGRESSION', attribution_tier: 'judge', attribution_confidence: 'low', source: 'orchestrator' }, att(1), { message: 'tests failed after the change', raw_output: 'raw' });
+  b.add('recovery.decision', { attempt: 1, action: 'stop_environment', retry: false, progress_classification: 'NO_PROGRESS', stop_reason_code: 'REGRESSION_UNATTRIBUTED', failure_type: 'regression_test', retry_decision: { action: 'stop_environment', reason: 'REGRESSION_UNATTRIBUTED: the regression cannot be attributed to a test the candidate changed.', should_continue: false } }, att(1), { environment_failure: 'none' }); b.add('attempt.concluded', { succeeded: false }, att(1)); finish(b, 'FAILED');
   return { id: 'fx-brownfield-regression', evidenceId: 'ev-fx-brownfield-regression', title: 'Brownfield: regression failure', goal: 'Speed up Matcher without changing behaviour', status: 'failure', failureCategory: 'quality_gate_failed', timestamp: '2026-10-10 10:30:00', durationSec: 211.4, attempts: 1, milestone: { groupId: null, index: null, total: null }, seed: present(b, 'full', true, { revision: rev, tree: hex(10), identity: 'brownfield-svc' }) };
 }
 

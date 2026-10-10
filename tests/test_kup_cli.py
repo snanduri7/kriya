@@ -218,6 +218,22 @@ def test_every_error_code_is_producible():
     cursor = _json(["evidence", "records", "grow", "--json", "--kup-version", "1", "-n", "3"])["data"]["next_cursor"]
     writer.append("model.request", {"n": 1}, identity={"role": "planner", "phase": "planning"})
     produced.add(_json(["evidence", "records", "grow", "--json", "--kup-version", "1", "-n", "3", "--cursor", cursor])["error"]["code"])  # EVIDENCE_HEAD_CHANGED
+    # Run Cockpit M3 content codes (through the real CLI): policy off by default; with Kriya's content_visibility on, a digest-only part
+    # is unavailable and an oversized part is over the cap.
+    from _kup_evidence_fixtures import candidate_store
+
+    from kriya.core.attempt_evidence import model as _model
+    _d, cseqs = candidate_store("cc-policy")
+    cc = ["evidence", "change-content", "cc-policy", "--json", "--kup-version", "1", f"--seq={cseqs['staged']}", "--part=diff"]
+    produced.add(_json(cc)["error"]["code"])  # EVIDENCE_CONTENT_POLICY
+    on = AppConfig()
+    on.evidence.attempt_recorder.content_visibility = "on"
+    _d2, dseqs = candidate_store("cc-dig", capture=_model.CAPTURE_DIGEST_ONLY)
+    _d3, bseqs = candidate_store("cc-big", big=64)
+    with patch("kriya.cli.load_config", return_value=on), patch.object(policy, "EVIDENCE_BLOB_MAX_BYTES", 40):
+        for rid, seq in (("cc-dig", dseqs["staged"]), ("cc-big", bseqs["staged"])):
+            res = CliRunner().invoke(main, ["evidence", "change-content", rid, "--json", "--kup-version", "1", f"--seq={seq}", "--part=diff"])
+            produced.add(json.loads(res.output)["error"]["code"])  # EVIDENCE_CONTENT_UNAVAILABLE / EVIDENCE_BLOB_TOO_LARGE
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced

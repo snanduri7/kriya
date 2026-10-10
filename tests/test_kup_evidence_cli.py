@@ -234,3 +234,20 @@ def test_from_trace_flag_resolves_through_the_cli():
     env = _env(["evidence", "manifest", "t-cli", "--json", "--kup-version", "1", "--snapshot-id", sid, "--from-trace"])
     assert env["data"]["run_id"] == "ev-cli" and env["data"]["store"] == "present" and env["data"]["link"]["trace_run_id"] == "t-cli"
     assert _env(["evidence", "manifest", "t-cli", "--json", "--kup-version", "1", "--from-trace"])["error"]["code"] == policy.INVALID_REQUEST
+
+
+def test_change_content_through_the_cli_is_refused_by_default_and_served_only_when_kriya_authorizes_it():
+    from _kup_evidence_fixtures import DIFF_TEXT, candidate_store
+
+    from kriya.config import AppConfig
+    _d, seqs = candidate_store("cli-cc")
+    argv = ["evidence", "change-content", "cli-cc", "--json", "--kup-version", "1", f"--seq={seqs['staged']}", "--part=diff"]
+    env = _env(argv)  # AppConfig() default: content_visibility off
+    assert env["error"]["code"] == "EVIDENCE_CONTENT_POLICY" and env["error"]["reason"] == "content_visibility_off" and env["data"] is None
+    cfg = AppConfig()
+    cfg.evidence.attempt_recorder.content_visibility = "on"
+    with patch("kriya.cli.load_config", return_value=cfg):
+        res = CliRunner().invoke(main, argv)
+    served = json.loads(res.output)
+    assert served["data"]["content"] == DIFF_TEXT and served["data"]["content_class"] == "candidate_content"
+    assert _invoke(["evidence", "change-content", "cli-cc", "--json", "--seq=1", "--part=diff"]).exit_code == 2  # --kup-version is required

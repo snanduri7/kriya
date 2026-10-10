@@ -12,10 +12,3 @@ export const ofKind = (records: readonly EvidenceRecord[], kind: string) => reco
 
 /** `sha256:ab12...` shortened for display; the full digest stays available to the caller. */
 export const shortDigest = (digest: unknown): string => (typeof digest === 'string' ? digest.replace(/^sha256:/, '').slice(0, 10) : '-');
-
-/** The attempt a document should show: the selected one, else the highest attempt that has a record of one of `kinds`; null when none has. */
-export function effectiveAttempt(records: readonly EvidenceRecord[], selected: string | null, kinds: readonly string[]): number | null {
-  if (selected !== null && Number.isInteger(Number(selected))) return Number(selected);
-  const numbers = records.filter((r) => kinds.includes(r.kind) && r.attempt_number != null).map((r) => r.attempt_number as number);
-  return numbers.length ? Math.max(...numbers) : null;
-}

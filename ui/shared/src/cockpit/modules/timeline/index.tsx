@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AvailabilityView, Badge, Panel, payloadOf, useDispatch, useModuleSelection, useRunEvidence, type EvidenceRecord, type ModuleDefinition, type Tone } from '../../core';
+import { AvailabilityView, Badge, OPEN_TARGETS, Panel, gateKey, payloadOf, useDispatch, useModuleSelection, useRunEvidence, type EvidenceRecord, type ModuleDefinition, type Tone } from '../../core';
 
 interface Node { key: string; seq: number; label: string; tone: Tone; unitId: string | null; attempt: string | null; gateId: string | null }
 interface Attempt { number: number; nodes: Node[] }
@@ -39,7 +39,7 @@ export function buildTree(records: readonly EvidenceRecord[]): { units: Unit[]; 
     if (!d) continue;
     const p = payloadOf(r);
     const attempt = r.attempt_number ?? null;
-    const node: Node = { key: `${r.seq}`, seq: r.seq, ...d, unitId: r.unit_id ?? null, attempt: attempt === null ? null : String(attempt), gateId: attempt !== null && (r.kind === 'gate.result' || r.kind === 'mirror.gate_outcome') ? `${attempt}:${String(r.kind === 'gate.result' ? p.gate : p.type)}` : null };
+    const node: Node = { key: `${r.seq}`, seq: r.seq, ...d, unitId: r.unit_id ?? null, attempt: attempt === null ? null : String(attempt), gateId: attempt !== null && (r.kind === 'gate.result' || r.kind === 'mirror.gate_outcome') ? gateKey(attempt, String(r.kind === 'gate.result' ? p.gate : p.type), r.seq) : null };
     if (!r.unit_id) { run.push(node); continue; }
     const unit = units.get(r.unit_id) ?? { id: r.unit_id, attempts: [], loose: [] };
     units.set(unit.id, unit);
@@ -65,6 +65,7 @@ function Timeline() {
   );
   return (
     <Panel title="Timeline">
+      {evidence.state === 'degraded' ? <p style={{ margin: '0 0 6px' }}><Badge tone="warn" title={evidence.reasons.join(' ')}>unsealed store</Badge> <span className="muted small">details in the trust strip</span></p> : null}
       <AvailabilityView value={evidence}>
         {(data) => (
           <>
@@ -94,11 +95,17 @@ function Timeline() {
 }
 
 function Detail({ records, seq }: { records: readonly EvidenceRecord[]; seq: number | null }) {
+  const dispatch = useDispatch();
   const r = records.find((x) => x.seq === seq);
   if (!r) return <p className="muted">Select a node to see exactly what was recorded.</p>;
   return (
     <div aria-label="Selected record">
       <div className="ck-group">Record {r.seq} · {r.kind} · provenance {r.provenance}{r.phase_provenance ? <> · phase <Badge tone="info">DERIVED</Badge></> : null}</div>
+      <div style={{ display: 'flex', gap: 6, margin: '4px 0' }}>
+        {r.kind === 'gate.result' || r.kind === 'mirror.gate_outcome' ? <button type="button" className="small" onClick={() => { const p = payloadOf(r); dispatch({ type: 'selectGate', gateId: gateKey(r.attempt_number ?? null, String(r.kind === 'gate.result' ? p.gate : p.type), r.seq) }); dispatch({ type: 'centralTab', tab: OPEN_TARGETS.validation }); }}>Open in Validation</button> : null}
+        {r.kind === 'candidate.change' ? <button type="button" className="small" onClick={() => { const p = payloadOf(r); if (typeof p.path === 'string') dispatch({ type: 'selectFile', filePath: p.path }); dispatch({ type: 'centralTab', tab: OPEN_TARGETS.changes }); }}>Open in Changes</button> : null}
+        <button type="button" className="small" onClick={() => dispatch({ type: 'centralTab', tab: OPEN_TARGETS.evidence })}>Open evidence</button>
+      </div>
       <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(payloadOf(r), null, 1)}</pre>
     </div>
   );

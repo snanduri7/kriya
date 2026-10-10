@@ -103,7 +103,7 @@ def encode_response(env: Dict[str, Any]) -> str:
 
 # ------------------------------------------------------------------ capabilities
 
-def capabilities() -> Dict[str, Any]:
+def capabilities(cfg=None) -> Dict[str, Any]:
     report = version_report()
     return {
         "kup_versions": [policy.KUP_SCHEMA_VERSION],
@@ -113,15 +113,18 @@ def capabilities() -> Dict[str, Any]:
         "limits": dict(policy.LIMITS),
         "features": {"snapshot": True, "prompt": True, "comparisons": False, "attribution": False, "diagnostics": False, "output": False,
                      "consistency_kinds": list(policy.CONSISTENCY_KINDS), "error_codes": list(policy.ERROR_CODES), "database_states": list(policy.DATABASE_STATES),
-                     **_cockpit_features()},
+                     **_cockpit_features(cfg)},
     }
 
 
-def _cockpit_features() -> Dict[str, Any]:
+def _cockpit_features(cfg=None) -> Dict[str, Any]:
     """Capability set 1.1 flags: true only for what this build implements (a flag is never advertised before its operation exists)."""
+    # Kriya's own SECURITY_AUTHORITY decision, never a host's: no configuration, or anything but an explicit `on`, is off.
+    content_authorized = getattr(getattr(getattr(cfg, "evidence", None), "attempt_recorder", None), "content_visibility", "off") == "on"
     return {
         "capability_set": policy.CAPABILITY_SET,
-        "evidence": True, "evidence_content": False, "qualification": False, "authority": False,
+        "evidence": True, "evidence_content": content_authorized, "evidence_content_classes": sorted(set(policy.BLOB_CLASSES.values())) if content_authorized else [],
+        "qualification": False, "authority": False,
         "knowledge": False, "tools": False, "experiments": False, "live": False, "actions": False,
         "evidence_capture_modes": list(evidence_model.CAPTURE_MODES),
         "evidence_verification_states": list(policy.EVIDENCE_VERIFICATION_STATES),

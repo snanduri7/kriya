@@ -9,6 +9,7 @@ function EvidenceTable() {
     <AvailabilityView value={evidence}>
       {(data) => (
         <Panel title={`Evidence records (${data.records.length})`}>
+          {data.verify && !data.verify.sealed ? <p className="muted small" style={{ margin: '0 0 4px' }}>Read from an unsealed store.</p> : null}
           <table style={{ width: '100%', borderCollapse: 'collapse' }} aria-label="Evidence records">
             <thead><tr className="muted"><th align="left">seq</th><th align="left">kind</th><th align="left">attempt</th><th align="left">role</th><th align="left">provenance</th><th align="left">blobs</th></tr></thead>
             <tbody>

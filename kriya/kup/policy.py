@@ -41,6 +41,7 @@ OPERATIONS = (
     "evidence.manifest",  # evidence-store metadata: capture mode, seal, gaps, DERIVED absence reason
     "evidence.verify",  # chain, blobs and seal of one run's evidence store, recomputed now
     "evidence.records",  # paged, filtered, verbatim records of a verified store
+    "evidence.change_content",  # ONE authorized, capped part (diff/before/after) of ONE recorded candidate change
 )
 
 # Error codes (closed vocabulary; the host shows an unknown code literally).
@@ -64,11 +65,15 @@ EVIDENCE_SCHEMA_UNSUPPORTED = "EVIDENCE_SCHEMA_UNSUPPORTED"  # a manifest/record
 EVIDENCE_STORE_NOT_FOUND = "EVIDENCE_STORE_NOT_FOUND"        # no store for the run (operations that need records, not a manifest)
 EVIDENCE_VERIFY_FAILED = "EVIDENCE_VERIFY_FAILED"            # status other than VERIFIED/UNSEALED (extra: status, broken_seq, blob_problems, detail)
 EVIDENCE_HEAD_CHANGED = "EVIDENCE_HEAD_CHANGED"              # a cursor's chain head is no longer the store's head (extra: head_then, head_now)
+EVIDENCE_CONTENT_POLICY = "EVIDENCE_CONTENT_POLICY"          # content refused by Kriya's visibility policy or class table (extra: content_class, reason)
+EVIDENCE_CONTENT_UNAVAILABLE = "EVIDENCE_CONTENT_UNAVAILABLE"  # authorized, but the store holds no bytes for that part (extra: reason)
+EVIDENCE_BLOB_TOO_LARGE = "EVIDENCE_BLOB_TOO_LARGE"          # the part is over the response cap (extra: bytes_total)
 ERROR_CODES = (
     UNSUPPORTED_SCHEMA_VERSION, INVALID_RESPONSE, INVALID_REQUEST, STORE_BUSY, READ_ONLY_UNAVAILABLE,
     RESPONSE_TOO_LARGE, CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED,
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
     EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
+    EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.
@@ -105,6 +110,17 @@ EVIDENCE_PAGE_DEFAULT = 200
 EVIDENCE_PAGE_MAX = 1000
 EVIDENCE_PAGE_MAX_BYTES = MAX_RESPONSE_BYTES // 2  # a page stops (truncated: true) before the serialized records exceed this
 EVIDENCE_FILTER_VALUE_MAX = 256
+EVIDENCE_BLOB_MAX_BYTES = 1024 * 1024  # one content part per response; larger is refused from its recorded size, never truncated
+
+# Content classes (SECURITY_AUTHORITY). The table covers EVERY blob key the current producers emit for a candidate change
+# (attempt.py: before/after/diff; scope.py refused candidates: proposed/attempted_edits), enforced by a producer-scanning test.
+# A key that is not listed is `unclassified` and is never served, whatever the visibility setting says.
+CONTENT_CLASS_CANDIDATE = "candidate_content"
+CONTENT_CLASS_UNCLASSIFIED = "unclassified"
+BLOB_CLASSES = {
+    "before": CONTENT_CLASS_CANDIDATE, "after": CONTENT_CLASS_CANDIDATE, "diff": CONTENT_CLASS_CANDIDATE,
+    "proposed": CONTENT_CLASS_CANDIDATE, "attempted_edits": CONTENT_CLASS_CANDIDATE,
+}
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 RETAIN_SNAPSHOTS = 3
 RETAINED_BYTES_CEILING = RETAIN_SNAPSHOTS * MAX_SNAPSHOT_BYTES
@@ -130,6 +146,7 @@ LIMITS = {
     "evidence_page_default": EVIDENCE_PAGE_DEFAULT,
     "evidence_page_max": EVIDENCE_PAGE_MAX,
     "evidence_page_max_bytes": EVIDENCE_PAGE_MAX_BYTES,
+    "evidence_content_max_bytes": EVIDENCE_BLOB_MAX_BYTES,
     "max_snapshot_bytes": MAX_SNAPSHOT_BYTES,
     "retain_snapshots": RETAIN_SNAPSHOTS,
     "retained_bytes_ceiling": RETAINED_BYTES_CEILING,

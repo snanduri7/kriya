@@ -3,7 +3,7 @@
  * One selection = one manifest, one verification and one paged pass over the records, shared by every module (so the store is
  * verified once per page, not once per module). Nothing is cached across selections: a fresh selection or refresh re-verifies.
  */
-import type { EvidenceManifest, EvidenceVerify } from '../../model/kup';
+import type { EvidenceChangeContent, EvidenceManifest, EvidenceVerify } from '../../model/kup';
 import { failed, unavailable, type Availability, type UnavailableReason } from './availability';
 import type { Provenance } from './evidence';
 import type { ProviderError, ProviderResult, UIProvider } from './provider';
@@ -23,6 +23,13 @@ export interface RunEvidence {
 const ABSENCE_TO_REASON: Record<string, UnavailableReason> = {
   pruned: 'pruned', capture_off: 'capture_off', recorder_unavailable: 'recorder_unavailable', pre_recorder: 'pre_recorder', unknown: 'store_absent',
 };
+const SEMANTIC_ABSENCE: Partial<Record<UnavailableReason, string>> = {
+  pruned: 'The evidence store for this run was removed by retention.',
+  capture_off: 'Evidence capture was off for this run.',
+  pre_recorder: 'This run was recorded before the evidence recorder existed.',
+  recorder_unavailable: 'The evidence recorder was unavailable for this run.',
+  store_absent: 'No evidence store is available for this run.',
+};
 const PAGE = 1000;
 const MAX_PAGES = 200;
 
@@ -40,8 +47,10 @@ export async function loadRunEvidence(provider: UIProvider, runId: string, snaps
   const m = manifest.data;
   const evidenceRunId = m.run_id;
   if (m.store === 'absent' || evidenceRunId === null) {
+    // Default text is the semantic state; the exact recorded detail (paths and all) stays available as secondary provenance.
     const why = m.absence;
-    return unavailable(ABSENCE_TO_REASON[why?.reason ?? 'unknown'] ?? 'store_absent', why ? `${why.detail} (derived from the run's recorded event)` : 'no evidence store for this run');
+    const reason = ABSENCE_TO_REASON[why?.reason ?? 'unknown'] ?? 'store_absent';
+    return unavailable(reason, SEMANTIC_ABSENCE[reason] ?? SEMANTIC_ABSENCE.store_absent!, why ? `${why.detail} (derived from the run's recorded event)` : undefined);
   }
   const verify: ProviderResult<EvidenceVerify> = await provider.evidenceVerify(evidenceRunId, signal);
   if (!verify.ok) return fromError(verify.error);
@@ -61,4 +70,20 @@ export async function loadRunEvidence(provider: UIProvider, runId: string, snaps
     cursor = res.data.next_cursor;
   }
   return failed('PAGE_LIMIT', `more than ${MAX_PAGES} pages of records; the run is not loaded in full`);
+}
+
+
+/** A refused or failed content read as the Availability the user sees (Kriya states why; the UI never guesses). */
+export function contentAvailability(result: ProviderResult<EvidenceChangeContent>): Availability<EvidenceChangeContent> {
+  if (result.ok) return { state: 'ready', data: result.data, provenance: result.provenance };
+  const { code, message, extra } = result.error;
+  const reason = typeof extra.reason === 'string' ? extra.reason : '';
+  switch (code) {
+    case 'EVIDENCE_CONTENT_POLICY': return unavailable('denied', reason === 'unclassified_key' ? 'This kind of content is not classified for display, so Kriya never serves it.' : "Kriya's content visibility policy does not authorize showing stored content.", message);
+    case 'EVIDENCE_CONTENT_UNAVAILABLE': return reason === 'digest_only' ? unavailable('digest_only', 'This run kept a digest of this content, not the content itself.', message) : { state: 'not_recorded', detail: 'The recorder kept nothing for this part of the change.' };
+    case 'EVIDENCE_BLOB_TOO_LARGE': return failed(code, `This part is ${String(extra.bytes_total ?? 'more than the limit of')} bytes; the display limit is 1 MiB, so it is not shown.`);
+    case 'EVIDENCE_VERIFY_FAILED': return unavailable('unverified', `The store does not verify (${String(extra.status ?? 'status not given')}); nothing is served from it.`, message);
+    case 'EVIDENCE_STORE_NOT_FOUND': return unavailable('store_absent', 'No evidence store is available for this run.', message);
+    default: return failed(code, message);
+  }
 }

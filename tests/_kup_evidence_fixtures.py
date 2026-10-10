@@ -88,3 +88,25 @@ def rich_store(run_id: str, *, seal: bool = True, keep_open: bool = False, phase
     if seal and not keep_open:
         assert writer.seal("run_closed")
     return run_directory(state_dir(), run_id), writer
+
+
+DIFF_TEXT = "--- a/src/A.java\n+++ b/src/A.java\n@@ -1 +1,2 @@\n class A {}\n+// added\n"
+
+
+def candidate_store(run_id: str, *, capture: str = model.CAPTURE_FULL, seal: bool = True, big: int = 0):
+    """A store with one STAGED candidate.change (before/after/diff content), one REFUSED one (proposed content) and a non-candidate
+    record that also carries a blob. Returns (directory, {name: seq})."""
+    writer = AttemptEvidenceWriter(state_dir(), run_id, capture=capture, manifest={"workspace_identity": "ws"})
+    ids = {**IDENTITY, "phase": "attempt"}
+    seqs = {"run": writer.append("run.opened", {})}
+    before, after = "class A {}\n", "class A {}\n// added\n" + ("x" * big)
+    seqs["staged"] = writer.append("candidate.change", {"decision": "STAGED", "path": "src/A.java", "before_digest": model.digest(before.encode()), "after_digest": model.digest(after.encode()),
+                                                         "created": False, "deleted": False, "unchanged": False, "lines_added": 1, "lines_removed": 0, "text_diff": True},
+                                   identity=ids, content={"before": before, "after": after, "diff": DIFF_TEXT})
+    seqs["refused"] = writer.append("candidate.change", {"decision": "REFUSED", "path": "src/B.java", "reason_code": "X", "diff": "NOT_APPLICABLE", "after_digest": "NOT_APPLICABLE"},
+                                    identity=ids, content={"proposed": "class B {}\n"})
+    seqs["parse"] = writer.append("developer.parse", {"kind": "file"}, identity=ids, content={"analysis_model_claimed": "reasoning"})
+    seqs["binary"] = writer.append("candidate.change", {"decision": "STAGED", "path": "img.bin", "created": True}, identity=ids, content={"after": b"\xff\xfe\x00binary"})
+    if seal:
+        assert writer.seal("run_closed")
+    return run_directory(state_dir(), run_id), seqs

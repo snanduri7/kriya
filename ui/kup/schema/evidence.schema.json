@@ -436,6 +436,79 @@
         }
       },
       "additionalProperties": true
+    },
+    "EvidenceChangeContent": {
+      "type": "object",
+      "description": "One authorized part of one recorded candidate change (evidence.change_content). Served only when Kriya's own content_visibility is on; capped; re-hashed on read.",
+      "required": [
+        "run_id",
+        "seq",
+        "part",
+        "content_class",
+        "path",
+        "attempt",
+        "ref",
+        "bytes_total",
+        "encoding",
+        "content",
+        "digest_ok",
+        "head_digest"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "part": {
+          "type": "string"
+        },
+        "content_class": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "The sha256 reference the record names; the bytes below hash to it."
+        },
+        "bytes_total": {
+          "type": "integer"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "digest_ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "head_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

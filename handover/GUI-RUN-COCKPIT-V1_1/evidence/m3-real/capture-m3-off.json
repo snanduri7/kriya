@@ -1,0 +1,17 @@
+[
+ {
+  "width": 1600,
+  "height": 1000,
+  "wait": 800
+ },
+ {
+  "name": "acquire_to_first_runs_ms",
+  "js": "(async()=>{const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Acquire snapshot').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('.ck-list button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});return Math.round(performance.now()-t0)})()",
+  "wait": 300
+ },
+ {
+  "js": "(async()=>{document.querySelectorAll('.ck-list button')[0].click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Execution timeline\"] li')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Changes').click();await new Promise((r)=>{const i=setInterval(()=>{ if(document.querySelector('[aria-label=\"Changed files\"] button')){clearInterval(i);r()} },15); setTimeout(()=>{clearInterval(i);r()},30000)});document.querySelector('[aria-label=\"Changed files\"] button').click();})()",
+  "wait": 900,
+  "file": "08-real-changes-mode-b-content-not-authorized.png"
+ }
+]

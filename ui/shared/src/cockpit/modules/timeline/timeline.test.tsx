@@ -19,7 +19,7 @@ describe('Timeline: the only hierarchical navigator', () => {
     expect(tree.run.map((n) => n.seq)).toEqual([1, 5]);
     expect(tree.units).toHaveLength(1);
     expect(tree.units[0]!.attempts.map((a) => [a.number, a.nodes.map((n) => n.seq)])).toEqual([[1, [2, 3]], [2, [4]]]);
-    expect(tree.units[0]!.attempts[0]!.nodes[0]).toMatchObject({ gateId: '1:compile', attempt: '1', tone: 'bad' });
+    expect(tree.units[0]!.attempts[0]!.nodes[0]).toMatchObject({ gateId: '1:compile@2', attempt: '1', tone: 'bad' });
   });
   it('real recorder vocabulary (shape MEASURED on a real store): model.result calls, mirrored gate outcomes and events, fallback decisions', () => {
     const tree = buildTree([
@@ -39,7 +39,7 @@ describe('Timeline: the only hierarchical navigator', () => {
     const nodes = unit.attempts[0]!.nodes;
     expect(nodes.map((n) => n.seq)).toEqual([5, 7, 8, 9]); // the request of an answered call is the same call, not a second node
     expect(nodes.map((n) => n.label)).toEqual(['fallback decision (call)', 'model call #1 (developer) · stop', 'compile passed (mirrored outcome)', 'attempt closed: success']);
-    expect(nodes[2]).toMatchObject({ gateId: '1:compile', tone: 'ok' });
+    expect(nodes[2]).toMatchObject({ gateId: '1:compile@8', tone: 'ok' });
   });
   it('a model.request with no answer is still shown (a call that never returned is evidence too)', () => {
     expect(buildTree([rec(1, 'model.request', { unit_id: 'u', attempt_number: 1, role: 'developer', call_seq: 4 })]).units[0]!.attempts[0]!.nodes.map((n) => n.label)).toEqual(['model call #4 (developer)']);
@@ -51,7 +51,7 @@ describe('Timeline: the only hierarchical navigator', () => {
     const { store } = renderModule(timelineModule, { runId: 'fx-greenfield-success' });
     const tree = await screen.findByRole('tree', { name: 'Execution timeline' });
     fireEvent.click(within(tree).getByRole('button', { name: /compile passed/ }));
-    expect(store.getState()).toMatchObject({ unitId: 'unit-1', attempt: '1', gateId: '1:compile' });
+    expect(store.getState()).toMatchObject({ unitId: 'unit-1', attempt: '1', gateId: expect.stringMatching(/^1:compile@\d+$/) });
     expect(await screen.findByLabelText('Selected record')).toHaveTextContent('"gate": "compile"');
   });
 });

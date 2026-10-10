@@ -50,29 +50,36 @@ describe('the fixture scenarios', () => {
     const timeline = await screen.findByRole('tree', { name: 'Execution timeline' });
     expect(within(timeline).getByRole('button', { name: /compile failed/ })).toBeInTheDocument();
     expect(within(timeline).getByRole('button', { name: /diagnosis COMPILE_FAILED/ })).toBeInTheDocument();
+    expect(within(timeline).getByRole('button', { name: /recovery decision/ })).toBeInTheDocument();
     expect(within(timeline).getAllByRole('button', { name: /^Attempt \d$/ })).toHaveLength(2);
     expect(within(timeline).getByRole('button', { name: /retry delta/ })).toBeInTheDocument();
   });
 
   it('brownfield regression failure: the failed gate and the regression decision are shown as recorded', async () => {
     renderShell({ runId: 'fx-brownfield-regression', selection: { centralTab: 'validation' } });
-    expect(await screen.findByText(/tests · attempt 1/)).toBeInTheDocument();
+    expect(await screen.findByText(/Validation summary · attempt 1/)).toBeInTheDocument();
     expect(screen.getAllByText('failed', { selector: '.ck-badge' }).length).toBeGreaterThan(0);
+    const why = await screen.findByLabelText('Why');
+    expect(within(why).getAllByText('MODEL_CLAIMED', { selector: '.ck-badge' }).length).toBeGreaterThanOrEqual(2); // every statement carries the recorded class, never promoted
+    expect(within(why).queryByText('DERIVED_DETERMINISTIC')).toBeNull();
     const timeline = await screen.findByRole('tree', { name: 'Execution timeline' });
     expect(within(timeline).getByRole('button', { name: /regression NEW_FAILURE/ })).toBeInTheDocument();
   });
 
   it('digest-only evidence: metadata and digests, and an explicit statement that content was not kept', async () => {
-    renderShell({ runId: 'fx-digest-only', selection: { centralTab: 'changes' } });
-    expect(await screen.findByText(/Digest only: this run kept digests, not file content/)).toBeInTheDocument();
+    renderShell({ runId: 'fx-digest-only', selection: { centralTab: 'changes', attempt: '1', filePath: 'docs/guide.md' }, fixture: { evidenceContent: true } });
+    expect(await screen.findByText(/kept digests of file content, not the content itself/)).toBeInTheDocument();
     expect(within(await screen.findByRole('list', { name: 'Changed files' })).getByText('MODIFIED')).toBeInTheDocument();
     expect((await trust()).getByText('capture: digest_only')).toBeInTheDocument();
   });
 
   it('pruned evidence is its own state with the derived reason, in every evidence surface', async () => {
     renderShell({ runId: 'fx-pruned', selection: { centralTab: 'changes' } });
-    expect((await screen.findAllByText('Pruned by retention')).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(/derived from the run's recorded event/).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Evidence pruned by retention')).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('The evidence store for this run was removed by retention.').length).toBeGreaterThanOrEqual(2);
+    // the exact recorded path is secondary provenance behind a disclosure, not in the default text
+    expect(screen.getAllByText('Recorded detail').length).toBeGreaterThan(0);
+    for (const el of screen.getAllByText(/attempt-evidence\/ev-fx-pruned/)) expect(el.closest('details')).not.toBeNull();
     expect(screen.queryByText(/no data/i)).toBeNull();
   });
 
@@ -85,19 +92,22 @@ describe('the fixture scenarios', () => {
   });
 
   it('content denied (the production default): full capture, but the UI says content is not authorized and requests none', async () => {
-    const { provider } = renderShell({ runId: 'fx-denied-content', selection: { centralTab: 'changes' } });
-    expect(await screen.findByText(/Content not authorized/)).toBeInTheDocument();
+    const { provider } = renderShell({ runId: 'fx-denied-content', selection: { centralTab: 'changes', attempt: '1', filePath: 'src/Api.java' } });
+    expect(await screen.findByText(/content visibility policy does not authorize showing stored content/)).toBeInTheDocument();
     expect(await provider.capabilities()).toMatchObject({ ok: true, data: { features: { evidence_content: false } } });
   });
 
   it('content allowed by Kriya: still no viewer in this build, said plainly (never an invented diff)', async () => {
-    renderShell({ runId: 'fx-denied-content', selection: { centralTab: 'changes' }, fixture: { evidenceContent: true } });
-    expect(await screen.findByText(/before\/after viewer is not part of this build yet/)).toBeInTheDocument();
+    renderShell({ runId: 'fx-denied-content', selection: { centralTab: 'changes', attempt: '1', filePath: 'src/Api.java' }, fixture: { evidenceContent: true } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Show diff' }));
+    expect(await screen.findByLabelText('Unified diff')).toHaveTextContent('field0 = 42');
   });
 
   it('unsealed store: degraded with the reason, labelled Unfinished, and never claimed to be active', async () => {
     renderShell({ runId: 'fx-unsealed' });
-    expect((await screen.findAllByText(/The store is unsealed: the run crashed or is still writing; which one is not recorded\./)).length).toBeGreaterThan(0);
+    // exactly one prominent notice (the trust strip owns it); Timeline and Evidence only carry a compact marker
+    expect(await screen.findAllByText(/The store is unsealed: the run crashed or is still writing; which one is not recorded\./)).toHaveLength(1);
+    expect(await screen.findByText('unsealed store')).toBeInTheDocument();
     expect(await screen.findByText('Unfinished')).toBeInTheDocument();
     expect((await trust()).getByText('unsealed')).toBeInTheDocument();
     expect(screen.queryByText(/\bActive\b|Running/)).toBeNull();

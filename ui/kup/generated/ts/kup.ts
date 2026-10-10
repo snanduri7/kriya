@@ -26,6 +26,9 @@ export type ErrorCode =
   | 'EVIDENCE_STORE_NOT_FOUND'
   | 'EVIDENCE_VERIFY_FAILED'
   | 'EVIDENCE_HEAD_CHANGED'
+  | 'EVIDENCE_CONTENT_POLICY'
+  | 'EVIDENCE_CONTENT_UNAVAILABLE'
+  | 'EVIDENCE_BLOB_TOO_LARGE'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -50,7 +53,8 @@ export interface Envelope {
     | 'snapshot.verify'
     | 'evidence.manifest'
     | 'evidence.verify'
-    | 'evidence.records';
+    | 'evidence.records'
+    | 'evidence.change_content';
   /**
    * Opaque, client-chosen; echoed verbatim.
    */
@@ -626,6 +630,29 @@ export interface EvidenceRecord {
   [k: string]: unknown;
 }
 
+// ---- EvidenceChangeContent (evidence.schema.json#/$defs/EvidenceChangeContent) ----
+/**
+ * One authorized part of one recorded candidate change (evidence.change_content). Served only when Kriya's own content_visibility is on; capped; re-hashed on read.
+ */
+export interface EvidenceChangeContent {
+  run_id: string;
+  seq: number;
+  part: string;
+  content_class: string;
+  path: string | null;
+  attempt: number | null;
+  /**
+   * The sha256 reference the record names; the bytes below hash to it.
+   */
+  ref: string;
+  bytes_total: number;
+  encoding: 'utf-8' | 'base64';
+  content: string;
+  digest_ok: true;
+  head_digest: string | null;
+  [k: string]: unknown;
+}
+
 // ---- KupRequest (host-contract.schema.json#/$defs/KupRequest) ----
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
@@ -704,6 +731,12 @@ export type KupRequest =
       kind?: [string, ...string[]];
       limit?: number;
       cursor?: string;
+    }
+  | {
+      operation: 'evidence.change_content';
+      run_id: RunId;
+      seq: number;
+      part: string;
     };
 export type RunId = string;
 

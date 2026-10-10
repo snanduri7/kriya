@@ -1538,6 +1538,20 @@ def evidence_records(ctx: click.Context, run_id: str, json_output: bool, kup_ver
                                             "kind": list(kinds) or None, "from_seq": from_seq, "limit": limit, "cursor": cursor}, kup_version)
 
 
+@evidence_group.command(name="change-content")
+@click.argument("run_id")
+@click.option("--json", "json_output", is_flag=True)
+@_KUP_VERSION_OPTION
+@click.option("--seq", "seq", type=int, required=True, help="The seq of the candidate.change record.")
+@click.option("--part", "part", required=True, help="Which kept part: diff, before, after, proposed or attempted_edits.")
+@click.pass_context
+def evidence_change_content(ctx: click.Context, run_id: str, json_output: bool, kup_version: Optional[int], seq: int, part: str) -> None:
+    """Read-only KUP: ONE authorized, capped part of ONE recorded candidate change. Refused unless Kriya's own content_visibility is on."""
+    if not json_output or kup_version is None:
+        raise click.UsageError("evidence change-content is a KUP operation: pass --json --kup-version 1")
+    _evidence_kup(ctx, "evidence.change_content", {"run_id": run_id, "seq": seq, "part": part}, kup_version)
+
+
 @evidence_group.command(name="verify")
 @click.argument("run_id")
 @click.option("--json", "json_output", is_flag=True)
