@@ -10,7 +10,18 @@ export const IPC_CHANNELS = {
   settingGet: 'kriya:host:setting:get',
   settingSet: 'kriya:host:setting:set',
   hostInfo: 'kriya:host:info',
+  // M5 workspace lifecycle. The renderer never names a folder to open: the NATIVE chooser (main) returns a path, and only a path the
+  // person chose (or one remembered from an earlier choice) can be handed to Kriya as a workspace argument.
+  chooseWorkspace: 'kriya:host:workspace:choose',
+  recentWorkspaces: 'kriya:host:workspace:recent',
+  rememberWorkspace: 'kriya:host:workspace:remember',
+  forgetWorkspace: 'kriya:host:workspace:forget',
 } as const;
+/** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
+export const MENU_CHANNEL = 'kriya:host:menu';
+export const MENU_COMMANDS = ['openFolder'] as const;
+export type MenuCommand = (typeof MENU_COMMANDS)[number];
+export const RECENT_WORKSPACES_MAX = 10;
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 export const ALLOWED_CHANNELS: readonly IpcChannel[] = Object.values(IPC_CHANNELS);
 
@@ -44,10 +55,11 @@ export type KupRequest =
   | { operation: 'snapshot.list'; verify?: boolean }
   | { operation: 'snapshot.prune'; keep?: number }
   | { operation: 'snapshot.verify'; snapshot_id: string }
-  | { operation: 'history.list'; snapshot_id: string; limit?: number; cursor?: string }
+  | { operation: 'history.list'; snapshot_id: string; limit?: number; cursor?: string; workspace?: string }
   | { operation: 'history.detail'; snapshot_id: string; run_id: string }
   | { operation: 'history.prompt'; snapshot_id: string; run_id: string }
   | { operation: 'workspace.status'; workspace: string }
+  | { operation: 'workspace.describe'; workspace: string }
   | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
   | { operation: 'evidence.change_content'; run_id: string; seq: number; part: string }
@@ -108,7 +120,7 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       return { ok: true, value: { operation: 'snapshot.verify', snapshot_id: sid.value } };
     }
     case 'history.list': {
-      if (!keys.every((k) => ['operation', 'snapshot_id', 'limit', 'cursor'].includes(k))) return { ok: false, message: 'history.list accepts only snapshot_id, limit and cursor' };
+      if (!keys.every((k) => ['operation', 'snapshot_id', 'limit', 'cursor', 'workspace'].includes(k))) return { ok: false, message: 'history.list accepts only snapshot_id, limit, cursor and workspace' };
       const sid = validateSnapshotId(v.snapshot_id); if (!sid.ok) return sid;
       const out: KupRequest = { operation: 'history.list', snapshot_id: sid.value };
       if ('limit' in v) {
@@ -116,6 +128,7 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
         out.limit = v.limit;
       }
       if ('cursor' in v) { const c = validateCursor(v.cursor); if (!c.ok) return c; out.cursor = c.value; }
+      if ('workspace' in v) { const w = validateWorkspacePath(v.workspace); if (!w.ok) return w; out.workspace = w.value; }
       return { ok: true, value: out };
     }
     case 'history.detail':
@@ -147,10 +160,11 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       return { ok: true, value: { operation: v.operation, run_id: r.value, seq: v.seq, part: v.part } };
     }
     case 'evidence.records': return validateEvidenceRecords(v, keys);
-    case 'workspace.status': {
-      if (keys.join() !== 'operation,workspace') return { ok: false, message: 'workspace.status takes exactly workspace' };
+    case 'workspace.status':
+    case 'workspace.describe': {
+      if (keys.join() !== 'operation,workspace') return { ok: false, message: `${v.operation} takes exactly workspace` };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
-      return { ok: true, value: { operation: 'workspace.status', workspace: w.value } };
+      return { ok: true, value: { operation: v.operation, workspace: w.value } };
     }
     default:
       return { ok: false, message: `unknown operation ${String(v.operation)}` };

@@ -41,6 +41,7 @@ const TYPES = [
   ['Comparison', 'history.schema.json', '#/$defs/Comparison'],
   ['Prompt', 'history.schema.json', '#/$defs/Prompt'],
   ['WorkspaceStatus', 'workspace.schema.json', '#'],
+  ['WorkspaceDescribe', 'workspace.schema.json', '#/$defs/WorkspaceDescribe'],
   ['Consistency', 'common.schema.json', '#/$defs/Consistency'],
   ['SnapshotSummary', 'snapshot.schema.json', '#/$defs/SnapshotSummary'],
   ['SnapshotAcquireResult', 'snapshot.schema.json', '#/$defs/SnapshotAcquireResult'],
@@ -56,6 +57,8 @@ const TYPES = [
   ['OpenInIdeRequest', 'host-contract.schema.json', '#/$defs/OpenInIdeRequest'],
   ['OpenInIdeResult', 'host-contract.schema.json', '#/$defs/OpenInIdeResult'],
   ['HostInfo', 'host-contract.schema.json', '#/$defs/HostInfo'],
+  ['WorkspaceChoice', 'host-contract.schema.json', '#/$defs/WorkspaceChoice'],
+  ['RecentWorkspaces', 'host-contract.schema.json', '#/$defs/RecentWorkspaces'],
   ['HostMessages', 'host-contract.schema.json', '#/$defs/Messages'],
 ];
 

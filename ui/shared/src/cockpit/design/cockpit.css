@@ -57,3 +57,14 @@
 .ck-inspector > [data-module] { flex: 1 1 0; min-height: 140px; overflow: auto; }
 .ck-inspector [data-module], .ck-inspector .ck-panel, .ck-inspector li { min-width: 0; overflow-wrap: anywhere; }
 .ck-inspector [data-module] { overflow-x: hidden; overflow-y: auto; }
+
+/* GUI M5: welcome surface, workspace switcher, recent workspaces */
+.ck-welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12vh 14vw; min-height: 0; overflow: auto; }
+.ck-welcome h1 { font-size: 28px; margin: 0; letter-spacing: .02em; } .ck-welcome h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); margin: 18px 0 6px; }
+.ck-welcome .ck-primary { background: var(--ck-accent-bg); border-color: var(--ck-accent); padding: 6px 14px; }
+.ck-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: min(560px, 70vw); }
+.ck-recent li { display: flex; gap: 6px; } .ck-recent li > button:first-child { flex: 1; text-align: left; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.ck-recent .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ck-quiet { background: transparent; }
+.ck-switcher { position: relative; } .ck-menu { position: absolute; z-index: 5; top: 100%; left: 0; min-width: 220px; margin-top: 4px; padding: 4px; display: flex; flex-direction: column; gap: 2px; background: var(--ck-raised); border: 1px solid var(--ck-line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.ck-menu button { text-align: left; border-color: transparent; background: transparent; } .ck-menu button:hover, .ck-menu button:focus-visible { background: var(--ck-accent-bg); }
+.ck-notice { margin: 6px 12px 0; }

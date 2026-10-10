@@ -25,7 +25,10 @@ export function aboutPanelOptions(version: string): { applicationName: string; a
 }
 
 /** The macOS application menu. Labels are explicit (`About Kriya`, `Hide Kriya`, `Quit Kriya`), never derived from the Electron binary's name. */
-export function applicationMenuTemplate(isMac: boolean, name: string = PRODUCT_NAME): MenuItemConstructorOptions[] {
+export interface MenuCommands { openFolder(): void }
+const NO_COMMANDS: MenuCommands = { openFolder: () => undefined };
+
+export function applicationMenuTemplate(isMac: boolean, name: string = PRODUCT_NAME, commands: MenuCommands = NO_COMMANDS): MenuItemConstructorOptions[] {
   const appMenu: MenuItemConstructorOptions = {
     label: name,
     submenu: [
@@ -40,8 +43,13 @@ export function applicationMenuTemplate(isMac: boolean, name: string = PRODUCT_N
       { role: 'quit', label: `Quit ${name}` },
     ],
   };
+  // File > Open Folder... (Cmd+O / Ctrl+O): the same action as the welcome screen and the toolbar. It only asks the renderer to open the chooser.
+  const openFolder: MenuItemConstructorOptions = { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => commands.openFolder() };
+  const file: MenuItemConstructorOptions = isMac
+    ? { label: 'File', submenu: [openFolder, { type: 'separator' }, { role: 'close', label: 'Close Window' }] }
+    : { label: 'File', submenu: [openFolder, { type: 'separator' }, { role: 'quit', label: `Quit ${name}` }] };
   const edit: MenuItemConstructorOptions = { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] };
   const view: MenuItemConstructorOptions = { label: 'View', submenu: [{ role: 'togglefullscreen' }] };
   const windowMenu: MenuItemConstructorOptions = { label: 'Window', role: 'windowMenu' };
-  return isMac ? [appMenu, edit, view, windowMenu] : [{ label: 'File', submenu: [{ role: 'quit', label: `Quit ${name}` }] }, edit, view, windowMenu];
+  return isMac ? [appMenu, file, edit, view, windowMenu] : [file, edit, view, windowMenu];
 }

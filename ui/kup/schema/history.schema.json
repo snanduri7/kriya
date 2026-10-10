@@ -27,7 +27,22 @@
       "required": ["runs", "next_cursor"],
       "properties": {
         "runs": { "type": "array", "items": { "$ref": "#/$defs/RunSummary" } },
-        "next_cursor": { "type": ["string", "null"], "description": "Opaque cursor (recorded timestamp + run id + store binding); pagination is observational, not a snapshot across invocations." }
+        "next_cursor": { "type": ["string", "null"], "description": "Opaque cursor (recorded timestamp + run id + store binding); pagination is observational, not a snapshot across invocations." },
+        "workspace_scope": {
+          "description": "Present only when the request named a workspace (GUI M5). The trace table records no workspace; a run belongs to a workspace only when its attempt-evidence manifest says so. Runs with no readable manifest link are `unattributed` and are not listed; the counts say how many rows were set aside.",
+          "type": "object",
+          "required": ["workspace_identity", "basis", "matched", "other", "unattributed", "scanned", "truncated"],
+          "properties": {
+            "workspace_identity": { "type": "string" },
+            "basis": { "type": "string" },
+            "matched": { "type": "integer", "minimum": 0 },
+            "other": { "type": "integer", "minimum": 0, "description": "Rows whose manifest records a DIFFERENT workspace." },
+            "unattributed": { "type": "integer", "minimum": 0, "description": "Rows with no readable evidence manifest (no store, no recorded link, unreadable): neither included nor claimed by another workspace." },
+            "scanned": { "type": "integer", "minimum": 0 },
+            "truncated": { "type": "boolean", "description": "true when the bounded scan stopped before the end of history; next_cursor continues it." }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },

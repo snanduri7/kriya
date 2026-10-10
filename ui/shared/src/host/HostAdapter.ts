@@ -41,7 +41,23 @@ export interface HostInfo {
   configDirectoryProblem: string | null;
 }
 
+/** The desktop's folder lifecycle (GUI M5). The host owns the NATIVE chooser and the remembered list; it returns paths and nothing else - what a
+ * folder is (identity, Git, state) is Kriya's answer (`workspace.describe`). A host without a native chooser (a browser test host) omits it. */
+export interface WorkspaceChoice { chosen: boolean; path: string | null }
+export type MenuCommand = 'openFolder';
+export interface WorkspaceHost {
+  /** The native folder chooser. Cancelling resolves { chosen: false } and changes nothing. */
+  choose(): Promise<WorkspaceChoice>;
+  recent(): Promise<string[]>;
+  /** Makes an already-validated folder the current workspace and the most recent one; resolves the new recent list. */
+  remember(path: string): Promise<string[]>;
+  forget(path: string): Promise<string[]>;
+  /** Application-menu commands (File > Open Folder...). Returns the unsubscribe function. */
+  onMenuCommand(listener: (command: MenuCommand) => void): () => void;
+}
+
 export interface HostAdapter {
+  workspace?: WorkspaceHost;
   query(request: KupRequest, signal?: AbortSignal): Promise<KupEnvelope>;
   openInIde(request: OpenInIdeRequest): Promise<OpenInIdeResult>;
   copyToClipboard(text: string): Promise<void>;

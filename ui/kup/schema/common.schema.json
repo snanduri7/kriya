@@ -80,6 +80,7 @@
         "EVIDENCE_CONTENT_POLICY",
         "EVIDENCE_CONTENT_UNAVAILABLE",
         "EVIDENCE_BLOB_TOO_LARGE",
+        "WORKSPACE_UNAVAILABLE",
         "HOST_ERROR"
       ]
     },
@@ -244,6 +245,7 @@
             "history.detail",
             "history.prompt",
             "workspace.status",
+            "workspace.describe",
             "snapshot.acquire",
             "snapshot.list",
             "snapshot.prune",

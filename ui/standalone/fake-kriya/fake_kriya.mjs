@@ -49,12 +49,19 @@ function parse(argv) {
   const rest = argv.slice(2);
   if (rest.join(' ') === '--capabilities') return { op: 'capabilities' };
   if (rest[0] === '--snapshot') { if (rest.length === 1) return { op: 'snapshot.acquire' }; if (rest[1] === '--workspace' && rest.length === 3) return { op: 'snapshot.acquire', workspace: rest[2] }; return null; }
+  if (rest[0] === '--describe-workspace') return typeof rest[1] === 'string' && rest.length === 2 ? { op: 'workspace.describe', workspace: rest[1] } : null;
   if (rest[0] === '--snapshots') { if (rest.length === 1) return { op: 'snapshot.list' }; if (rest[1] === '--verify' && rest.length === 2) return { op: 'snapshot.list', verify: true }; return null; }
   if (rest[0] === '--snapshot-prune') { if (rest.length === 1) return { op: 'snapshot.prune' }; if (rest[1] === '--keep' && rest.length === 3) return { op: 'snapshot.prune', keep: Number(rest[2]) }; return null; }
   if (rest[0] === '--snapshot-verify') return typeof rest[1] === 'string' && rest.length === 2 ? { op: 'snapshot.verify', sid: rest[1] } : null;
   if (rest[0] === '--snapshot-id' && typeof rest[1] === 'string') {
     const sid = rest[1]; const tail = rest.slice(2);
-    if (tail[0] === '-n') { const n = Number(tail[1]); if (!Number.isInteger(n) || n < 1 || n > 200) return null; if (tail.length === 2) return { op: 'history.list', sid, n }; if (tail[2] === '--cursor' && tail.length === 4) return { op: 'history.list', sid, n, cursor: tail[3] }; return null; }
+    if (tail[0] === '-n') {
+      const n = Number(tail[1]); if (!Number.isInteger(n) || n < 1 || n > 200) return null;
+      const out = { op: 'history.list', sid, n }; let i = 2;
+      if (tail[i] === '--cursor' && typeof tail[i + 1] === 'string') { out.cursor = tail[i + 1]; i += 2; }
+      if (tail[i] === '--workspace' && typeof tail[i + 1] === 'string') { out.workspace = tail[i + 1]; i += 2; }
+      return i === tail.length ? out : null;
+    }
     if (tail[0] === '--run-id' && typeof tail[1] === 'string') { if (tail.length === 2) return { op: 'history.detail', sid, runId: tail[1] }; if (tail[2] === '--include-prompt' && tail.length === 3) return { op: 'history.prompt', sid, runId: tail[1] }; }
   }
   return null;
@@ -107,11 +114,13 @@ else {
     case 'history.list': {
       out = pinnedOrError('history.list', req.sid) ?? withSnapshot(load(req.cursor ? `history.list.cursor.${req.cursor}.json` : 'history.list.page1.json') ?? errorEnvelope('history.list', 'INVALID_REQUEST', 'cursor is not an opaque token issued by this protocol'), find(req.sid));
       if (out.data) out.data.runs = out.data.runs.slice(0, req.n);
+      if (out.data && req.workspace) out.data.workspace_scope = { workspace_identity: 'ab'.repeat(32), basis: 'evidence manifest workspace_identity', matched: out.data.runs.length, other: 0, unattributed: 0, scanned: out.data.runs.length, truncated: false };
       break;
     }
     case 'history.detail': out = pinnedOrError('history.detail', req.sid) ?? withSnapshot(load(`history.detail.${req.runId}.json`) ?? errorEnvelope('history.detail', 'INVALID_REQUEST', `no run ${req.runId} in snapshot ${req.sid}`), find(req.sid)); break;
     case 'history.prompt': out = pinnedOrError('history.prompt', req.sid) ?? withSnapshot(load(`history.prompt.${req.runId}.json`) ?? errorEnvelope('history.prompt', 'INVALID_REQUEST', `no run ${req.runId} in snapshot ${req.sid}`), find(req.sid)); break;
     case 'workspace.status': out = load('workspace.status.json'); if (out?.data) out.data.workspace = req.workspace; break;
+    case 'workspace.describe': out = load('workspace.describe.json'); if (out?.data) { out.data.workspace = req.workspace; out.data.requested = req.workspace; out.data.name = req.workspace.split('/').pop() || req.workspace; } break;
   }
   if (behavior === 'schema2') out = { ...out, schema_version: 2 };
   emit(out);

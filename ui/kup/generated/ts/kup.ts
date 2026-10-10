@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'EVIDENCE_CONTENT_POLICY'
   | 'EVIDENCE_CONTENT_UNAVAILABLE'
   | 'EVIDENCE_BLOB_TOO_LARGE'
+  | 'WORKSPACE_UNAVAILABLE'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -47,6 +48,7 @@ export interface Envelope {
     | 'history.detail'
     | 'history.prompt'
     | 'workspace.status'
+    | 'workspace.describe'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -225,6 +227,28 @@ export interface HistoryList {
    * Opaque cursor (recorded timestamp + run id + store binding); pagination is observational, not a snapshot across invocations.
    */
   next_cursor: string | null;
+  /**
+   * Present only when the request named a workspace (GUI M5). The trace table records no workspace; a run belongs to a workspace only when its attempt-evidence manifest says so. Runs with no readable manifest link are `unattributed` and are not listed; the counts say how many rows were set aside.
+   */
+  workspace_scope?: {
+    workspace_identity: string;
+    basis: string;
+    matched: number;
+    /**
+     * Rows whose manifest records a DIFFERENT workspace.
+     */
+    other: number;
+    /**
+     * Rows with no readable evidence manifest (no store, no recorded link, unreadable): neither included nor claimed by another workspace.
+     */
+    unattributed: number;
+    scanned: number;
+    /**
+     * true when the bounded scan stopped before the end of history; next_cursor continues it.
+     */
+    truncated: boolean;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }
 export interface RunSummary {
@@ -413,6 +437,68 @@ export interface WorkspaceStatus {
     | number
     | boolean
     | null;
+  [k: string]: unknown;
+}
+
+// ---- WorkspaceDescribe (workspace.schema.json#/$defs/WorkspaceDescribe) ----
+/**
+ * data of `workspace.describe` (GUI M5): the read-only facts Kriya reports about a folder the desktop host picked. Nothing here classifies the folder as greenfield or brownfield; absent facts are null (the host shows Not recorded), never inferred.
+ */
+export interface WorkspaceDescribe {
+  /**
+   * Kriya's canonical spelling of the folder (control-plane identity input).
+   */
+  workspace: string;
+  /**
+   * The path as picked.
+   */
+  requested: string;
+  name: string;
+  /**
+   * sha256 workspace identity Kriya records in run manifests.
+   */
+  identity: string;
+  checkout: {
+    state: 'checkout_root' | 'inside_repository' | 'not_a_repository' | 'git_unavailable';
+    root: string | null;
+    /**
+     * Commit Git reports for HEAD; null when unborn or not a checkout root.
+     */
+    head: string | null;
+    branch: string | null;
+    detached: boolean | null;
+    /**
+     * Tracked changes or untracked files per `git status`; null when Git did not report.
+     */
+    dirty: boolean | null;
+    /**
+     * Upper bound on changed paths (a rename counts its source too), capped at 1000.
+     */
+    changed_entries: number | null;
+    changed_truncated: boolean;
+    /**
+     * Why a fact is missing, when Git said.
+     */
+    reason: string | null;
+    [k: string]: unknown;
+  };
+  recovery: {
+    status: string;
+    run_active: boolean;
+    [k: string]: unknown;
+  };
+  kriya_directory_present: boolean;
+  configuration: {
+    file_in_workspace: boolean;
+    note: string;
+    [k: string]: unknown;
+  };
+  state: {
+    directory: string;
+    source: 'env' | 'config' | 'default';
+    trace_database_present: boolean;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }
 
@@ -707,6 +793,10 @@ export type KupRequest =
       snapshot_id: string;
       limit?: number;
       cursor?: string;
+      /**
+       * Only the runs whose evidence manifest records this workspace (Kriya decides; the scope is reported in the result).
+       */
+      workspace?: string;
     }
   | {
       operation: 'history.detail';
@@ -720,6 +810,13 @@ export type KupRequest =
     }
   | {
       operation: 'workspace.status';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'workspace.describe';
       /**
        * Absolute path without control characters.
        */
@@ -809,15 +906,51 @@ export interface HostInfo {
   configDirectoryProblem: string | null;
 }
 
+// ---- WorkspaceChoice (host-contract.schema.json#/$defs/WorkspaceChoice) ----
+/**
+ * Result of the native folder chooser. The host returns a path only; Kriya (workspace.describe) interprets it.
+ */
+export interface WorkspaceChoice {
+  /**
+   * false when the person cancelled (a normal outcome: nothing changes).
+   */
+  chosen: boolean;
+  path: string | null;
+}
+
+// ---- RecentWorkspaces (host-contract.schema.json#/$defs/RecentWorkspaces) ----
+/**
+ * A bounded, most-recent-first list of folders previously opened. Remembered paths are NOT trusted: opening one runs the same Kriya validation.
+ *
+ * @maxItems 10
+ *
+ * Items: Absolute path without control characters.
+ */
+export type RecentWorkspaces =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string, string];
+
 // ---- HostMessages (host-contract.schema.json#/$defs/Messages) ----
 /**
  * Exactly the gated grammar (03_GATE.md): history reads are PINNED to a snapshot id (required); acquisition is a separate explicit request; run_id, cursor and snapshot_id are opaque values the host validates before use.
  */
 export type SettingKey = 'editor' | 'kriyaExecutable' | 'workspacePath' | 'configDirectory';
 export type SettingValue = string | null;
-
 /**
- * The six messages. Each entry documents request and response shapes; the wire channel names are host-specific (Electron: kriya:kup:query etc.).
+ * A bounded, most-recent-first list of folders previously opened. Remembered paths are NOT trusted: opening one runs the same Kriya validation.
+ *
+ * @maxItems 10
+ *
+ * Items: Absolute path without control characters.
  */
 export interface HostMessages {
   query?: {
@@ -851,6 +984,32 @@ export interface HostMessages {
   hostInfo?: {
     request?: null;
     response?: HostInfo;
+    [k: string]: unknown;
+  };
+  chooseWorkspace?: {
+    request?: null;
+    response?: WorkspaceChoice;
+    [k: string]: unknown;
+  };
+  recentWorkspaces?: {
+    request?: null;
+    response?: RecentWorkspaces;
+    [k: string]: unknown;
+  };
+  rememberWorkspace?: {
+    /**
+     * Absolute path without control characters.
+     */
+    request?: string;
+    response?: RecentWorkspaces;
+    [k: string]: unknown;
+  };
+  forgetWorkspace?: {
+    /**
+     * Absolute path without control characters.
+     */
+    request?: string;
+    response?: RecentWorkspaces;
     [k: string]: unknown;
   };
 }

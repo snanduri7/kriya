@@ -128,6 +128,92 @@ def workspace_head(path: str) -> Optional[str]:
     return head if _SHA.match(head) else None
 
 
+_PROBE_TIMEOUT_SECONDS = 15
+_PROBE_ENTRY_CAP = 1000
+# Opening a folder must never execute anything the folder configures: fsmonitor is a repository-supplied command, hooks are never
+# consulted by these read-only queries, and optional locks are off so `status` does not refresh (write) the index.
+_PROBE_OPTIONS = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false")
+
+
+@dataclass(frozen=True)
+class CheckoutFacts:
+    """What Git itself reports about a folder (GUI M5 Open Folder). ``state`` is closed: checkout_root, inside_repository,
+    not_a_repository, git_unavailable. Fields Git did not report are None, never guessed."""
+    state: str
+    root: Optional[str] = None
+    head: Optional[str] = None
+    branch: Optional[str] = None
+    detached: Optional[bool] = None
+    dirty: Optional[bool] = None
+    changed_entries: Optional[int] = None
+    changed_truncated: bool = False
+    reason: Optional[str] = None
+
+
+def _git_candidates() -> List[str]:
+    """Every distinct ``git`` on PATH, in PATH order. A shim that cannot run (the macOS developer-tools stub that refuses until a license is
+    accepted) must not hide a working git later in the same approved PATH."""
+    found: List[str] = []
+    for directory in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep):
+        candidate = os.path.join(directory, "git")
+        if directory and os.path.isfile(candidate) and os.access(candidate, os.X_OK) and candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def _probe(git: str, cwd: str, *args: str) -> "subprocess.CompletedProcess[bytes]":
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", ""), "GIT_OPTIONAL_LOCKS": "0",
+           "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
+    return subprocess.run([git, *_PROBE_OPTIONS, *args], cwd=cwd, env=env, capture_output=True, check=False, timeout=_PROBE_TIMEOUT_SECONDS)
+
+
+def _first_working_git(path: str) -> Tuple[Optional[str], Optional["subprocess.CompletedProcess[bytes]"], str]:
+    """(git, rev-parse --show-toplevel result, reason): the first git whose answer is CONCLUSIVE - it succeeded, or said plainly that the folder is
+    not a repository. (None, None, reason) when no git on PATH gave a conclusive answer; the reason is the last one Git itself gave."""
+    reason = "the git executable was not found"
+    for git in _git_candidates():
+        try:
+            top = _probe(git, path, "rev-parse", "--show-toplevel")
+        except subprocess.TimeoutExpired:
+            return None, None, "git did not answer in time"
+        except OSError as error:
+            reason = f"git could not run: {type(error).__name__}"
+            continue
+        if top.returncode == 0 or "not a git repository" in top.stderr.decode("utf-8", errors="replace").lower():
+            return git, top, ""
+        reason = top.stderr.decode("utf-8", errors="replace").strip()[:300] or f"git exited {top.returncode}"
+    return None, None, reason
+
+
+def describe_checkout(path: str) -> CheckoutFacts:
+    """Read-only repository facts for ``path``, from Git. Never writes the repository (no index refresh, no fsmonitor, no hooks); a
+    sub-directory of an enclosing repository is reported as such and inherits none of its facts (the rule workspace_head states)."""
+    git, top, reason = _first_working_git(path)
+    if git is None or top is None:
+        return CheckoutFacts("git_unavailable", reason=reason)
+    if top.returncode != 0:
+        return CheckoutFacts("not_a_repository")
+    root = top.stdout.decode("utf-8", errors="replace").strip()
+    if os.path.realpath(root) != os.path.realpath(path):
+        return CheckoutFacts("inside_repository", root=root)
+    try:
+        head_run = _probe(git, path, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+        head = head_run.stdout.decode("utf-8", errors="replace").strip() if head_run.returncode == 0 else ""
+        branch_run = _probe(git, path, "symbolic-ref", "--short", "-q", "HEAD")
+        branch = branch_run.stdout.decode("utf-8", errors="replace").strip() if branch_run.returncode == 0 else ""
+        status = _probe(git, path, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return CheckoutFacts("checkout_root", root=root, reason=f"git did not finish: {type(error).__name__}")
+    entries = [e for e in status.stdout.split(b"\0") if e] if status.returncode == 0 else None
+    # A rename entry is followed by its source path as a separate field; counting fields over-counts renames by their sources, so the
+    # figure is an upper bound on changed paths and is reported as entries, which is what it is.
+    return CheckoutFacts("checkout_root", root=root, head=head if _SHA.match(head) else None, branch=branch or None,
+                         detached=not branch, dirty=None if entries is None else bool(entries),
+                         changed_entries=None if entries is None else min(len(entries), _PROBE_ENTRY_CAP),
+                         changed_truncated=entries is not None and len(entries) > _PROBE_ENTRY_CAP,
+                         reason=None if entries is not None else status.stderr.decode("utf-8", errors="replace").strip()[:300])
+
+
 def workspace_identity_key(identity_path: str) -> str:
     """The export's workspace key: the identity path's realpath, hashed (the
     same keying the dependency cache uses)."""

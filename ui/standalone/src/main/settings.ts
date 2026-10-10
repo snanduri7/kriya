@@ -1,12 +1,20 @@
 /** Host-owned settings (editor, kriya executable, workspace) in Electron's userData: never Kriya state (P-31). */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { EDITOR_IDS, type EditorId, type SettingKey } from './ipc_contract';
+import { EDITOR_IDS, RECENT_WORKSPACES_MAX, validateWorkspacePath, type EditorId, type SettingKey } from './ipc_contract';
+
+/** A remembered list is UI data, not trust: keep only well-formed absolute paths, de-duplicated, bounded. */
+export function sanitizeRecent(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) if (validateWorkspacePath(item).ok && !out.includes(item as string)) out.push(item as string);
+  return out.slice(0, RECENT_WORKSPACES_MAX);
+}
 
 /** configDirectory: the child's working directory for every kriya call (kriya.yaml discovery); null = operator HOME.
  * Independent of workspacePath, which is the recovery-assessment workspace passed as an explicit argument. */
-export interface Settings { editor: EditorId; kriyaExecutable: string | null; workspacePath: string | null; configDirectory: string | null }
-export const DEFAULT_SETTINGS: Settings = { editor: 'vscode', kriyaExecutable: null, workspacePath: null, configDirectory: null };
+export interface Settings { editor: EditorId; kriyaExecutable: string | null; workspacePath: string | null; configDirectory: string | null; recentWorkspaces: string[] }
+export const DEFAULT_SETTINGS: Settings = { editor: 'vscode', kriyaExecutable: null, workspacePath: null, configDirectory: null, recentWorkspaces: [] };
 
 export class SettingsStore {
   private cache: Settings | null = null;
@@ -20,12 +28,13 @@ export class SettingsStore {
         kriyaExecutable: typeof raw.kriyaExecutable === 'string' ? raw.kriyaExecutable : null,
         workspacePath: typeof raw.workspacePath === 'string' ? raw.workspacePath : null,
         configDirectory: typeof raw.configDirectory === 'string' ? raw.configDirectory : null,
+        recentWorkspaces: sanitizeRecent(raw.recentWorkspaces),
       };
     } catch { this.cache = { ...DEFAULT_SETTINGS }; }
     return this.cache;
   }
-  get<K extends SettingKey>(key: K): Settings[K] { return this.read()[key]; }
-  set<K extends SettingKey>(key: K, value: Settings[K]): void {
+  get<K extends keyof Settings>(key: K): Settings[K] { return this.read()[key]; }
+  set<K extends keyof Settings>(key: K, value: Settings[K]): void {
     const next = { ...this.read(), [key]: value } as Settings;
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = join(dirname(this.file), `.settings.${process.pid}.tmp`);

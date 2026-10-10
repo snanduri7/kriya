@@ -37,6 +37,9 @@ public class KupRequest {
 
     /**
      * Absolute path without control characters.
+     *
+     * Only the runs whose evidence manifest records this workspace (Kriya decides; the scope is
+     * reported in the result).
      */
     @JsonProperty("workspace")
     public String getWorkspace() { return workspace; }

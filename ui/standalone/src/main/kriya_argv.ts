@@ -25,6 +25,7 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       if (!Number.isInteger(limit) || limit < 1 || limit > LIMITS.listMax) throw new Error('limit outside the grammar');
       const argv = ['traces', '--json', '--snapshot-id', request.snapshot_id, '-n', String(limit)];
       if (request.cursor !== undefined) argv.push('--cursor', request.cursor);
+      if (request.workspace !== undefined) argv.push('--workspace', request.workspace);
       return argv;
     }
     case 'history.detail':
@@ -50,6 +51,8 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     }
     case 'workspace.status':
       return ['runs', 'status', '--workspace', request.workspace, '--json', '--kup-version', '1'];
+    case 'workspace.describe':
+      return ['traces', '--json', '--describe-workspace', request.workspace];
     default: {
       const never: never = request;
       throw new Error(`operation outside the grammar: ${JSON.stringify(never)}`);
@@ -65,6 +68,7 @@ export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['traces', '--json', '--snapshot-prune'],
   ['traces', '--json', '--snapshot-verify'],
   ['traces', '--json', '--snapshot-id'],
+  ['traces', '--json', '--describe-workspace'],
   ['runs', 'status', '--workspace'],
 ];
 

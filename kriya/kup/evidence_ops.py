@@ -97,6 +97,22 @@ def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     return envelope("evidence.manifest", request_id, data=data, source=_source(cfg, snapshot), consistency=live_consistency())
 
 
+def recorded_workspace_identity(cfg, evidence_id: Optional[str]) -> Tuple[str, Optional[str]]:
+    """(state, identity) of the workspace an evidence manifest records: state is ``recorded`` (identity is the manifest's own
+    ``workspace_identity``) or ``unattributed`` - no id, no store, an unsupported schema, an unreadable manifest or one that names no workspace.
+    Read-only; the only workspace-scope reader of a store, so the reader stays confined to this module (design 9.1)."""
+    if evidence_id is None:
+        return "unattributed", None
+    run = reader.open_run(_state_dir(cfg), evidence_id)
+    try:
+        if not run.exists:
+            return "unattributed", None
+        recorded = run.manifest().get("workspace_identity")
+    except (OSError, ValueError, reader.UnsupportedEvidenceSchema):
+        return "unattributed", None
+    return ("recorded", recorded) if isinstance(recorded, str) and recorded else ("unattributed", None)
+
+
 def _recorded_evidence_id(details: Any) -> Optional[str]:
     """The evidence run id a recorded event names, only when it is a safe run id."""
     value = details.get("run_id") if isinstance(details, dict) else None

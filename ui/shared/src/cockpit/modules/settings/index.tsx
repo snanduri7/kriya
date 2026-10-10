@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { KeyValue, Panel, useProvider, type ModuleDefinition } from '../../core';
 
-const FIELDS = [['workspacePath', 'Workspace'], ['configDirectory', 'Configuration directory'], ['kriyaExecutable', 'Kriya executable']] as const;
+// The workspace is not a setting: it is chosen with Open Folder (the host only accepts folders the person chose).
+const FIELDS = [['configDirectory', 'Configuration directory'], ['kriyaExecutable', 'Kriya executable']] as const;
 
 /** Host settings only; the Kriya-owned content-visibility authority is never editable here (a host may only narrow it). */
 function Settings() {

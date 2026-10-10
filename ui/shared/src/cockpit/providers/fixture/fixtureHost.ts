@@ -3,7 +3,7 @@
  * (full KUP envelopes with typed errors), and the provider layer validates every answer against the same generated schemas, so
  * FixtureProvider = HostProvider over this host. DEV/TEST ONLY: nothing outside fixture code and tests may import this file.
  */
-import type { HostAdapter, HostInfo, HostSettings, OpenInIdeRequest, OpenInIdeResult } from '../../../host/HostAdapter';
+import type { HostAdapter, HostInfo, HostSettings, MenuCommand, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '../../../host/HostAdapter';
 import type { KupEnvelope, KupRequest } from '../../../model/kup';
 import { SCENARIOS, type Scenario, type SeedRecord } from './scenarios';
 
@@ -17,7 +17,23 @@ const SOURCE = { state_directory: '/fixture/state', trace_database: '/fixture/st
 const EVIDENCE_SOURCE = { ...SOURCE, evidence_directory: '/fixture/state/attempt-evidence' };
 const HEAD = (records: readonly SeedRecord[]) => 'sha256:' + String(records.length).padStart(2, '0').repeat(32).slice(0, 64);
 
+/** The folders the fixture host knows how to describe (DEV/TEST ONLY). Each is described by the same fields Kriya reports; none is classified. */
+export const FIXTURE_FOLDERS: Readonly<Record<string, { checkout: Json; recovery?: string; runs: 'all' | 'none'; kriyaDirectory?: boolean }>> = {
+  '/fixture/workspace': { checkout: { state: 'checkout_root', root: '/fixture/workspace', head: 'b2b5fc411394e307cf9422d8fbb5fed511bba8ce', branch: 'main', detached: false, dirty: false, changed_entries: 0, changed_truncated: false, reason: null }, runs: 'all' },
+  '/fixture/dirty': { checkout: { state: 'checkout_root', root: '/fixture/dirty', head: '0f1e2d3c4b5a69788796a5b4c3d2e1f001122334', branch: 'feature/clamp', detached: false, dirty: true, changed_entries: 3, changed_truncated: false, reason: null }, runs: 'none' },
+  '/fixture/empty': { checkout: { state: 'not_a_repository', root: null, head: null, branch: null, detached: null, dirty: null, changed_entries: null, changed_truncated: false, reason: null }, runs: 'none' },
+  '/fixture/plain': { checkout: { state: 'not_a_repository', root: null, head: null, branch: null, detached: null, dirty: null, changed_entries: null, changed_truncated: false, reason: null }, runs: 'none', kriyaDirectory: true },
+  '/fixture/nested': { checkout: { state: 'inside_repository', root: '/fixture/workspace', head: null, branch: null, detached: null, dirty: null, changed_entries: null, changed_truncated: false, reason: null }, runs: 'none' },
+  '/fixture/blocked': { checkout: { state: 'checkout_root', root: '/fixture/blocked', head: 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', branch: 'main', detached: false, dirty: false, changed_entries: 0, changed_truncated: false, reason: null }, recovery: 'RECOVERY_AVAILABLE', runs: 'none' },
+};
+
 export interface FixtureHostOptions {
+  /** The folders the scripted chooser returns, in order (null = the person cancels). Empty = every choice is a cancel. */
+  choices?: readonly (string | null)[];
+  /** Folders remembered from an earlier session (most recent first). */
+  recent?: readonly string[];
+  /** The workspace already open at construction. Default: '/fixture/workspace' (the cockpit tests start inside a workspace); null = the welcome screen. */
+  workspace?: string | null;
   /** capabilities.features.evidence_content. false (the production default) = content is not authorized. */
   evidenceContent?: boolean;
   scenarios?: readonly Scenario[];
@@ -29,11 +45,46 @@ export class FixtureHost implements HostAdapter {
   private readonly scenarios: readonly Scenario[];
   private readonly evidenceContent: boolean;
   private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', configDirectory: null, kriyaExecutable: null };
+  private readonly choices: (string | null)[];
+  private recentList: string[];
+  private readonly menuListeners = new Set<(command: MenuCommand) => void>();
+  /** What the host was asked to do, for assertions: the chooser opened, folders remembered or forgotten. */
+  readonly workspaceCalls: string[] = [];
+  readonly workspace: WorkspaceHost;
   calls: KupRequest[] = [];
 
   constructor(options: FixtureHostOptions = {}) {
     this.scenarios = options.scenarios ?? SCENARIOS;
     this.evidenceContent = options.evidenceContent ?? false;
+    this.choices = [...(options.choices ?? [])];
+    this.recentList = [...(options.recent ?? [])];
+    if (options.workspace !== undefined) this.settings.workspacePath = options.workspace;
+    this.workspace = {
+      choose: async (): Promise<WorkspaceChoice> => {
+        this.workspaceCalls.push('choose');
+        const next = this.choices.shift();
+        return next === undefined || next === null ? { chosen: false, path: null } : { chosen: true, path: next };
+      },
+      recent: async () => [...this.recentList],
+      remember: async (path) => { this.workspaceCalls.push(`remember:${path}`); this.recentList = [path, ...this.recentList.filter((p) => p !== path)].slice(0, 10); this.settings.workspacePath = path; return [...this.recentList]; },
+      forget: async (path) => { this.workspaceCalls.push(`forget:${path}`); this.recentList = this.recentList.filter((p) => p !== path); if (this.settings.workspacePath === path) this.settings.workspacePath = null; return [...this.recentList]; },
+      onMenuCommand: (listener) => { this.menuListeners.add(listener); return () => { this.menuListeners.delete(listener); }; },
+    };
+  }
+
+  /** Test hook: the application menu asks the renderer to open the chooser. */
+  menu(command: MenuCommand): void { for (const l of [...this.menuListeners]) l(command); }
+
+  private describeFolder(workspace: string): KupEnvelope {
+    const known = FIXTURE_FOLDERS[workspace];
+    if (!known) return this.err('workspace.describe', 'WORKSPACE_UNAVAILABLE', `no such folder: ${workspace}`, { reason: 'not_found' });
+    const name = workspace.slice(workspace.lastIndexOf('/') + 1);
+    return this.env('workspace.describe', {
+      workspace, requested: workspace, name, identity: 'ab'.repeat(32), checkout: known.checkout, recovery: { status: known.recovery ?? 'CLEAN', run_active: false },
+      kriya_directory_present: known.kriyaDirectory ?? false,
+      configuration: { file_in_workspace: false, note: 'The cockpit reads with its own configuration directory (KUP host setting); a kriya.yaml inside the opened folder is not applied to these reads.' },
+      state: { directory: SOURCE.state_directory, source: 'env', trace_database_present: true },
+    }, this.live, SOURCE);
   }
 
   private env(operation: string, data: unknown, consistency: Json, source: Json | null = SOURCE): KupEnvelope {
@@ -49,7 +100,7 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
@@ -179,6 +230,11 @@ export class FixtureHost implements HostAdapter {
       case 'history.list': {
         if (request.snapshot_id !== FIXTURE_SNAPSHOT_ID) return this.err('history.list', 'SNAPSHOT_UNAVAILABLE', `snapshot ${request.snapshot_id} is not published`, { snapshot_id: request.snapshot_id });
         const ordered = [...this.scenarios].sort((a, b) => b.timestamp.localeCompare(a.timestamp) || b.id.localeCompare(a.id));
+        if (request.workspace !== undefined) {
+          // Scoped like Kriya: only a workspace whose manifests record it has runs; the rest of the store is counted, never listed.
+          const mine = FIXTURE_FOLDERS[request.workspace]?.runs === 'all' ? ordered : [];
+          return this.env('history.list', { runs: mine.map((s) => this.summary(s)), next_cursor: null, workspace_scope: { workspace_identity: 'ab'.repeat(32), basis: 'evidence manifest workspace_identity', matched: mine.length, other: ordered.length - mine.length, unattributed: 2, scanned: ordered.length + 2, truncated: false } }, this.snapshotConsistency(), this.snapshotSource());
+        }
         return this.env('history.list', { runs: ordered.map((s) => this.summary(s)), next_cursor: null }, this.snapshotConsistency(), this.snapshotSource());
       }
       case 'history.detail': {
@@ -188,6 +244,7 @@ export class FixtureHost implements HostAdapter {
       }
       case 'history.prompt': return this.err('history.prompt', 'INVALID_REQUEST', 'the fixture host stores no prompts');
       case 'workspace.status': return this.env('workspace.status', { workspace: request.workspace, run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
+      case 'workspace.describe': return this.describeFolder(request.workspace);
       case 'evidence.manifest':
         if (request.from_trace === true && !request.snapshot_id) return this.err('evidence.manifest', 'INVALID_REQUEST', 'from_trace needs the snapshot_id the trace row is read from');
         return request.from_trace === true ? this.manifest(find(request.run_id), request.run_id, true, true) : this.manifest(findEvidence(request.run_id), request.run_id, request.snapshot_id !== undefined, false);

@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, useDispatch, useModuleSelection, useProvider, useSession, type ModuleDefinition } from '../../core';
-import type { RunSummary } from '../../../model/kup';
+import { AvailabilityView, useDispatch, useModuleSelection, useProvider, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import type { HistoryList, RunSummary } from '../../../model/kup';
 
 const PAGE = 200;
 
+const mergeScope = (a: Scope | null, b: Scope | null): Scope | null => (a && b ? { ...b, matched: a.matched + b.matched, other: a.other + b.other, unattributed: a.unattributed + b.unattributed, scanned: a.scanned + b.scanned } : b ?? a);
+
+/** What Kriya set aside, in its own terms: attributed to another workspace, or carrying no recorded workspace at all (never guessed either way). */
+function scopeNote(scope: Scope): string {
+  const parts = [`${scope.other} run(s) in this state store belong to other workspaces`, `${scope.unattributed} have no recorded workspace and are not listed`];
+  return `${parts.join('; ')}.${scope.truncated ? ' The scan stopped before the end of history; load more to continue.' : ''}`;
+}
+
 const statusLabel = (status: string | null | undefined) => (status === 'in_progress' ? 'Unfinished' : status ?? 'status not recorded');
 
-interface Loaded { key: string; runs: RunSummary[]; next: string | null; error: string | null; busy: boolean }
+type Scope = NonNullable<HistoryList['workspace_scope']>;
+interface Loaded { key: string; runs: RunSummary[]; next: string | null; error: string | null; busy: boolean; scope: Scope | null }
 
 function RunsList() {
   const provider = useProvider();
@@ -14,25 +23,28 @@ function RunsList() {
   const selected = useModuleSelection('runId');
   const dispatch = useDispatch();
   const snapshotId = session.snapshotId;
+  // The list is the open workspace's runs: Kriya scopes it by what each run's evidence manifest records; Runs only reacts to the workspace.
+  const workspace = useWorkspacePath();
+  const key = snapshotId ? `${snapshotId}|${workspace ?? ''}` : null;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const current = loaded && loaded.key === snapshotId ? loaded : null;
+  const current = loaded && loaded.key === key ? loaded : null;
 
   useEffect(() => {
-    if (!snapshotId) return undefined;
+    if (!snapshotId || key === null) return undefined;
     const ac = new AbortController();
-    void provider.listRuns(snapshotId, { limit: PAGE }, ac.signal).then((r) => {
+    void provider.listRuns(snapshotId, { limit: PAGE, ...(workspace ? { workspace } : {}) }, ac.signal).then((r) => {
       if (ac.signal.aborted) return;
-      setLoaded(r.ok ? { key: snapshotId, runs: r.data.runs, next: r.data.next_cursor ?? null, error: null, busy: false } : { key: snapshotId, runs: [], next: null, error: `${r.error.code}: ${r.error.message}`, busy: false });
+      setLoaded(r.ok ? { key, runs: r.data.runs, next: r.data.next_cursor ?? null, error: null, busy: false, scope: r.data.workspace_scope ?? null } : { key, runs: [], next: null, error: `${r.error.code}: ${r.error.message}`, busy: false, scope: null });
     });
     return () => ac.abort();
-  }, [provider, snapshotId]);
+  }, [provider, snapshotId, workspace, key]);
 
   const more = () => {
     if (!snapshotId || !current?.next) return;
     const { next } = current;
     setLoaded({ ...current, busy: true });
-    void provider.listRuns(snapshotId, { limit: PAGE, cursor: next }).then((r) => {
-      setLoaded((prev) => (prev && prev.key === snapshotId ? (r.ok ? { ...prev, runs: [...prev.runs, ...r.data.runs], next: r.data.next_cursor ?? null, busy: false, error: null } : { ...prev, busy: false, error: `${r.error.code}: ${r.error.message}` }) : prev));
+    void provider.listRuns(snapshotId, { limit: PAGE, cursor: next, ...(workspace ? { workspace } : {}) }).then((r) => {
+      setLoaded((prev) => (prev && prev.key === key ? (r.ok ? { ...prev, runs: [...prev.runs, ...r.data.runs], next: r.data.next_cursor ?? null, busy: false, error: null, scope: mergeScope(prev.scope, r.data.workspace_scope ?? null) } : { ...prev, busy: false, error: `${r.error.code}: ${r.error.message}` }) : prev));
     });
   };
 
@@ -68,6 +80,8 @@ function RunsList() {
         </div>
       ))}
       {current ? <div className="muted small" role="status">{current.runs.length} run(s) loaded{current.next ? '' : ' (all)'}</div> : null}
+      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No run is recorded for this workspace</strong>Kriya found no run whose evidence names this folder.</div> : null}
+      {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
     </div>
   );

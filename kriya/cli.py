@@ -149,7 +149,7 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
     # repository-controlled configuration.
     # KRIYA-VERSION-001: `kriya version` reads only the installed package; it
     # must answer in any directory, whatever configuration is there.
-    if ctx.invoked_subcommand in ('authority', 'runs', 'version'):
+    if ctx.invoked_subcommand in ('authority', 'runs', 'version', 'kup-stdio'):
         return
     try:
         ctx.obj['config'] = load_config(config, trust_file=trust_file)
@@ -186,6 +186,18 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
         else:
             click.echo(ctx.get_help())
         ctx.exit()
+
+@main.command(name='kup-stdio', hidden=True)
+@click.pass_context
+def kup_stdio(ctx: click.Context) -> None:
+    """Serve the allowlisted KUP read operations over stdin/stdout (newline-delimited JSON) from ONE long-lived process.
+
+    GUI M5 transport for the desktop host; the one-shot `traces --json` / `evidence ... --json` commands remain and answer through the same
+    operation implementation. Loads the configuration per request (kriya/kup/serve.py), so nothing about SECURITY_AUTHORITY is cached."""
+    from kriya.kup.serve import run
+
+    sys.exit(run(ctx.obj.get('config_path'), ctx.obj.get('trust_file')))
+
 
 @main.command()
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable identity (stdout carries only the JSON).')
@@ -5166,7 +5178,10 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
               help="KUP: ACQUIRE a new consistent snapshot of the history store (SQLite online backup inside one read "
                    "transaction) into <state dir>/kup-snapshots and publish it. The only KUP operation that writes.")
 @click.option("--workspace", "workspace", type=click.Path(), default=None,
-              help="With --snapshot: refuse acquisition while a run is active for this workspace (policy).")
+              help="With --snapshot: refuse acquisition while a run is active for this workspace (policy). With a history read: only the runs whose "
+                   "evidence manifest records this workspace.")
+@click.option("--describe-workspace", "describe_workspace", type=click.Path(), default=None,
+              help="KUP (GUI M5): read-only facts Kriya reports about this folder (identity, Git, recovery status, state directory). Opens nothing for writing.")
 @click.option("--snapshots", "list_snaps", is_flag=True, help="KUP: list the published snapshots.")
 @click.option("--verify", is_flag=True, help="With --snapshots: also verify every snapshot's digest.")
 @click.option("--snapshot-verify", "verify_id", default=None,
@@ -5183,7 +5198,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_legacy: bool, legacy_path: Optional[str],
            as_json: bool, capabilities: bool, acquire: bool, workspace: Optional[str], list_snaps: bool, verify: bool,
            verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str], cursor: Optional[str],
-           run_id: Optional[str], include_prompt: bool) -> None:
+           run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str]) -> None:
     """Show persistent run trace logs and metrics of past runs.
 
     With --json this is the KUP v1 read path (GUI M1 Phase C, handover/GUI-D4-READ-STRATEGY/03_GATE.md): it never
@@ -5200,14 +5215,14 @@ def traces(ctx: click.Context, limit: Optional[int], show_all: bool, migrate_leg
     if config_error is not None and not as_json:
         click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
         sys.exit(1)
-    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace])
+    kup_flags = any([capabilities, acquire, list_snaps, verify, verify_id, prune, keep is not None, snapshot_id, cursor, run_id, include_prompt, workspace, describe_workspace])
     if as_json:
         if migrate_legacy or legacy_path is not None or show_all:
             raise click.UsageError("--json (KUP) cannot be combined with --migrate-legacy, --legacy-path or --all")
         if config_error is not None:
             _traces_kup_config_error(config_error)
             return
-        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt)
+        _traces_kup(ctx.obj['config'], limit, capabilities, acquire, workspace, list_snaps, verify, verify_id, prune, keep, snapshot_id, cursor, run_id, include_prompt, describe_workspace)
         return
     cfg: AppConfig = ctx.obj['config']
     if kup_flags:
@@ -5316,7 +5331,7 @@ def _traces_kup_config_error(error: Exception) -> None:
 
 def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquire: bool, workspace: Optional[str],
                 list_snaps: bool, verify: bool, verify_id: Optional[str], prune: bool, keep: Optional[int], snapshot_id: Optional[str],
-                cursor: Optional[str], run_id: Optional[str], include_prompt: bool) -> None:
+                cursor: Optional[str], run_id: Optional[str], include_prompt: bool, describe_workspace: Optional[str] = None) -> None:
     """Translate the KUP flag grammar into one operation request and print its envelope (exit 0; typed errors are
     envelopes, so the host can tell a protocol refusal from a crash)."""
     sys.dont_write_bytecode = True  # nothing the KUP path imports from here on writes bytecode
@@ -5326,12 +5341,13 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
 
     modes = [name for name, flag in (("capabilities", capabilities), ("snapshot.acquire", acquire), ("snapshot.list", list_snaps),
                                      ("snapshot.prune", prune), ("snapshot.verify", bool(verify_id)),
+                                     ("workspace.describe", bool(describe_workspace)),
                                      ("history", bool(snapshot_id or run_id or cursor or include_prompt))) if flag]
     if not modes:
         modes = ["history"]  # plain `--json [-n N]`: a history read, which requires --snapshot-id (typed below)
     if len(modes) != 1:
         click.echo(encode_response(error_envelope("unknown", "cli", INVALID_REQUEST,
-                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, or a history read (--snapshot-id ...)")))
+                                                  "choose exactly one of --capabilities, --snapshot, --snapshots, --snapshot-prune, --snapshot-verify, --describe-workspace, or a history read (--snapshot-id ...)")))
         return
     mode = modes[0]
     request: Dict[str, Any]
@@ -5345,6 +5361,8 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
         request = {"operation": "snapshot.prune", "keep": keep}
     elif mode == "snapshot.verify":
         request = {"operation": "snapshot.verify", "snapshot_id": verify_id}
+    elif mode == "workspace.describe":
+        request = {"operation": "workspace.describe", "workspace": describe_workspace}
     else:
         if run_id is not None:
             if cursor is not None or limit is not None:
@@ -5355,7 +5373,8 @@ def _traces_kup(cfg: AppConfig, limit: Optional[int], capabilities: bool, acquir
             if include_prompt:
                 click.echo(encode_response(error_envelope("history.prompt", "cli", INVALID_REQUEST, "--include-prompt requires --run-id")))
                 return
-            request = {"operation": "history.list", "snapshot_id": snapshot_id, "limit": limit, "cursor": cursor}
+            request = {"operation": "history.list", "snapshot_id": snapshot_id, "limit": limit, "cursor": cursor,
+                       **({"workspace": os.path.abspath(workspace)} if workspace else {})}
     click.echo(encode_response(run_kup_operation(cfg, request)))
 
 if __name__ == '__main__':

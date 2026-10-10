@@ -9,6 +9,7 @@ import type { ModuleDefinition, ModuleRegistry, SelectionField } from './modules
 import type { UIProvider } from './provider';
 import type { RunContext } from './runContext';
 import { useSelectionState, type SelectionStore } from './selectionStore';
+import { WorkspaceProvider, useWorkspacePath } from './workspace';
 
 export interface Services { provider: UIProvider; selection: SelectionStore; registry: ModuleRegistry }
 const ServicesContext = createContext<Services | null>(null);
@@ -57,14 +58,23 @@ export function CockpitProviders({ services, children }: { services: Services; c
   return (
     <ServicesContext.Provider value={services}>
       <CapabilitiesProvider>
-        <SessionProvider>
-          <RunEvidenceProvider>
-            <RunContextProvider>{children}</RunContextProvider>
-          </RunEvidenceProvider>
-        </SessionProvider>
+        <WorkspaceBinding>
+          <SessionProvider>
+            <RunEvidenceProvider>
+              <RunContextProvider>{children}</RunContextProvider>
+            </RunEvidenceProvider>
+          </SessionProvider>
+        </WorkspaceBinding>
       </CapabilitiesProvider>
     </ServicesContext.Provider>
   );
+}
+
+/** Switching workspace clears what belonged to the previous one (the selected run, record, attempt); nothing is carried across. */
+function WorkspaceBinding({ children }: { children: ReactNode }) {
+  const { provider, selection } = useServices();
+  const reset = useCallback(() => selection.dispatch({ type: 'reset' }), [selection]);
+  return <WorkspaceProvider provider={provider} onChanged={reset}>{children}</WorkspaceProvider>;
 }
 
 function CapabilitiesProvider({ children }: { children: ReactNode }) {
@@ -77,6 +87,7 @@ function CapabilitiesProvider({ children }: { children: ReactNode }) {
 /** Pins a browsing session to one verified snapshot (digest verified at pin, as in M1); it never substitutes another id. */
 function SessionProvider({ children }: { children: ReactNode }) {
   const { provider, selection } = useServices();
+  const openWorkspace = useWorkspacePath();
   const [nonce, setNonce] = useState(0);
   const [acquired, setAcquired] = useState<string | null>(null);
   const [acquireError, setAcquireError] = useState<Availability<{ snapshotId: string }> | null>(null);
@@ -99,12 +110,13 @@ function SessionProvider({ children }: { children: ReactNode }) {
   const status = acquireError ?? pinned;
 
   const acquire = useCallback(async (workspace?: string) => {
-    const res = await provider.acquireSnapshot(workspace);
+    // The open workspace travels with the acquisition so Kriya's own policy (no acquisition while a run is active there) applies.
+    const res = await provider.acquireSnapshot(workspace ?? openWorkspace ?? undefined);
     if (!res.ok) { setAcquireError(failed(res.error.code, res.error.message)); return; }
     setAcquireError(null);
     selection.dispatch({ type: 'reset' });
     setAcquired(res.data.snapshot_id);
-  }, [provider, selection]);
+  }, [provider, selection, openWorkspace]);
 
   const snapshotId = status.state === 'ready' ? status.data.snapshotId : null;
   const value = useMemo<Session>(() => ({ snapshotId, status, refresh, acquire }), [snapshotId, status, refresh, acquire]);

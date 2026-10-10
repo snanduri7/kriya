@@ -12,5 +12,58 @@
     "exit_code": { "type": ["integer", "null"], "description": "The semantic exit code the non-KUP command would have returned." },
     "assessment": { "type": ["object", "array", "string", "number", "boolean", "null"], "description": "RecoveryAssessment.to_dict() verbatim (kriya/control/recovery.py)." }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "$defs": {
+    "WorkspaceDescribe": {
+      "description": "data of `workspace.describe` (GUI M5): the read-only facts Kriya reports about a folder the desktop host picked. Nothing here classifies the folder as greenfield or brownfield; absent facts are null (the host shows Not recorded), never inferred.",
+      "type": "object",
+      "required": ["workspace", "requested", "name", "identity", "checkout", "recovery", "kriya_directory_present", "configuration", "state"],
+      "properties": {
+        "workspace": { "type": "string", "description": "Kriya's canonical spelling of the folder (control-plane identity input)." },
+        "requested": { "type": "string", "description": "The path as picked." },
+        "name": { "type": "string" },
+        "identity": { "type": "string", "description": "sha256 workspace identity Kriya records in run manifests." },
+        "checkout": {
+          "type": "object",
+          "required": ["state", "root", "head", "branch", "detached", "dirty", "changed_entries", "changed_truncated", "reason"],
+          "properties": {
+            "state": { "type": "string", "enum": ["checkout_root", "inside_repository", "not_a_repository", "git_unavailable"] },
+            "root": { "type": ["string", "null"] },
+            "head": { "type": ["string", "null"], "description": "Commit Git reports for HEAD; null when unborn or not a checkout root." },
+            "branch": { "type": ["string", "null"] },
+            "detached": { "type": ["boolean", "null"] },
+            "dirty": { "type": ["boolean", "null"], "description": "Tracked changes or untracked files per `git status`; null when Git did not report." },
+            "changed_entries": { "type": ["integer", "null"], "description": "Upper bound on changed paths (a rename counts its source too), capped at 1000." },
+            "changed_truncated": { "type": "boolean" },
+            "reason": { "type": ["string", "null"], "description": "Why a fact is missing, when Git said." }
+          },
+          "additionalProperties": true
+        },
+        "recovery": {
+          "type": "object",
+          "required": ["status", "run_active"],
+          "properties": { "status": { "type": "string" }, "run_active": { "type": "boolean" } },
+          "additionalProperties": true
+        },
+        "kriya_directory_present": { "type": "boolean" },
+        "configuration": {
+          "type": "object",
+          "required": ["file_in_workspace", "note"],
+          "properties": { "file_in_workspace": { "type": "boolean" }, "note": { "type": "string" } },
+          "additionalProperties": true
+        },
+        "state": {
+          "type": "object",
+          "required": ["directory", "source", "trace_database_present"],
+          "properties": {
+            "directory": { "type": "string" },
+            "source": { "type": "string", "enum": ["env", "config", "default"] },
+            "trace_database_present": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
 }

@@ -1,0 +1,161 @@
+[
+ {
+  "wait": 800,
+  "file": "01-welcome.png",
+  "width": 1600,
+  "height": 1000
+ },
+ {
+  "name": "welcome_recent_count",
+  "js": "(()=>{return document.querySelectorAll('.ck-recent li').length})()",
+  "wait": 600
+ },
+ {
+  "name": "open_stale_recent_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelectorAll('.ck-recent li > button:first-child')[2].click();const ok=await W(()=>document.querySelector('[role=alert]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 400,
+  "file": "02-stale-recent-error.png"
+ },
+ {
+  "js": "(()=>{[...document.querySelectorAll('[role=alert] button')].find(b=>b.textContent==='Remove from recent').click()})()",
+  "wait": 500
+ },
+ {
+  "name": "recent_count_after_remove",
+  "js": "(()=>{return document.querySelectorAll('.ck-recent li').length})()",
+  "wait": 600
+ },
+ {
+  "name": "open_recent_A_to_first_runs_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelectorAll('.ck-recent li > button:first-child')[0].click();const ok=await W(()=>document.querySelector('.ck-list button'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click()})()",
+  "wait": 500,
+  "file": "03-workspace-A-git-project.png"
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click()})()",
+  "wait": 300
+ },
+ {
+  "wait": 500,
+  "file": "04-runs-A.png"
+ },
+ {
+  "name": "runs_list_count_A",
+  "js": "(()=>{return [document.querySelectorAll('.ck-list button').length,document.querySelector('[data-testid=run-scope]')?.innerText]})()",
+  "wait": 600
+ },
+ {
+  "name": "select_run_to_timeline_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelectorAll('.ck-list button')[0].click();const ok=await W(()=>document.querySelector('[aria-label=\"Execution timeline\"] li'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "validation_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Validation').click();const ok=await W(()=>document.querySelector('[aria-label=\"Gates\"] button'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "changes_metadata_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Changes').click();const ok=await W(()=>document.querySelector('[aria-label=\"Changed files\"] button'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 400
+ },
+ {
+  "js": "(()=>{document.querySelector('[aria-label=\"Changed files\"] button').click()})()",
+  "wait": 400
+ },
+ {
+  "name": "authorized_diff_retrieval_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent==='Show diff').click();const ok=await W(()=>document.querySelector('[aria-label=\"Unified diff\"]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500,
+  "file": "05-changes-authorized-diff-A.png"
+ },
+ {
+  "name": "context_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Context').click();const ok=await W(()=>/prompt text|no model call recorded/i.test(document.querySelector('[data-module=\"context\"]')?.innerText||''));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "evidence_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Evidence').click();const ok=await W(()=>document.querySelector('[aria-label=\"Evidence records\"]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "plan_first_render_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('[role=tab]')].find(t=>t.textContent==='Plan').click();const ok=await W(()=>(document.querySelector('[data-module=\"plan\"]')?.innerText||'').includes('Not recorded'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500
+ },
+ {
+  "name": "switch_A_to_B_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();window.__prev=document.querySelector('.ck-list button')?.innerText;document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/p3dpin/.test(i.textContent)).click();const ok=await W(()=>document.querySelector('.ck-list button')&&document.querySelector('.ck-list button').innerText!==window.__prev);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 600,
+  "file": "06-runs-B-other-workspace.png"
+ },
+ {
+  "name": "selection_cleared_after_switch",
+  "js": "(()=>{return document.querySelector('[aria-label=\"Execution timeline\"] li')===null})()",
+  "wait": 600
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click()})()",
+  "wait": 500,
+  "file": "07-workspace-B-non-git-folder.png"
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click()})()",
+  "wait": 300
+ },
+ {
+  "name": "open_empty_folder_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/Open Folder/.test(i.textContent)).click();const ok=await W(()=>/No run is recorded for this workspace/.test(document.body.innerText));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500,
+  "file": "08-runs-empty-folder.png"
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click()})()",
+  "wait": 500,
+  "file": "09-workspace-empty-folder.png"
+ },
+ {
+  "name": "open_dirty_repo_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/Open Folder/.test(i.textContent)).click();const ok=await W(()=>/m5-dirty|dirty/.test(document.querySelector('[aria-label=\"Switch workspace\"]').innerText));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 700,
+  "file": "10-workspace-dirty-repo.png"
+ },
+ {
+  "name": "open_missing_folder_error",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/Open Folder/.test(i.textContent)).click();const ok=await W(()=>document.querySelector('[role=alert]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500,
+  "file": "11-error-missing-folder.png"
+ },
+ {
+  "name": "open_unreadable_folder_error",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/Open Folder/.test(i.textContent)).click();const ok=await W(()=>/cannot be read/.test(document.querySelector('[role=alert]')?.innerText||''));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 500,
+  "file": "12-error-unreadable-folder.png"
+ },
+ {
+  "name": "cancel_keeps_workspace",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/Open Folder/.test(i.textContent)).click();return 'clicked'})()",
+  "wait": 900
+ },
+ {
+  "name": "after_cancel_state",
+  "js": "(()=>{return [document.querySelector('[aria-label=\"Switch workspace\"]').innerText.trim(),!!document.querySelector('nav[aria-label=Destinations]')]})()",
+  "wait": 300,
+  "file": "13-cancel-leaves-workspace.png"
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click()})()",
+  "wait": 300
+ },
+ {
+  "name": "switch_back_to_A_ms",
+  "js": "(async()=>{const W=(f,ms=30000)=>new Promise((r)=>{const i=setInterval(()=>{if(f()){clearInterval(i);r(true)}},15);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('[aria-label=\"Switch workspace\"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(i=>/pin\\.V0ZC/.test(i.textContent)).click();const ok=await W(()=>[...document.querySelectorAll('.ck-list button')].length===1&&/f8eeec67|Unfinished|success|status/.test(document.querySelector('.ck-list button').innerText));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 600,
+  "file": "14-switched-back-to-A.png"
+ }
+]

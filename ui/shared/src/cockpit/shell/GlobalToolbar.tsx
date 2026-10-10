@@ -1,29 +1,25 @@
-import { useEffect, useState } from 'react';
 import { Badge, ProviderBanner, useProvider } from '../core';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { WorkspaceNotice } from './WelcomeScreen';
 
 export interface ToolbarToggles { secondary: boolean; inspector: boolean; drawer: boolean }
 
-export function GlobalToolbar({ showSecondaryToggle, open, onToggle }: { showSecondaryToggle: boolean; open: ToolbarToggles; onToggle(which: keyof ToolbarToggles): void }) {
+/** The global toolbar. It names the open workspace (never its path: that belongs to the Workspace page) and offers the same Open Folder action as the menu. */
+export function GlobalToolbar({ showSecondaryToggle, open, onToggle, bare = false }: { showSecondaryToggle: boolean; open: ToolbarToggles; onToggle(which: keyof ToolbarToggles): void; bare?: boolean }) {
   const provider = useProvider();
-  const [where, setWhere] = useState<{ config: string | null; workspace: string | null }>({ config: null, workspace: null });
-  useEffect(() => {
-    let live = true;
-    void Promise.all([provider.getSetting('configDirectory'), provider.getSetting('workspacePath')]).then(([config, workspace]) => { if (live) setWhere({ config: config ?? null, workspace: workspace ?? null }); });
-    return () => { live = false; };
-  }, [provider]);
   return (
     <div>
       <ProviderBanner kind={provider.kind} />
       <header className="ck-toolbar" role="banner">
         <span className="ck-mark">Kriya</span>
-        <span className="muted optional" aria-label="Configuration directory">{where.config ?? 'default configuration'}</span>
-        <span className="muted optional" aria-label="Workspace">{where.workspace ?? 'no workspace selected'}</span>
+        <WorkspaceSwitcher />
         <span className="grow" />
-        {showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>Runs pane</button> : null}
-        <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Inspector</button>
-        <button type="button" aria-pressed={open.drawer} onClick={() => onToggle('drawer')}>Drawer</button>
+        {!bare && showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>Runs pane</button> : null}
+        {!bare ? <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Inspector</button> : null}
+        {!bare ? <button type="button" aria-pressed={open.drawer} onClick={() => onToggle('drawer')}>Drawer</button> : null}
         {provider.kind === 'fixture' ? <Badge tone="warn">fixture</Badge> : null}
       </header>
+      {bare ? null : <WorkspaceNotice />}
     </div>
   );
 }

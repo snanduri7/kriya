@@ -126,6 +126,13 @@
               "minLength": 1,
               "maxLength": 1024,
               "pattern": "^[A-Za-z0-9][A-Za-z0-9+/=_-]*$"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Only the runs whose evidence manifest records this workspace (Kriya decides; the scope is reported in the result)."
             }
           },
           "additionalProperties": false
@@ -179,6 +186,26 @@
           "properties": {
             "operation": {
               "const": "workspace.status"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "operation",
+            "workspace"
+          ],
+          "properties": {
+            "operation": {
+              "const": "workspace.describe"
             },
             "workspace": {
               "type": "string",
@@ -455,7 +482,7 @@
       ]
     },
     "Messages": {
-      "description": "The six messages. Each entry documents request and response shapes; the wire channel names are host-specific (Electron: kriya:kup:query etc.).",
+      "description": "The ten messages (six KUP-era plus the four workspace-lifecycle messages of M5). Each entry documents request and response shapes; the wire channel names are host-specific (Electron: kriya:kup:query etc.).",
       "type": "object",
       "properties": {
         "query": {
@@ -537,9 +564,102 @@
               "$ref": "#/$defs/HostInfo"
             }
           }
+        },
+        "chooseWorkspace": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "null"
+            },
+            "response": {
+              "$ref": "#/$defs/WorkspaceChoice"
+            }
+          }
+        },
+        "recentWorkspaces": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "null"
+            },
+            "response": {
+              "$ref": "#/$defs/RecentWorkspaces"
+            }
+          }
+        },
+        "rememberWorkspace": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            },
+            "response": {
+              "$ref": "#/$defs/RecentWorkspaces"
+            }
+          }
+        },
+        "forgetWorkspace": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            },
+            "response": {
+              "$ref": "#/$defs/RecentWorkspaces"
+            }
+          }
         }
       },
       "additionalProperties": false
+    },
+    "WorkspaceChoice": {
+      "description": "Result of the native folder chooser. The host returns a path only; Kriya (workspace.describe) interprets it.",
+      "type": "object",
+      "required": [
+        "chosen",
+        "path"
+      ],
+      "properties": {
+        "chosen": {
+          "type": "boolean",
+          "description": "false when the person cancelled (a normal outcome: nothing changes)."
+        },
+        "path": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/[^\\u0000-\\u001F]*$",
+              "description": "Absolute path without control characters."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RecentWorkspaces": {
+      "description": "A bounded, most-recent-first list of folders previously opened. Remembered paths are NOT trusted: opening one runs the same Kriya validation.",
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096,
+        "pattern": "^/[^\\u0000-\\u001F]*$",
+        "description": "Absolute path without control characters."
+      }
     }
   }
 }

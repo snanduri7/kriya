@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitProviders, createSelectionStore, useCapabilities, type ModuleRegistry, type SelectionStore, type UIProvider } from '../core';
+import { CockpitProviders, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type SelectionStore, type UIProvider } from '../core';
 import type { Selection } from '../../state/selection';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
@@ -8,6 +8,7 @@ import { MainWorkspace } from './MainWorkspace';
 import { ModuleHost } from './ModuleHost';
 import { NavigationRail } from './NavigationRail';
 import { SecondaryPane } from './SecondaryPane';
+import { WelcomeScreen } from './WelcomeScreen';
 import { ResizeHandle } from './ResizeHandle';
 
 export const INSPECTOR_COLLAPSE_AT = 1180;
@@ -46,6 +47,8 @@ function useWidth(override?: number): number {
 }
 
 function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewportWidth?: number }) {
+  const folder = useWorkspace();
+  const folderOpen = folder.current !== null;
   const caps = useCapabilities();
   const width = useWidth(viewportWidth);
   const pages = useMemo(() => registry.visiblePages(caps), [registry, caps]);
@@ -86,11 +89,13 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
   if (workspace && !(hasInspector && showInspector)) classes.push('no-inspector');
 
   return (
-    <div className="ck ck-shell" ref={root} onKeyDown={onKeyDown} data-width={width} data-page={page?.id ?? ''}>
-      <GlobalToolbar showSecondaryToggle={hasSecondary} open={toggles} onToggle={(which) => {
+    <div className="ck ck-shell" ref={root} onKeyDown={onKeyDown} data-width={width} data-page={folderOpen ? page?.id ?? '' : 'welcome'}>
+      <GlobalToolbar bare={!folderOpen} showSecondaryToggle={hasSecondary} open={toggles} onToggle={(which) => {
         if (which === 'secondary') setSecondaryOpen(!showSecondary);
         if (which === 'inspector') setInspectorOpen(!showInspector);
       }} />
+      {/* No folder open: the welcome surface and nothing else - never runs, never fixture content. The toolbar above is the same element either way. */}
+      {!folderOpen ? (folder.ready ? <WelcomeScreen /> : <div className="ck-state muted" role="status">Loading…</div>) : (
       <div className={classes.join(' ')} style={{ '--ck-secondary': `${secondaryW}px`, '--ck-inspector': `${inspectorW}px` } as React.CSSProperties}>
         <NavigationRail pages={pages} active={page?.id ?? ''} onSelect={setPageId} />
         {workspace ? (
@@ -109,7 +114,8 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
           </>
         )}
       </div>
-      {workspace ? <EvidenceDrawer modules={drawer} /> : null}
+      )}
+      {folderOpen && workspace ? <EvidenceDrawer modules={drawer} /> : null}
     </div>
   );
 }

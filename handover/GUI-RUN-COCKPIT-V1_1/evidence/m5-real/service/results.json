@@ -1,0 +1,29 @@
+{
+ "welcome_recent_count": 3,
+ "open_stale_recent_ms": 32,
+ "recent_count_after_remove": 2,
+ "open_recent_A_to_first_runs_ms": 182,
+ "runs_list_count_A": [
+  1,
+  "4 run(s) in this state store belong to other workspaces; 349 have no recorded workspace and are not listed."
+ ],
+ "select_run_to_timeline_ms": 61,
+ "validation_first_render_ms": 18,
+ "changes_metadata_first_render_ms": 17,
+ "authorized_diff_retrieval_ms": 16,
+ "context_first_render_ms": 17,
+ "evidence_first_render_ms": 17,
+ "plan_first_render_ms": 16,
+ "switch_A_to_B_ms": 153,
+ "selection_cleared_after_switch": true,
+ "open_empty_folder_ms": 153,
+ "open_dirty_repo_ms": 137,
+ "open_missing_folder_error": 32,
+ "open_unreadable_folder_error": 33,
+ "cancel_keeps_workspace": "clicked",
+ "after_cancel_state": [
+  "m5-dirty ▾",
+  true
+ ],
+ "switch_back_to_A_ms": 183
+}

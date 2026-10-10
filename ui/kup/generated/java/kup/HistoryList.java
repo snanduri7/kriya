@@ -15,6 +15,7 @@ public class HistoryList {
 
     private String nextCursor;
     private List<RunSummary> runs;
+    private WorkspaceScope workspaceScope;
 
     /**
      * Opaque cursor (recorded timestamp + run id + store binding); pagination is observational,
@@ -29,4 +30,15 @@ public class HistoryList {
     public List<RunSummary> getRuns() { return runs; }
     @JsonProperty("runs")
     public void setRuns(List<RunSummary> value) { this.runs = value; }
+
+    /**
+     * Present only when the request named a workspace (GUI M5). The trace table records no
+     * workspace; a run belongs to a workspace only when its attempt-evidence manifest says so.
+     * Runs with no readable manifest link are `unattributed` and are not listed; the counts say
+     * how many rows were set aside.
+     */
+    @JsonProperty("workspace_scope")
+    public WorkspaceScope getWorkspaceScope() { return workspaceScope; }
+    @JsonProperty("workspace_scope")
+    public void setWorkspaceScope(WorkspaceScope value) { this.workspaceScope = value; }
 }

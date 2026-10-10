@@ -1,7 +1,8 @@
 /** Test infrastructure: mount one module (or the whole shell) over the deterministic fixture provider. Never imported by product code. */
 import { render } from '@testing-library/react';
 import { initialSelection, type Selection } from '../../state/selection';
-import { createFixtureProvider, type FixtureHostOptions } from '../providers/fixture';
+import { createFixtureProvider, FixtureHost, type FixtureHostOptions } from '../providers/fixture';
+import { HostProvider } from '../providers/hostProvider';
 import { CockpitProviders, ModuleScope, createModuleRegistry, createSelectionStore, gateRows, loadRunEvidence, type ModuleDefinition, type ModuleRegistry, type SelectionStore, type UIProvider } from '../core';
 import { FIXTURE_SNAPSHOT_ID } from '../providers/fixture';
 import { AppShell } from '../shell/AppShell';
@@ -31,4 +32,13 @@ export function renderShell(opts: { registry?: ModuleRegistry; runId?: string | 
   const store = createSelectionStore({ ...initialSelection, runId: opts.runId ?? null, ...opts.selection });
   render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} />);
   return { provider, store };
+}
+
+/** The shell over a fixture host the test can see into: the scripted native chooser, the remembered list, the calls the host received and the menu. */
+export function renderWorkspaceShell(opts: { fixture?: FixtureHostOptions; registry?: ModuleRegistry; width?: number } = {}): Mounted & { host: FixtureHost } {
+  const host = new FixtureHost(opts.fixture);
+  const provider = new HostProvider(host, 'fixture');
+  const store = createSelectionStore({ ...initialSelection });
+  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} />);
+  return { provider, store, host };
 }

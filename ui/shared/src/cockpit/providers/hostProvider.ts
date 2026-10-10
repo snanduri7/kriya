@@ -6,11 +6,13 @@
  */
 import { validate, validateData } from '@kriya-ui/kup';
 import type { HostAdapter, HostSettings } from '../../host/HostAdapter';
-import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus } from '../../model/kup';
+import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus } from '../../model/kup';
 import type { ChangeContentQuery, ProviderKind, ProviderResult, RecordsQuery, UIProvider } from '../core/provider';
 
 export class HostProvider implements UIProvider {
   constructor(private readonly host: HostAdapter, readonly kind: ProviderKind) {}
+
+  get desktop() { return this.host.workspace ?? null; }
 
   private async call<T>(request: KupRequest, signal?: AbortSignal): Promise<ProviderResult<T>> {
     let raw: unknown;
@@ -40,11 +42,12 @@ export class HostProvider implements UIProvider {
   listSnapshots(signal?: AbortSignal) { return this.call<SnapshotList>({ operation: 'snapshot.list' }, signal); }
   acquireSnapshot(workspace?: string) { return this.call<SnapshotAcquireResult>(workspace ? { operation: 'snapshot.acquire', workspace } : { operation: 'snapshot.acquire' }); }
   verifySnapshot(snapshotId: string, signal?: AbortSignal) { return this.call<SnapshotVerify>({ operation: 'snapshot.verify', snapshot_id: snapshotId }, signal); }
-  listRuns(snapshotId: string, page: { limit?: number; cursor?: string } = {}, signal?: AbortSignal) {
-    return this.call<HistoryList>({ operation: 'history.list', snapshot_id: snapshotId, ...(page.limit !== undefined ? { limit: page.limit } : {}), ...(page.cursor !== undefined ? { cursor: page.cursor } : {}) }, signal);
+  listRuns(snapshotId: string, page: { limit?: number; cursor?: string; workspace?: string } = {}, signal?: AbortSignal) {
+    return this.call<HistoryList>({ operation: 'history.list', snapshot_id: snapshotId, ...(page.limit !== undefined ? { limit: page.limit } : {}), ...(page.cursor !== undefined ? { cursor: page.cursor } : {}), ...(page.workspace !== undefined ? { workspace: page.workspace } : {}) }, signal);
   }
   runDetail(snapshotId: string, runId: string, signal?: AbortSignal) { return this.call<RunDetail>({ operation: 'history.detail', snapshot_id: snapshotId, run_id: runId }, signal); }
   workspaceStatus(workspace: string, signal?: AbortSignal) { return this.call<WorkspaceStatus>({ operation: 'workspace.status', workspace }, signal); }
+  describeWorkspace(workspace: string, signal?: AbortSignal) { return this.call<WorkspaceDescribe>({ operation: 'workspace.describe', workspace }, signal); }
   evidenceManifest(runId: string, options: { snapshotId?: string; fromTrace?: boolean } = {}, signal?: AbortSignal) {
     return this.call<EvidenceManifest>({ operation: 'evidence.manifest', run_id: runId, ...(options.snapshotId ? { snapshot_id: options.snapshotId } : {}), ...(options.fromTrace ? { from_trace: true } : {}) }, signal);
   }

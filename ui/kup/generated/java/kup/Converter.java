@@ -25,6 +25,7 @@
 //     Comparison data = Converter.ComparisonFromJsonString(jsonString);
 //     Prompt data = Converter.PromptFromJsonString(jsonString);
 //     WorkspaceStatus data = Converter.WorkspaceStatusFromJsonString(jsonString);
+//     WorkspaceDescribe data = Converter.WorkspaceDescribeFromJsonString(jsonString);
 //     Consistency data = Converter.ConsistencyFromJsonString(jsonString);
 //     SnapshotSummary data = Converter.SnapshotSummaryFromJsonString(jsonString);
 //     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
@@ -40,6 +41,8 @@
 //     OpenInIdeRequest data = Converter.OpenInIdeRequestFromJsonString(jsonString);
 //     OpenInIdeResult data = Converter.OpenInIdeResultFromJsonString(jsonString);
 //     HostInfo data = Converter.HostInfoFromJsonString(jsonString);
+//     WorkspaceChoice data = Converter.WorkspaceChoiceFromJsonString(jsonString);
+//     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
 
 package kup;
 
@@ -202,6 +205,14 @@ public class Converter {
         return getWorkspaceStatusObjectWriter().writeValueAsString(obj);
     }
 
+    public static WorkspaceDescribe WorkspaceDescribeFromJsonString(String json) throws IOException {
+        return getWorkspaceDescribeObjectReader().readValue(json);
+    }
+
+    public static String WorkspaceDescribeToJsonString(WorkspaceDescribe obj) throws JsonProcessingException {
+        return getWorkspaceDescribeObjectWriter().writeValueAsString(obj);
+    }
+
     public static Consistency ConsistencyFromJsonString(String json) throws IOException {
         return getConsistencyObjectReader().readValue(json);
     }
@@ -320,6 +331,22 @@ public class Converter {
 
     public static String HostInfoToJsonString(HostInfo obj) throws JsonProcessingException {
         return getHostInfoObjectWriter().writeValueAsString(obj);
+    }
+
+    public static WorkspaceChoice WorkspaceChoiceFromJsonString(String json) throws IOException {
+        return getWorkspaceChoiceObjectReader().readValue(json);
+    }
+
+    public static String WorkspaceChoiceToJsonString(WorkspaceChoice obj) throws JsonProcessingException {
+        return getWorkspaceChoiceObjectWriter().writeValueAsString(obj);
+    }
+
+    public static List<String> RecentWorkspacesFromJsonString(String json) throws IOException {
+        return getRecentWorkspacesObjectReader().readValue(json);
+    }
+
+    public static String RecentWorkspacesToJsonString(List<String> obj) throws JsonProcessingException {
+        return getRecentWorkspacesObjectWriter().writeValueAsString(obj);
     }
 
     private static ObjectReader EnvelopeReader;
@@ -723,6 +750,37 @@ public class Converter {
     private static ObjectWriter getWorkspaceStatusObjectWriter() {
         if (WorkspaceStatusWriter == null) instantiateWorkspaceStatusMapper();
         return WorkspaceStatusWriter;
+    }
+
+    private static ObjectReader WorkspaceDescribeReader;
+    private static ObjectWriter WorkspaceDescribeWriter;
+
+    private static void instantiateWorkspaceDescribeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        WorkspaceDescribeReader = mapper.readerFor(WorkspaceDescribe.class);
+        WorkspaceDescribeWriter = mapper.writerFor(WorkspaceDescribe.class);
+    }
+
+    private static ObjectReader getWorkspaceDescribeObjectReader() {
+        if (WorkspaceDescribeReader == null) instantiateWorkspaceDescribeMapper();
+        return WorkspaceDescribeReader;
+    }
+
+    private static ObjectWriter getWorkspaceDescribeObjectWriter() {
+        if (WorkspaceDescribeWriter == null) instantiateWorkspaceDescribeMapper();
+        return WorkspaceDescribeWriter;
     }
 
     private static ObjectReader ConsistencyReader;
@@ -1188,5 +1246,67 @@ public class Converter {
     private static ObjectWriter getHostInfoObjectWriter() {
         if (HostInfoWriter == null) instantiateHostInfoMapper();
         return HostInfoWriter;
+    }
+
+    private static ObjectReader WorkspaceChoiceReader;
+    private static ObjectWriter WorkspaceChoiceWriter;
+
+    private static void instantiateWorkspaceChoiceMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        WorkspaceChoiceReader = mapper.readerFor(WorkspaceChoice.class);
+        WorkspaceChoiceWriter = mapper.writerFor(WorkspaceChoice.class);
+    }
+
+    private static ObjectReader getWorkspaceChoiceObjectReader() {
+        if (WorkspaceChoiceReader == null) instantiateWorkspaceChoiceMapper();
+        return WorkspaceChoiceReader;
+    }
+
+    private static ObjectWriter getWorkspaceChoiceObjectWriter() {
+        if (WorkspaceChoiceWriter == null) instantiateWorkspaceChoiceMapper();
+        return WorkspaceChoiceWriter;
+    }
+
+    private static ObjectReader RecentWorkspacesReader;
+    private static ObjectWriter RecentWorkspacesWriter;
+
+    private static void instantiateRecentWorkspacesMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        RecentWorkspacesReader = mapper.readerFor(List.class);
+        RecentWorkspacesWriter = mapper.writerFor(List.class);
+    }
+
+    private static ObjectReader getRecentWorkspacesObjectReader() {
+        if (RecentWorkspacesReader == null) instantiateRecentWorkspacesMapper();
+        return RecentWorkspacesReader;
+    }
+
+    private static ObjectWriter getRecentWorkspacesObjectWriter() {
+        if (RecentWorkspacesWriter == null) instantiateRecentWorkspacesMapper();
+        return RecentWorkspacesWriter;
     }
 }

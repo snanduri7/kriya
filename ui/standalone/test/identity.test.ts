@@ -28,6 +28,22 @@ describe('main-process identity', () => {
     expect(labels(applicationMenuTemplate(true, 'Other'))).toContain('Quit Other'); // derived from the name, not from the binary
   });
 
+  it('File > Open Folder... exists on every platform with Cmd/Ctrl+O, calls only the injected command, and the word Electron appears nowhere', () => {
+    for (const mac of [true, false]) {
+      const calls: string[] = [];
+      const template = applicationMenuTemplate(mac, 'Kriya', { openFolder: () => calls.push('openFolder') });
+      const file = template.find((m) => m.label === 'File');
+      const item = (file?.submenu as Array<{ label?: string; accelerator?: string; click?: () => void }>).find((i) => i.label === 'Open Folder…');
+      expect(item?.accelerator, `mac=${mac}`).toBe('CmdOrCtrl+O');
+      item?.click?.();
+      expect(calls).toEqual(['openFolder']);
+      expect(JSON.stringify(template)).not.toMatch(/electron/i);
+    }
+    expect(() => applicationMenuTemplate(true)).not.toThrow(); // the default menu has an inert command, never undefined
+    const withoutCommand = (applicationMenuTemplate(true).find((m) => m.label === 'File')?.submenu as Array<{ click?: () => void }>)[0]!;
+    expect(withoutCommand.click?.()).toBeUndefined();
+  });
+
   it('the About panel names Kriya and the build version, never Electron', () => {
     expect(aboutPanelOptions('0.0.1')).toEqual({ applicationName: 'Kriya', applicationVersion: '0.0.1', version: '0.0.1', copyright: 'Kriya' });
   });
@@ -44,6 +60,7 @@ describe('main-process identity', () => {
     expect(main).toContain('title: WINDOW_TITLE');
     expect(main).toContain("win.on('page-title-updated', (e) => e.preventDefault())");
     expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(');
+    expect(main).toContain("{ openFolder: () => command('openFolder') }");
     expect(main).toContain('app.setAboutPanelOptions(aboutPanelOptions(');
     expect(main).not.toMatch(/run inspector/);
   });

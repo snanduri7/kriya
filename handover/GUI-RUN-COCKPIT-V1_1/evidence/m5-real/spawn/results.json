@@ -1,0 +1,29 @@
+{
+ "welcome_recent_count": 3,
+ "open_stale_recent_ms": 797,
+ "recent_count_after_remove": 2,
+ "open_recent_A_to_first_runs_ms": 1817,
+ "runs_list_count_A": [
+  0,
+  null
+ ],
+ "select_run_to_timeline_ms": 2433,
+ "validation_first_render_ms": 17,
+ "changes_metadata_first_render_ms": 17,
+ "authorized_diff_retrieval_ms": 796,
+ "context_first_render_ms": 17,
+ "evidence_first_render_ms": 20,
+ "plan_first_render_ms": 17,
+ "switch_A_to_B_ms": 1713,
+ "selection_cleared_after_switch": true,
+ "open_empty_folder_ms": 1727,
+ "open_dirty_repo_ms": 902,
+ "open_missing_folder_error": 812,
+ "open_unreadable_folder_error": "TIMEOUT",
+ "cancel_keeps_workspace": "clicked",
+ "after_cancel_state": [
+  "m5-dirty ▾",
+  true
+ ],
+ "switch_back_to_A_ms": 2401
+}

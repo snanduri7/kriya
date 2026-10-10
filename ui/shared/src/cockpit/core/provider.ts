@@ -4,9 +4,9 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceStatus,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus,
 } from '../../model/kup';
-import type { HostSettings } from '../../host/HostAdapter';
+import type { HostSettings, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
 
 export type ProviderKind = 'kriya' | 'fixture';
@@ -38,9 +38,14 @@ export interface UIProvider {
   listSnapshots(signal?: AbortSignal): Promise<ProviderResult<SnapshotList>>;
   acquireSnapshot(workspace?: string): Promise<ProviderResult<SnapshotAcquireResult>>;
   verifySnapshot(snapshotId: string, signal?: AbortSignal): Promise<ProviderResult<SnapshotVerify>>;
-  listRuns(snapshotId: string, page?: { limit?: number; cursor?: string }, signal?: AbortSignal): Promise<ProviderResult<HistoryList>>;
+  /** `workspace`: only the runs whose evidence manifest records that workspace (Kriya decides; the result's workspace_scope says what was set aside). */
+  listRuns(snapshotId: string, page?: { limit?: number; cursor?: string; workspace?: string }, signal?: AbortSignal): Promise<ProviderResult<HistoryList>>;
   runDetail(snapshotId: string, runId: string, signal?: AbortSignal): Promise<ProviderResult<RunDetail>>;
   workspaceStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceStatus>>;
+  /** Kriya's read-only facts about a folder (identity, Git, recovery status, state directory). Never classifies the folder. */
+  describeWorkspace(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceDescribe>>;
+  /** The desktop folder lifecycle (native chooser, remembered folders, menu commands); null when the host has none. */
+  readonly desktop: WorkspaceHost | null;
   /** `fromTrace`: `runId` is a trace row id (as listRuns returns it) and the evidence run id is resolved by Kriya from that row's recorded
    * event (needs `snapshotId`). Trace ids and evidence ids differ in every real store, so a module never assumes they are equal. */
   evidenceManifest(runId: string, options?: { snapshotId?: string; fromTrace?: boolean }, signal?: AbortSignal): Promise<ProviderResult<EvidenceManifest>>;
