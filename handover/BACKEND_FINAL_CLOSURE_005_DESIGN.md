@@ -774,8 +774,10 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   lineage shape); in a mutating unit a Developer retry. The managed-service admission
   (`_validate_and_convert_managed_service_contract`) grounds `service_command` through the same resolver and refuses
   to start, but as MANAGED_SERVICE_CONTRACT_INVALID with no reason code. Other consumers of `run_app_sequence`
-  results, not in scope: the self-correction re-run (attempt.py, reachable only after a first run that the fixed
-  consumer admitted) and the milestone drift replay (milestones.py, advisory). `run_app` has no production caller.
+  results at the time of the fix: the self-correction re-run (attempt.py) was scoped out as reachable only after a
+  first run the fixed consumer admitted - a reachability argument, not a correctness one; the focused review
+  (13.9, F1) showed the repair itself can change what the re-run requires, and it is fixed in the addendum below.
+  The milestone drift replay (milestones.py) is advisory. `run_app` has no production caller.
 - Root cause: CONFIRMED (probe + trace + the pre-fix reproducer). Classification: KRIYA_PRODUCT, supported-backend
   correctness (Python host and contained), same class as 13.5 on a different gate. Not model behaviour.
 - Owner decision (2026-10-10): FIX NOW. Invariant: when interpreter/venv preparation failed and the structured
@@ -818,6 +820,43 @@ time; no commit before the operator's verification; no push; readiness bar uncha
   passed, the one failure the registry tripwire on this slice's own row (closure_evidence must be non-empty on
   every row, including OPEN; a harness contract missed when the row was added, filled with the closure). Registry
   row CLOSED.
+
+#### 13.6 addendum - RUNTIME-VERIFICATION-RERUN-ENV-STOP-001 (P3, focused review of 6d97558..6169745, finding F1)
+
+- Observation (reviewer, TRACED; reproduced MEASURED 2026-10-10): the mutating path's plain-nonzero-exit branch runs
+  the self-correction micro-loop and, when it resolves, re-runs `run_app_sequence` once and grades THAT result
+  directly (deterministic kind: the exit status; otherwise the contract classifier and the grader) - the shared
+  consumer is called for the first run only. Reachability is real, not inferred: the first run is dependency-free
+  and admitted; the loop's repair declares a dependency (`requirements.txt`, in its writable scope - the ordinary
+  model response to a ModuleNotFoundError); the re-run now REQUIRES the project environment, `python -m venv` fails,
+  the resolver returns the typed result, and the block graded it as the candidate's: the typed environment message
+  went to the LLM grader and the failure was raised `run_verification` (repair-003/prefix/
+  F1_residual_reproducer_before.txt: `2 failed, 1 passed` - the reproducer as predicted, plus one control whose
+  failure was a harness artifact, below). No false success; a wasted Developer retry for an environmental failure.
+- Root cause: CONFIRMED (trace + the pre-fix reproducer through the real path). Owner decision (2026-10-10):
+  REPRODUCE FIRST, then the narrow correction only.
+- Fix (attempt.py, one statement): the self-correction re-run calls `_stop_on_environment_gate_result(state, run_res,
+  "runtime")` right after its post-run cleanup, before the deterministic exit status or the grader reads the result -
+  the same single typed-stop owner the compile, test and (since 13.6) runtime consumers use, keyed on the structured
+  `environment_reason_code` only. The full shared raiser was deliberately NOT called here: it also applies the
+  pre-existing output-text classifier, which would newly stop a repaired re-run whose output matches infrastructure
+  text instead of grading it as before (the owner's constraints: structured code only, no output-text matching,
+  genuine candidate failures preserved). No new taxonomy, retry policy or budget change.
+- Reproducer (tests/test_repair_003_f1_residual_self_correction_rerun_environment_stop.py, written first): the real
+  Developer write, compile gate, pytest test gate and both `run_app_sequence` runs; only `python -m venv` stubbed and
+  the micro-loop replaced by a scripted repair that writes only files it was handed as writable (rule 4). Controls:
+  a resolved repair with nothing declared re-launches the app, which still fails, and stays `run_verification`
+  graded twice with the self-correction attempt attached; a deterministic pytest re-run that executed and exits 0
+  passes on process-exit authority with no grade call. Harness artifact found and fixed in the control (rule 10):
+  the repaired test file had the same size and same-second mtime as the failing one, so pytest reused its cached
+  assertion-rewritten bytecode (`assert 1 == 1` evaluated as `assert 1 == 2`); the repaired content is now longer.
+- Verification (operator runs, 2026-10-10): post-fix 3/3 (repair-003/prefix/F1_residual_reproducer_after.txt);
+  mutants F1R-M1 (the re-run's stop removed) KILLED 1 failed / 2 passed - the reproducer only, both controls pass,
+  which is also the pre-fix measurement of the corrected deterministic control; F1R-M2 (the stop moved after the
+  re-run grading) KILLED 1 failed / 2 passed - the reproducer's grade-count assertion; attempt.py restored
+  byte-identical (repair-003/mutations/F1R-M*.txt, run_f1_residual_mutations.sh); adjacent 14 modules (F1, P2-2,
+  self-correction, PRD-025 evidence, D4, D5, D5b, deterministic diagnostic, P1-1 both modules, controller enforce,
+  prompt-fit closure, workflow): 1343 passed, 1 deselected. Every prediction matched. Registry row CLOSED.
 
 ### 13.7 SUITE-PRESERVATION-DIRECT-BASELINE-POLICY-001 (P3, independent review of 6d97558, finding F3) - fix
 

@@ -10445,6 +10445,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                     timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
                                 )
                                 clean_untracked_files_since(ctx.worktree_path, pre_run_untracked_after_repair)
+                                # RUNTIME-VERIFICATION-ENV-STOP-001 residual (focused review
+                                # 2026-10-10, F1): the repair may have changed what the run
+                                # REQUIRES (a declared dependency), so this re-run's result can
+                                # be the typed environment result just like the first run's -
+                                # nothing launched, no behaviour to grade. The same single typed
+                                # stop the first run takes (structured reason code only, never
+                                # output text), before the deterministic exit status or the
+                                # grader ever reads it; a re-run that executed is graded below
+                                # exactly as before.
+                                _stop_on_environment_gate_result(state, run_res, "runtime")
                                 repaired_deterministic_kind = deterministic_sequence_kind(
                                     resolved_run_commands
                                 )
