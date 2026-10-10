@@ -1,5 +1,6 @@
 {
   "name": "@kriya-ui/standalone",
+  "productName": "Kriya",
   "private": true,
   "version": "0.0.1",
   "description": "Electron standalone shell (gate A-1 hardening). Only the main process spawns processes, and only the allowlisted kriya command grammar.",
@@ -11,7 +12,10 @@
     "build:cockpit-fixture": "npm run build:main && VITE_KRIYA_UI=cockpit VITE_KRIYA_PROVIDER=fixture vite build",
     "build:cockpit": "npm run build:main && VITE_KRIYA_UI=cockpit vite build && node scripts-check-bundle.mjs",
     "build": "npm run build:main && npm run build:renderer",
-    "start": "electron .",
+    "start": "node mac-app.mjs start",
+    "start:raw": "electron .",
+    "package:mac": "npm run build:cockpit && node mac-app.mjs package",
+    "verify:mac-app": "node mac-app.mjs verify",
     "measure": "KRIYA_UI_MEASURE=1 electron .",
     "test": "vitest run"
   },

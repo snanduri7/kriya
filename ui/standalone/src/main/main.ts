@@ -7,13 +7,14 @@
  * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
  * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
  */
-import { app, BrowserWindow, clipboard, ipcMain, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, session, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from './hardening';
 import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
 import { isFixtureMode, resolveHostMode } from './host_mode';
+import { PRODUCT_NAME, WINDOW_TITLE, aboutPanelOptions, applicationMenuTemplate, resolveUserData } from './identity';
 import { IPC_CHANNELS, LIMITS, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
@@ -22,6 +23,12 @@ import { runMeasurement } from './measure';
 import { DEFAULT_SOAK, runSoak } from './soak';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
 import { SettingsStore } from './settings';
+
+// Product identity (identity.ts) is set before anything else reads the application name. The name decides Electron's default userData
+// directory, so the directory earlier builds used is pinned explicitly (an operator's --user-data-dir still wins).
+const pinnedUserData = resolveUserData(app.getPath('appData'), app.commandLine.hasSwitch('user-data-dir'));
+app.setName(PRODUCT_NAME);
+if (pinnedUserData !== null) app.setPath('userData', pinnedUserData);
 
 const MEASURE = process.env.KRIYA_UI_MEASURE === '1';
 const SOAK = process.env.KRIYA_UI_SOAK === '1';
@@ -132,7 +139,7 @@ function hardenSession() {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1400, height: 900, title: 'Kriya run inspector',
+    width: 1400, height: 900, title: WINDOW_TITLE,
     webPreferences: { ...WEB_PREFERENCES, preload: join(__dirname, 'preload.js'), additionalArguments: MEASURE || SOAK ? ['--kriya-ui-measure'] : [] },
   });
   ownedWebContentsId = win.webContents.id;
@@ -145,6 +152,7 @@ function createWindow() {
     win.webContents.on('console-message', (event) => log(`console[${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`));
     win.webContents.on('render-process-gone', (_e, details) => log(`render-process-gone ${details.reason}`));
   }
+  win.on('page-title-updated', (e) => e.preventDefault()); // a page can never rename the product window
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.on('will-redirect', (e) => e.preventDefault());
   win.webContents.on('will-attach-webview', (e) => e.preventDefault());
@@ -154,6 +162,8 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  app.setAboutPanelOptions(aboutPanelOptions(app.getVersion()));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin')));
   settings = new SettingsStore(join(app.getPath('userData'), 'kriya-ui-settings.json'));
   hardenSession();
   registerIpc();

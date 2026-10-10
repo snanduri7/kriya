@@ -1,0 +1,8 @@
+Observed 2026-10-10T13:36:46Z on macOS (Kriya.app packaged by mac-app.mjs, launched with open -n):
+process: Kriya (Contents/MacOS/Kriya); helpers seen: Kriya Helper, Kriya Helper (Renderer)
+menu bar items: Apple, Kriya, Edit, View, Window
+Kriya menu: About Kriya, Services, Hide Kriya, Hide Others, Show All, Quit Kriya (Quit and Keep Windows)
+window title: Kriya
+screencapture was refused (no Screen Recording permission for this terminal), so the evidence is the accessibility tree via System Events.
+
+Dev/test launch (npm start -> mac-app.mjs start -> .dev/Kriya.app): process Kriya; menu bar items: Apple, Kriya, Edit, View, Window; window title: Kriya; Kriya menu: About Kriya, missing value, Services, missing value, Hide Kriya, Hide Others, Show All, missing value, Quit Kriya, Quit and Keep Windows
