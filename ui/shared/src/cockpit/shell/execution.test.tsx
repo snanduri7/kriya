@@ -228,6 +228,8 @@ describe('Start Run', () => {
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'failure'));
     expect(within(bar).getByText('Run failed')).toBeInTheDocument();
     expect(within(bar).getByText(/failure category quality_gate_failed/)).toBeInTheDocument();
+    expect(within(bar).getByText(/Kriya reported:/)).toBeInTheDocument(); // Kriya's own recorded error text, not an inferred cause
+    expect(within(bar).getByText(/Failed to create an isolated generation sandbox \(fixture\)/)).toBeInTheDocument();
   });
 
   it('a process that dies without sealing is NOT a success: the host reports the exit, Kriya\'s records say the run did not finish', async () => {

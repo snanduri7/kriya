@@ -3,8 +3,8 @@
  * (workspace lock + RunRecord), attempt-evidence recorder, trace logger and the real persistent read process. The ONE thing replaced is the workflow body
  * that would call a model (fixtures/controlled_kriya.py) - no model is ever called. Needs the repository's .venv (skipped, loudly, when absent).
  */
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,6 +21,13 @@ const available = existsSync(PYTHON);
 interface Env { [k: string]: string }
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+const FIXED_PATH = '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin';
+/** The `git` candidates on a PATH, in order, and whether each RUNS (the macOS Xcode shim exits 69 until its license is accepted). */
+function gitCandidates(path: string): Array<{ path: string; works: boolean }> {
+  return path.split(':').map((d) => `${d}/git`).filter((c) => existsSync(c)).map((c) => ({ path: c, works: spawnSync(c, ['--version'], { encoding: 'utf8' }).status === 0 }));
+}
+const firstGitWorks = gitCandidates(FIXED_PATH)[0]?.works ?? false;
+
 let counter = 0;
 const mint = () => { counter += 1; return `20261010T1010${String(counter).padStart(2, '0')}-${(0xabcd0000 + counter).toString(16)}`; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,6 +35,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 describe.skipIf(!available)('Start Run against real Kriya with a controlled workflow body', () => {
   let base = ''; let state = ''; let config = ''; let home = '';
   let env: Env = {};
+  let childPath = FIXED_PATH;
   let service: KriyaService;
 
   const read = async (request: KupRequest): Promise<Json> => {
@@ -51,7 +59,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
   }
   function host(ws: string, exe: string, over: { prepare?: ConstructorParameters<typeof ExecutionHost>[0]['prepare'] } = {}) {
     return new ExecutionHost({
-      launch: launchExecution, prepare: over.prepare ?? (() => ({ ok: true, executable: exe, env: { PATH: '/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin', ...env } })),
+      launch: launchExecution, prepare: over.prepare ?? (() => ({ ok: true, executable: exe, env: { ...env } })),
       currentWorkspace: () => ws, mintLaunchId: mint, now: () => new Date(),
       preflight: (workspaceArg) => read({ operation: 'execution.preflight', workspace: workspaceArg }), graceMs: 4000,
     });
@@ -64,7 +72,13 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     base = mkdtempSync(join(tmpdir(), 'kriya-gui-exec-'));
     state = join(base, 'state'); config = join(base, 'config'); home = join(base, 'home');
     for (const d of [state, config, home, join(base, 'ws')]) mkdirSync(d);
-    env = { HOME: home, KRIYA_STATE_DIR: state, PYTHONDONTWRITEBYTECODE: '1' };
+    // The host's fixed PATH, with a working git first ONLY when this machine's first git is broken (a license-gated Xcode shim): the tests exercise execution,
+    // not this machine's toolchain; the blocked case itself is the test below.
+    if (!firstGitWorks) {
+      const working = gitCandidates(process.env.PATH ?? '').concat(gitCandidates(FIXED_PATH)).find((c) => c.works);
+      if (working) { mkdirSync(join(base, 'bin')); symlinkSync(working.path, join(base, 'bin', 'git')); childPath = `${join(base, 'bin')}:${FIXED_PATH}`; }
+    }
+    env = { HOME: home, KRIYA_STATE_DIR: state, PYTHONDONTWRITEBYTECODE: '1', PATH: childPath };
     const real = join(base, 'kriya-real');
     writeFileSync(real, `#!/bin/sh\nexec '${PYTHON}' -m kriya.cli "$@"\n`);
     chmodSync(real, 0o755);
@@ -209,6 +223,21 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     await untilExited(h);
     expect(h.state().exit).toEqual({ code: 1, signal: null });
     expect((await status(ws, r.launch_id!)).error.code).toBe('LAUNCH_NOT_FOUND');
+  }, 120_000);
+
+  it.skipIf(firstGitWorks)('on a machine whose first git on the fixed PATH does not run, the preflight blocks the start with the reason (the live-smoke finding) and nothing is launched', async () => {
+    const ws = workspace('gitshim');
+    const blockedEnv = { HOME: home, KRIYA_STATE_DIR: state, PYTHONDONTWRITEBYTECODE: '1', PATH: FIXED_PATH };
+    const blockedService = new KriyaService({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: config, env: blockedEnv });
+    try {
+      const h = new ExecutionHost({ launch: launchExecution, prepare: () => ({ ok: true, executable: executable('gitshim', { outcome: 'success' }), env: blockedEnv }), currentWorkspace: () => ws, mintLaunchId: mint, now: () => new Date(),
+        preflight: async (w) => { const out = await blockedService.request({ operation: 'execution.preflight', workspace: w }); return out.kind === 'json' ? out.json : { error: { code: 'HOST_ERROR', message: out.message }, data: null }; } });
+      const r = await h.start({ workspace: ws, goal: 'g' });
+      expect(r).toMatchObject({ started: false, refusal: { code: 'PREFLIGHT_BLOCKED' } });
+      expect(r.refusal!.blockers!.map((b) => b.code)).toContain('TOOL_UNAVAILABLE');
+      expect(r.refusal!.message).toMatch(/git is required for every run/);
+      expect(existsSync(join(ws, '.kriya'))).toBe(false);
+    } finally { await blockedService.stop(); }
   }, 120_000);
 
   it('operator-only configuration in the folder blocks the start before any process exists', async () => {

@@ -119,7 +119,7 @@ export class FixtureExecution {
     const ended = phase === 'ENDED' ? {
       at: '2026-10-10T10:12:00+00:00', exit_code: refused ? 2 : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') ? 0 : 1, workflow_status: approval ? null : refused ? 'refused' : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined') ? 'success' : 'failure',
       quality_gates_passed: refused ? false : (outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined'), failure_category: outcome === 'failure' ? 'quality_gate_failed' : null, trace_run_id: refused || approval ? null : LAUNCHED_TRACE_ID,
-      error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
+      error: refused ? 'another Kriya run already owns this folder' : approval ? 'Aborted!' : outcome === 'failure' ? 'Failed to create an isolated generation sandbox (fixture)' : null, note: 'copied from the workflow\'s own result; the RunRecord, evidence store and trace row are the outcome authority',
     } : null;
     return {
       launch: {

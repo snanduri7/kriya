@@ -96,6 +96,12 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
         blockers.append(_blocker("RUN_ACTIVE", f"another Kriya run already owns this folder ({holder})"))
     elif assessment.status != STATUS_CLEAN:
         blockers.append(_blocker("RECOVERY_REQUIRED", f"the folder's last run left it in state {assessment.status}; recover it (kriya runs recover) before starting another"))
+    tools = tool_visibility()
+    git_entry = next((t for t in tools if t["tool"] == "git"), None)
+    if git_entry is not None and not git_entry["available"]:
+        # traced from a real run: every run creates an isolated generation sandbox with git, so a git that does not run fails the run at its first step
+        blockers.append(_blocker("TOOL_UNAVAILABLE", f"git is required for every run and {git_entry.get('reason') or 'is not on this process\'s PATH'}"
+                                 + (f"; a working copy exists later on PATH ({git_entry['alternatives'][0]}) but a run executes the first" if git_entry.get("alternatives") else "")))
     configuration: Dict[str, Any] = {
         "status": "loaded" if cfg is not None else ("refused" if authority["status"] == "refused" else "failed"),
         "source": state.config_source or "packaged_default", "file": state.config_path, "directory": workspace, "discovery": DISCOVERY,
@@ -127,7 +133,7 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
         "configuration": configuration, "state": runtime_state, "model": model,
         "recovery": {"status": assessment.status, "run_active": assessment.status == STATUS_RUN_ACTIVE},
         "interaction": {"approvals": "unavailable", "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION},
-        "toolchains": {"tools": tool_visibility(), "note": TOOLCHAIN_NOTE},
+        "toolchains": {"tools": tools, "note": TOOLCHAIN_NOTE},
     }
 
 

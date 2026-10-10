@@ -62,6 +62,7 @@ export function ActiveRunBanner() {
           <div className="muted small">Kriya stopped here instead of deciding for you. This version of the app cannot approve it: the approval must currently be performed outside the Kriya GUI (nothing was approved on your behalf). Source: {run.outcome!.source}.</div>
         </div>
       ) : null}
+      {finished && run.outcome!.recordedError && run.outcome!.recordedError !== run.outcome!.detail && run.outcome!.kind !== 'success' && run.outcome!.kind !== 'approval_required' ? <div role="note"><strong>Kriya reported:</strong> <span className="mono small">{run.outcome!.recordedError}</span></div> : null}
       {finished && !run.outcome!.approval ? <div>{run.outcome!.detail} <span className="muted small">Source: {run.outcome!.source}.</span></div> : null}
       {finished && run.outcome!.declined.length ? <div className="muted small">Decisions declined, nothing approved (the run proceeded without them): {run.outcome!.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</div> : null}
       {run.stage === 'starting' && !finished ? <div className="muted">Waiting for Kriya to record the launch…</div> : null}

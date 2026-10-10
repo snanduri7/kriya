@@ -43,6 +43,14 @@ def _status(path, launch_id=LID, cfg=None):
     return run_kup_operation(cfg or AppConfig(), {"operation": "launch.status", "workspace": str(path), "launch_id": launch_id})
 
 
+@pytest.fixture(autouse=True)
+def _stable_tools(request, monkeypatch):
+    """Tests that are not about tool visibility must not depend on THIS machine's git/python (the Xcode shims differ per machine): a healthy git is stubbed."""
+    if "tool" in request.node.name or "preflight_reports_tool" in request.node.name:
+        return
+    monkeypatch.setattr("kriya.kup.execution.tool_visibility", lambda: [{"tool": "git", "available": True, "path": "/usr/bin/git", "checked": "ran --version"}])
+
+
 @pytest.fixture
 def ws(tmp_path):
     folder = tmp_path / "proj"
@@ -521,7 +529,8 @@ def test_tool_visibility_never_changes_the_environment_or_blocks_the_start(ws, m
     monkeypatch.setenv("PATH", "/nonexistent")
     before = dict(os.environ)
     data = _preflight(ws)["data"]
-    assert data["ready"] is True, "a missing tool is information, not a blocker: what a goal needs is only known during the run"
+    assert [b["code"] for b in data["blockers"]] == ["TOOL_UNAVAILABLE"], "only git (needed by every run's sandbox) blocks; a missing python3/java/mvn is information"
+    assert "git" in data["blockers"][0]["message"]
     assert dict(os.environ) == before
 
 
@@ -542,12 +551,39 @@ def test_a_tool_that_exists_on_path_but_does_not_run_is_reported_unavailable_wit
     assert tools["mvn"]["available"] is False and tools["mvn"]["path"] is None
 
 
-def test_a_working_tool_later_on_path_is_used_when_an_earlier_one_is_a_shim(ws, monkeypatch, tmp_path):
+def test_the_FIRST_tool_on_path_decides_a_working_copy_later_is_only_mentioned(ws, monkeypatch, tmp_path):
+    """A run executes the first `git` on PATH: a working one later on the same PATH must not make a broken first one look usable."""
     shim, good = tmp_path / "shim", tmp_path / "good"
-    for directory, body in ((shim, "exit 69"), (good, "echo git version 2.0")):
+    for directory, body in ((shim, "echo 'You have not agreed to the Xcode license agreements.' >&2; exit 69"), (good, "echo git version 2.0")):
         directory.mkdir()
         (directory / "git").write_text(f"#!/bin/sh\n{body}\n")
         (directory / "git").chmod(0o755)
     monkeypatch.setenv("PATH", f"{shim}:{good}")
-    entry = {t["tool"]: t for t in _preflight(ws)["data"]["toolchains"]["tools"]}["git"]
-    assert entry["available"] is True and entry["path"] == str(good / "git")
+    data = _preflight(ws)["data"]
+    entry = {t["tool"]: t for t in data["toolchains"]["tools"]}["git"]
+    assert entry["available"] is False and entry["alternatives"] == [str(good / "git")]
+    assert "Xcode license" in entry["reason"] and "69" in entry["reason"]
+
+
+def test_a_tool_git_that_does_not_run_blocks_the_start_with_the_reason_and_the_alternative(ws, monkeypatch, tmp_path):
+    """Traced from the live smoke: every run needs git for its isolated sandbox, so the start is refused up front instead of failing at the first step."""
+    shim, good = tmp_path / "shim", tmp_path / "good"
+    for directory, body in ((shim, "echo 'Xcode license not accepted' >&2; exit 69"), (good, "echo git version 2.0")):
+        directory.mkdir()
+        (directory / "git").write_text(f"#!/bin/sh\n{body}\n")
+        (directory / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}:{good}")
+    data = _preflight(ws)["data"]
+    assert data["ready"] is False
+    blocker = next(b for b in data["blockers"] if b["code"] == "TOOL_UNAVAILABLE")
+    assert "git is required for every run" in blocker["message"] and "Xcode license not accepted" in blocker["message"] and str(good / "git") in blocker["message"]
+
+
+def test_a_tool_git_working_first_on_path_does_not_block(ws, monkeypatch, tmp_path):
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / "git").write_text("#!/bin/sh\necho git version 2.0\n")
+    (good / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", str(good))
+    data = _preflight(ws)["data"]
+    assert not [b for b in data["blockers"] if b["code"] == "TOOL_UNAVAILABLE"]

@@ -42,6 +42,8 @@ export interface RunOutcome {
   approval?: { kind: string; reason: string; details: Record<string, unknown> };
   /** Decisions the run could proceed without that the desktop declined (nothing approved); informational, whatever the outcome. */
   declined: Array<{ kind: string; reason: string }>;
+  /** The error text Kriya itself recorded when the launch ended (bounded by Kriya at 400 characters); null when none was recorded. */
+  recordedError: string | null;
 }
 
 export interface RunTiming { clickedAt: number; acknowledgedAt: number | null; recordSeenAt: number | null; terminalAt: number | null; refreshedAt: number | null }
@@ -102,10 +104,11 @@ const PAGE = 200;
 export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): RunOutcome | null {
   const outcome = deriveCore(status, notRecorded, host);
   const declined = (status?.launch.declined_decisions ?? []).map((d) => ({ kind: d.kind, reason: d.reason }));
-  return outcome === null ? null : { ...outcome, declined };
+  const recordedError = status?.launch.ended?.error ?? null;
+  return outcome === null ? null : { ...outcome, declined, recordedError };
 }
 
-function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): Omit<RunOutcome, 'declined'> | null {
+function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): Omit<RunOutcome, 'declined' | 'recordedError'> | null {
   const exited = host?.phase === 'exited';
   const exitText = host?.exit ? (host.exit.signal ? `signal ${host.exit.signal}` : `exit code ${host.exit.code ?? 'unknown'}`) : 'exit not reported';
   if (status === null) {
