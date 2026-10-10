@@ -143,6 +143,28 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     process.stderr.write(`[exec-timing] start->ack ${ackMs} ms, ack->launch record visible ${firstRecordMs - ackMs} ms, read latency during run max ${Math.max(...readLatencies)} ms (median ${[...readLatencies].sort((a, b) => a - b)[Math.floor(readLatencies.length / 2)]} ms, n=${readLatencies.length})\n`);
   }, 180_000);
 
+  it('GREENFIELD end to end: an EMPTY folder opens, goes through the same preflight/start path, is attributed from the first write, records an ADDED file and refreshes into its own run list', async () => {
+    const ws = workspace('greenfield-empty'); // no files at all
+    expect(readdirSync(ws)).toEqual([]);
+    const described = ((await read({ operation: 'workspace.describe', workspace: ws })).data as Json);
+    expect(described.checkout).toMatchObject({ state: 'not_a_repository', head: null, dirty: null }); // facts only; nothing classifies it as greenfield
+    const pre = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
+    expect(pre.ready).toBe(true); // the same preflight an existing project gets
+    const h = host(ws, executable('greenfield', { outcome: 'success', step_ms: 50 }));
+    const r = await h.start({ workspace: ws, goal: 'Create a utility library with a clamp function.' });
+    expect(r.started).toBe(true);
+    await untilExited(h);
+    const status1 = (await status(ws, r.launch_id!)).data as Json;
+    expect(status1.launch.workspace.identity).toBe(described.identity); // linked to the folder that was opened
+    expect(status1.run_record.terminal_status).toBe('SUCCESS');
+    const recs = ((await read({ operation: 'evidence.records', run_id: r.launch_id!, kind: ['candidate.change'] })).data as Json).records as Array<{ payload: Json }>;
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.payload).toMatchObject({ created: true, deleted: false, unchanged: false }); // the cockpit classifies this ADDED: new file, no baseline
+    const snap = (await read({ operation: 'snapshot.acquire', workspace: ws })).data as Json;
+    const list = (await read({ operation: 'history.list', snapshot_id: snap.snapshot_id, workspace: ws })).data as Json;
+    expect(list.runs.map((x: Json) => x.run_id)).toEqual([status1.launch.ended.trace_run_id]); // terminal refresh: exactly this folder's one run
+  }, 180_000);
+
   it('the launch record never holds the goal text, and a hostile goal reaches no shell', async () => {
     const ws = workspace('hostile');
     const marker = join(base, 'pwned');

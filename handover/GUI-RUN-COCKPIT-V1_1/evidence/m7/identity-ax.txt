@@ -7,6 +7,6 @@ processes:
 menu bar: Apple | Kriya | File | Edit | View | Window | 
 menu Kriya: About Kriya | missing value | Services | missing value | Hide Kriya | Hide Others | Show All | missing value | Quit Kriya | Quit and Keep Windows | 
 menu File: Open Folder… | missing value | Close Window | Close All | 
-menu Window: Minimize | Minimize All | Zoom | Zoom All | Fill | Center | missing value | Move & Resize | Full Screen Tile | missing value | Bring All to Front | Arrange in Front | Remove Window from Set | missing value | Kriya | 
+menu Window: Minimize | Minimize All | Zoom | Zoom All | Fill | Center | missing value | Move & Resize | Full Screen Tile | missing value | Move to Sriram’s iPad Head | missing value | Bring All to Front | Arrange in Front | Remove Window from Set | missing value | Kriya | 
 
 still running after Quit Kriya: 0 process(es); orphan kup-stdio: 0

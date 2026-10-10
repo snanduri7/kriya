@@ -1,0 +1,89 @@
+{
+ "_workspace": {
+  "version": "2",
+  "workspace_id": "57e1238a332886d9f2423745e82137ba3b91175d5446c0ff536ae229e5a21a65"
+ },
+ "approval_required": null,
+ "declined_decisions": [],
+ "ended": {
+  "at": "2026-10-10T17:11:19.378188+00:00",
+  "error": "Failed to create an isolated generation sandbox: Git repository detection/bootstrap failed for '/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-live-smoke.kMwmMi/ws/hello-project': greenfield Git initialization failed: You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SD",
+  "exit_code": 1,
+  "failure_category": null,
+  "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
+  "quality_gates_passed": false,
+  "trace_run_id": null,
+  "workflow_status": "failed"
+ },
+ "goal": {
+  "chars": 135,
+  "sha256": "f20aeb6dcac25bcaf84264bbad3637dff9f774ee4b11bdd0dafb398642119e24"
+ },
+ "history": [
+  {
+   "at": "2026-10-10T17:10:53.383228+00:00",
+   "phase": "STARTING"
+  },
+  {
+   "at": "2026-10-10T17:10:53.579830+00:00",
+   "phase": "RUNNING"
+  },
+  {
+   "at": "2026-10-10T17:11:19.378211+00:00",
+   "phase": "ENDED"
+  }
+ ],
+ "kind": "kriya.launch",
+ "launch_id": "20261010T224052-e0941ceb",
+ "options": {
+  "interactive": false,
+  "knowledge_policy": "strict"
+ },
+ "phase": "ENDED",
+ "preflight": {
+  "ready": true,
+  "blockers": [],
+  "configuration": {
+   "authority": {
+    "fields": [],
+    "status": "no_findings"
+   },
+   "directory": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-live-smoke.kMwmMi/ws/hello-project",
+   "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+   "file": null,
+   "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+   "source": "packaged_default",
+   "status": "loaded"
+  },
+  "model": {
+   "context_window": 32768,
+   "endpoint": "http://localhost:11434/v1",
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M"
+   ],
+   "model": "qwen3-coder:30b",
+   "provider": "openai",
+   "role_overrides": {}
+  },
+  "state": {
+   "cockpit_directory": null,
+   "directory": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-live-smoke.kMwmMi/state",
+   "observable_by_cockpit": null,
+   "source": "env"
+  }
+ },
+ "process": {
+  "pid": 49716
+ },
+ "requested_at": "2026-10-10T17:10:53.383024+00:00",
+ "run": {
+  "base_revision": null,
+  "run_id": "20261010T224052-e0941ceb",
+  "started_at": "2026-10-10T17:10:53.579818+00:00"
+ },
+ "schema": 1,
+ "workspace": {
+  "identity": "57e1238a332886d9f2423745e82137ba3b91175d5446c0ff536ae229e5a21a65",
+  "path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-live-smoke.kMwmMi/ws/hello-project"
+ }
+}
