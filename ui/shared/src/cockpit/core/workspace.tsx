@@ -97,6 +97,11 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     if (previous !== null && previous !== next) changed.current?.(next);
   }, []);
 
+  const [project, setProjectState] = useState<NewProjectDraft | null>(null);
+  const setProject = useCallback((next: NewProjectDraft | null) => { projectRef.current = next; setProjectState(next); }, []);
+  const creatingRef = useRef(false);
+  const choosingRef = useRef(false);
+
   /** Validate with Kriya, then commit. Returns true when the folder is now open. The previous workspace stays open on any failure. */
   const open = useCallback(async (path: string, options: { remember: boolean }): Promise<boolean> => {
     if (openingRef.current) return false;
@@ -118,12 +123,13 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
         }
       }
       setState((s) => ({ ...s, busy: false, notice: null, current: { path, facts: described.data, provenance: described.provenance }, ...(recent ? { recent } : {}) }));
+      if (!creatingRef.current) setProject(null); // another folder was opened while a New Project dialog was up: its parent choice no longer applies
       settle(path);
       return true;
     } finally {
       openingRef.current = false;
     }
-  }, [provider, desktop, settle]);
+  }, [provider, desktop, settle, setProject]);
 
   // Launch: the host decides whether a workspace is already open (the desktop app starts with none; a development host may preset one). A preset one
   // is validated like any other; if Kriya refuses it the person lands on the welcome screen with the reason.
@@ -141,14 +147,17 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     return () => { live = false; };
   }, [provider, desktop, open]);
 
-  const [project, setProjectState] = useState<NewProjectDraft | null>(null);
-  const setProject = useCallback((next: NewProjectDraft | null) => { projectRef.current = next; setProjectState(next); }, []);
-  const creatingRef = useRef(false);
   const canCreate = desktop !== null && typeof desktop.chooseProjectParent === 'function' && typeof desktop.createProject === 'function';
 
   const beginProject = useCallback(async () => {
-    if (!desktop?.chooseProjectParent || openingRef.current || creatingRef.current) return;
-    const choice = await desktop.chooseProjectParent();
+    if (!desktop?.chooseProjectParent || openingRef.current || creatingRef.current || choosingRef.current) return;
+    choosingRef.current = true; // one native chooser at a time: a second Cmd+N / click while it is open is ignored, not queued
+    let choice;
+    try {
+      choice = await desktop.chooseProjectParent();
+    } finally {
+      choosingRef.current = false;
+    }
     if (choice.refused === 'RUN_ACTIVE') {
       setState((s) => ({ ...s, notice: { code: 'RUN_ACTIVE', message: 'A run is in progress; a project cannot be created until it ends.', path: s.current?.path ?? '' } }));
       return;

@@ -170,3 +170,32 @@ describe('the provider API itself', () => {
     expect(host.workspaceCalls.filter((c) => c === 'createProject:same-tick')).toHaveLength(1);
   });
 });
+
+describe('races', () => {
+  it('a second New Project request while the native chooser is still open is ignored, not queued', async () => {
+    const { host } = renderWorkspaceShell({ fixture: { workspace: null, projectParents: ['/fixture/parent', '/fixture/parent'] } });
+    await screen.findByRole('main', { name: 'Welcome' });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const original = host.workspace.chooseProjectParent!.bind(host.workspace);
+    host.workspace.chooseProjectParent = async () => { await gate; return original(); };
+    const button = screen.getByRole('button', { name: /^New Project…/ });
+    fireEvent.click(button);
+    act(() => host.menu('newProject'));
+    fireEvent.click(button);
+    release();
+    await dialog();
+    expect(host.workspaceCalls.filter((c) => c === 'chooseProjectParent')).toHaveLength(1);
+  });
+  it('a refused open leaves a New Project dialog untouched; a successful open removes it', async () => {
+    const { host } = renderWorkspaceShell({ fixture: { workspace: null, projectParents: ['/fixture/parent'], choices: ['/fixture/missing', '/fixture/empty'] } });
+    await begin();
+    host.menu('openFolder'); // the chooser returns a folder Kriya refuses
+    await waitFor(() => expect(host.workspaceCalls).toContain('choose'));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('dialog', { name: 'New Project' })).toBeInTheDocument();
+    host.menu('openFolder'); // now a folder Kriya accepts
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    expect(screen.queryByRole('dialog', { name: 'New Project' })).toBeNull();
+  });
+});

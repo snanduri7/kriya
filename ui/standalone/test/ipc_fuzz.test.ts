@@ -17,8 +17,8 @@ const CHARS = ['a', 'Z', '0', '9', '-', '_', '.', ':', '/', ' ', '\u0000', '\n',
 const str = (max = 40): string => Array.from({ length: Math.floor(rand() * max) }, () => pick(CHARS)).join('');
 const WEIRD: unknown[] = [null, undefined, true, false, 0, -1, 1.5, NaN, Infinity, 2 ** 53, '', [], {}, [[]], () => 1, Symbol('x'), 10n, new Date(0), /x/, { toString: () => 'x' }, Object.create(null), { __proto__: { polluted: 1 } }];
 const OPS = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'evidence.manifest', 'evidence.verify', 'evidence.records',
-  'evidence.change_content', 'evidence.call_content', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'shell.exec', 'evidence.__proto__', ''];
-const KEYS = ['operation', 'workspace', 'run_id', 'snapshot_id', 'launch_id', 'cursor', 'limit', 'seq', 'part', 'kind', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'keep', 'verify', 'from_trace', 'goal', 'path', 'line', '__proto__', 'constructor', 'extra', 'argv', 'command', 'shell'];
+  'evidence.change_content', 'evidence.call_content', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'shell.exec', 'evidence.__proto__', ''];
+const KEYS = ['operation', 'workspace', 'run_id', 'snapshot_id', 'launch_id', 'parent', 'name', 'token', 'kind', 'cursor', 'limit', 'seq', 'part', 'kind', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'keep', 'verify', 'from_trace', 'goal', 'path', 'line', '__proto__', 'constructor', 'extra', 'argv', 'command', 'shell'];
 const value = (depth = 0): unknown => {
   const r = rand();
   if (r < 0.4) return str();
@@ -43,6 +43,8 @@ describe('validators never throw and accept only the grammar', () => {
       expect(plain(result.value)).toBe(true);
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
       expect(OPS).toContain(result.value.operation);
+      expect(result.value.operation).not.toBe('workspace.create'); // never accepted from the renderer
+      if (result.value.operation === 'execution.context' || result.value.operation === 'execution.model_probe') { expect(() => buildKriyaArgv(result.value)).toThrow(/persistent Kriya service/); continue; } // served by the persistent service only
       const argv = buildKriyaArgv(result.value);
       expect(argvIsAllowed(argv), argv.join(' ')).toBe(true);
       for (const field of ['run_id', 'snapshot_id', 'cursor', 'launch_id', 'workspace'] as const) {
@@ -91,6 +93,55 @@ describe('validators never throw and accept only the grammar', () => {
         const v = validateSettingValue(k.value, rand() < 0.3 ? value() : pick(['vscode', '/abs/path', 'relative', '', '/a\u0000b', null, 'x'.repeat(5000)]));
         if (v.ok && typeof v.value === 'string' && k.value !== 'editor') expect(v.value.startsWith('/')).toBe(true);
       }
+    }
+  });
+});
+
+
+describe('New Project, notification and settings guards never throw and accept only their grammar (seeded fuzz)', () => {
+  it('ProjectHost.create: nothing reaches Kriya unless it is exactly {live token, name}; a refused/odd answer approves nothing', async () => {
+    const { ProjectHost, PROJECT_TOKEN_RE } = await import('../src/main/project_host');
+    let n = 0;
+    const asked: Array<[string, string]> = []; const approved: string[] = [];
+    const answers: unknown[] = [null, 'x', 7, {}, { error: null, data: null }, { error: null, data: { workspace: 'rel' } }, { error: { code: 'X' }, data: null }, { error: null, data: { workspace: '/ok/a' } }, { data: { workspace: '/ok/b' }, error: { code: 'WORKSPACE_UNAVAILABLE', message: 'm', reason: 'already_exists' } }];
+    let k = 0;
+    const host = new ProjectHost({ create: async (p, name) => { asked.push([p, name]); return answers[k++ % answers.length]; }, approveCreated: (p) => { approved.push(p); }, runActive: () => false, now: () => 0, mintToken: () => `pt-${String(++n).padStart(32, '0')}` });
+    const parents = ['/a', 'rel', '', '/a\nb', '/' + 'x'.repeat(5000)];
+    let liveTokens: string[] = [];
+    for (let i = 0; i < 4000; i += 1) {
+      if (rand() < 0.1) { const c = await host.chooseParent(async () => pick(parents)); if (c.chosen) liveTokens.push(c.token!); expect(c.chosen ? PROJECT_TOKEN_RE.test(c.token!) : c.token === null).toBe(true); }
+      const raw = rand() < 0.5 ? { token: rand() < 0.6 && liveTokens.length ? pick(liveTokens) : str(40), name: rand() < 0.7 ? str(120) : value() } : value();
+      const r = await host.create(raw);
+      expect(typeof r.created).toBe('boolean');
+      if (r.created) { expect(r.path && r.path.startsWith('/')).toBe(true); expect(approved).toContain(r.path); }
+      liveTokens = liveTokens.slice(-4);
+    }
+    for (const [parent, name] of asked) { expect(parent.startsWith('/')).toBe(true); expect(typeof name).toBe('string'); expect(name.length).toBeGreaterThan(0); }
+    expect(approved.every((p) => p.startsWith('/'))).toBe(true);
+  });
+  it('NotificationHost.notify: only a closed kind for the current launch is ever shown, and the text never contains renderer input', async () => {
+    const { NotificationHost, NOTIFY_KINDS } = await import('../src/main/notification_host');
+    const LID = '20261011T101010-abcdef01';
+    const shown: string[] = [];
+    const host = new NotificationHost({ supported: () => true, windowFocused: () => false, currentLaunch: () => LID, workspacePath: () => '/Users/p/proj', show: (spec) => { shown.push(`${spec.title}|${spec.body}`); }, onActivate: () => undefined, now: () => rand() * 1e9 });
+    for (let i = 0; i < 20000; i += 1) {
+      const raw = rand() < 0.4 ? { kind: pick([...NOTIFY_KINDS, str(10), ...WEIRD]), launch_id: rand() < 0.7 ? LID : str(30), ...(rand() < 0.2 ? { body: str(30), title: str(30) } : {}) } : value();
+      const r = host.notify(raw);
+      expect(typeof r.shown).toBe('boolean');
+      if (r.shown) { expect(raw).toMatchObject({ launch_id: LID }); expect((NOTIFY_KINDS as readonly string[]).includes((raw as { kind: string }).kind)).toBe(true); }
+    }
+    expect(shown.length).toBeGreaterThan(0);
+    for (const text of shown) expect(text).toMatch(/^Kriya (needs your approval|run finished|run did not finish successfully)\|/);
+  });
+  it('rendererMayWrite: no input combination lets the cockpit renderer write a host-owned setting', async () => {
+    const { rendererMayWrite, validateSettingKey: key, validateSettingValue: val, HOST_OWNED_SETTINGS } = await import('../src/main/ipc_contract');
+    for (let i = 0; i < 20000; i += 1) {
+      const k = key(rand() < 0.5 ? pick(['editor', 'kriyaExecutable', 'workspacePath', 'configDirectory', ...HOST_OWNED_SETTINGS]) : value());
+      if (!k.ok) continue;
+      const v = val(k.value, rand() < 0.5 ? (rand() < 0.5 ? null : '/ok/path') : value());
+      if (!v.ok) continue;
+      if ((HOST_OWNED_SETTINGS as readonly string[]).includes(k.value)) expect(rendererMayWrite(k.value, 'cockpit', v.value), `${k.value}=${String(v.value)}`).toBe(false);
+      if (k.value === 'workspacePath' && v.value !== null) expect(rendererMayWrite(k.value, 'cockpit', v.value)).toBe(false);
     }
   });
 });
