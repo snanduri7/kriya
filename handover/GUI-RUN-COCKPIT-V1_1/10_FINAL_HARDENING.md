@@ -66,3 +66,45 @@ Memory attribution (`evidence/m9/soak-12min-attribution`, same workload, per-pro
 *First soak (preserved, `soak-30min-run1-throttled`)*: ran to cycle 240 with the same flat metrics, then the owner's screen was no longer shown and Chromium throttled the hidden window's timers to once a minute (a 60,059 ms lag sample): a measurement-environment artifact, not product behaviour. The evidence build therefore disables background throttling (evidence packages only) and the runner keeps the display awake (`caffeinate`); the clean run above is the one reported.
 
 *Large data* (Phase E): see the scaling table above.
+
+## Phase O - the one independent bug-hunt review (fresh reviewer, `git diff e8ac25d..232d096`)
+
+Verdict: **no P0**; six P2 and nine P3 findings, every one verified by me against the code before acting. All valid P2 and all straightforward P3 were fixed in ONE review-fix commit (`067af72`); no second broad review was run.
+
+| # | Sev | Finding (verified) | Disposition |
+|---|---|---|---|
+| P2-1 | P2 | Live-run evidence was keyed on the run only: a NEW review for the same launch kept the earlier candidate's Changes/Validation next to it | FIXED - keyed on review id + candidate digest; test re-reads on `replaceReview()`; mutant killed |
+| P2-2 | P2 | Product kept the stock Electron fuses (RunAsNode, NODE_OPTIONS, --inspect ON - MEASURED in the fuse wire) and accepted `--remote-debugging-port` | FIXED - fuses patched off before the ad-hoc signature (MEASURED 0/0/0 in `out/Kriya.app`, evidence package untouched), package check verifies them, the product exits 2 on a debug / remote-debugging switch (MEASURED); 2 mutants killed |
+| P2-3 | P2 | "Diff viewable" was decided by one cached capability flag; digest-only capture, an unloaded or unreadable evidence load still produced the ordinary "Confirm approval" | FIXED - viewable only when policy allows AND this review's evidence is loaded with kept content; otherwise the explicit confirmation with an accurate reason; digest-only and not-loaded controls; mutant killed |
+| P2-4 | P2 | A launch record that stayed unreadable (typed error other than not-found) after the process was gone locked the workspace forever | FIXED - concluded as "The run could not be followed" after 4 polls with the process gone; mutant killed |
+| P2-5 | P2 | RecursionError (deep line / manifest) and a non-object `blobs` in a hash-chained record escaped the evidence reader as exceptions | FIXED in `reader.py` and `evidence_ops._guard`; forged-chain, 200000-deep line and manifest tests; 5/5 mutants killed |
+| P2-6 | P2 | Several of my own tests could pass vacuously (call_content on a candidate seq, the fuzz tautology, a "slow answer" test that held every answer, a "decision after death" test that attempted none, a rapid-switch test that could not fail) | FIXED - healthy controls added, the fuzz assertion made real, the vacuous tests replaced (tab switching now provably reads no further evidence; a real late decision is refused with LAUNCH_NOT_ACTIVE) |
+| P3-1 | P3 | Package checker scanned only top-level `*.js`; its "negative control" only grepped its own source; `package --evidence` without `--out` overwrote the product | FIXED - `package_check.mjs` scans every packaged file (all extensions, maps, sub-directories, renderer, package.json main), is proven on deliberately bad synthetic packages, `--evidence` requires `--out` |
+| P3-2 | P3 | The unconfirmed-conclusion state lived in a ref shared across launches | FIXED by construction - local to each launch's effect |
+| P3-3 | P3 | Preflight key compared by `split('|')[0]` (collides on `|` in a folder name) | FIXED - the workspace is a field of the stored answer |
+| P3-4 | P3 | Workspace-scope attribution and the launch store summary did not check run identity | FIXED + tested |
+| P3-5 | P3 | The shell banner interpreted record kinds; the boundary test used a hand-picked allowlist | FIXED - labelling lives in core (`progressCounts`); the boundary test scans every shell file |
+| P3-6 | P3 | `rel.startsWith('..')` falsely refused files named like `..foo` | FIXED - path-segment aware; test for `..hidden.py` and `src/..data` |
+| P3-7 | P3 | `forgetRecent` had no catch | FIXED - typed notice; test |
+| P3-8 | P3 | The greenfield/brownfield matrix took change kinds from the same script that produced them and compared the folder shallowly | FIXED - kinds are cross-checked against what existed on disk; the folder is compared as a full content-hashed tree |
+| P3-9 | P3 | `kriyaExecutable` / `configDirectory` are renderer-settable through the typed settings IPC (pre-existing, M1 design) | NOT CHANGED - needs an owner decision on an accepted design; registered as deferred `GUI-SETTINGS-RENDERER-WRITABLE-001` |
+
+## Phase Q - was another live smoke needed?
+
+No. The approval and execution AUTHORITY paths are unchanged by the review fixes: the decider, the typed `launch-decision` IPC, the exclusive decision file, the durable-before-resume rule and the launch process are untouched. The changes are presentation / read-side (which confirmation wording applies, which evidence key is read, how an unreadable record is concluded), the evidence reader's handling of hostile bytes, and packaging (fuses, switch refusal). The packaged product was rebuilt from the final sources and started natively (exit 2 on a debug switch, a normal start runs, no debug port). The live run `20261011T094647-bc1ca4c4` (real model, real approval, change applied) stays the authoritative live evidence.
+
+## Phase P - final gates (on commit `067af72` sources)
+
+| Gate | Result |
+|---|---|
+| `npm run check:integration` (generated check, typecheck, eslint 0 warnings, shared-deps, script tests, all UI suites, Java round trip, serializer fixtures) | PASS: kup 66, shared **376**, test-host 46 (+2 skipped), standalone **284** (+1 skipped) |
+| ruff / pylint (`kriya plugins/core_tools tests`) | zero findings / exit 0 |
+| Targeted Python (corruption matrix 47, request fuzz, registry) | PASS |
+| ONE final canonical full pytest `PYTHONPATH=$PWD pytest -q -n 8 --dist loadgroup` | **10270 passed, 0 failed** (26 min); no second run needed |
+| Review-fix mutation (new decision logic) | 12/12 killed: fuse list, debug-switch grammar, unreadable conclusion, digest-only guard, `..` check, evidence key, reader recursion, blobs guard, scope identity, summary identity, `_guard` recursion (killed after adding the nested-manifest test), launch-pending isolation (made impossible by construction) |
+| Hardening-pass mutation (earlier) | 28/28 killed |
+| Product package | rebuilt from final sources: `--package` check OK, fuses 0/0/0, ad-hoc signature verifies, native start OK, exit 2 on `--remote-debugging-port` |
+
+Nothing pushed or merged. Backend cohorts, model qualification, Ollama/profile settings and solver readiness (4/12, NOT READY) untouched.
+
+**KRIYA GUI v1 HARDENING: PASS - READY TO USE: YES.**
