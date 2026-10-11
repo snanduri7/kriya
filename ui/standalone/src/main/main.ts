@@ -22,6 +22,7 @@ import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
+import { ApprovalHost } from './approval_host';
 import { ExecutionHost } from './execution_host';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
@@ -61,6 +62,7 @@ const services = new KriyaServiceHolder();
 let settings: SettingsStore;
 let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
+let approvals: ApprovalHost;
 let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
 let quitting = false; // set once the person has confirmed interrupting a run and quitting
@@ -220,6 +222,10 @@ function registerIpc() {
     if (TRACE) process.stderr.write(`[kriya-ui] startRun ${result.started ? `launched ${result.launch_id}` : `refused ${result.refusal?.code}`} in ${Date.now() - startedAt} ms\n`);
     return result;
   });
+  ipcMain.handle(IPC_CHANNELS.decideApproval, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return approvals.decide(raw);
+  });
   ipcMain.handle(IPC_CHANNELS.executionState, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return execution.state();
@@ -279,6 +285,10 @@ app.whenReady().then(async () => {
     launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
     preflight: (workspace) => kupQuery({ operation: 'execution.preflight', workspace }),
     log: TRACE ? (line) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
+  });
+  approvals = new ApprovalHost({
+    run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,
+    currentWorkspace: () => workspaces.current(), log: TRACE ? (line) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
   });
   workspaces = new WorkspaceRegistry({
     getRecent: () => settings.get('recentWorkspaces'), setRecent: (list) => settings.set('recentWorkspaces', list),

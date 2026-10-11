@@ -93,6 +93,13 @@ export class FixtureHost implements HostAdapter {
     return [...this.baseScenarios, launched];
   }
 
+  /** While a launch waits on the human's review its evidence store is live (unsealed) and holds the candidate: the same recorded shapes a finished run's store has. */
+  private liveReviewScenario(evidenceId: string): Scenario | undefined {
+    if (!this.exec || evidenceId !== LAUNCH_ID || !this.exec.reviewPending()) return undefined;
+    const template = this.baseScenarios.find((s) => s.id === 'fx-greenfield-success') ?? this.baseScenarios[0]!;
+    return { ...template, id: LAUNCHED_TRACE_ID, evidenceId: LAUNCH_ID, goal: this.exec.goal(), seed: template.seed.store === 'present' ? { ...template.seed, sealed: false } : template.seed };
+  }
+
   /** Test hook: the application menu asks the renderer to open the chooser. */
   menu(command: MenuCommand): void { for (const l of [...this.menuListeners]) l(command); }
 
@@ -239,7 +246,7 @@ export class FixtureHost implements HostAdapter {
   async query(request: KupRequest): Promise<KupEnvelope> {
     this.calls.push(request);
     const find = (id: string) => this.scenarios.find((s) => s.id === id);
-    const findEvidence = (id: string) => this.scenarios.find((s) => s.evidenceId === id);
+    const findEvidence = (id: string) => this.scenarios.find((s) => s.evidenceId === id) ?? this.liveReviewScenario(id);
     switch (request.operation) {
       case 'capabilities': return this.env('capabilities', this.capabilities(), { kind: 'not_applicable', live_stream: false });
       case 'snapshot.list': return this.env('snapshot.list', { snapshot_directory: '/fixture/state/kup-snapshots', snapshots: [this.snapshotSummary(), ...this.extraSnapshotIds.map((id) => ({ ...this.snapshotSummary(), snapshot_id: id, acquisition_completed_at: '2026-10-09T09:00:00.010000Z' }))], retain: 3 }, this.live);
@@ -284,7 +291,7 @@ export class FixtureHost implements HostAdapter {
       case 'evidence.change_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.change_content');
       case 'evidence.call_content': return this.changeContent(request.run_id, findEvidence(request.run_id), request.seq, request.part, 'evidence.call_content');
       case 'evidence.records': {
-        if (this.exec && request.run_id === LAUNCH_ID && !this.exec.ended()) {
+        if (this.exec && request.run_id === LAUNCH_ID && !this.exec.ended() && !this.exec.reviewPending()) {
           const page = this.exec.records(request.from_seq ?? 1, request.limit ?? 200);
           const head = 'sha256:' + String(this.exec.lineCount()).padStart(2, '0').repeat(32).slice(0, 64);
           return this.env('evidence.records', { run_id: LAUNCH_ID, head_digest: head, records: page, next_cursor: null, filters_applied: {}, truncated: false, truncated_tail: false }, this.live, EVIDENCE_SOURCE);

@@ -18,6 +18,7 @@ const api = {
   forgetWorkspace: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.forgetWorkspace, path),
   startRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.startRun, request),
   executionState: () => ipcRenderer.invoke(IPC_CHANNELS.executionState),
+  decideApproval: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideApproval, request),
   /** The ONLY inbound channel: a fixed command name from the application menu. The event object and any payload are dropped, never forwarded. */
   onMenuCommand: (listener: (command: MenuCommand) => void) => {
     const handler = (_event: unknown, command: unknown) => { if ((MENU_COMMANDS as readonly unknown[]).includes(command)) listener(command as MenuCommand); };

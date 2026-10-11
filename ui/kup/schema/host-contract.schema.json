@@ -684,6 +684,17 @@
               "$ref": "#/$defs/ExecutionState"
             }
           }
+        },
+        "decideApproval": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "$ref": "#/$defs/DecideApprovalRequest"
+            },
+            "response": {
+              "$ref": "#/$defs/DecideApprovalResult"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -954,6 +965,91 @@
             }
           ],
           "description": "A typed host-side reason; never process output."
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecideApprovalRequest": {
+      "description": "Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. Kriya (`launch-decision`) validates every identity against its durable state and refuses a stale, replayed, foreign or late request.",
+      "type": "object",
+      "required": [
+        "workspace",
+        "launch_id",
+        "review_id",
+        "candidate_digest",
+        "decision"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001F]*$",
+          "description": "Absolute path without control characters."
+        },
+        "launch_id": {
+          "type": "string",
+          "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$"
+        },
+        "review_id": {
+          "type": "string",
+          "pattern": "^ra-[0-9a-f]{24}$"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecideApprovalResult": {
+      "description": "Answer to a review decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed refusal code.",
+      "type": "object",
+      "required": [
+        "accepted",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "launch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "review_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decided_at": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

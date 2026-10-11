@@ -30,11 +30,22 @@ describe('Runs', () => {
     expect(screen.getByText('2026-10-10')).toBeInTheDocument();
     expect(screen.getByText(/Unfinished/)).toBeInTheDocument();
     expect(screen.queryByText(/\bActive\b|Running/)).toBeNull();
-    expect(screen.getByText(/success · 1 attempt\(s\) · 98\.1s/)).toBeInTheDocument();
+    expect(screen.getByText(/success · 98\.1s/)).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ attempt\(s\)/)).toBeNull(); // the trace row's retry counter is never presented as an attempt count
   });
   it('selecting a run writes only runId (and resets what is below it)', async () => {
     const { store } = renderModule(runsModule, { selection: { attempt: '3', unitId: 'u' } });
     fireEvent.click(await screen.findByRole('button', { name: /Create a small CLI app/ }));
     expect(store.getState()).toMatchObject({ runId: 'fx-greenfield-success', attempt: null, unitId: null });
+  });
+});
+
+describe('attempt count presentation (GUI final)', () => {
+  it('the SELECTED run shows the attempts its evidence proves; no other row loads evidence to count, and the trace row\'s retry counter is never shown as the count', async () => {
+    renderModule(runsModule, { runId: 'fx-greenfield-success' });
+    expect(await screen.findByText(/success · 1 observed attempt\(s\) · 71\.2s/)).toBeInTheDocument();
+    expect(screen.queryByText(/(?<!observed )attempt\(s\)/)).toBeNull();
+    const others = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-selected') === 'false');
+    for (const row of others) expect(row.querySelector('.muted')?.textContent ?? '').not.toMatch(/attempt/);
   });
 });

@@ -20,6 +20,9 @@ export const IPC_CHANNELS = {
   // one allowlisted Kriya command line itself (execution_host.ts); executionState reports the process, never the run's outcome.
   startRun: 'kriya:host:execution:start',
   executionState: 'kriya:host:execution:state',
+  // GUI final: the review decision. ONE typed action (workspace + the identities Kriya gave the pending review + approve|reject); the host forwards it to
+  // Kriya's review-decision action and reports Kriya's answer. The renderer cannot name a command, an option or a different authority.
+  decideApproval: 'kriya:host:execution:decide',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';
@@ -46,6 +49,8 @@ export const LIMITS = {
   goalMax: 16000, // kriya/control/launch.py::GOAL_MAX_CHARS
 } as const;
 export const LAUNCH_ID_RE = /^\d{8}T\d{6}-[0-9a-f]{8}$/;
+export const REVIEW_ID_RE = /^ra-[0-9a-f]{24}$/;
+export const CANDIDATE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 // A cursor must start alphanumeric so it can never be read as an option by the kriya CLI (`--cursor --help`).
@@ -224,6 +229,19 @@ export function validateStartRun(v: unknown): ValidationResult<StartRunRequest> 
   if (v.goal.length > LIMITS.goalMax) return { ok: false, message: `the goal is ${v.goal.length} characters; the limit is ${LIMITS.goalMax}` };
   if (v.goal.includes('\0')) return { ok: false, message: 'the goal contains a NUL character' };
   return { ok: true, value: { workspace: w.value, goal: v.goal } };
+}
+
+export interface DecideApprovalRequest { workspace: string; launch_id: string; review_id: string; candidate_digest: string; decision: 'approve' | 'reject' }
+
+/** Review decision: exactly these five fields, each in its closed grammar. There is no field for 'always', 'whatever is current', an option or a mode. */
+export function validateDecideApproval(v: unknown): ValidationResult<DecideApprovalRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'candidate_digest,decision,launch_id,review_id,workspace') return { ok: false, message: 'decideApproval takes exactly workspace, launch_id, review_id, candidate_digest and decision' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+  if (typeof v.review_id !== 'string' || !REVIEW_ID_RE.test(v.review_id)) return { ok: false, message: 'review_id is malformed' };
+  if (typeof v.candidate_digest !== 'string' || !CANDIDATE_DIGEST_RE.test(v.candidate_digest)) return { ok: false, message: 'candidate_digest is malformed' };
+  if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
+  return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, candidate_digest: v.candidate_digest, decision: v.decision } };
 }
 
 export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; line?: number }> {

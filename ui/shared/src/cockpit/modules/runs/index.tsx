@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, useDispatch, useNavigate, useModuleSelection, useProvider, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ofKind, useDispatch, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
 import type { HistoryList, RunSummary } from '../../../model/kup';
 
 const PAGE = 200;
@@ -21,6 +21,9 @@ function RunsList() {
   const provider = useProvider();
   const session = useSession();
   const selected = useModuleSelection('runId');
+  const evidence = useRunEvidence();
+  // The attempt count of the SELECTED run, derived from its loaded evidence (the trace row's own `attempts` is a retry counter, so it is never shown as the count; other rows load no evidence just to count).
+  const observedAttempts = evidence.state === 'ready' || evidence.state === 'degraded' ? ofKind(evidence.data.records, 'attempt.opened').length : null;
   const dispatch = useDispatch();
   const snapshotId = session.snapshotId;
   const go = useNavigate();
@@ -82,7 +85,7 @@ function RunsList() {
               <li key={run.run_id}>
                 <button type="button" aria-selected={run.run_id === selected} onClick={() => dispatch({ type: 'selectRun', runId: run.run_id })}>
                   <div>{run.goal ?? run.run_id}</div>
-                  <div className="muted small">{statusLabel(run.status)} · {run.attempts ?? '?'} attempt(s){run.duration_sec != null ? ` · ${Math.round(run.duration_sec * 10) / 10}s` : ''}</div>
+                  <div className="muted small">{statusLabel(run.status)}{run.run_id === selected && observedAttempts !== null ? ` · ${observedAttempts} observed attempt(s)` : ''}{run.duration_sec != null ? ` · ${Math.round(run.duration_sec * 10) / 10}s` : ''}</div>
                 </button>
               </li>
             ))}

@@ -1,4 +1,4 @@
-import type { ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
+import type { DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -61,6 +61,8 @@ export interface WorkspaceHost {
 export interface ExecutionHostPort {
   startRun(request: StartRunRequest): Promise<StartRunResult>;
   state(): Promise<ExecutionState>;
+  /** Review decision (GUI final): the host forwards ONE typed decision to Kriya's `launch-decision` action and reports Kriya's answer. It never decides. */
+  decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
 }
 
 export interface HostAdapter {

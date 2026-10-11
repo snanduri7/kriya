@@ -5,20 +5,31 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
+/**
+ * change_review: a change is held for the person's review (human-in-the-loop).
+ * configured_mode: the resolved configuration selects another autonomy mode (shown, never
+ * changed by the app). unknown: the configuration could not be resolved.
+ */
 public enum Approvals {
-    UNAVAILABLE;
+    CHANGE_REVIEW, CONFIGURED_MODE, UNAVAILABLE, UNKNOWN;
 
     @JsonValue
     public String toValue() {
         switch (this) {
+            case CHANGE_REVIEW: return "change_review";
+            case CONFIGURED_MODE: return "configured_mode";
             case UNAVAILABLE: return "unavailable";
+            case UNKNOWN: return "unknown";
         }
         return null;
     }
 
     @JsonCreator
     public static Approvals forValue(String value) throws IOException {
+        if (value.equals("change_review")) return CHANGE_REVIEW;
+        if (value.equals("configured_mode")) return CONFIGURED_MODE;
         if (value.equals("unavailable")) return UNAVAILABLE;
+        if (value.equals("unknown")) return UNKNOWN;
         throw new IOException("Cannot deserialize Approvals");
     }
 }

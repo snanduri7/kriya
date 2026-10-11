@@ -107,6 +107,40 @@ def save_launch_record(workspace_path: str, launch_id: str, payload: Dict[str, A
     _save_json_document(workspace_path, launch_record_path(workspace_path, launch_id), payload, derived_from_active_run=False)
 
 
+def launch_review_decision_path(workspace_path: str, launch_id: str, review_id: str) -> str:
+    """GUI final: the ONE durable decision of ONE pending change review, beside the launch record. One file per review id: a decision for a review
+    that has been superseded can never be read as the answer to the current one."""
+    if not _valid_run_id(launch_id) or not _valid_run_id(review_id):
+        raise ValueError("launch_id and review_id must contain only letters, digits, '-' or '_'")
+    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.review-{review_id}.json")
+
+
+def save_launch_review_decision(workspace_path: str, launch_id: str, review_id: str, payload: Dict[str, Any]) -> None:
+    """Writes the decision ONLY if none exists yet (the revision of an absent file is the expected base): a second writer is refused, never overwrites."""
+    path = launch_review_decision_path(workspace_path, launch_id, review_id)
+    if os.path.lexists(path):
+        raise FileExistsError(path)
+    # the expected base is the revision of NO bytes: a decision that appears between this check and the write changes the base and the write is refused
+    _save_json_document(workspace_path, path, payload, derived_from_active_run=False, expected_file_revision=raw_digest(b""))
+
+
+def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:
+    """None when no (complete, trustworthy) decision exists yet. A partially written or foreign file is 'not yet', never a decision."""
+    path = launch_review_decision_path(workspace_path, launch_id, review_id)
+    try:
+        with open(path, "rb") as handle:
+            payload = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        validate_ownership(workspace_path, payload, path)
+    except WorkspaceOwnershipError:
+        return None
+    return payload
+
+
 def load_launch_record(workspace_path: str, launch_id: str) -> Optional[Dict[str, Any]]:
     """None when no record exists; raises UnreadableRunRecordError when one exists but is not trustworthy (corrupt or owned by another workspace)."""
     path = launch_record_path(workspace_path, launch_id)

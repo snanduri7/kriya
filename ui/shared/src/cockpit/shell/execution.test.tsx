@@ -49,7 +49,7 @@ describe('goal and preflight', () => {
     expect(within(panel).getByText('/fixture/state')).toBeInTheDocument();
     expect(within(panel).getByText('fixture-model:7b')).toBeInTheDocument();
     expect(within(panel).getByText(/fallback fixture-fallback:3b/)).toBeInTheDocument();
-    expect(within(panel).getByText(/no interactive approval/i)).toBeInTheDocument();
+    expect(within(panel).getByText(/held for your review in this window and applied only if you approve it/i)).toBeInTheDocument();
     expect(startButton()).toBeDisabled();
     await typeGoal();
     await waitFor(() => expect(startButton()).toBeEnabled());
@@ -247,7 +247,7 @@ describe('Start Run', () => {
     expect(within(bar).queryByText(/succeeded/i)).toBeNull();
   });
 
-  it('an approval the desktop cannot give is shown as "Approval required" with Kriya\'s recorded reason and details, says it must be done outside the GUI, and offers no Approve button', async () => {
+  it('a change review Kriya could not hold open is shown as "Approval required" with Kriya\'s recorded reason and details, says nothing was approved, and offers no Approve button', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'approval_required' } });
     await typeGoal();
     await screen.findByText('fixture-model:7b');
@@ -259,7 +259,7 @@ describe('Start Run', () => {
     expect(within(bar).getByText(/a proposed change needs approval/)).toBeInTheDocument();
     expect(within(bar).getByText(/the proposed change touches a sensitive path/)).toBeInTheDocument();
     expect(within(bar).getByText(/files: \.github\/workflows\/ci\.yml/)).toBeInTheDocument();
-    expect(within(bar).getByText(/performed outside the Kriya GUI/)).toBeInTheDocument();
+    expect(within(bar).getByText(/nothing was approved on your behalf/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve|accept|allow|yes/i })).toBeNull();
     expect(within(bar).queryByText(/Run failed/)).toBeNull();
   });

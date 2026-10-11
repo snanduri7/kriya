@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Badge, useDispatch, useExecution, type RunView } from '../core';
+import { ApprovalReview } from './ApprovalReview';
 
 const STAGE_LABEL: Record<RunView['stage'], string> = { starting: 'Starting', running: 'Running', finished: 'Finished' };
 const COUNTS: Array<[string, string]> = [['unit.opened', 'Units opened'], ['attempt.opened', 'Attempts opened'], ['model.request', 'Model requests'], ['gate.result', 'Gate results']];
@@ -22,7 +23,7 @@ function useElapsed(since: string | null, running: boolean): string | null {
   return Number.isFinite(start) ? clock(now - start) : null;
 }
 
-const TONE = { success: 'ok', failure: 'bad', needs_review: 'warn', refused: 'bad', interrupted: 'warn', not_recorded: 'warn', approval_required: 'warn' } as const;
+const TONE = { success: 'ok', failure: 'bad', needs_review: 'warn', refused: 'bad', interrupted: 'warn', not_recorded: 'warn', approval_required: 'warn', rejected: 'warn', review_expired: 'warn' } as const;
 const APPROVAL_KIND: Record<string, string> = {
   change_approval: 'a proposed change needs approval', knowledge_gap_acknowledgement: 'a knowledge gap needs acknowledgement', skill_gap_decision: 'a skill gap needs a decision',
   skill_conflict_decision: 'two skills may conflict', web_lookup_review: 'live-lookup references need review', web_lookup_query: 'a live-lookup search needs approval',
@@ -43,9 +44,9 @@ export function ActiveRunBanner() {
   return (
     <section className="ck-runbar ck-state" role="status" aria-live="polite" aria-label="Active run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-runbar-head">
-        <strong>{finished ? run.outcome!.label : `Run ${STAGE_LABEL[run.stage].toLowerCase()}`}</strong>
+        <strong>{finished ? run.outcome!.label : run.review ? 'Approval required' : `Run ${STAGE_LABEL[run.stage].toLowerCase()}`}</strong>
         <span className="muted mono small" title="The launch id is the run id">{run.launchId}</span>
-        {!finished ? <Badge tone="info">{STAGE_LABEL[run.stage]}</Badge> : <Badge tone={TONE[run.outcome!.kind]}>{run.outcome!.kind.replace('_', ' ')}</Badge>}
+        {!finished ? (run.review ? <Badge tone="warn">approval required</Badge> : <Badge tone="info">{STAGE_LABEL[run.stage]}</Badge>) : <Badge tone={TONE[run.outcome!.kind]}>{run.outcome!.kind.replace('_', ' ')}</Badge>}
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         <span className="grow" />
         {finished ? (
@@ -55,11 +56,12 @@ export function ActiveRunBanner() {
           </>
         ) : null}
       </div>
+      {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
       {finished && run.outcome!.approval ? (
         <div>
           <div><strong>{APPROVAL_KIND[run.outcome!.approval.kind] ?? run.outcome!.approval.kind}.</strong> {run.outcome!.approval.reason}</div>
           {detailLines(run.outcome!.approval.details).map((l) => <div key={l} className="muted small mono">{l}</div>)}
-          <div className="muted small">Kriya stopped here instead of deciding for you. This version of the app cannot approve it: the approval must currently be performed outside the Kriya GUI (nothing was approved on your behalf). Source: {run.outcome!.source}.</div>
+          <div className="muted small">{run.outcome!.approval.kind === 'change_approval' ? 'Kriya could not hold this review open for you, so it stopped instead of deciding: nothing was approved on your behalf. Start the run again to review the change.' : 'Kriya stopped here instead of deciding for you. This version of the app cannot take this kind of decision: it must be performed outside the Kriya GUI (nothing was approved on your behalf).'} Source: {run.outcome!.source}.</div>
         </div>
       ) : null}
       {finished && run.outcome!.recordedError && run.outcome!.recordedError !== run.outcome!.detail && run.outcome!.kind !== 'success' && run.outcome!.kind !== 'approval_required' ? <div role="note"><strong>Kriya reported:</strong> <span className="mono small">{run.outcome!.recordedError}</span></div> : null}

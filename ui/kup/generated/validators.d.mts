@@ -34,5 +34,7 @@ export const validateWorkspaceChoice: ((value: unknown) => boolean) & { errors?:
 export const validateStartRunRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateStartRunResult: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateExecutionState: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateDecideApprovalRequest: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateDecideApprovalResult: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateRecentWorkspaces: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateHostMessages: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };

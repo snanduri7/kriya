@@ -4,7 +4,7 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
@@ -50,6 +50,8 @@ export const validate = {
   startRunRequest: (x: unknown) => run<StartRunRequest>('validateStartRunRequest', x),
   startRunResult: (x: unknown) => run<StartRunResult>('validateStartRunResult', x),
   executionState: (x: unknown) => run<ExecutionState>('validateExecutionState', x),
+  decideApprovalRequest: (x: unknown) => run<DecideApprovalRequest>('validateDecideApprovalRequest', x),
+  decideApprovalResult: (x: unknown) => run<DecideApprovalResult>('validateDecideApprovalResult', x),
   section: (x: unknown) => run<Section>('validateSection', x),
   kupRequest: (x: unknown) => run<KupRequest>('validateKupRequest', x),
   openInIdeRequest: (x: unknown) => run<OpenInIdeRequest>('validateOpenInIdeRequest', x),

@@ -158,7 +158,7 @@
         "interaction": {
           "type": "object",
           "required": ["approvals", "knowledge_policy", "note"],
-          "properties": { "approvals": { "type": "string", "enum": ["unavailable"] }, "knowledge_policy": { "type": "string" }, "note": { "type": "string" } },
+          "properties": { "approvals": { "type": "string", "enum": ["change_review", "configured_mode", "unknown", "unavailable"], "description": "change_review: a change is held for the person's review (human-in-the-loop). configured_mode: the resolved configuration selects another autonomy mode (shown, never changed by the app). unknown: the configuration could not be resolved." }, "autonomy_mode": { "type": ["string", "null"], "description": "The autonomy mode of the resolved configuration, verbatim." }, "knowledge_policy": { "type": "string" }, "note": { "type": "string" } },
           "additionalProperties": true
         }
       },
@@ -224,6 +224,18 @@
               "type": "array",
               "description": "Decisions the run could proceed without (skill gap/conflict, live lookup) that the desktop declined: nothing was approved, the run continued; informational only.",
               "items": { "type": "object", "required": ["kind", "reason", "details", "noted_at"], "properties": { "kind": { "type": "string" }, "reason": { "type": "string" }, "details": { "type": "object", "additionalProperties": true }, "noted_at": { "type": "string" } }, "additionalProperties": true }
+            },
+            "pending_approval": {
+              "type": ["object", "null"],
+              "description": "The change review the run is waiting on (or last waited on): the exact candidate (digest; files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.",
+              "required": ["review_id", "sequence", "kind", "status", "requested_at", "expires_at", "candidate_digest", "files", "reason", "reason_truncated", "reason_sha256", "decision"],
+              "properties": { "review_id": { "type": "string" }, "sequence": { "type": "integer" }, "kind": { "type": "string" }, "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED"] }, "requested_at": { "type": "string" }, "expires_at": { "type": "string" }, "candidate_digest": { "type": "string" }, "files": { "type": "array", "items": { "type": "object", "required": ["filepath", "diff_sha256", "lines_added", "lines_removed"], "properties": { "filepath": { "type": "string" }, "diff_sha256": { "type": "string" }, "lines_added": { "type": "integer" }, "lines_removed": { "type": "integer" } }, "additionalProperties": true } }, "reason": { "type": "string" }, "reason_truncated": { "type": "boolean" }, "reason_sha256": { "type": "string" }, "decision": { "type": ["object", "null"], "properties": { "decision": { "type": ["string", "null"] }, "decided_at": { "type": ["string", "null"] }, "source": { "type": "string" } }, "additionalProperties": true } },
+              "additionalProperties": true
+            },
+            "approval_history": {
+              "type": "array",
+              "description": "Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.",
+              "items": { "type": "object", "required": ["review_id", "sequence", "kind", "status", "requested_at", "expires_at", "candidate_digest", "files", "reason", "reason_truncated", "reason_sha256", "decision"], "properties": { "review_id": { "type": "string" }, "sequence": { "type": "integer" }, "kind": { "type": "string" }, "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED"] }, "requested_at": { "type": "string" }, "expires_at": { "type": "string" }, "candidate_digest": { "type": "string" }, "files": { "type": "array", "items": { "type": "object", "required": ["filepath", "diff_sha256", "lines_added", "lines_removed"], "properties": { "filepath": { "type": "string" }, "diff_sha256": { "type": "string" }, "lines_added": { "type": "integer" }, "lines_removed": { "type": "integer" } }, "additionalProperties": true } }, "reason": { "type": "string" }, "reason_truncated": { "type": "boolean" }, "reason_sha256": { "type": "string" }, "decision": { "type": ["object", "null"], "properties": { "decision": { "type": ["string", "null"] }, "decided_at": { "type": ["string", "null"] }, "source": { "type": "string" } }, "additionalProperties": true } }, "additionalProperties": true }
             },
             "approval_required": {
               "type": ["object", "null"],

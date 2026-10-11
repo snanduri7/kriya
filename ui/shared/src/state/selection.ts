@@ -21,6 +21,8 @@ export interface Selection {
   phaseFilter: string | null; // filters visibility only, never selection
   bottomTab: string | null; // the evidence drawer's active module id (drawerOpen is shared with M1)
   compareAttempt: string | null; // the second attempt (B) of an A/B comparison; `attempt` is A
+  /** GUI final: the launch whose LIVE evidence is being reviewed (a run waiting on the human's decision has no trace row yet); equals runId, or null. */
+  liveLaunchId: string | null;
 }
 
 export const initialSelection: Selection = {
@@ -39,10 +41,13 @@ export const initialSelection: Selection = {
   phaseFilter: null,
   bottomTab: null,
   compareAttempt: null,
+  liveLaunchId: null,
 };
 
 export type SelectionAction =
   | { type: 'selectRun'; runId: string | null }
+  /** Select the run a launch is still executing (read from its live evidence store, not from a trace row). */
+  | { type: 'selectLiveRun'; launchId: string }
   | { type: 'selectAttempt'; attempt: string | null }
   | { type: 'selectEvent'; eventIndex: number | null }
   | { type: 'selectComparison'; path: string | null }
@@ -65,8 +70,11 @@ export function selectionReducer(state: Selection, action: SelectionAction): Sel
   switch (action.type) {
     case 'selectRun':
       // A new run invalidates every finer selection; the tab choice is kept (user intent).
-      if (action.runId === state.runId) return state;
-      return { ...state, runId: action.runId, attempt: null, eventIndex: null, comparisonPath: null, unitId: null, eventSeq: null, gateId: null, filePath: null, phaseFilter: null, compareAttempt: null };
+      if (action.runId === state.runId && state.liveLaunchId === null) return state;
+      return { ...state, runId: action.runId, liveLaunchId: null, attempt: null, eventIndex: null, comparisonPath: null, unitId: null, eventSeq: null, gateId: null, filePath: null, phaseFilter: null, compareAttempt: null };
+    case 'selectLiveRun':
+      if (state.runId === action.launchId && state.liveLaunchId === action.launchId) return state;
+      return { ...state, runId: action.launchId, liveLaunchId: action.launchId, attempt: null, eventIndex: null, comparisonPath: null, unitId: null, eventSeq: null, gateId: null, filePath: null, phaseFilter: null, compareAttempt: null };
     case 'selectAttempt':
       // Narrowing to one attempt may hide the selected event, so the event selection is dropped; widening back to
       // "all events" hides nothing, so the selected event (an index into the recorded list) stays selected.

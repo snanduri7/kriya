@@ -47,6 +47,8 @@
 //     StartRunRequest data = Converter.StartRunRequestFromJsonString(jsonString);
 //     StartRunResult data = Converter.StartRunResultFromJsonString(jsonString);
 //     ExecutionState data = Converter.ExecutionStateFromJsonString(jsonString);
+//     DecideApprovalRequest data = Converter.DecideApprovalRequestFromJsonString(jsonString);
+//     DecideApprovalResult data = Converter.DecideApprovalResultFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
 
 package kup;
@@ -384,6 +386,22 @@ public class Converter {
 
     public static String ExecutionStateToJsonString(ExecutionState obj) throws JsonProcessingException {
         return getExecutionStateObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideApprovalRequest DecideApprovalRequestFromJsonString(String json) throws IOException {
+        return getDecideApprovalRequestObjectReader().readValue(json);
+    }
+
+    public static String DecideApprovalRequestToJsonString(DecideApprovalRequest obj) throws JsonProcessingException {
+        return getDecideApprovalRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideApprovalResult DecideApprovalResultFromJsonString(String json) throws IOException {
+        return getDecideApprovalResultObjectReader().readValue(json);
+    }
+
+    public static String DecideApprovalResultToJsonString(DecideApprovalResult obj) throws JsonProcessingException {
+        return getDecideApprovalResultObjectWriter().writeValueAsString(obj);
     }
 
     public static List<String> RecentWorkspacesFromJsonString(String json) throws IOException {
@@ -1477,6 +1495,68 @@ public class Converter {
     private static ObjectWriter getExecutionStateObjectWriter() {
         if (ExecutionStateWriter == null) instantiateExecutionStateMapper();
         return ExecutionStateWriter;
+    }
+
+    private static ObjectReader DecideApprovalRequestReader;
+    private static ObjectWriter DecideApprovalRequestWriter;
+
+    private static void instantiateDecideApprovalRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideApprovalRequestReader = mapper.readerFor(DecideApprovalRequest.class);
+        DecideApprovalRequestWriter = mapper.writerFor(DecideApprovalRequest.class);
+    }
+
+    private static ObjectReader getDecideApprovalRequestObjectReader() {
+        if (DecideApprovalRequestReader == null) instantiateDecideApprovalRequestMapper();
+        return DecideApprovalRequestReader;
+    }
+
+    private static ObjectWriter getDecideApprovalRequestObjectWriter() {
+        if (DecideApprovalRequestWriter == null) instantiateDecideApprovalRequestMapper();
+        return DecideApprovalRequestWriter;
+    }
+
+    private static ObjectReader DecideApprovalResultReader;
+    private static ObjectWriter DecideApprovalResultWriter;
+
+    private static void instantiateDecideApprovalResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideApprovalResultReader = mapper.readerFor(DecideApprovalResult.class);
+        DecideApprovalResultWriter = mapper.writerFor(DecideApprovalResult.class);
+    }
+
+    private static ObjectReader getDecideApprovalResultObjectReader() {
+        if (DecideApprovalResultReader == null) instantiateDecideApprovalResultMapper();
+        return DecideApprovalResultReader;
+    }
+
+    private static ObjectWriter getDecideApprovalResultObjectWriter() {
+        if (DecideApprovalResultWriter == null) instantiateDecideApprovalResultMapper();
+        return DecideApprovalResultWriter;
     }
 
     private static ObjectReader RecentWorkspacesReader;

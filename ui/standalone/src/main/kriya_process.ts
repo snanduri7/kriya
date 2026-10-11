@@ -26,7 +26,7 @@ export interface SpawnOptions {
   argv: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv; // ONLY what the caller passes (the real kriya: child_env.ts; the stand-in: main.ts fakeEnv); never ambient process.env
-  limits?: Partial<typeof PROCESS_LIMITS>;
+  limits?: Partial<Record<keyof typeof PROCESS_LIMITS, number>>;
   /** Used for the fixture kriya: run a script with Electron's own binary as Node. */
   nodeScript?: boolean;
 }

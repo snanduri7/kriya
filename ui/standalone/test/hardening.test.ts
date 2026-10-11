@@ -144,8 +144,27 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     for (const f of readdirSync(MAIN)) {
       if (f === 'execution_host.ts') continue;
       const src = read(join(MAIN, f));
-      expect(src, f).not.toMatch(/'generate'|"generate"|--launch-id|--yes|--knowledge-policy|--trust-file/);
+      // `--launch-id` is also an option of the review-decision command (kriya_argv.ts, below); `generate`, auto-approval and trust options appear nowhere else.
+      expect(src, f).not.toMatch(/'generate'|"generate"|--yes|--knowledge-policy|--trust-file/);
+      if (f !== 'kriya_argv.ts') expect(src, f).not.toMatch(/--launch-id/);
     }
+  });
+  it('the review decision is ONE typed action: one command line in one place, validated twice, no option that could approve more than the one review (GUI final)', () => {
+    const argv = read(join(MAIN, 'kriya_argv.ts'));
+    expect(argv).toContain("const argv = ['launch-decision', '--launch-id', request.launch_id, '--review-id', request.review_id, '--candidate-digest', request.candidate_digest, '--decision', request.decision];");
+    for (const f of readdirSync(MAIN)) {
+      const src = read(join(MAIN, f));
+      expect(src, f).not.toMatch(/--yes|--always|--auto-approve|--autonomy|(['"])-y\1/);
+      if (f !== 'kriya_argv.ts' && f !== 'approval_host.ts') expect(src, f).not.toContain('launch-decision');
+    }
+    const host = read(join(MAIN, 'approval_host.ts'));
+    expect(host).toContain('validateDecideApproval(raw)');
+    expect(host).toContain('buildLaunchDecisionArgv(request.value)');
+    expect(host).toContain('this.deps.currentWorkspace() !== workspace');
+    expect(host).not.toMatch(/from '(node:)?child_process'|from 'electron'|from '(node:)?fs'|writeFile|appendFile|mkdir/); // no process, no Electron, no file written by the proxy
+    expect(mainTs).toContain('return approvals.decide(raw);');
+    expect(read(join(MAIN, 'preload.ts'))).toContain('decideApproval: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideApproval, request)');
+    expect(read(join(MAIN, 'ipc_contract.ts'))).toContain("Object.keys(v).sort().join() !== 'candidate_digest,decision,launch_id,review_id,workspace'");
   });
   it('the launch id is minted in main and never accepted from the renderer', () => {
     expect(mainTs).toContain('mintLaunchId,');

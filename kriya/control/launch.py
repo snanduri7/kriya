@@ -22,7 +22,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 from kriya.control.persistence import load_launch_record, save_launch_record
 
@@ -86,8 +86,9 @@ class LaunchSession:
             "requested_at": _now(), "goal": goal_digest(goal), "options": options, "preflight": preflight,
             "process": {"pid": os.getpid()}, "phase": PHASE_STARTING, "run": None, "ended": None,
             "history": [{"phase": PHASE_STARTING, "at": _now()}],
-            "approval_required": None, "declined_decisions": [],
+            "approval_required": None, "declined_decisions": [], "pending_approval": None, "approval_history": [],
         }
+        self._review_sequence = 0
 
     @property
     def record(self) -> Dict[str, Any]:
@@ -145,6 +146,53 @@ class LaunchSession:
             if isinstance(details, dict) and details.get("run_id") == self.launch_id:
                 self._trace_run_id = trace_run_id
 
+    def request_change_approval(self, files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[bool]]:
+        """The change gate asked for a human decision. Record the exact pending review durably (bound to this launch, workspace and candidate) and return the
+        awaitable that resolves to the human's decision (see kriya/control/launch_approval.py). None = no review could be recorded: the caller declines."""
+        from kriya.control.launch_approval import (
+            HISTORY_MAX,
+            STATUS_EXPIRED,
+            STATUS_PENDING,
+            await_decision,
+            build_pending,
+        )
+
+        if not files:
+            return None
+        self._review_sequence += 1
+        pending = build_pending(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, files, reason)
+        previous = self._record.get("pending_approval")
+        history = list(self._record.get("approval_history") or [])
+        if isinstance(previous, dict):
+            history.append({**previous, "status": STATUS_EXPIRED if previous.get("status") == STATUS_PENDING else previous.get("status")})
+        self._record["approval_history"] = history[-HISTORY_MAX:]
+        self._record["pending_approval"] = pending
+        try:
+            save_launch_record(self.workspace, self.launch_id, self._record)
+        except Exception as error:  # no durable pending review means nothing can be approved against it
+            logger.error("Launch %s: pending review not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
+            self._record["pending_approval"], self._record["approval_history"] = previous, history[:-1] if isinstance(previous, dict) else history
+            return None
+        return await_decision(self, pending["review_id"], pending["candidate_digest"])
+
+    def resolve_review(self, review_id: str, status: str, decision: Dict[str, Any]) -> bool:
+        """Record how the pending review ended BEFORE the workflow is told. False (nothing recorded, so the caller must not approve) when the review is
+        no longer the pending one or the record cannot be written."""
+        from kriya.control.launch_approval import STATUS_PENDING
+
+        pending = self._record.get("pending_approval")
+        if not isinstance(pending, dict) or pending.get("review_id") != review_id or pending.get("status") != STATUS_PENDING:
+            return False
+        updated = {**pending, "status": status, "decision": decision}
+        self._record["pending_approval"] = updated
+        try:
+            save_launch_record(self.workspace, self.launch_id, self._record)
+        except Exception as error:
+            logger.error("Launch %s: review decision not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
+            self._record["pending_approval"] = pending
+            return False
+        return True
+
     def claim_run_id(self, workspace: str) -> Optional[str]:
         """The id the first top-level run in this launch's workspace must use (once)."""
         if self._claimed or workspace != self.workspace:
@@ -159,6 +207,12 @@ class LaunchSession:
     def finish(self, exit_code: int, result: Optional[Dict[str, Any]], error: Optional[str]) -> None:
         """Seal the record with what the launching process ended with. ``workflow_*`` are the workflow's own returned words, copied, not judged."""
         result = result if isinstance(result, dict) else {}
+        from kriya.control.launch_approval import STATUS_EXPIRED, STATUS_PENDING
+
+        pending = self._record.get("pending_approval")
+        if isinstance(pending, dict) and pending.get("status") == STATUS_PENDING:
+            # the launch ends with a review nobody decided (interrupted before the wait began, a crash): the record must not keep claiming it is waiting
+            self._record["pending_approval"] = {**pending, "status": STATUS_EXPIRED, "decision": {"decision": None, "decided_at": _now(), "source": "launch-ended"}}
         if result.get("status") == "knowledge_gap":
             # strict KnowledgeGuard stop: acknowledging the gap is a human decision the desktop cannot make (kriya generate --ack-knowledge-gap is a CLI option)
             gaps = [g for g in (result.get("gap_report") or {}).get("gaps", []) if isinstance(g, dict)]
@@ -212,6 +266,16 @@ def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> b
     except Exception as error:  # observational
         logger.error("Launch: approval requirement not recorded (%s: %s)", type(error).__name__, error)
         return True
+
+
+def request_change_approval(files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[bool]]:
+    """For the change gate's callback in `kriya generate`: inside a desktop launch with a non-empty change set, the awaitable that resolves to the human
+    decision (the callback returns it; the change gate awaits it). None outside a launch, for an empty change set, or when no review could be recorded."""
+    try:
+        return _ACTIVE.request_change_approval(files, reason) if _ACTIVE is not None else None
+    except Exception as error:  # observational: a failure to record means the caller declines
+        logger.error("Launch: change review not requested (%s: %s)", type(error).__name__, error)
+        return None
 
 
 def note_trace_row(trace_run_id: str, run_events: Any) -> None:

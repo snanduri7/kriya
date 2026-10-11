@@ -78,7 +78,7 @@ def test_preflight_describes_the_run_exactly_and_is_read_only(ws):
     assert cfg["directory"] == canonical_workspace(str(ws)) and len(cfg["fingerprint"]) == 64
     assert data["state"]["observable_by_cockpit"] is True and data["state"]["directory"] == data["state"]["cockpit_directory"]
     assert data["model"]["model"] and data["model"]["provider"] and "api_key" not in json.dumps(data)
-    assert data["interaction"]["approvals"] == "unavailable" and data["interaction"]["knowledge_policy"] == "strict"
+    assert data["interaction"]["approvals"] == "change_review" and data["interaction"]["autonomy_mode"] == "human-in-the-loop" and data["interaction"]["knowledge_policy"] == "strict"
     assert os.getcwd() == cwd, "the preflight must restore the process working directory"
     assert _tree(ws) == before and not (ws / ".kriya").exists(), "a preflight writes nothing into the folder"
 
@@ -624,3 +624,15 @@ def test_a_tool_git_working_first_on_path_does_not_block(ws, monkeypatch, tmp_pa
     monkeypatch.setenv("PATH", str(good))
     data = _preflight(ws)["data"]
     assert not [b for b in data["blockers"] if b["code"] == "TOOL_UNAVAILABLE"]
+
+
+def test_preflight_reports_the_configured_autonomy_mode_and_never_changes_it():
+    from kriya.kup.execution import _interaction
+
+    assert _interaction(AppConfig())["approvals"] == "change_review"
+    autonomous = AppConfig()
+    autonomous.autonomy.mode = "autonomous"
+    shown = _interaction(autonomous)
+    assert shown["approvals"] == "configured_mode" and shown["autonomy_mode"] == "autonomous" and "autonomous" in shown["note"]
+    assert autonomous.autonomy.mode == "autonomous", "the report must not alter the configuration"
+    assert _interaction(None)["approvals"] == "unknown"

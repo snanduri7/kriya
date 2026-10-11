@@ -6,14 +6,18 @@ logger and the typed result. Only `_generate_impl` - the planning/generation/ver
 script, so the cockpit's execution path can be driven deterministically without any model. Other commands (`traces`, `evidence`, `kup-stdio`, ...)
 are the real ones, so reads see exactly the durable records a real run would leave.
 
-A goal containing [controlled:success|failure|crash|die|approval] overrides the outcome for that run.
+A goal containing [controlled:success|failure|crash|die|approval|review] overrides the outcome for that run.
 Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die|hold|approval", "step_ms": 300, "release": "<path>"}
   success / failure  -> a run with unit, attempt, model, change and gate records; success seals RunRecord SUCCESS, failure seals FAILURE
   crash              -> raises inside the run (RunRecord FAILURE, no trace row)
   die                -> SIGKILL after the records: nothing is sealed (the launch stays RUNNING, the lock is released by the OS)
   approval           -> records the human decision the workflow reached (Kriya's own recorder), then stops: nothing is approved
   hold               -> records, then waits until the `release` file exists (to observe a run in progress), then succeeds
+  review             -> records a candidate and a passing gate, then reaches the REAL change-approval path (kriya.control.launch.request_change_approval, the same
+                        call the generate callback makes) and waits for the human's decision: approve -> the run succeeds; reject -> the run ends human_rejected,
+                        exactly as the workflow's abort does (its result carries a checkpoint-style run_id that is NOT the trace row id)
 """
+import asyncio
 import json
 import os
 import re
@@ -34,7 +38,7 @@ from kriya.core.trace import TraceLogger
 SCRIPT = json.loads(os.environ.get("KRIYA_CONTROLLED_SCRIPT", "{}"))
 STEP = float(SCRIPT.get("step_ms", 300)) / 1000.0
 OUTCOME = SCRIPT.get("outcome", "success")
-MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval)\]")
+MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review)\]")
 
 
 def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
@@ -73,16 +77,28 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 release = SCRIPT.get("release")
                 while release and not os.path.exists(release):
                     time.sleep(0.05)
+            approved = None
+            if OUTCOME == "review":
+                from kriya.control.launch import request_change_approval
+                awaiting = request_change_approval(
+                    [{"filepath": "src/clamp.py", "content": "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -0,0 +1,2 @@\n+def clamp(v, lo, hi):\n+    return max(lo, min(hi, v))\n"}],
+                    "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
+                approved = asyncio.run(awaiting) if awaiting is not None else False
         pointer = scope.store_pointer()
-        success = OUTCOME in ("success", "hold")
-        status = "success" if success else "failure"
+        success = OUTCOME in ("success", "hold") or approved is True
+        rejected = OUTCOME == "review" and not approved
+        status = "success" if success else "human_rejected" if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
                    "message": "attempt evidence store", "failure_type": None, "operation": None, "details": pointer, "created_at": started}]
         TraceLogger(os.path.join(resolve_state_directory(cfg)[0], "traces.db")).log_run(
             run_id=trace_id, goal=goal, duration_sec=time.time() - started, attempts=1, status=status, files_modified=["src/clamp.py"] if success else [],
-            failure_category=None if success else "quality_gate_failed", run_events=events)
+            failure_category=None if success else status if rejected else "quality_gate_failed", run_events=events)
         if success:
             _complete_successful_run(context)
+    if rejected:
+        # the workflow's own abort result: no status, a checkpoint-style run_id (NOT the trace row id)
+        output.result = {"files": [], "quality_gates_passed": False, "review": "reviewed", "run_id": "20200101T000000-0badc0de"}
+        sys.exit(1)
     output.result = {"status": status, "quality_gates_passed": success, "run_id": trace_id, "files": ["src/clamp.py"] if success else [],
                      **({} if success else {"failure_category": "quality_gate_failed"})}
     sys.exit(0 if success else 1)

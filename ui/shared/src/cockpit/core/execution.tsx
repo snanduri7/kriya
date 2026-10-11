@@ -11,7 +11,7 @@
  * the outcome is durable. When it is, the Runs/Timeline/Overview/... modules are refreshed through the ordinary snapshot path - they never see a special case.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
+import type { DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
 import type { SelectionStore } from './selectionStore';
@@ -28,7 +28,9 @@ export interface RunProgress {
 }
 export const NO_PROGRESS: RunProgress = { lastSeq: 0, kinds: {}, recent: [], error: null };
 
-export type OutcomeKind = 'success' | 'failure' | 'needs_review' | 'refused' | 'interrupted' | 'not_recorded' | 'approval_required';
+export type OutcomeKind = 'success' | 'failure' | 'needs_review' | 'refused' | 'interrupted' | 'not_recorded' | 'approval_required' | 'rejected' | 'review_expired';
+/** The change review a run is waiting on, exactly as Kriya's launch record holds it. */
+export type PendingReview = NonNullable<LaunchStatus['launch']['pending_approval']>;
 export interface RunOutcome {
   kind: OutcomeKind;
   label: string;
@@ -58,6 +60,8 @@ export interface RunView {
   progress: RunProgress;
   stage: RunStage;
   outcome: RunOutcome | null;
+  /** The change review the run is WAITING on right now (Kriya's record: PENDING, the run live) - the only state in which a decision can be taken. */
+  review: PendingReview | null;
   timing: RunTiming;
 }
 
@@ -85,7 +89,17 @@ export interface ExecutionApi {
   locked: boolean;
   /** Clear a finished run's banner. */
   dismiss(): void;
+  /** The state of the decision being taken on the pending review (never more than one in flight). */
+  decision: DecisionState;
+  /** Approve or reject the review that is pending NOW, with the identities Kriya gave it; Kriya validates them and the waiting run - not this window - continues. */
+  decide(decision: 'approve' | 'reject'): Promise<void>;
 }
+
+export type DecisionState =
+  | { state: 'idle' }
+  | { state: 'submitting'; reviewId: string; decision: 'approve' | 'reject' }
+  | { state: 'refused'; reviewId: string; decision: 'approve' | 'reject'; code: string; message: string }
+  | { state: 'accepted'; reviewId: string; decision: 'approve' | 'reject' };
 
 const ExecutionContext = createContext<ExecutionApi | null>(null);
 export function useExecution(): ExecutionApi {
@@ -122,8 +136,16 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
     const workflowStatus = ended?.workflow_status ?? null;
     const traceRunId = ended?.trace_run_id ?? null;
     const needed = launch.approval_required;
+    const review = launch.pending_approval ?? null;
+    const succeeded = record.found && record.terminal_status === 'SUCCESS';
     // The RunRecord is the authority: a run that reached SUCCESS was not stopped by any decision, whatever was noted along the way.
-    if (needed && !(record.found && record.terminal_status === 'SUCCESS')) {
+    if (review && !succeeded && review.status === 'REJECTED') {
+      return { kind: 'rejected', label: 'Changes rejected', detail: 'You rejected the proposed changes; Kriya applied nothing.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
+    }
+    if (review && !succeeded && review.status === 'EXPIRED') {
+      return { kind: 'review_expired', label: 'Review expired', detail: review.decision?.source === 'host-gone' ? 'This window went away while the review was waiting, so Kriya declined it: nothing was applied.' : review.decision?.source === 'interrupted' ? 'The run was interrupted while the review was waiting: nothing was applied.' : 'The review was not decided in time, so Kriya declined it: nothing was applied.', source: 'Kriya launch record (the review\'s recorded end)', traceRunId, workflowStatus };
+    }
+    if (needed && !succeeded) {
       return { kind: 'approval_required', label: 'Approval required', detail: needed.reason, source: 'Kriya launch record (the decision the workflow reached)', traceRunId, workflowStatus,
         approval: { kind: needed.kind, reason: needed.reason, details: needed.details } };
     }
@@ -133,7 +155,7 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
     if (record.found && record.terminal_status) {
       const kind: OutcomeKind = record.terminal_status === 'SUCCESS' ? 'success' : record.terminal_status === 'FAILURE' ? 'failure' : 'needs_review';
       const word = kind === 'success' ? 'Run succeeded' : kind === 'failure' ? 'Run failed' : `Run ended: ${record.terminal_status}`;
-      const extras = [ended?.failure_category ? `failure category ${ended.failure_category}` : null, record.commit_result ? `commit ${record.commit_result}` : null, ended && ended.exit_code !== 0 ? `process exit code ${ended.exit_code}` : null].filter(Boolean);
+      const extras = [review?.status === 'APPROVED' ? 'the change was approved by you' : null, ended?.failure_category ? `failure category ${ended.failure_category}` : null, record.commit_result ? `commit ${record.commit_result}` : null, ended && ended.exit_code !== 0 ? `process exit code ${ended.exit_code}` : null].filter(Boolean);
       return { kind, label: word, detail: extras.length ? extras.join(' · ') : 'Recorded by Kriya.', source: 'Kriya RunRecord (the run\'s own lifecycle authority)', traceRunId, workflowStatus };
     }
     return { kind: 'interrupted', label: 'The run did not finish', detail: ended?.error ?? 'The launching process ended and no terminal outcome is recorded in the run record.', source: 'Kriya launch record', traceRunId, workflowStatus };
@@ -164,6 +186,8 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
+  const [decision, setDecision] = useState<DecisionState>({ state: 'idle' });
+  const decidingRef = useRef(false);
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
   const pendingRef = useRef<string | null>(null);
@@ -194,6 +218,21 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const preflight = useMemo<PreflightState>(() => (!port ? { state: 'unavailable', reason: 'This host cannot start a run.' } : key === null ? { state: 'idle' } : done?.key === key ? done.state : done && key !== null && done.key.split('|')[0] === key.split('|')[0] ? done.state : { state: 'loading' }), [port, key, done]);
   // (a re-check of the SAME folder keeps showing the last answer until Kriya's new one arrives; the host re-resolves it authoritatively at Start regardless)
 
+  // A run this host started is still executing when the window (re)loads: follow it again instead of relying on this window's memory. The host knows its one
+  // execution process; Kriya's records say everything else (a pending review included).
+  useEffect(() => {
+    if (!port || workspace === null) return undefined;
+    let live = true;
+    void port.state().then((host) => {
+      if (!live || runRef.current !== null) return;
+      if ((host.phase === 'starting' || host.phase === 'running') && host.launch_id !== null && host.workspace === workspace) {
+        const at = performance.now();
+        setRun({ launchId: host.launch_id, workspace, host, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, timing: { clickedAt: at, acknowledgedAt: at, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
+      }
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [port, workspace]);
+
   const refreshPreflight = useCallback(() => setNonce((n) => n + 1), []);
 
   const start = useCallback(async () => {
@@ -212,7 +251,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         if (r?.code === 'PREFLIGHT_BLOCKED') refreshPreflight();
         return;
       }
-      setRun({ launchId: result.launch_id, workspace, host: null, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, timing: { clickedAt, acknowledgedAt, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
+      setRun({ launchId: result.launch_id, workspace, host: null, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, timing: { clickedAt, acknowledgedAt, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
     } catch (error) {
       setRefusal({ code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), blockers: [] });
     } finally {
@@ -262,8 +301,10 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
       setRun((prev) => {
         if (!prev || prev.launchId !== launchId) return prev;
         const stage: RunStage = outcome ? 'finished' : data && data.launch.phase === 'RUNNING' ? 'running' : 'starting';
+        const pending = data?.launch.pending_approval ?? null;
+        const review = !outcome && data && data.launch.phase === 'RUNNING' && data.liveness === 'live' && pending && pending.status === 'PENDING' ? pending : null;
         return {
-          ...prev, host: hostState ?? prev.host, status: data ?? prev.status, progress, stage, outcome,
+          ...prev, host: hostState ?? prev.host, status: data ?? prev.status, progress, stage, outcome, review,
           statusError: status.ok || notRecorded ? null : status.error,
           timing: { ...prev.timing, recordSeenAt: prev.timing.recordSeenAt ?? (data ? now : null), terminalAt: outcome ? now : null },
         };
@@ -288,9 +329,29 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     return () => { live = false; if (timer) clearTimeout(timer); };
   }, [port, provider, launchId, runWorkspace, selection, intervals.hiddenMs, intervals.slowMs, intervals.slowAfterMs, intervals.visibleMs]);
 
+  // One decision at a time, taken on the review that is pending NOW. The identities travel exactly as Kriya gave them; Kriya refuses a stale or replayed one.
+  const decide = useCallback(async (choice: 'approve' | 'reject') => {
+    const current = runRef.current;
+    const review = current?.review ?? null;
+    if (!port || !current || !review || decidingRef.current) return;
+    decidingRef.current = true; // synchronous: a second click in the same tick never reaches the host
+    setDecision({ state: 'submitting', reviewId: review.review_id, decision: choice });
+    let answer: DecideApprovalResult;
+    try {
+      answer = await port.decideApproval({ workspace: current.workspace, launch_id: current.launchId, review_id: review.review_id, candidate_digest: review.candidate_digest, decision: choice });
+    } catch (error) {
+      answer = { accepted: false, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), launch_id: null, review_id: null, decision: null, decided_at: null };
+    } finally {
+      decidingRef.current = false;
+    }
+    setDecision(answer.accepted ? { state: 'accepted', reviewId: review.review_id, decision: choice } : { state: 'refused', reviewId: review.review_id, decision: choice, code: answer.code, message: answer.message });
+  }, [port]);
+
   const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
   const locked = starting || (run !== null && run.stage !== 'finished');
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss }),
-    [port, goal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss]);
+  // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
+  const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
+    [port, goal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }

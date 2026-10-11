@@ -30,8 +30,22 @@ from kriya.kup.workspace_ops import validated_workspace
 from kriya.platform.toolchain_locator import tool_visibility
 
 KNOWLEDGE_POLICY = "strict"
-INTERACTION = ("This host has no interactive approval: a step that needs one (an escalation, a knowledge-gap acknowledgement, a skill choice) "
-               "stops the run instead of being approved for you.")
+INTERACTION_REVIEW = ("A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human "
+                      "decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.")
+INTERACTION_NO_REVIEW = ("This folder's configuration sets the autonomy mode to {mode!r}, so a change is not held for review by this configuration. Any other step that "
+                         "needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.")
+INTERACTION_UNKNOWN = ("The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run "
+                       "instead of being approved for you.")
+
+
+def _interaction(cfg: Any) -> Dict[str, Any]:
+    """How a change is approved in a run here, from the RESOLVED configuration (shown, never changed): the autonomy mode is the operator's, the app has no selector."""
+    if cfg is None:
+        return {"approvals": "unknown", "autonomy_mode": None, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_UNKNOWN}
+    mode = str(cfg.autonomy.mode)
+    if mode == "human-in-the-loop":
+        return {"approvals": "change_review", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_REVIEW}
+    return {"approvals": "configured_mode", "autonomy_mode": mode, "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION_NO_REVIEW.format(mode=mode)}
 DISCOVERY = ("Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` "
              "here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.")
 
@@ -133,7 +147,7 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
         "workspace": {"path": workspace, "identity": workspace_identity(workspace), "name": os.path.basename(workspace.rstrip(os.sep)) or workspace},
         "configuration": configuration, "state": runtime_state, "model": model,
         "recovery": {"status": assessment.status, "run_active": assessment.status == STATUS_RUN_ACTIVE},
-        "interaction": {"approvals": "unavailable", "knowledge_policy": KNOWLEDGE_POLICY, "note": INTERACTION},
+        "interaction": _interaction(cfg),
         "toolchains": {"tools": tools, "note": TOOLCHAIN_NOTE},
     }
 
@@ -149,7 +163,7 @@ def preflight(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
 
 
 def _launch_view(record: Dict[str, Any]) -> Dict[str, Any]:
-    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required", "declined_decisions")
+    keys = ("launch_id", "workspace", "requested_at", "goal", "options", "phase", "run", "ended", "history", "approval_required", "declined_decisions", "pending_approval", "approval_history")
     view = {key: record.get(key) for key in keys}
     process = record.get("process")
     view["process"] = {"pid": process.get("pid")} if isinstance(process, dict) else None

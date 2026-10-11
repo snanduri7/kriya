@@ -8,10 +8,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ApprovalHost } from '../src/main/approval_host';
 import { ExecutionHost } from '../src/main/execution_host';
 import { launchExecution } from '../src/main/execution_process';
 import type { KupRequest } from '../src/main/ipc_contract';
 import { KriyaService } from '../src/main/kriya_service';
+import { runKriya } from '../src/main/kriya_process';
 
 const ROOT = join(__dirname, '..', '..', '..');
 const PYTHON = join(ROOT, '.venv', 'bin', 'python');
@@ -319,4 +321,120 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     expect(d.run_record.terminal_status).toBe('FAILURE');
     expect(d.workspace_lock.held).toBe(false);
   }, 180_000);
+
+  // ---------------------------------------------------------------- the human review of a change (GUI final): the REAL launch, the REAL approval action
+  const realKriya = () => join(ROOT, '.venv', 'bin', 'kriya');
+  function approvals(ws: string) {
+    return new ApprovalHost({
+      run: (o) => runKriya({ executable: o.executable, argv: o.argv, cwd: o.cwd, env: o.env, limits: o.limits }),
+      prepare: () => ({ ok: true, executable: realKriya(), env: { ...env } }), currentWorkspace: () => ws,
+    });
+  }
+  async function untilPending(ws: string, id: string, ms = 60_000): Promise<Json> {
+    const end = Date.now() + ms;
+    for (;;) {
+      const s = await status(ws, id);
+      const pending = s.error ? null : (s.data as Json).launch.pending_approval;
+      if (pending && pending.status === 'PENDING') return pending;
+      if (Date.now() > end) throw new Error('no pending review appeared');
+      await sleep(50);
+    }
+  }
+  const decision = (ws: string, id: string, review: Json, choice: 'approve' | 'reject', over: Json = {}) =>
+    ({ workspace: ws, launch_id: id, review_id: review.review_id, candidate_digest: review.candidate_digest, decision: choice, ...over });
+
+  it('APPROVE end to end: the run waits at the real approval path, the typed action is accepted, Kriya records it BEFORE the run continues, and the sealed outcome is SUCCESS linked to the real trace row', async () => {
+    const ws = workspace('review-approve', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-approve', { outcome: 'review', step_ms: 100 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    expect(pending).toMatchObject({ kind: 'change_approval', status: 'PENDING', decision: null });
+    expect(pending.files[0]).toMatchObject({ filepath: 'src/clamp.py', lines_added: 2, lines_removed: 0 });
+    expect(pending.reason).toContain('Automated Code Review');
+    // while it waits: live, the workspace is held, no outcome exists
+    const waiting = (await status(ws, id)).data as Json;
+    expect(waiting).toMatchObject({ liveness: 'live', workspace_lock: { held: true, held_by_this_launch: true } });
+    expect(waiting.launch.ended).toBeNull();
+    const a = approvals(ws);
+    const accepted = await a.decide(decision(ws, id, pending, 'approve'));
+    expect(accepted).toMatchObject({ accepted: true, code: 'ACCEPTED', decision: 'approve', review_id: pending.review_id });
+    await untilExited(h);
+    const d = (await status(ws, id)).data as Json;
+    expect(d.run_record).toMatchObject({ found: true, terminal_status: 'SUCCESS' });
+    expect(d.launch.pending_approval).toMatchObject({ status: 'APPROVED', decision: { decision: 'approve', source: 'launch-decision' } });
+    expect(d.launch.ended).toMatchObject({ exit_code: 0, workflow_status: 'success' });
+    // the link is the REAL trace row (the controlled body's result run_id is not it)
+    const snap = (await read({ operation: 'snapshot.acquire', workspace: ws })).data as Json;
+    const list = (await read({ operation: 'history.list', snapshot_id: snap.snapshot_id, workspace: ws })).data as Json;
+    expect(list.runs.map((r: Json) => r.run_id)).toContain(d.launch.ended.trace_run_id);
+    expect(h.state()).toMatchObject({ phase: 'exited', exit: { code: 0 } });
+  }, 120_000);
+
+  it('REJECT end to end: the durable outcome is the recorded human rejection (RunRecord FAILURE, trace row human_rejected), one attempt, no retry', async () => {
+    const ws = workspace('review-reject', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-reject', { outcome: 'review', step_ms: 100 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'reject'))).toMatchObject({ accepted: true, decision: 'reject' });
+    await untilExited(h);
+    const d = (await status(ws, id)).data as Json;
+    expect(d.run_record).toMatchObject({ found: true, terminal_status: 'FAILURE' });
+    expect(d.launch.pending_approval).toMatchObject({ status: 'REJECTED', decision: { decision: 'reject' } });
+    expect(d.launch.ended).toMatchObject({ exit_code: 1 });
+    expect(d.launch.ended.trace_run_id).not.toBeNull();
+    expect(d.launch.ended.trace_run_id).not.toBe('20200101T000000-0badc0de'); // never the result's own run_id
+    expect(d.launch.approval_history).toEqual([]);
+    const records = (await read({ operation: 'evidence.records', run_id: id, limit: 200 })).data as Json;
+    expect(records.records.filter((r: Json) => r.kind === 'attempt.opened')).toHaveLength(1); // no retry was invented
+  }, 120_000);
+
+  it('a decision for another candidate, another run, another folder, or in the wrong shape fails closed - and the run keeps waiting until the right one arrives', async () => {
+    const ws = workspace('review-stale', { 'a.txt': 'a' });
+    const other = workspace('review-elsewhere');
+    const h = host(ws, executable('review-stale', { outcome: 'review', step_ms: 100 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    const a = approvals(ws);
+    expect(await a.decide(decision(ws, id, pending, 'approve', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
+    expect(await a.decide(decision(ws, id, pending, 'approve', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
+    expect(await a.decide(decision(ws, '20200101T000000-00000000', pending, 'approve'))).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_FOUND' });
+    expect(await a.decide(decision(other, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'WORKSPACE_NOT_OPEN' }); // not the open folder
+    expect(await a.decide({ ...decision(ws, id, pending, 'approve'), extra: 'x' })).toMatchObject({ accepted: false, code: 'INVALID_REQUEST' });
+    expect(await a.decide(decision(ws, id, pending, 'approve-always' as never))).toMatchObject({ accepted: false, code: 'INVALID_REQUEST' });
+    expect(((await status(ws, id)).data as Json).launch.pending_approval.status).toBe('PENDING'); // nothing was recorded by any refusal
+    expect(await a.decide(decision(ws, id, pending, 'reject'))).toMatchObject({ accepted: true });
+    await untilExited(h);
+  }, 120_000);
+
+  it('a duplicate or late decision is refused: the second approve and a decision after the run ended change nothing', async () => {
+    const ws = workspace('review-duplicate', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-duplicate', { outcome: 'review', step_ms: 100 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    const a = approvals(ws);
+    const [first, second] = await Promise.all([a.decide(decision(ws, id, pending, 'approve')), a.decide(decision(ws, id, pending, 'reject'))]);
+    expect([first.accepted, second.accepted].filter(Boolean)).toHaveLength(1); // exactly one decision was taken (the host serializes; Kriya would refuse the other anyway)
+    await untilExited(h);
+    const late = await a.decide(decision(ws, id, pending, 'approve'));
+    expect(late).toMatchObject({ accepted: false });
+    expect(['LAUNCH_ENDED', 'ALREADY_DECIDED']).toContain(late.code);
+    const d = (await status(ws, id)).data as Json;
+    expect(d.launch.pending_approval.status).toBe(first.accepted ? 'APPROVED' : 'REJECTED');
+  }, 120_000);
+
+  it('a launch process that dies while the review is pending cannot be approved any more, and is never read as a success', async () => {
+    const ws = workspace('review-died', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-died', { outcome: 'review', step_ms: 100 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    const pid = ((await status(ws, id)).data as Json).launch.process.pid as number;
+    process.kill(pid, 'SIGKILL');
+    await untilExited(h);
+    const refused = await approvals(ws).decide(decision(ws, id, pending, 'approve'));
+    expect(refused).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_ACTIVE' });
+    const d = (await status(ws, id)).data as Json;
+    expect(d.liveness).toBe('interrupted');
+    expect(d.launch.ended).toBeNull();
+    expect(d.run_record.terminal_status).not.toBe('SUCCESS');
+  }, 120_000);
 });

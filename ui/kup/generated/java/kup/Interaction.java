@@ -13,13 +13,27 @@ public class Interaction {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private Approvals approvals;
+    private String autonomyMode;
     private String knowledgePolicy;
     private String note;
 
+    /**
+     * change_review: a change is held for the person's review (human-in-the-loop).
+     * configured_mode: the resolved configuration selects another autonomy mode (shown, never
+     * changed by the app). unknown: the configuration could not be resolved.
+     */
     @JsonProperty("approvals")
     public Approvals getApprovals() { return approvals; }
     @JsonProperty("approvals")
     public void setApprovals(Approvals value) { this.approvals = value; }
+
+    /**
+     * The autonomy mode of the resolved configuration, verbatim.
+     */
+    @JsonProperty("autonomy_mode")
+    public String getAutonomyMode() { return autonomyMode; }
+    @JsonProperty("autonomy_mode")
+    public void setAutonomyMode(String value) { this.autonomyMode = value; }
 
     @JsonProperty("knowledge_policy")
     public String getKnowledgePolicy() { return knowledgePolicy; }

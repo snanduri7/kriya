@@ -43,6 +43,20 @@ export async function loadRunEvidence(provider: UIProvider, runId: string, snaps
   if (snapshotId === null) return unavailable('unknown_run', 'No snapshot is pinned, so the run\'s recorded evidence link cannot be read.');
   // Trace ids and evidence ids differ in every real store: Kriya resolves the link from the row's recorded event.
   const manifest = await provider.evidenceManifest(runId, { snapshotId, fromTrace: true }, signal);
+  return loadStore(provider, runId, manifest, signal);
+}
+
+/**
+ * The evidence of a run a launch is STILL executing (GUI final: reviewing a change before approving it). Such a run has no trace row yet - Kriya writes it when the
+ * run ends - so there is no recorded link to resolve: the launch id IS the evidence run id (the run claimed it), and the store is read live, verified like any other.
+ * The store is unsealed until the run closes, which the modules already present as a degraded state.
+ */
+export async function loadLiveRunEvidence(provider: UIProvider, launchId: string, signal?: AbortSignal): Promise<Availability<RunEvidence>> {
+  const manifest = await provider.evidenceManifest(launchId, {}, signal);
+  return loadStore(provider, launchId, manifest, signal);
+}
+
+async function loadStore(provider: UIProvider, runId: string, manifest: ProviderResult<EvidenceManifest>, signal?: AbortSignal): Promise<Availability<RunEvidence>> {
   if (!manifest.ok) return fromError(manifest.error);
   const m = manifest.data;
   const evidenceRunId = m.run_id;

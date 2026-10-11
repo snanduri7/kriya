@@ -199,6 +199,26 @@ def kup_stdio(ctx: click.Context) -> None:
     sys.exit(run(ctx.obj.get('config_path'), ctx.obj.get('trust_file')))
 
 
+@main.command(name='launch-decision', hidden=True)
+@click.option('--launch-id', required=True, help='The desktop launch (its run id).')
+@click.option('--review-id', required=True, help='The pending review being decided (from launch.status).')
+@click.option('--candidate-digest', required=True, help='The digest of the change under review (from launch.status).')
+@click.option('--decision', required=True, type=click.Choice(['approve', 'reject']))
+def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decision: str) -> None:
+    """The typed approval action of the desktop host: record ONE human decision for the change review that is pending in this folder's launch.
+
+    The folder is the working directory (like `generate`). Prints one JSON object on stdout; exit 0 only when the decision was accepted. The waiting
+    `generate --launch-id` process records the decision durably and only then continues (kriya/control/launch_approval.py)."""
+    from kriya.control.launch_approval import ApprovalRefused, decide
+
+    try:
+        result = decide(os.getcwd(), launch_id, review_id, candidate_digest, decision)
+    except ApprovalRefused as refusal:
+        click.echo(json.dumps({"accepted": False, "code": refusal.code, "message": refusal.message}, sort_keys=True))
+        sys.exit(2)
+    click.echo(json.dumps(result, sort_keys=True))
+
+
 @main.command()
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable identity (stdout carries only the JSON).')
 def version(as_json: bool) -> None:
@@ -3142,12 +3162,19 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         click.echo(token, nl=False)
         sys.stdout.flush()
 
-    def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+    def on_approval(files: List[Dict[str, str]], reason: str) -> Any:
         from kriya.control.launch import (
-            note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision
+            note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
+            request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
         )
-        if note_approval_required("change_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
-            return False  # a desktop launch never approves and never prompts: declining stops the run cleanly (human_rejected)
+        # ONLY the change gate passes a non-empty change set (tests/test_kup_execution.py pins that). Inside a launch its decision is the human's, taken
+        # through the durable review; every other approval (empty set) is declined without prompting and the awaitable is never returned there, because
+        # those call sites do not await it.
+        awaiting = request_change_approval(files, reason)
+        if awaiting is not None:
+            return awaiting
+        if note_approval_required("change_approval" if files else "other_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
+            return False  # a desktop launch never approves on its own and never prompts: declining stops the run cleanly (human_rejected)
         if yes:
             click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
             return True

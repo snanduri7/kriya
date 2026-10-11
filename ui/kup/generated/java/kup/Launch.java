@@ -14,6 +14,7 @@ public class Launch {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
+    private List<ApprovalHistory> approvalHistory;
     private ApprovalRequired approvalRequired;
     private List<DeclinedDecision> declinedDecisions;
     private Ended ended;
@@ -21,11 +22,21 @@ public class Launch {
     private List<History> history;
     private String launchid;
     private Map<String, Object> options;
+    private PendingApproval pendingApproval;
     private LaunchPhase phase;
     private Map<String, Object> process;
     private String requestedAt;
     private Run run;
     private LaunchWorkspace workspace;
+
+    /**
+     * Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of
+     * them can be decided any more.
+     */
+    @JsonProperty("approval_history")
+    public List<ApprovalHistory> getApprovalHistory() { return approvalHistory; }
+    @JsonProperty("approval_history")
+    public void setApprovalHistory(List<ApprovalHistory> value) { this.approvalHistory = value; }
 
     /**
      * The human decision the run reached and the desktop cannot make (never auto-approved):
@@ -69,6 +80,17 @@ public class Launch {
     public Map<String, Object> getOptions() { return options; }
     @JsonProperty("options")
     public void setOptions(Map<String, Object> value) { this.options = value; }
+
+    /**
+     * The change review the run is waiting on (or last waited on): the exact candidate (digest;
+     * files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable
+     * status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the
+     * waiting process record the decision BEFORE the run continues.
+     */
+    @JsonProperty("pending_approval")
+    public PendingApproval getPendingApproval() { return pendingApproval; }
+    @JsonProperty("pending_approval")
+    public void setPendingApproval(PendingApproval value) { this.pendingApproval = value; }
 
     @JsonProperty("phase")
     public LaunchPhase getPhase() { return phase; }

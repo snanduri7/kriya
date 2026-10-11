@@ -13,6 +13,7 @@ function Overview() {
               ['Workspace', ctx.workspace.identity ?? 'not recorded'],
               ['Baseline revision', ctx.baseline.revision ?? 'not recorded (no baseline is assumed)'], ['Baseline tree', ctx.baseline.treeHash ?? 'not recorded'],
               ['Evidence store', ctx.evidence.store === 'present' ? `present, capture ${ctx.evidence.captureMode ?? 'not recorded'}` : 'absent'],
+              ['Trace row "attempts" (as stored)', ctx.storedAttempts === null ? 'not recorded' : `${ctx.storedAttempts} - Kriya's retry counter (retries + best-of-N candidates), not the number of attempts made; the attempt count below is derived from the run's evidence`],
             ]} />
           </Panel>
           <AvailabilityView value={evidence}>

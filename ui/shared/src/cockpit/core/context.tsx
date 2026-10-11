@@ -4,7 +4,7 @@ import type { Selection, SelectionAction } from '../../state/selection';
 import { useAsync, toAvailability } from './async';
 import { failed, unavailable, type Availability } from './availability';
 import { CapabilityRegistry } from './capability';
-import { loadRunEvidence, type RunEvidence } from './evidenceClient';
+import { loadLiveRunEvidence, loadRunEvidence, type RunEvidence } from './evidenceClient';
 import type { ModuleDefinition, ModuleRegistry, SelectionField } from './modules';
 import type { UIProvider } from './provider';
 import type { RunContext } from './runContext';
@@ -138,7 +138,8 @@ function RunEvidenceProvider({ children }: { children: ReactNode }) {
   const { provider, selection } = useServices();
   const { snapshotId } = useSession();
   const runId = useSelectionState(selection, (s) => s.runId);
-  const state = useAsync<RunEvidence>(runId ? `evidence:${runId}:${snapshotId ?? ''}` : null, (signal) => loadRunEvidence(provider, runId!, snapshotId, signal), unavailable('unknown_run', 'Select a run.'));
+  const live = useSelectionState(selection, (s) => s.liveLaunchId) === runId && runId !== null;
+  const state = useAsync<RunEvidence>(runId ? `evidence:${live ? 'live' : 'row'}:${runId}:${live ? '' : snapshotId ?? ''}` : null, (signal) => (live ? loadLiveRunEvidence(provider, runId!, signal) : loadRunEvidence(provider, runId!, snapshotId, signal)), unavailable('unknown_run', 'Select a run.'));
   return <RunEvidenceContext.Provider value={state}>{children}</RunEvidenceContext.Provider>;
 }
 
@@ -147,10 +148,26 @@ function RunContextProvider({ children }: { children: ReactNode }) {
   const { snapshotId } = useSession();
   const caps = useCapabilities();
   const runId = useSelectionState(selection, (s) => s.runId);
+  const live = useSelectionState(selection, (s) => s.liveLaunchId) === runId && runId !== null;
   const evidence = useRunEvidence();
-  const detail = useAsync<RunDetail>(runId && snapshotId ? `detail:${runId}:${snapshotId}` : null, async (signal) => toAvailability(await provider.runDetail(snapshotId!, runId!, signal)), unavailable('unknown_run', 'Select a run.'));
+  const detail = useAsync<RunDetail>(runId && snapshotId && !live ? `detail:${runId}:${snapshotId}` : null, async (signal) => toAvailability(await provider.runDetail(snapshotId!, runId!, signal)), unavailable('unknown_run', live ? "This run is still executing: its trace row is written when it ends." : 'Select a run.'));
   const value = useMemo<Availability<RunContext>>(() => {
     if (!runId) return unavailable('unknown_run', 'Select a run.');
+    if (live) {
+      // A run waiting on the human's review: there is no trace row yet, so nothing about its goal, status or failure category is claimed. The baseline and the store come from its manifest.
+      if (evidence.state === 'loading') return { state: 'loading' };
+      if (evidence.state !== 'ready' && evidence.state !== 'degraded') return unavailable('unknown_run', 'The live evidence of this run is not readable.');
+      const manifest = (evidence.data.manifest.manifest ?? {}) as Record<string, unknown>;
+      const text = (v: unknown) => (typeof v === 'string' && v.length ? v : null);
+      const revision = text(manifest.base_revision);
+      const treeHash = text(manifest.base_tree_hash);
+      const ctx: RunContext = {
+        runId, snapshotId, provider: provider.kind, goal: null, status: 'RUNNING', failureCategory: null, storedAttempts: null, milestone: { groupId: null, index: null, total: null },
+        workspace: { identity: text(manifest.workspace_identity), path: text(manifest.workspace_path) }, baseline: { revision, treeHash, source: revision || treeHash ? 'recorded' : 'not_recorded' }, changeType: null, capabilities: caps,
+        evidence: { store: 'present', captureMode: text(manifest.capture), sealed: evidence.data.verify?.sealed ?? null, verification: evidence.data.verify?.status ?? null, consistency: evidence.data.provenance.records?.consistency?.kind ?? null },
+      };
+      return { state: 'ready', data: ctx, provenance: evidence.provenance };
+    }
     if (detail.state === 'loading') return { state: 'loading' };
     if (detail.state !== 'ready') return detail.state === 'error' ? failed(detail.code, detail.message) : unavailable('unknown_run', 'The run row is not readable.');
     const run = detail.data.run;
@@ -160,7 +177,7 @@ function RunContextProvider({ children }: { children: ReactNode }) {
     const revision = text(manifest.base_revision);
     const treeHash = text(manifest.base_tree_hash);
     const ctx: RunContext = {
-      runId, snapshotId, provider: provider.kind, goal: run.goal ?? null, status: run.status ?? null, failureCategory: run.failure_category ?? null,
+      runId, snapshotId, provider: provider.kind, goal: run.goal ?? null, status: run.status ?? null, failureCategory: run.failure_category ?? null, storedAttempts: typeof run.attempts === 'number' ? run.attempts : null,
       milestone: { groupId: run.milestone_group_id ?? null, index: run.milestone_index ?? null, total: run.milestone_total ?? null },
       workspace: { identity: text(manifest.workspace_identity), path: text(manifest.workspace_path) },
       baseline: { revision, treeHash, source: revision || treeHash ? 'recorded' : 'not_recorded' },
@@ -175,6 +192,6 @@ function RunContextProvider({ children }: { children: ReactNode }) {
       },
     };
     return { state: 'ready', data: ctx, provenance: detail.provenance };
-  }, [runId, detail, evidence, caps, provider.kind, snapshotId]);
+  }, [runId, live, detail, evidence, caps, provider.kind, snapshotId]);
   return <RunDetailContext.Provider value={detail}><RunContextContext.Provider value={value}>{children}</RunContextContext.Provider></RunDetailContext.Provider>;
 }

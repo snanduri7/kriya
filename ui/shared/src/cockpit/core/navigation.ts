@@ -7,3 +7,6 @@ import { createContext, useContext } from 'react';
 export type Navigate = (pageId: string) => void;
 export const NavigationContext = createContext<Navigate>(() => undefined);
 export const useNavigate = (): Navigate => useContext(NavigationContext);
+
+/** The page that shows the selected run's documents (the registry's page id for run-scoped modules): where a review of a live run's change and validation is read. */
+export const RUN_DOCUMENTS_PAGE = 'runs';

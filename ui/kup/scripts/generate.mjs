@@ -63,6 +63,8 @@ const TYPES = [
   ['StartRunRequest', 'host-contract.schema.json', '#/$defs/StartRunRequest'],
   ['StartRunResult', 'host-contract.schema.json', '#/$defs/StartRunResult'],
   ['ExecutionState', 'host-contract.schema.json', '#/$defs/ExecutionState'],
+  ['DecideApprovalRequest', 'host-contract.schema.json', '#/$defs/DecideApprovalRequest'],
+  ['DecideApprovalResult', 'host-contract.schema.json', '#/$defs/DecideApprovalResult'],
   ['RecentWorkspaces', 'host-contract.schema.json', '#/$defs/RecentWorkspaces'],
   ['HostMessages', 'host-contract.schema.json', '#/$defs/Messages'],
 ];

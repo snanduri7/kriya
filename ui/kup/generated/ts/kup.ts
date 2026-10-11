@@ -579,7 +579,14 @@ export interface ExecutionPreflight {
     [k: string]: unknown;
   };
   interaction: {
-    approvals: 'unavailable';
+    /**
+     * change_review: a change is held for the person's review (human-in-the-loop). configured_mode: the resolved configuration selects another autonomy mode (shown, never changed by the app). unknown: the configuration could not be resolved.
+     */
+    approvals: 'change_review' | 'configured_mode' | 'unknown' | 'unavailable';
+    /**
+     * The autonomy mode of the resolved configuration, verbatim.
+     */
+    autonomy_mode?: string | null;
     knowledge_policy: string;
     note: string;
     [k: string]: unknown;
@@ -644,6 +651,64 @@ export interface LaunchStatus {
         [k: string]: unknown;
       };
       noted_at: string;
+      [k: string]: unknown;
+    }[];
+    /**
+     * The change review the run is waiting on (or last waited on): the exact candidate (digest; files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.
+     */
+    pending_approval?: {
+      review_id: string;
+      sequence: number;
+      kind: string;
+      status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+      requested_at: string;
+      expires_at: string;
+      candidate_digest: string;
+      files: {
+        filepath: string;
+        diff_sha256: string;
+        lines_added: number;
+        lines_removed: number;
+        [k: string]: unknown;
+      }[];
+      reason: string;
+      reason_truncated: boolean;
+      reason_sha256: string;
+      decision: {
+        decision?: string | null;
+        decided_at?: string | null;
+        source?: string;
+        [k: string]: unknown;
+      } | null;
+      [k: string]: unknown;
+    } | null;
+    /**
+     * Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.
+     */
+    approval_history?: {
+      review_id: string;
+      sequence: number;
+      kind: string;
+      status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+      requested_at: string;
+      expires_at: string;
+      candidate_digest: string;
+      files: {
+        filepath: string;
+        diff_sha256: string;
+        lines_added: number;
+        lines_removed: number;
+        [k: string]: unknown;
+      }[];
+      reason: string;
+      reason_truncated: boolean;
+      reason_sha256: string;
+      decision: {
+        decision?: string | null;
+        decided_at?: string | null;
+        source?: string;
+        [k: string]: unknown;
+      } | null;
       [k: string]: unknown;
     }[];
     /**
@@ -1176,6 +1241,35 @@ export interface ExecutionState {
   diagnostic: ('spawn_failed' | 'terminated_by_the_host') | null;
 }
 
+// ---- DecideApprovalRequest (host-contract.schema.json#/$defs/DecideApprovalRequest) ----
+/**
+ * Review decision (GUI final): ONE human decision for the change review that is pending in a launch Kriya recorded. It carries the identities Kriya gave the pending review (launch id, review id, candidate digest) and nothing else - no option can approve 'whatever is current', approve always, or widen Kriya's authority. Kriya (`launch-decision`) validates every identity against its durable state and refuses a stale, replayed, foreign or late request.
+ */
+export interface DecideApprovalRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  launch_id: string;
+  review_id: string;
+  candidate_digest: string;
+  decision: 'approve' | 'reject';
+}
+
+// ---- DecideApprovalResult (host-contract.schema.json#/$defs/DecideApprovalResult) ----
+/**
+ * Answer to a review decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed refusal code.
+ */
+export interface DecideApprovalResult {
+  accepted: boolean;
+  code: string;
+  message: string;
+  launch_id?: string | null;
+  review_id?: string | null;
+  decision?: string | null;
+  decided_at?: string | null;
+}
+
 // ---- RecentWorkspaces (host-contract.schema.json#/$defs/RecentWorkspaces) ----
 /**
  * A bounded, most-recent-first list of folders previously opened. Remembered paths are NOT trusted: opening one runs the same Kriya validation.
@@ -1278,6 +1372,11 @@ export interface HostMessages {
   executionState?: {
     request?: null;
     response?: ExecutionState;
+    [k: string]: unknown;
+  };
+  decideApproval?: {
+    request?: DecideApprovalRequest;
+    response?: DecideApprovalResult;
     [k: string]: unknown;
   };
 }

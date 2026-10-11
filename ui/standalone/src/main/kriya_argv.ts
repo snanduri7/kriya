@@ -2,7 +2,7 @@
  * The ONLY place a kriya command line is built (P-25 grammar, P-31). Pure: no Electron, no child_process.
  * Argument ARRAYS, never shell text; every value validated by ipc_contract first.
  */
-import { LIMITS, type KupRequest } from './ipc_contract';
+import { CANDIDATE_DIGEST_RE, LAUNCH_ID_RE, LIMITS, REVIEW_ID_RE, type DecideApprovalRequest, type KupRequest } from './ipc_contract';
 
 function evidenceHead(subcommand: 'manifest' | 'verify' | 'records' | 'change-content' | 'call-content', runId: string): string[] {
   return ['evidence', subcommand, runId, '--json', '--kup-version', '1'];
@@ -64,6 +64,19 @@ export function buildKriyaArgv(request: KupRequest): string[] {
   }
 }
 
+/** The review decision command line, exactly one shape (the workspace is the working directory, never an argument):
+ *     launch-decision --launch-id <id> --review-id <id> --candidate-digest <sha256:...> --decision approve|reject */
+export function buildLaunchDecisionArgv(request: DecideApprovalRequest): string[] {
+  const argv = ['launch-decision', '--launch-id', request.launch_id, '--review-id', request.review_id, '--candidate-digest', request.candidate_digest, '--decision', request.decision];
+  if (!isLaunchDecisionArgv(argv)) throw new Error('launch-decision argv outside the grammar');
+  return argv;
+}
+
+export function isLaunchDecisionArgv(argv: readonly string[]): boolean {
+  return argv.length === 9 && argv[0] === 'launch-decision' && argv[1] === '--launch-id' && LAUNCH_ID_RE.test(argv[2] ?? '') && argv[3] === '--review-id' && REVIEW_ID_RE.test(argv[4] ?? '')
+    && argv[5] === '--candidate-digest' && CANDIDATE_DIGEST_RE.test(argv[6] ?? '') && argv[7] === '--decision' && (argv[8] === 'approve' || argv[8] === 'reject');
+}
+
 /** Every argv the shell may ever produce starts with one of these prefixes; the test pins it. */
 export const ALLOWED_ARGV_PREFIXES: readonly (readonly string[])[] = [
   ['traces', '--json', '--capabilities'],
@@ -87,5 +100,5 @@ function isEvidenceArgv(argv: readonly string[]): boolean {
 }
 
 export function argvIsAllowed(argv: readonly string[]): boolean {
-  return isEvidenceArgv(argv) || ALLOWED_ARGV_PREFIXES.some((p) => p.every((tok, i) => argv[i] === tok));
+  return isEvidenceArgv(argv) || isLaunchDecisionArgv(argv) || ALLOWED_ARGV_PREFIXES.some((p) => p.every((tok, i) => argv[i] === tok));
 }
