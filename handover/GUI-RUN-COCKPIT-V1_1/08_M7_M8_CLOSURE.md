@@ -139,3 +139,12 @@ The smoke has NOT been repeated after the fixes (needs the owner's go-ahead).
 ## App icon 2026-10-11 (GUI-APP-ICON-001 closed)
 
 The owner chose logo concept B (agent loop). `ui/standalone/assets/Kriya.svg` is the source; `node make-icon.mjs` produces `assets/Kriya.icns` (transparent corners, all ten standard sizes) and `npm run package:mac` installs it. The packaged app verifies with no default-icon warning. Brand/trademark vetting is the owner's.
+
+## Third live smoke 2026-10-11 (after GUI-LAUNCH-APPROVAL-ABORT-001 and GUI-LAUNCH-TRACE-LINK-001): PASS for the integration
+
+Run `20261011T090021-a3a5aff8`, packaged app, no environment variable, real model (`qwen3-coder:30b`), scratch project and state; evidence `evidence/m8/live-smoke-3/`.
+- Open Folder 151 ms; Start acknowledged 152 ms; launch record seen ~1.1 s after the click; terminal 44 s after Start; refreshed 207 ms after the terminal state.
+- The run generated a candidate in ONE attempt (3 gates passed), reached the human-in-the-loop change approval, DECLINED it (nothing approved) and stopped cleanly: banner "Approval required" with the reviewer's text and the file (`hello.py`); trace row `d1a585fc` `human_rejected`; launch record ENDED, `trace_run_id` = `d1a585fc` (the real row). No retry after the approval (smoke 2: 3 retries).
+- Every run tab populated from the sealed store (62 records): Validation (3 gates passed), Changes (`hello.py` +1/-1), Context (4 model invocations), Plan, Attempts, Evidence.
+- Observations, not defects fixed here: (1) the Runs list shows `0 attempt(s)` for this run while the evidence shows 1 attempt - Kriya's own trace row for `human_rejected` records attempts=0; (2) the page's event-loop-lag sampler reported p95 ~900 ms / median 0 in both smokes; it runs in the same window the capture harness screenshots, so the figure is NOT isolated product evidence (UNKNOWN, unresolved).
+- IMPORTANT: with the packaged-default configuration (autonomy mode human-in-the-loop) every run that changes files stops at the approval, which this app cannot give (owner decision GUI-EXEC-APPROVAL-001, deferred). The cockpit can start, watch and honestly report runs; it cannot land a change until that is decided.
