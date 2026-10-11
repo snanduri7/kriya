@@ -5219,7 +5219,8 @@ def _judge_candidate_suite(
     attribution = _attribute_candidate_suite(state, ctx, result, scope)
     if attribution is None:
         return not result["success"], result.get("output", ""), {}
-    evidence = attribution.evidence_text(state.validation_baseline_full_regression, result.get("output", ""))
+    evidence = attribution.evidence_text(state.validation_baseline_full_regression, result.get("output", ""),
+                                         test_execution.failure_details(result))
     return attribution.blocking, evidence, {"regression_attribution": attribution.gate_evidence()}
 
 

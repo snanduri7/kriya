@@ -51,7 +51,7 @@ import re
 import time
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from kriya.workflow.edit_safety import content_revision
 
@@ -702,6 +702,38 @@ def parse_surefire_structured_outcomes(raw: str) -> Optional[Tuple[Tuple[TestOut
 
 # --- Building a ValidationOutcome from an existing validator result ---------
 
+_JVM_RUNNERS = frozenset({"gradle", "maven"})
+
+
+def _structured_report_outcomes(
+    raw_result: Dict[str, Any], success: bool,
+) -> Optional[Tuple[Tuple[TestOutcome, ...], Dict[str, int]]]:
+    """(failing/erroring outcomes, aggregate counts) from a COMPLETE JVM TestExecutionReport, or None: no report, an
+    incomplete one (never positive evidence), another runner, or a failed gate whose report names no failing test (the
+    build failed for a reason the tests do not explain - the whole-output comparison then stays the authority)."""
+    from kriya.tools import test_execution
+
+    report = test_execution.report_from_result(raw_result)
+    if report is None or not report.complete or report.runner not in _JVM_RUNNERS:
+        return None
+    outcomes: Dict[str, TestOutcome] = {}
+    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+    key = {test_execution.PASSED: "passed", test_execution.FAILED: "failed", test_execution.ERROR: "error",
+           test_execution.SKIPPED: "skipped"}
+    for case in report.cases:
+        if case.status not in key:
+            return None  # a status this reader does not know is not evidence
+        counts[key[case.status]] += 1
+        if case.status in (test_execution.FAILED, test_execution.ERROR) and case.identity not in outcomes:
+            outcomes[case.identity] = TestOutcome(
+                test_id=case.identity,
+                status=TestStatus.FAIL if case.status == test_execution.FAILED else TestStatus.ERROR,
+                failure_fingerprint=compute_failure_fingerprint(case.detail or ""))
+    if not success and not outcomes:
+        return None
+    return tuple(sorted(outcomes.values(), key=lambda o: o.test_id)), counts
+
+
 def build_validation_outcome(
     raw_result: Dict[str, Any], *, evidence_ref: Optional[str] = None,
 ) -> ValidationOutcome:
@@ -721,6 +753,13 @@ def build_validation_outcome(
     aggregate_counts = None
     parsed = (parse_surefire_structured_outcomes(output) if surefire_summary is not None
               else parse_pytest_structured_outcomes(output))
+    if parsed is None:
+        # GRADLE-REGRESSION-DELTA-PER-TEST-001: a JVM run whose console carries no Surefire block (Gradle) is read from
+        # the runner's own JUnit XML, when that report is complete and the failed gate actually names failing tests.
+        parsed = _structured_report_outcomes(raw_result, success)
+        if parsed is not None and not success:
+            fingerprint = compute_failure_fingerprint("\n".join(sorted(
+                f"{o.test_id}|{o.status.value}|{o.failure_fingerprint}" for o in parsed[0])))
     if parsed is not None:
         # Deliberately NOT collapsed to None when the tuple is empty - an
         # empty-but-successfully-parsed tuple means "pytest output was
@@ -1022,6 +1061,13 @@ def regression_unattributed_diagnosis(delta: "BaselineDeltaResult") -> Tuple[str
             f"PRE-mutation baseline and this candidate are {fingerprints} (level1={level1}), which proves nothing "
             "per test, so no failure can be attributed to this candidate or excused as pre-existing - the gate "
             f"failed closed. {common}")
+    if any(r.startswith("level1:") for r in structural) and not delta.level2_available:
+        return ATTRIBUTION_AGGREGATE_DELTA, (
+            "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the "
+            f"captured PRE-mutation baseline (level1={level1}), and no per-test evidence was available for this run "
+            f"({delta.level2_unavailable_reason or 'no structured per-test report'}), so no test could be confirmed as "
+            "caused by this candidate or excused as pre-existing - the gate failed closed. "
+            f"{common}")
     if any(r.startswith("level1:") for r in structural):
         return ATTRIBUTION_AGGREGATE_DELTA, (
             "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate outcome changed relative to the "
@@ -1331,7 +1377,9 @@ def _short_test_name(test_id: str) -> str:
     return test_id.rsplit("::", 1)[-1]
 
 
-def extract_test_failure_sections(raw_output: str, test_ids: Sequence[str]) -> Dict[str, str]:
+def extract_test_failure_sections(
+    raw_output: str, test_ids: Sequence[str], failure_details: Optional[Mapping[str, str]] = None,
+) -> Dict[str, str]:
     """Best-effort per-test isolation of pytest's own "FAILURES" section,
     keyed by the FULL test_id. Falls back to the short-summary FAILED/ERROR
     line alone (matching _PYTEST_SUMMARY_LINE_RE) when the detailed
@@ -1363,8 +1411,10 @@ def extract_test_failure_sections(raw_output: str, test_ids: Sequence[str]) -> D
             rf"^(FAILED|ERROR)\s+{re.escape(test_id)}(?:\s+-\s+(.*))?$",
             raw_output or "", re.MULTILINE,
         )
+        detail = (failure_details or {}).get(test_id)
         result[test_id] = (
             summary_match.group(0) if summary_match
+            else f"FAILED {test_id}: {detail}" if detail  # the runner's own structured report (JVM)
             else f"FAILED {test_id} (failure detail unavailable in raw output)"
         )
     return result
@@ -1372,6 +1422,7 @@ def extract_test_failure_sections(raw_output: str, test_ids: Sequence[str]) -> D
 
 def render_blocking_regression_evidence(
     *, baseline: "ValidationBaseline", confirmed_test_ids: Sequence[str], raw_output: str,
+    failure_details: Optional[Mapping[str, str]] = None,
 ) -> str:
     """Builds the Developer-facing regression-failure text from ONLY the
     caller-confirmed candidate-attributable test ids - never the raw
@@ -1387,7 +1438,7 @@ def render_blocking_regression_evidence(
     pre_by_id = {
         o.test_id: o for o in (baseline.outcome.test_outcomes or ())
     } if baseline.outcome is not None else {}
-    sections = extract_test_failure_sections(raw_output, confirmed_test_ids)
+    sections = extract_test_failure_sections(raw_output, confirmed_test_ids, failure_details)
     lines = [
         f"{len(confirmed_test_ids)} test(s) newly fail relative to the captured "
         "PRE-mutation baseline (every other full-regression failure is classified "

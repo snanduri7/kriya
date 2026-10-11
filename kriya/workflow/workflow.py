@@ -53,6 +53,7 @@ from kriya.static_analysis.service import (
     commit_guard,
     static_analysis_result_fields,
 )
+from kriya.tools import test_execution
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
 from kriya.workflow.acceptance_approval import bound_approval
@@ -6241,6 +6242,7 @@ class WorkflowEngine:
                             baseline=state.validation_baseline_full_regression,
                             confirmed_test_ids=_confirmed_regression_ids,
                             raw_output=full_test_res.get("output", ""),
+                            failure_details=test_execution.failure_details(full_test_res),
                         )
                         if _targeted_test_res is not None and (
                             not _targeted_test_res["success"] or _targeted_regression_should_block

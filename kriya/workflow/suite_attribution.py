@@ -93,13 +93,15 @@ class SuiteAttribution:
                 "confirmed_regressions": self.confirmed_regressions(),
                 "blocking_reasons": list(self.delta.blocking_reasons)}
 
-    def evidence_text(self, baseline: ValidationBaseline, raw_output: str) -> str:
+    def evidence_text(self, baseline: ValidationBaseline, raw_output: str,
+                      failure_details: Optional[Mapping[str, str]] = None) -> str:
         """The Developer-facing failure text: the confirmed regressions' own sections when per-test evidence
         attributes them (VAL-001 G1-DEVINV2), else the raw output."""
         confirmed = self.confirmed_regressions()
         if not confirmed:
             return raw_output
-        return render_blocking_regression_evidence(baseline=baseline, confirmed_test_ids=confirmed, raw_output=raw_output)
+        return render_blocking_regression_evidence(
+            baseline=baseline, confirmed_test_ids=confirmed, raw_output=raw_output, failure_details=failure_details)
 
     def message(self) -> str:
         return f"PRE/POST delta: level1={self.delta.level1.classification.value} blocking={self.blocking}"

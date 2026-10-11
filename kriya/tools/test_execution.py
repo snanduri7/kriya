@@ -74,6 +74,10 @@ class TestCaseResult:
     classname: str
     name: str
     status: str
+    # GRADLE-REGRESSION-DELTA-PER-TEST-001: for a FAILED/ERROR case of a JVM report, the runner's own exception type and
+    # the first lines of its message (bounded, control characters removed); "" for a passing case and for every pytest
+    # case (pytest keeps its richer ``case_evidence``). Carried so the regression gate can say WHY a test fails.
+    detail: str = ""
 
 
 @dataclass
@@ -131,7 +135,7 @@ class TestExecutionReport:
         data = self.summary()
         data["workspace"] = self.workspace
         data["test_cases"] = [{"identity": c.identity, "classname": c.classname, "name": c.name,
-                               "status": c.status} for c in self.cases]
+                               "status": c.status, **({"detail": c.detail} if c.detail else {})} for c in self.cases]
         return data
 
     def pytest_evidence(self) -> Optional[Dict[str, Any]]:
@@ -209,6 +213,27 @@ def _status(testcase: ET.Element) -> str:
     return PASSED
 
 
+_DETAIL_MAX_CHARS = 300
+_DETAIL_MAX_LINES = 2
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _case_detail(testcase: ET.Element) -> str:
+    """A failing JVM case's exception type and message head, bounded: ``type: first | second`` (the type is not repeated
+    when the message already starts with it); the first non-empty body line when the message is empty; "" otherwise."""
+    for child in testcase:
+        if child.tag.rsplit("}", 1)[-1] not in _FAILURE_TAGS:
+            continue
+        kind = (child.get("type") or "").strip()
+        lines = [line.strip() for line in (child.get("message") or "").splitlines() if line.strip()]
+        if not lines:
+            lines = [line.strip() for line in (child.text or "").splitlines() if line.strip()][:1]
+        head = " | ".join(lines[:_DETAIL_MAX_LINES])
+        text = head if not kind or head.startswith(kind) else f"{kind}: {head}" if head else kind
+        return _CONTROL_RE.sub("", text)[:_DETAIL_MAX_CHARS]
+    return ""
+
+
 def parse_junit_xml(data: bytes) -> List[TestCaseResult]:
     """Every ``<testcase>`` of one JUnit XML document (``<testsuite>`` or
     ``<testsuites>`` root). Raises ``ET.ParseError`` on malformed XML."""
@@ -220,7 +245,7 @@ def parse_junit_xml(data: bytes) -> List[TestCaseResult]:
         classname = testcase.get("classname") or ""
         name = testcase.get("name") or ""
         cases.append(TestCaseResult(identity=_identity(classname, name), classname=classname, name=name,
-                                    status=_status(testcase)))
+                                    status=_status(testcase), detail=_case_detail(testcase)))
     return cases
 
 
@@ -497,7 +522,19 @@ def report_from_result(result: Any) -> Optional[TestExecutionReport]:
         gate_id=str(data.get("gate_id") or ""), runner=str(data.get("runner") or ""),
         workspace=str(data.get("workspace") or ""), completeness=str(data.get("completeness") or INDETERMINATE),
         reason=data.get("reason"),
-        cases=[TestCaseResult(identity=c["identity"], classname=c["classname"], name=c["name"], status=c["status"])
+        cases=[TestCaseResult(identity=c["identity"], classname=c["classname"], name=c["name"], status=c["status"],
+                              detail=str(c.get("detail") or ""))
                for c in data.get("test_cases") or ()],
         report_files=list(data.get("report_files") or ()), cleared_reports=int(data.get("cleared_reports") or 0),
         version=int(data.get("version") or 0))
+
+
+def failure_details(result: Any) -> Dict[str, str]:
+    """{test identity: failure detail} for the failing cases a test-gate result's report carries (the first detail of a
+    parameterized identity); empty when the result carries no report or no detail."""
+    report = report_from_result(result)
+    details: Dict[str, str] = {}
+    for case in report.cases if report is not None else ():
+        if case.detail and case.status in (FAILED, ERROR):
+            details.setdefault(case.identity, case.detail)
+    return details
