@@ -28,3 +28,21 @@ Baseline: tag `kriya-gui-v1.0.0-hardened` = main = `5be638e`. Everything below w
 
 ## Plan (priority order of the owner's instruction)
 workspace.create + New Project -> readiness (model probe, routing, egress) -> Skills (read-only) -> Tools (read-only) -> notifications + Return to Active Run + approval indicator -> Runs search/filter -> productivity actions -> reproof. Run Report: deferred to v1.2 unless it proves narrow.
+
+## What was built (all verified by tests, mutation checks and the packaged app over real Kriya)
+
+**Normal workflow, no Terminal for supported use:** Launch -> Welcome (promise + New Project / Open Folder / recents) -> New Project (native parent chooser -> name -> Kriya creates ONE empty folder; no Git init, nothing scaffolded) or Open Folder -> Workspace page: Goal + Readiness checklist + Skills + Tools and capabilities + Model routing -> Start Run -> work continues in the background -> native notification when approval is needed (and when the run ends) -> "Return to run" / "1 approval waiting - Go to review" -> Validation + Changes + reviewer text -> Approve / Reject (Kriya authority, unchanged; content hidden => explicit "Approve without viewing diff") -> Runs (search, status and time filters; pinned Active run row) -> Timeline, Overview, Trust, Validation, Changes, WHY, Context, Plan, Attempts, Evidence.
+
+**New Kriya operations (Kriya owns them; the GUI shows answers):** `workspace.create` (host-only, token-gated; never reachable from the renderer's query channel), `execution.context` (Skills metadata, configured tools, per-role routing, egress; starts nothing, returns no rule text/command/argument/environment/credential), `execution.model_probe` (one bounded local GET /models per distinct endpoint, refused for non-local endpoints under local_only). Fixed along the way: `execution.preflight` crashed on a malformed kriya.yaml (now a typed CONFIG_LOAD_FAILED blocker).
+
+**Skills the user can do:** see every Skill Kriya would discover with its category, verified state and provenance, staged-rule count and origin; see that Kriya selects them automatically; see which a run actually used (Context module). **Cannot** (backend gap, registered): build/import a Skill from a document, folder or URL; create/promote/edit; choose manually.
+
+**Tools/MCP the user can do:** see configured plugins and MCP server names with declared capability profiles, marked operator-managed, health not checked. **Cannot:** configure, approve, start or health-check tools (operator/terminal by design).
+
+**Operator-managed on purpose:** kriyaExecutable, configDirectory (host-owned; the renderer cannot write them), SECURITY_AUTHORITY / content visibility, autonomy mode, egress, model routing, MCP configuration and approvals, secrets.
+
+**Model routing:** Planner, Architect, Developer (default model), Reviewer, Run verifier, Skill-gap check, Spec compliance with model, server, source (default/override), fallback chain and measured availability. No per-run model picker (Kriya has no authority-preserving per-run policy).
+
+**Notifications / return:** closed kinds approval_required, run_succeeded, run_unsuccessful, asked only from durable Kriya state (never for the person's own rejection), host-built text (folder name only: never a diff, path, source or reviewer text), current launch only, once per event (approval repeats rate-limited), never while the window is focused; clicking returns to the run (fixed showRun command).
+
+**Productivity:** Copy run ID / workspace path / failure details, Reveal workspace in Finder (the host reveals the folder it has open), existing Open in editor and Copy diff. Settings: editor, recents management, read-only host-owned values and stored-diff status.
