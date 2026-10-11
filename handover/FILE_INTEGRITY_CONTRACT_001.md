@@ -304,3 +304,7 @@ New filesystem write sites, all under Kriya's state directory or a Kriya-owned s
 replace; staged read-only asset copies and the candidate export inside a scratch under `<state>/authority-runs/`),
 `kriya/workflow/workflow.py` (+4: the baseline export under the same scratch, removed after the run). Counted in
 `tests/test_file_integrity_contract_001.py::_AUDITED_WRITE_SITES`.
+
+## Direct-write audit addendum (GUI final, 2026-10-11)
+
+`kriya/control/persistence.py` gains one counted site: `os.unlink(staging)` in `save_launch_review_decision`. Classification: Kriya CONTROL state only (`<workspace>/.kriya/control/launches/`), never a target-repository source file and never model/tool content. The decision document is staged complete through the ownership-stamped control writer (`_save_json_document` -> `write_control_file`), then `os.link`ed to its final name (atomic and exclusive: a second writer gets `FileExistsError`) and the staging name is removed. Count: `kriya/control/persistence.py` 1 -> 2.
