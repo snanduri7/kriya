@@ -97,3 +97,6 @@
 .ck-setup > summary:focus-visible { outline: 2px solid var(--ck-accent); outline-offset: 2px; }
 .ck-skills { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 8px; max-height: 360px; overflow: auto; }
 .ck-table { width: 100%; border-collapse: collapse; } .ck-table th, .ck-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--ck-line); vertical-align: top; } .ck-table thead th { color: var(--ck-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+.ck-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; } .ck-filters .ck-filter { flex: 1 1 140px; min-width: 0; }
+.ck-active-row { margin: 6px 0; } .ck-active-row button { width: 100%; text-align: left; border-color: var(--ck-accent); background: var(--ck-accent-bg); }

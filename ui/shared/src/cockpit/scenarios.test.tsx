@@ -108,7 +108,7 @@ describe('the fixture scenarios', () => {
     // exactly one prominent notice (the trust strip owns it); Timeline and Evidence only carry a compact marker
     expect(await screen.findAllByText(/The store is unsealed: the run crashed or is still writing; which one is not recorded\./)).toHaveLength(1);
     expect(await screen.findByText('unsealed store')).toBeInTheDocument();
-    expect(await screen.findByText('Unfinished')).toBeInTheDocument();
+    expect((await screen.findAllByText('Unfinished')).filter((el) => el.tagName !== 'OPTION')).toHaveLength(1); // the run's label (the Runs status filter has an option of the same name)
     expect((await trust()).getByText('unsealed')).toBeInTheDocument();
     expect(screen.queryByText(/\bActive\b|Running/)).toBeNull();
   });

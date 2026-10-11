@@ -137,6 +137,20 @@ describe('Return to run and the approval indicator', () => {
     act(() => host.menu('showRun'));
     expect(store.getState()).toEqual(before);
   });
+  it('the Runs list pins an "Active run" row while a run is active (with the approval hint), selecting the live run; it disappears with the run', async () => {
+    const { host, bar, store } = await reachReview();
+    goTo('Runs');
+    const row = await screen.findByRole('button', { name: 'Active run - return to it' });
+    expect(row).toHaveTextContent('approval waiting');
+    fireEvent.click(row);
+    await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Active run - return to it' })).toHaveAttribute('aria-selected', 'true'));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'));
+    expect(screen.queryByRole('button', { name: 'Active run - return to it' })).toBeNull();
+  });
   it('the Return and indicator buttons are gone once the run is over', async () => {
     const { host, bar } = await start({ outcome: 'success' });
     act(() => host.exec!.finish());

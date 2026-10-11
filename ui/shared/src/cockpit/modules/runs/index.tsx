@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, ofKind, useDispatch, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { AvailabilityView, RUN_DOCUMENTS_PAGE, ofKind, useDispatch, useExecution, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { NO_FILTER, filterRuns, isFiltering, type RangeFilter, type RunFilter, type StatusFilter } from './filter';
 import type { HistoryList, RunSummary } from '../../../model/kup';
 
 const PAGE = 200;
@@ -31,7 +32,12 @@ function RunsList() {
   const workspace = useWorkspacePath();
   const key = snapshotId ? `${snapshotId}|${workspace ?? ''}` : null;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<RunFilter>(NO_FILTER);
+  // "now" for the time ranges, taken when the person picks a range or refreshes (not on every render, which would also be impure)
+  const [asOf, setAsOf] = useState(() => Date.now());
+  const ex = useExecution();
+  const active = ex.run && ex.run.stage !== 'finished' ? ex.run : null;
+  const liveSelected = useModuleSelection('liveLaunchId');
   const current = loaded && loaded.key === key ? loaded : null;
 
   useEffect(() => {
@@ -53,26 +59,46 @@ function RunsList() {
     });
   };
 
+  const filtered = useMemo(() => filterRuns(current?.runs ?? [], filter, asOf), [current, filter, asOf]);
   const groups = useMemo(() => {
     const byGroup = new Map<string, RunSummary[]>();
-    const needle = query.trim().toLowerCase();
-    for (const run of (current?.runs ?? []).filter((r) => !needle || `${r.goal ?? ''} ${r.status ?? ''}`.toLowerCase().includes(needle))) {
+    for (const run of filtered.runs) {
       const key = run.milestone_group_id ? `Milestone ${run.milestone_group_id}` : `${(run.timestamp ?? 'time not recorded').slice(0, 10)}`;
       byGroup.set(key, [...(byGroup.get(key) ?? []), run]);
     }
     return [...byGroup.entries()];
-  }, [current, query]);
+  }, [filtered]);
+  const filtering = isFiltering(filter);
 
   return (
     <div>
       <div className="ck-runs-head">
         <h2 style={{ fontSize: 14, margin: 0 }}>Runs</h2>
         <span>
-          <button type="button" title="Acquire a new consistent snapshot of the history store" onClick={() => void session.acquire()} disabled={snapshotId === null && session.status.state === 'loading'}>Refresh runs</button>{' '}
+          <button type="button" title="Acquire a new consistent snapshot of the history store" onClick={() => { setAsOf(Date.now()); void session.acquire(); }} disabled={snapshotId === null && session.status.state === 'loading'}>Refresh runs</button>{' '}
           {workspace ? <button type="button" className="ck-primary" onClick={() => go('workspace')}>New Run</button> : null}
         </span>
       </div>
-      {(current?.runs.length ?? 0) > 6 ? <input type="search" aria-label="Filter runs" placeholder="Filter by goal or status" value={query} onChange={(e) => setQuery(e.target.value)} className="ck-filter" /> : null}
+      {active ? (
+        <div className="ck-active-row">
+          <button type="button" aria-selected={liveSelected === active.launchId} aria-label="Active run - return to it" onClick={() => { dispatch({ type: 'selectLiveRun', launchId: active.launchId }); go(RUN_DOCUMENTS_PAGE); }}>
+            <div><span aria-hidden="true">● </span>Active run{active.review ? ' · approval waiting' : ''}</div>
+            <div className="muted small">{active.stage === 'starting' ? 'Starting' : 'Running'} · return to it</div>
+          </button>
+        </div>
+      ) : null}
+      {(current?.runs.length ?? 0) > 0 ? (
+        <div className="ck-filters" role="search" aria-label="Filter runs">
+          <input type="search" aria-label="Filter runs" placeholder="Search goal, status or id" value={filter.query} onChange={(e) => setFilter({ ...filter, query: e.target.value })} className="ck-filter" />
+          <select aria-label="Status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value as StatusFilter })}>
+            <option value="all">Any status</option><option value="success">Success</option><option value="failure">Failure</option><option value="unfinished">Unfinished</option><option value="not_recorded">Status not recorded</option>
+          </select>
+          <select aria-label="Time" value={filter.range} onChange={(e) => { setAsOf(Date.now()); setFilter({ ...filter, range: e.target.value as RangeFilter }); }}>
+            <option value="any">Any time</option><option value="today">Today</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
+          </select>
+          {filtering ? <button type="button" className="ck-quiet" onClick={() => setFilter(NO_FILTER)}>Clear filters</button> : null}
+        </div>
+      ) : null}
       {snapshotId === null ? <AvailabilityView value={session.status}>{() => null}</AvailabilityView> : null}
       {session.status.state !== 'ready' && session.status.state !== 'loading' ? <button type="button" onClick={() => void session.acquire()}>Acquire snapshot</button> : null}
       {snapshotId !== null && current === null ? <div className="ck-state muted" role="status">Loading…</div> : null}
@@ -92,7 +118,14 @@ function RunsList() {
           </ul>
         </div>
       ))}
-      {current ? <div className="muted small" role="status">{current.runs.length} run(s) loaded{current.next ? '' : ' (all)'}</div> : null}
+      {current ? (
+        <div className="muted small" role="status">
+          {filtering ? `${filtered.runs.length} of ${current.runs.length} loaded run(s) match` : `${current.runs.length} run(s) loaded${current.next ? '' : ' (all)'}`}
+          {filtering && current.next ? '. Filters apply to the runs loaded so far; load more to include older runs' : ''}
+          {filtering && filter.range !== 'any' && filtered.untimed ? `. ${filtered.untimed} run(s) have no recorded time and cannot be placed in a time range` : ''}
+        </div>
+      ) : null}
+      {current && filtering && filtered.runs.length === 0 && current.runs.length > 0 ? <div className="ck-state"><strong>No loaded run matches these filters</strong><button type="button" onClick={() => setFilter(NO_FILTER)}>Clear filters</button></div> : null}
       {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No run is recorded for this workspace</strong>Kriya found no run whose evidence names this folder. Start one with New Run.</div> : null}
       {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
@@ -103,6 +136,6 @@ function RunsList() {
 export const runsModule: ModuleDefinition = {
   id: 'runs',
   placement: { page: 'runs', surface: 'secondary', label: 'Runs', order: 10 },
-  requiredCapabilities: ['snapshot'], optionalCapabilities: [], selectionDependencies: ['runId'],
+  requiredCapabilities: ['snapshot'], optionalCapabilities: [], selectionDependencies: ['runId', 'liveLaunchId'],
   render: RunsList,
 };
