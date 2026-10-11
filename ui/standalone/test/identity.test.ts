@@ -56,7 +56,7 @@ describe('main-process identity', () => {
   it('main.ts sets the identity before anything reads the name, titles the window, blocks page-driven renames and installs the menu', () => {
     const main = read('src', 'main', 'main.ts');
     expect(main.indexOf('app.setName(PRODUCT_NAME)')).toBeGreaterThan(-1);
-    expect(main.indexOf('app.setName(PRODUCT_NAME)')).toBeLessThan(main.indexOf('const MEASURE'));
+    expect(main.indexOf('app.setName(PRODUCT_NAME)')).toBeLessThan(main.indexOf('function loadDevDrivers'));
     expect(main).toContain('title: WINDOW_TITLE');
     expect(main).toContain("win.on('page-title-updated', (e) => e.preventDefault())");
     expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(');

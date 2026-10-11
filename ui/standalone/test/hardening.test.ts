@@ -56,9 +56,12 @@ describe('gate A-1 hardening settings (every one checked)', () => {
       expect(src, f).not.toMatch(/from 'electron'|require\(|node:|child_process/);
     }
   });
-  it('the fixture stand-in is the only executable while matrix protection holds (D-9 gate in main.ts)', () => {
-    expect(mainTs).toContain("process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1'");
-    expect(mainTs).toContain('fake_kriya.mjs');
+  it('the fixture stand-in and its D-9 gate live ONLY in the dev drivers module; main.ts knows neither the environment variable nor the stand-in script', () => {
+    const dev = read(join(MAIN, 'dev_drivers.ts'));
+    expect(dev).toContain("env.KRIYA_UI_ALLOW_REAL_KRIYA === '1'");
+    expect(dev).toContain('fake_kriya.mjs');
+    expect(mainTs).toContain('const ALLOW_REAL = dev?.allowReal ?? false;');
+    expect(mainTs).not.toMatch(/KRIYA_UI_ALLOW_REAL_KRIYA|fake_kriya|fake-kriya|KRIYA_FAKE_/);
   });
   it('the real kriya is launched only with the child environment policy (child_env.ts), never with the host environment', () => {
     expect(mainTs).toContain('buildKriyaChildEnv(process.env)');
@@ -68,7 +71,8 @@ describe('gate A-1 hardening settings (every one checked)', () => {
     expect(runner).toContain('KRIYA_CHILD_PATH');
   });
   it('every kriya child runs in the validated configuration directory, never in Electron\'s own working directory (F-5)', () => {
-    expect((mainTs.match(/cwd: dir\.directory/g) ?? []).length).toBe(4); // the persistent service (query path and the host's own preflight ask), the one-shot real child and the stand-in alike
+    expect((mainTs.match(/cwd: dir\.directory/g) ?? []).length).toBe(3); // the persistent service (query path and the host's own preflight ask) and the one-shot real child
+    expect(mainTs).toContain('dev.runFake(argv, dir.directory)'); // the development stand-in runs in the same validated directory
     expect(mainTs).toContain("resolveConfigDirectory(settings.get('configDirectory'), process.env, isDirectory)");
     expect(mainTs).not.toMatch(/process\.cwd\(\)/);
     expect(mainTs).toContain('configDirectorySource');
@@ -92,11 +96,13 @@ describe('M5 persistent transport and workspace authority (hardening)', () => {
     expect(mainTs).toContain("app.on('before-quit', (event) => {");
     expect(mainTs).toContain('void services.stop();');
   });
-  it('the scripted chooser exists only while the screenshot driver is active and replaces nothing but the native dialog call', () => {
-    expect(mainTs).toContain('CAPTURE_DIR && process.env.KRIYA_UI_CAPTURE_CHOOSE');
-    expect(mainTs.indexOf('if (CAPTURE_CHOICES) return CAPTURE_CHOICES.shift()')).toBeGreaterThan(mainTs.indexOf('workspaces.choose(async () => {'));
-    expect(mainTs.indexOf('if (CAPTURE_CHOICES) return CAPTURE_CHOICES.shift()')).toBeLessThan(mainTs.indexOf('dialog.showOpenDialog'));
-    expect(mainTs.match(/KRIYA_UI_CAPTURE_CHOOSE/g)?.length).toBe(2);
+  it('the scripted chooser exists only in the dev drivers module (absent from the product), active only while the screenshot driver is, and replaces nothing but the native dialog call', () => {
+    const dev = read(join(MAIN, 'dev_drivers.ts'));
+    expect(dev).toContain('CAPTURE_DIR && env.KRIYA_UI_CAPTURE_CHOOSE');
+    expect(mainTs).not.toMatch(/KRIYA_UI_CAPTURE/);
+    const use = mainTs.indexOf('if (dev?.captureChoices) return dev.captureChoices.shift()');
+    expect(use).toBeGreaterThan(mainTs.indexOf('workspaces.choose(async () => {'));
+    expect(use).toBeLessThan(mainTs.indexOf('dialog.showOpenDialog'));
   });
   it('a request that names a folder is checked against the folders the person chose, BEFORE any transport; the native chooser runs only in main', () => {
     expect(mainTs.indexOf('workspaces.refuse(v.value)')).toBeGreaterThan(-1);

@@ -7,7 +7,7 @@ set -eu
 OUT="$1"
 UI="$(cd "$(dirname "$0")/../../../../ui/standalone" && pwd)"
 ROOT="$(cd "$UI/../.." && pwd)"
-APP="$UI/out/Kriya.app"
+APP="$UI/out-evidence/Kriya.app"  # the EVIDENCE package (npm run package:mac:evidence): the shipped product has no capture driver
 BASE="$(mktemp -d "${TMPDIR:-/tmp}/kriya-live-smoke.XXXXXX")"
 mkdir -p "$BASE/state" "$BASE/config" "$BASE/data" "$BASE/ws/hello-project" "$OUT"
 ( cd "$BASE/ws/hello-project" && git init -q -b main . \

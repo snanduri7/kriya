@@ -44,6 +44,7 @@ export class FixtureExecution {
   private staleServed = false;
   private reviewStatus: ReviewStatus = 'PENDING';
   private reviewSuperseded = false;
+  private killed = false;
   /** Every decision request the host received (for assertions). */
   readonly decisions: DecideApprovalRequest[] = [];
   readonly port: ExecutionHostPort;
@@ -58,6 +59,7 @@ export class FixtureExecution {
         this.frame = 0;
         this.reviewStatus = 'PENDING';
         this.reviewSuperseded = false;
+        this.killed = false;
         this.launchGoal = request.goal;
         this.launchWorkspace = request.workspace;
         return { started: true, launch_id: LAUNCH_ID, refusal: null };
@@ -78,22 +80,24 @@ export class FixtureExecution {
   finish(): void { if (this.frame >= 0 && !this.reviewPending()) this.frame = 4; }
   /** The run is waiting on the human's decision (a pending review exists and nobody has decided it). */
   reviewPending(): boolean { return this.outcome === 'review' && this.frame === REVIEW_FRAME && this.reviewStatus === 'PENDING'; }
+  /** Test hook: the execution process is killed (SIGKILL) where it stands - the launch record stays RUNNING, the workspace lock is released, nothing is sealed. */
+  killProcess(): void { this.killed = true; }
   /** Test hook: a retry produced a new candidate, so the review the person was shown is superseded (decisions for it are stale). */
   supersedeReview(): void { this.reviewSuperseded = true; }
 
   /** The process is alive (the real host's `active()`): not yet at the final frame. */
-  active(): boolean { return this.frame >= 0 && this.frame < 4; }
+  active(): boolean { return this.frame >= 0 && this.frame < 4 && !this.killed; }
   /** The run's final records are durable (a finished, sealed run the history now lists). */
   private succeeds(): boolean { return (this.outcome === 'review' && this.reviewStatus === 'APPROVED') || this.outcome === 'success' || this.outcome === 'success_after_stale_read' || this.outcome === 'success_with_declined'; }
   ended(): boolean { return this.frame === 4 && (this.succeeds() || this.outcome === 'failure' || (this.outcome === 'review' && this.reviewStatus === 'REJECTED')); }
 
   private hostState(): ExecutionState {
     if (this.frame < 0) return { phase: 'idle', launch_id: null, workspace: null, started_at: null, ended_at: null, exit: null, diagnostic: null };
-    const over = this.frame === 4;
-    const code = this.succeeds() ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
+    const over = this.frame === 4 || this.killed;
+    const code = this.killed ? null : this.succeeds() ? 0 : this.outcome === 'refused' ? 2 : this.outcome === 'died' ? null : 1;
     return {
       phase: over ? 'exited' : 'running', launch_id: LAUNCH_ID, workspace: this.launchWorkspace, started_at: '2026-10-10T10:10:10.000Z', ended_at: over ? '2026-10-10T10:12:00.000Z' : null,
-      exit: over ? { code, signal: this.outcome === 'died' ? 'SIGKILL' : null } : null, diagnostic: null,
+      exit: over ? { code, signal: this.outcome === 'died' || this.killed ? 'SIGKILL' : null } : null, diagnostic: null,
     };
   }
 
@@ -142,7 +146,7 @@ export class FixtureExecution {
     const sealed = f === 4 && (ok || outcome === 'failure' || rejected);
     const refused = outcome === 'refused' && f === 4;
     const approval = outcome === 'approval_required' && f === 4;
-    const died = outcome === 'died' && f === 4;
+    const died = (outcome === 'died' && f === 4) || this.killed;
     const phase = refused || sealed || approval ? 'ENDED' : f === 1 ? 'STARTING' : 'RUNNING';
     const terminal = sealed ? (ok ? 'SUCCESS' : 'FAILURE') : approval ? 'FAILURE' : null;
     const run = f >= 2 && !refused ? { run_id: LAUNCH_ID, started_at: '2026-10-10T10:10:12+00:00', base_revision: null } : null;

@@ -349,7 +349,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
     const pending = await untilPending(ws, id);
     expect(pending).toMatchObject({ kind: 'change_approval', status: 'PENDING', decision: null });
-    expect(pending.files[0]).toMatchObject({ filepath: 'src/clamp.py', lines_added: 2, lines_removed: 0 });
+    expect(pending.files[0]).toMatchObject({ filepath: 'src/clamp.py', lines_added: 1, lines_removed: 1 });
     expect(pending.reason).toContain('Automated Code Review');
     // while it waits: live, the workspace is held, no outcome exists
     const waiting = (await status(ws, id)).data as Json;
@@ -435,6 +435,121 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const d = (await status(ws, id)).data as Json;
     expect(d.liveness).toBe('interrupted');
     expect(d.launch.ended).toBeNull();
+    expect(d.run_record.terminal_status).not.toBe('SUCCESS');
+  }, 120_000);
+
+  // ---------------------------------------------------------------- GUI v1 hardening (Phase C): greenfield and brownfield through ONE path
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env: { ...process.env, PATH: childPath }, stdio: 'pipe' });
+  type Kind = 'added' | 'modified' | 'deleted';
+  interface Case { name: string; setup(dir: string): void; script: Json; decide?: 'approve' | 'reject'; expect: { terminal: 'SUCCESS' | 'FAILURE'; kinds: Kind[]; baseline: 'git' | 'none'; review?: 'APPROVED' | 'REJECTED' | null } }
+  const change = (path: string, kind: Kind) => ({ path, kind, lines_added: kind === 'deleted' ? 0 : 3, lines_removed: kind === 'added' ? 0 : 1 });
+  const CASES: Case[] = [
+    { name: 'greenfield empty folder, success', setup: () => undefined, script: { outcome: 'success', step_ms: 60, changes: [change('src/app.py', 'added'), change('tests/test_app.py', 'added')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['added', 'added'], baseline: 'none' } },
+    { name: 'greenfield git-initialized empty folder, success', setup: (d) => { git(d, 'init', '-q', '-b', 'main', '.'); }, script: { outcome: 'success', step_ms: 60, changes: [change('src/app.py', 'added')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['added'], baseline: 'none' } },
+    { name: 'greenfield compile failure', setup: () => undefined, script: { outcome: 'success', step_ms: 60, changes: [change('src/app.py', 'added')], gate: 'compile_fail' }, expect: { terminal: 'FAILURE', kinds: ['added'], baseline: 'none' } },
+    { name: 'greenfield test failure', setup: () => undefined, script: { outcome: 'success', step_ms: 60, changes: [change('src/app.py', 'added')], gate: 'test_fail' }, expect: { terminal: 'FAILURE', kinds: ['added'], baseline: 'none' } },
+    { name: 'greenfield approval', setup: () => undefined, script: { outcome: 'review', step_ms: 60, changes: [change('src/app.py', 'added')], gate: 'pass' }, decide: 'approve', expect: { terminal: 'SUCCESS', kinds: ['added'], baseline: 'none', review: 'APPROVED' } },
+    { name: 'greenfield rejection', setup: () => undefined, script: { outcome: 'review', step_ms: 60, changes: [change('src/app.py', 'added')], gate: 'pass' }, decide: 'reject', expect: { terminal: 'FAILURE', kinds: ['added'], baseline: 'none', review: 'REJECTED' } },
+    { name: 'brownfield clean repository, modified + added', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'success', step_ms: 60, changes: [change('a.py', 'modified'), change('b.py', 'added')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['modified', 'added'], baseline: 'git' } },
+    { name: 'brownfield DIRTY repository with the user\'s own uncommitted work', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); writeFileSync(join(d, 'a.py'), 'x = 2  # my edit\n'); writeFileSync(join(d, 'notes.txt'), 'untracked\n'); }, script: { outcome: 'success', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['modified'], baseline: 'git' } },
+    { name: 'brownfield deleted file', setup: (d) => { writeFileSync(join(d, 'old.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'success', step_ms: 60, changes: [change('old.py', 'deleted')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['deleted'], baseline: 'git' } },
+    { name: 'brownfield regression failure', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'success', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'regression_fail' }, expect: { terminal: 'FAILURE', kinds: ['modified'], baseline: 'git' } },
+    { name: 'brownfield approval of a modification', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'review', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, decide: 'approve', expect: { terminal: 'SUCCESS', kinds: ['modified'], baseline: 'git', review: 'APPROVED' } },
+    { name: 'brownfield rejection', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'review', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, decide: 'reject', expect: { terminal: 'FAILURE', kinds: ['modified'], baseline: 'git', review: 'REJECTED' } },
+    { name: 'existing files but NO baseline (not a git repository)', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); }, script: { outcome: 'success', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['modified'], baseline: 'none' } },
+  ];
+  const shapes = { describe: new Set<string>(), preflight: new Set<string>(), argv: new Set<string>() };
+
+  it.each(CASES.map((c) => [c.name, c] as const))('MATRIX: %s - the same cockpit path, the same module data, the recorded truth', async (_name, c) => {
+    const ws = workspace(`matrix-${CASES.indexOf(c)}`);
+    c.setup(ws);
+    const before = readdirSync(ws).sort().join(',') + (existsSync(join(ws, 'a.py')) ? readFileSync(join(ws, 'a.py'), 'utf8') : '');
+    const h = host(ws, executable(`matrix-${CASES.indexOf(c)}`, c.script));
+    const described = (await read({ operation: 'workspace.describe', workspace: ws })).data as Json;
+    const preflight = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
+    expect(preflight.ready, JSON.stringify(preflight.blockers)).toBe(true);
+    shapes.describe.add(Object.keys(described).sort().join(','));
+    shapes.preflight.add(Object.keys(preflight).sort().join(','));
+    const started = await h.start({ workspace: ws, goal: 'Add the feature. Do not change anything else.' });
+    expect(started.started).toBe(true);
+    const id = started.launch_id!;
+    if (c.decide) {
+      const pending = await untilPending(ws, id);
+      expect(pending.files.map((f: Json) => f.filepath)).toEqual(c.script.changes.map((x: Json) => x.path));
+      expect(await approvals(ws).decide(decision(ws, id, pending, c.decide))).toMatchObject({ accepted: true });
+    }
+    await untilExited(h);
+    const d = (await status(ws, id)).data as Json;
+    expect(d.run_record.terminal_status, JSON.stringify(d.launch.ended)).toBe(c.expect.terminal); // the RunRecord decides, never the process exit
+    expect(d.launch.pending_approval?.status ?? null).toBe(c.expect.review ?? null);
+    if (c.expect.terminal === 'FAILURE' && !c.expect.review) expect(d.launch.pending_approval).toBeNull(); // a failed gate never reaches a review
+    // the recorded evidence: verified, with exactly the changes the run recorded, and the baseline Kriya recorded (never inferred by the host)
+    expect(((await read({ operation: 'evidence.verify', run_id: id })).data as Json).status).toBe('VERIFIED');
+    const records = (await read({ operation: 'evidence.records', run_id: id, kind: ['candidate.change'], limit: 200 })).data as Json;
+    const kinds = records.records.map((r: Json) => (r.payload.deleted ? 'deleted' : r.payload.created ? 'added' : 'modified'));
+    expect(kinds).toEqual(c.expect.kinds);
+    const manifest = ((await read({ operation: 'evidence.manifest', run_id: id })).data as Json).manifest as Json;
+    expect(manifest.workspace_identity).toBe(described.identity);
+    if (c.expect.baseline === 'none') expect(manifest.base_revision ?? null).toBeNull(); else expect(typeof manifest.base_revision).toBe('string');
+    // the workspace is exactly as the person left it (this run applied nothing; the user's uncommitted work is intact)
+    expect(readdirSync(ws).filter((n) => n !== '.kriya').sort().join(',') + (existsSync(join(ws, 'a.py')) ? readFileSync(join(ws, 'a.py'), 'utf8') : '')).toBe(before.replace(/,?\.kriya/, ''));
+    shapes.argv.add(JSON.stringify(h.state().launch_id ? 'one-launch-shape' : 'none'));
+  }, 180_000);
+
+  it('MATRIX: every folder kind produced the same field set from Kriya (one cockpit, one workflow); nothing in the host decided what kind of folder it was', () => {
+    expect(shapes.describe.size).toBe(1);
+    expect(shapes.preflight.size).toBe(1);
+  });
+
+  it('QUIT while a review is pending: the run is interrupted like Ctrl-C, sealed as a failure, the review is closed undecided, and a late decision is refused - never an approval, never a success', async () => {
+    const ws = workspace('review-quit', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-quit', { outcome: 'review', step_ms: 60 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    const pending = await untilPending(ws, id);
+    await h.shutdown(); // SIGINT, then SIGKILL after the grace period - the application's quit path
+    expect(h.state()).toMatchObject({ phase: 'exited', diagnostic: 'terminated_by_the_host' });
+    const d = (await status(ws, id)).data as Json;
+    expect(d.launch.phase).toBe('ENDED');
+    expect(d.launch.ended.exit_code).toBe(130);
+    expect(d.run_record.terminal_status).toBe('FAILURE');
+    expect(d.launch.pending_approval).toMatchObject({ status: 'EXPIRED', decision: { decision: null } });
+    expect(['interrupted', 'launch-ended']).toContain(d.launch.pending_approval.decision.source);
+    expect(d.workspace_lock.held).toBe(false);
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'LAUNCH_ENDED' });
+    // the application's OWN quit path leaves the folder clean and startable again: no recovery is needed after a quit
+    const after = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
+    expect(after.recovery).toMatchObject({ status: 'CLEAN', run_active: false });
+    expect(after.ready).toBe(true);
+  }, 120_000);
+
+  it('a NEW window (a fresh approval host) can decide a review that is still pending: nothing depends on the first window\'s memory', async () => {
+    const ws = workspace('review-reload', { 'a.txt': 'a' });
+    const h = host(ws, executable('review-reload', { outcome: 'review', step_ms: 60 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    approvals(ws); // the first window's proxy is gone with the window
+    const pending = await untilPending(ws, id); // the review is rediscovered from Kriya's launch record alone
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: true });
+    await untilExited(h);
+    expect(((await status(ws, id)).data as Json).run_record.terminal_status).toBe('SUCCESS');
+  }, 120_000);
+
+  it('REOPEN after an abnormal exit: a run killed outright leaves the folder honestly marked, and the person can see why and what to do - never a silent stuck folder', async () => {
+    const ws = workspace('abnormal-exit', { 'a.txt': 'a' });
+    const h = host(ws, executable('abnormal-exit', { outcome: 'review', step_ms: 60 }));
+    const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
+    await untilPending(ws, id);
+    process.kill(((await status(ws, id)).data as Json).launch.process.pid as number, 'SIGKILL');
+    await untilExited(h);
+    // a "reopened" application: fresh hosts, nothing remembered, Kriya's durable records only
+    const reopened = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
+    const described = (await read({ operation: 'workspace.describe', workspace: ws })).data as Json;
+    // a HARD kill (crash, power loss) is different from a quit: Kriya cannot know what the dead run did, so it protects the folder - Start is blocked with a typed reason
+    // that names the state and the recovery step (a Kriya terminal action; the GUI has no recovery capability: registry GUI-RECOVERY-ACTION-001)
+    expect(reopened.ready).toBe(false);
+    expect(reopened.blockers).toEqual([expect.objectContaining({ code: 'RECOVERY_REQUIRED', message: expect.stringContaining('RECOVERY_AVAILABLE') })]);
+    expect(described.recovery).toMatchObject({ status: 'RECOVERY_AVAILABLE', run_active: false });
+    const d = (await status(ws, id)).data as Json;
+    expect(d.liveness).toBe('interrupted');
     expect(d.run_record.terminal_status).not.toBe('SUCCESS');
   }, 120_000);
 });

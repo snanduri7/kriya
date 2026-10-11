@@ -1,0 +1,167 @@
+{
+ "install_sampler": "ok",
+ "open_folder_to_runs_list_ms": {
+  "ms": 120,
+  "rows": 200,
+  "nodes": 870
+ },
+ "load_more_x5_ms": [
+  {
+   "ms": 43,
+   "rows": 400
+  },
+  {
+   "ms": 42,
+   "rows": 600
+  },
+  {
+   "ms": 42,
+   "rows": 800
+  },
+  {
+   "ms": 42,
+   "rows": 1000
+  },
+  {
+   "ms": 41,
+   "rows": 1200
+  }
+ ],
+ "select_big_run_to_overview_ms": {
+  "overview_ms": 5804,
+  "timeline_visible_ms": 5826,
+  "nodes": 66467,
+  "timeline_nodes": 61540,
+  "heap_mb": 43
+ },
+ "tab_validation_ms": {
+  "ms": 27,
+  "panel_nodes": 48,
+  "text_chars": 533
+ },
+ "tab_changes_ms": {
+  "ms": 21,
+  "panel_nodes": 46,
+  "text_chars": 1142
+ },
+ "tab_context_ms": {
+  "ms": 22,
+  "panel_nodes": 74,
+  "text_chars": 965
+ },
+ "tab_plan_ms": {
+  "ms": 35,
+  "panel_nodes": 51,
+  "text_chars": 732
+ },
+ "tab_attempts_ms": {
+  "ms": 35,
+  "panel_nodes": 408,
+  "text_chars": 3485
+ },
+ "tab_evidence_ms": {
+  "ms": 46,
+  "panel_nodes": 1542,
+  "text_chars": 13957
+ },
+ "tab_overview_ms": {
+  "ms": 38,
+  "panel_nodes": 38,
+  "text_chars": 2146
+ },
+ "changes_open_first_file_and_diff_ms": {
+  "ms": 23,
+  "changed_files_listed": 8
+ },
+ "raw_events_drawer_ms": {
+  "ms": 40,
+  "nodes": 66499
+ },
+ "baseline_heap": {
+  "heap_mb": 43,
+  "nodes": 66499
+ },
+ "navigation_cycles": {
+  "heaps": [
+   {
+    "cycle": 0,
+    "heap_mb": 43,
+    "nodes": 66470
+   },
+   {
+    "cycle": 20,
+    "heap_mb": 43,
+    "nodes": 4912
+   },
+   {
+    "cycle": 40,
+    "heap_mb": 43,
+    "nodes": 4912
+   },
+   {
+    "cycle": 60,
+    "heap_mb": 43,
+    "nodes": 4912
+   },
+   {
+    "cycle": 80,
+    "heap_mb": 43,
+    "nodes": 4912
+   },
+   {
+    "cycle": 100,
+    "heap_mb": 43,
+    "nodes": 4884
+   }
+  ],
+  "slow_tab_switches": [],
+  "slow_count": 0
+ },
+ "event_loop_lag": {
+  "all": {
+   "samples": 710,
+   "median": 0,
+   "p95": 5,
+   "p99": 10,
+   "max": 491,
+   "over100ms": 1,
+   "over500ms": 0
+  },
+  "open_folder": {
+   "samples": 3,
+   "median": 3,
+   "p95": 4,
+   "p99": 4,
+   "max": 4,
+   "over100ms": 0,
+   "over500ms": 0
+  },
+  "load_more": {
+   "samples": 16,
+   "median": 0,
+   "p95": 4,
+   "p99": 4,
+   "max": 4,
+   "over100ms": 0,
+   "over500ms": 0
+  },
+  "select_big_run_and_tabs": {
+   "samples": 186,
+   "median": 0,
+   "p95": 6,
+   "p99": 44,
+   "max": 491,
+   "over100ms": 1,
+   "over500ms": 0
+  },
+  "navigation_cycles": {
+   "samples": 468,
+   "median": 0,
+   "p95": 4,
+   "p99": 7,
+   "max": 19,
+   "over100ms": 0,
+   "over500ms": 0
+  }
+ }
+}

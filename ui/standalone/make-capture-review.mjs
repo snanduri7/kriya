@@ -15,6 +15,7 @@ const goalSet = (text) => `const ta=document.querySelector('#ck-goal');Object.ge
 const banner = `document.querySelector('[aria-label="Active run"]')`;
 const review = `document.querySelector('[aria-label="Change review"]')`;
 const btn = (label) => `[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='${label}')`;
+const confirmBtn = `([...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval')||[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve without viewing diff'))`;
 const GOAL = 'Update greet(name) so it returns "Hello, <name>!" while preserving the public function signature and keeping the project tests passing.';
 const steps = [];
 const add = (s) => steps.push(s);
@@ -30,8 +31,8 @@ add({ name: 'banner_text_at_review', js: `(()=>${banner}?${banner}.innerText:nul
 add({ name: 'open_changes', js: `(async()=>{${W}if(!${review})return 'no review';${btn('Review changes')}.click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20,30000);return document.querySelector('[role=tabpanel]').innerText})()`, wait: 1500, file: '06-review-changes.png' });
 add({ name: 'open_changes_first_file', js: `(async()=>{${W}if(!${review})return 'no review';const b=document.querySelector('[role=tabpanel] ul button');if(b){b.click();await W(()=>/diff|@@|\\+\\+\\+/.test(document.querySelector('[role=tabpanel]').innerText),20000)}return document.querySelector('[role=tabpanel]').innerText})()`, wait: 1200, file: '07-review-changes-detail.png' });
 add({ name: 'open_validation', js: `(async()=>{${W}if(!${review})return 'no review';${btn('Review validation')}.click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20,30000);return document.querySelector('[role=tabpanel]').innerText})()`, wait: 1500, file: '08-review-validation.png' });
-add({ name: 'approve_click', js: `(async()=>{${W}if(!${review})return 'no review';const t0=performance.now();${btn('Approve changes')}.click();await W(()=>${btn('Confirm approval')},5000);return 'confirm shown'})()`, wait: 600, file: '09-approve-confirm.png' });
-add({ name: 'approve_confirm', js: `(async()=>{${W}const c=${btn('Confirm approval')};if(!c)return 'no confirm';const t0=performance.now();c.click();await W(()=>!${review}||/recorded/i.test(${review}.innerText),30000);return Math.round(performance.now()-t0)})()`, wait: 800, file: '10-approval-recorded.png' });
+add({ name: 'approve_click', js: `(async()=>{${W}if(!${review})return 'no review';const t0=performance.now();${btn('Approve changes')}.click();await W(()=>${confirmBtn},5000);return 'confirm shown'})()`, wait: 600, file: '09-approve-confirm.png' });
+add({ name: 'approve_confirm', js: `(async()=>{${W}const c=${confirmBtn};if(!c)return 'no confirm';const t0=performance.now();c.click();await W(()=>!${review}||/recorded/i.test(${review}.innerText),30000);return Math.round(performance.now()-t0)})()`, wait: 800, file: '10-approval-recorded.png' });
 add({ name: 'wait_terminal', js: `(async()=>{${W}const t0=performance.now();const ok=await W(()=>${banner}&&${banner}.dataset.stage==='finished');return ok?{ms:Math.round(performance.now()-t0),outcome:${banner}.dataset.outcome}:'TIMEOUT'})()`, wait: 2500, file: '11-terminal.png' });
 add({ name: 'terminal_banner_text', js: `(()=>${banner}.innerText)()`, wait: 100 });
 add({ name: 'timing', js: `(()=>JSON.parse(${banner}.dataset.timing))()`, wait: 100 });

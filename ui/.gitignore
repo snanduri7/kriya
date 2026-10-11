@@ -6,3 +6,4 @@ fixtures/generated/
 # Kriya.app builds (mac-app.mjs)
 standalone/out/
 standalone/.dev/
+standalone/out-evidence/

@@ -67,13 +67,13 @@
  },
  {
   "name": "approve_click",
-  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve changes').click();await W(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval'),5000);return 'confirm shown'})()",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve changes').click();await W(()=>([...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval')||[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve without viewing diff')),5000);return 'confirm shown'})()",
   "wait": 600,
   "file": "09-approve-confirm.png"
  },
  {
   "name": "approve_confirm",
-  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const c=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval');if(!c)return 'no confirm';const t0=performance.now();c.click();await W(()=>!document.querySelector('[aria-label=\"Change review\"]')||/recorded/i.test(document.querySelector('[aria-label=\"Change review\"]').innerText),30000);return Math.round(performance.now()-t0)})()",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const c=([...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval')||[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve without viewing diff'));if(!c)return 'no confirm';const t0=performance.now();c.click();await W(()=>!document.querySelector('[aria-label=\"Change review\"]')||/recorded/i.test(document.querySelector('[aria-label=\"Change review\"]').innerText),30000);return Math.round(performance.now()-t0)})()",
   "wait": 800,
   "file": "10-approval-recorded.png"
  },

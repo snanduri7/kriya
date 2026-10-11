@@ -35,6 +35,7 @@ export function WelcomeScreen() {
         <div className="ck-state" role="alert">
           <strong>Could not open {folderName(ws.notice.path)}</strong>
           {ws.notice.message} <span className="muted small">({ws.notice.code})</span>
+          {ws.notice.detail ? <details><summary className="muted small">Technical detail</summary><span className="mono">{ws.notice.detail}</span></details> : null}
           <div>
             {stale ? <button type="button" onClick={() => void ws.forgetRecent(ws.notice!.path)}>Remove from recent</button> : null}{' '}
             <button type="button" onClick={ws.dismissNotice}>Dismiss</button>
@@ -70,6 +71,7 @@ export function WorkspaceNotice() {
     <div className="ck-state ck-notice" role="alert">
       <strong>Could not open {folderName(ws.notice.path)}; {ws.current.facts.name} is still open</strong>
       {ws.notice.message} <span className="muted small">({ws.notice.code})</span>{' '}
+      {ws.notice.detail ? <details><summary className="muted small">Technical detail</summary><span className="mono">{ws.notice.detail}</span></details> : null}
       {stale ? <button type="button" onClick={() => void ws.forgetRecent(ws.notice!.path)}>Remove from recent</button> : null}{' '}
       <button type="button" onClick={ws.dismissNotice}>Dismiss</button>
     </div>

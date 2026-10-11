@@ -35,7 +35,10 @@ function requireMac() {
   if (!existsSync(ELECTRON_APP)) throw new Error(`the stock Electron bundle is missing (${ELECTRON_APP}); run npm install in ui/`);
 }
 
-export function rebrand(dest, { icon, appDir }) {
+/** The dev/evidence drivers: present in an evidence or dev build, ABSENT from the shipped product. */
+export const DEV_DRIVER_FILES = ['dev_drivers', 'capture', 'measure', 'soak'];
+
+export function rebrand(dest, { icon, appDir, evidence = false }) {
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dirname(dest), { recursive: true });
   cpSync(ELECTRON_APP, dest, { recursive: true, verbatimSymlinks: true });
@@ -77,6 +80,10 @@ export function rebrand(dest, { icon, appDir }) {
     mkdirSync(join(app, 'dist'), { recursive: true });
     writeFileSync(join(app, 'package.json'), JSON.stringify({ name: pkg.name, productName: PRODUCT, version: pkg.version, main: pkg.main, private: true }, null, 2));
     cpSync(join(appDir, 'dist', 'main'), join(app, 'dist', 'main'), { recursive: true });
+    if (!evidence) {
+      // The shipped product carries NO dev/evidence driver (capture, scripted chooser, measure, soak, tracing, fixture stand-in): its files are not packaged.
+      for (const name of DEV_DRIVER_FILES) for (const ext of ['.js', '.js.map']) rmSync(join(app, 'dist', 'main', `${name}${ext}`), { force: true });
+    }
     cpSync(join(appDir, 'dist', 'renderer'), join(app, 'dist', 'renderer'), { recursive: true });
   }
   execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', dest], { stdio: 'pipe' }); // ad-hoc: a modified bundle must be re-signed to launch on Apple silicon
@@ -118,7 +125,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
     execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs')], { stdio: 'inherit' });
     const mode = JSON.parse(readFileSync(join(HERE, 'dist', 'renderer', 'ui-mode.json'), 'utf8')).ui;
     if (mode !== 'cockpit') throw new Error(`dist/renderer is a "${mode}" build; only the cockpit is packaged (npm run build)`);
-    const note = rebrand(join(out, `${PRODUCT}.app`), { icon, appDir: HERE });
+    const evidence = process.argv.includes('--evidence');
+    const note = rebrand(join(out, `${PRODUCT}.app`), { icon, appDir: HERE, evidence });
+    if (!evidence) execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs'), '--package', join(out, `${PRODUCT}.app`)], { stdio: 'inherit' });
     const findings = verifyBundle(join(out, `${PRODUCT}.app`));
     console.log(`packaged ${join(out, `${PRODUCT}.app`)}\n  ${note}`);
     for (const f of findings) console.log(`  ${f}`);

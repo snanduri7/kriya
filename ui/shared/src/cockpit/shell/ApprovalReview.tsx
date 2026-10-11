@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { sanitizeText } from '../../render/sanitize';
 import { Badge, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, shortDigest, useCapabilities, useDispatch, useExecution, useNavigate, type PendingReview } from '../core';
 
@@ -24,7 +24,11 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const go = useNavigate();
   const caps = useCapabilities();
   const [confirming, setConfirming] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  // The confirmation opens with focus on the SAFE choice (Cancel): a stray Enter never approves. Escape cancels it.
+  useEffect(() => { if (confirming) cancelRef.current?.focus(); }, [confirming]);
   const decision = ex.decision;
+  const hidden = !caps.has('evidence_content'); // Kriya's content-visibility policy (an operator setting; this app cannot change it) hides the diff text
   const busy = decision.state === 'submitting' || decision.state === 'accepted';
   const open = (tab: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => { dispatch({ type: 'selectLiveRun', launchId }); dispatch({ type: 'centralTab', tab }); go(RUN_DOCUMENTS_PAGE); };
   const added = review.files.reduce((n, f) => n + f.lines_added, 0);
@@ -40,11 +44,14 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         <summary>Reviewer text (as Kriya recorded it{review.reason_truncated ? '; shortened by Kriya' : ''})</summary>
         <pre className="mono small" style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', margin: '4px 0' }}>{sanitizeText(review.reason)}</pre>
       </details>
-      <div className="muted small" role="note">
-        {caps.has('evidence_content')
-          ? 'Open Changes to read the diff and Validation to see the gate results - both read this run\'s live evidence.'
-          : 'Kriya\'s content visibility is off, so the diff text is not shown here. The file list, line counts and digests above are Kriya\'s own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.'}
-      </div>
+      {caps.has('evidence_content') ? (
+        <div className="muted small" role="note">Open Changes to read the exact authorized diff and Validation to see the gate results - both read this run&apos;s live evidence.</div>
+      ) : (
+        <div role="note">
+          <strong>Diff hidden by Kriya content-visibility policy.</strong>{' '}
+          <span className="muted small">The file list, line counts and digests above are Kriya&apos;s own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.</span>
+        </div>
+      )}
       <div className="ck-runbar-head">
         <button type="button" onClick={() => open(OPEN_TARGETS.changes)}>Review changes</button>
         <button type="button" onClick={() => open(OPEN_TARGETS.validation)}>Review validation</button>
@@ -59,12 +66,12 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         ) : null}
       </div>
       {confirming && !busy ? (
-        <div role="alertdialog" aria-label="Confirm approval" className="ck-state">
+        <div role="alertdialog" aria-label="Confirm approval" className="ck-state" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setConfirming(false); } }}>
           <div><strong>Approve these {review.files.length} file change{review.files.length === 1 ? '' : 's'}?</strong> Kriya will continue its verification and, if it passes, apply the change to your folder.</div>
-          {!caps.has('evidence_content') ? <div role="note"><strong>You have not seen the diff text</strong> (Kriya&apos;s content visibility is off). You would be approving from the file list, the line counts, the digests and the reviewer&apos;s text above.</div> : null}
+          {hidden ? <div role="note"><strong>Diff hidden by Kriya content-visibility policy.</strong> You have not seen the diff text: you would be approving from the file list, the line counts, the digests and the reviewer&apos;s text above.</div> : null}
           <div className="ck-runbar-head">
-            <button type="button" onClick={() => { setConfirming(false); void ex.decide('approve', review.review_id); }}>Confirm approval</button>
-            <button type="button" onClick={() => setConfirming(false)}>Cancel</button>
+            <button type="button" onClick={() => { setConfirming(false); void ex.decide('approve', review.review_id); }}>{hidden ? 'Approve without viewing diff' : 'Confirm approval'}</button>
+            <button type="button" ref={cancelRef} onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         </div>
       ) : null}

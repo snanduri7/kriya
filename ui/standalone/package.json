@@ -18,7 +18,8 @@
     "package:mac": "npm run build:cockpit && node mac-app.mjs package",
     "verify:mac-app": "node mac-app.mjs verify",
     "measure": "KRIYA_UI_MEASURE=1 electron .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "package:mac:evidence": "npm run build:cockpit && node mac-app.mjs package --evidence --out out-evidence"
   },
   "dependencies": {
     "@kriya-ui/shared": "0.0.1",

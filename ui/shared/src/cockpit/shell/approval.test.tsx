@@ -43,7 +43,7 @@ describe('the review of a change', () => {
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
     expect(host.exec!.decisions).toEqual([]); // not yet: confirmation first
     const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm approval' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve without viewing diff' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]).toEqual({ workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
     expect(Object.keys(host.exec!.decisions[0]!).sort()).toEqual(['candidate_digest', 'decision', 'launch_id', 'review_id', 'workspace']);
@@ -73,7 +73,7 @@ describe('the review of a change', () => {
   it('a double click sends exactly one decision; the buttons are gone while it is in flight', async () => {
     const { host, bar } = await reachReview();
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
-    const confirm = within(bar).getByRole('button', { name: 'Confirm approval' });
+    const confirm = within(bar).getByRole('button', { name: 'Approve without viewing diff' });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     await waitFor(() => expect(host.exec!.decisions.length).toBeGreaterThan(0));
@@ -111,7 +111,7 @@ describe('the review of a change', () => {
   it('with content visibility off the review says the diff text is not shown and still presents Kriya\'s metadata (nothing is manufactured)', async () => {
     const { bar } = await reachReview({ evidenceContent: false });
     const review = within(bar).getByRole('region', { name: 'Change review' });
-    expect(within(review).getByText(/content visibility is off, so the diff text is not shown here/)).toBeInTheDocument();
+    expect(within(review).getByText('Diff hidden by Kriya content-visibility policy.')).toBeInTheDocument();
     expect(within(review).getByText('src/clamp.py')).toBeInTheDocument();
   });
 
@@ -222,7 +222,70 @@ describe('the decision is about the review that was displayed', () => {
     expect(await screen.findAllByText(/status not recorded/)).not.toHaveLength(0);
     expect(screen.queryByText('RUNNING')).toBeNull();
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).getAllByText(/Diff hidden by Kriya content-visibility policy\./).length).toBeGreaterThan(1); // in the review AND in the confirmation
     expect(within(bar).getByText(/You have not seen the diff text/)).toBeInTheDocument();
     expect(host.exec!.decisions).toEqual([]);
   });
 });
+
+describe('content visibility and the approval (owner final rule)', () => {
+  it('with the diff hidden, approving needs the explicit "Approve without viewing diff" - the generic confirmation does not exist, and nothing is sent before it is pressed', async () => {
+    const { host, bar } = await reachReview({ evidenceContent: false });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).queryByRole('button', { name: 'Confirm approval' })).toBeNull();
+    expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
+    expect(host.exec!.decisions).toEqual([]);
+    fireEvent.click(within(bar).getByRole('button', { name: 'Cancel' }));
+    expect(host.exec!.decisions).toEqual([]);
+    expect(within(bar).queryByRole('alertdialog', { name: 'Confirm approval' })).toBeNull();
+  });
+
+  it('with the diff authorized, the review points at the exact diff (no hidden-diff wording, ordinary confirmation) and the Changes module really shows it', async () => {
+    const { host, bar, store } = await reachReview({ evidenceContent: true });
+    const review = within(bar).getByRole('region', { name: 'Change review' });
+    expect(within(review).queryByText(/Diff hidden/)).toBeNull();
+    expect(within(review).getByText(/exact authorized diff/)).toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    const doc = await screen.findByRole('region', { name: 'Changes' });
+    fireEvent.click((await within(doc).findAllByRole('listitem'))[0]!.querySelector('button')!); // the first changed file
+    fireEvent.click(await within(doc).findByRole('button', { name: 'Show diff' }));
+    const diff = await within(doc).findByLabelText('Unified diff'); // the exact authorized diff, from Kriya's recorded bytes
+    expect(diff.querySelectorAll('[data-diff-row]').length).toBeGreaterThan(0);
+    expect(within(doc).queryByText(/Content not authorized/)).toBeNull();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).getByRole('button', { name: 'Confirm approval' })).toBeInTheDocument();
+    expect(within(bar).queryByRole('button', { name: 'Approve without viewing diff' })).toBeNull();
+    expect(host.exec!.decisions).toEqual([]);
+  });
+
+  it('no control in the app can turn content visibility on: Settings offers no content-visibility affordance and the host adapter exposes none', async () => {
+    const { host } = await reachReview({});
+    goTo('Settings');
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/content[- ]visibility.*(enable|turn on|allow)|enable content|show content/i);
+    for (const key of Object.keys(host)) expect(key).not.toMatch(/visibility/i);
+  });
+});
+
+describe('keyboard use of the approval (hardening, Phase J)', () => {
+  it('the confirmation opens with focus on Cancel (a stray Enter never approves), Escape cancels it, and nothing is sent', async () => {
+    const { host, bar } = await reachReview();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(within(bar).queryByRole('alertdialog', { name: 'Confirm approval' })).toBeNull();
+    expect(host.exec!.decisions).toEqual([]);
+  });
+
+  it('every control of the review is a native button with an accessible name, in document order, with no positive tabindex and no keyboard trap', async () => {
+    const { bar } = await reachReview();
+    const review = within(bar).getByRole('region', { name: 'Change review' });
+    const names = within(review).getAllByRole('button').map((b) => b.textContent?.trim());
+    expect(names).toEqual(['Review changes', 'Review validation', 'Approve changes', 'Reject changes']);
+    for (const el of Array.from(review.querySelectorAll('[tabindex]'))) expect(Number(el.getAttribute('tabindex'))).toBeLessThanOrEqual(0);
+    for (const b of within(review).getAllByRole('button')) expect(b).toHaveAttribute('type', 'button');
+  });
+});
+

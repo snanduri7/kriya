@@ -13,6 +13,9 @@ Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die
   die                -> SIGKILL after the records: nothing is sealed (the launch stays RUNNING, the lock is released by the OS)
   approval           -> records the human decision the workflow reached (Kriya's own recorder), then stops: nothing is approved
   hold               -> records, then waits until the `release` file exists (to observe a run in progress), then succeeds
+  Optional script keys (the hardening matrix): "changes": [{"path": "...", "kind": "added|modified|deleted", "lines_added": n, "lines_removed": n}] (default: one added
+                        src/clamp.py) and "gate": "pass|compile_fail|test_fail|regression_fail" (a failing gate makes the run FAIL, and a `review` run then ends before any review,
+                        as the workflow's safe failure does).
   review             -> records a candidate and a passing gate, then reaches the REAL change-approval path (kriya.control.launch.request_change_approval, the same
                         call the generate callback makes) and waits for the human's decision: approve -> the run succeeds; reject -> the run ends human_rejected,
                         exactly as the workflow's abort does (its result carries a checkpoint-style run_id that is NOT the trace row id)
@@ -63,12 +66,20 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             scope.emit("model.request", {"role": "developer"})
             scope.emit("model.result", {"finish_reason": "stop"})
             time.sleep(STEP)
-            scope.emit("candidate.change", {"decision": "STAGED", "path": "src/clamp.py", "created": True, "deleted": False, "unchanged": False,
-                                            "lines_added": 3, "lines_removed": 0, "text_diff": True},
-                       content={"after": "def clamp(v, lo, hi):\n    return max(lo, min(hi, v))\n", "diff": "+def clamp(v, lo, hi):\n+    return max(lo, min(hi, v))\n"})
+            for change in SCRIPT.get("changes") or [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}]:
+                kind = change.get("kind", "added")
+                payload = {"decision": "STAGED", "path": change["path"], "created": kind == "added", "deleted": kind == "deleted", "unchanged": False,
+                           "lines_added": change.get("lines_added", 1), "lines_removed": change.get("lines_removed", 0), "text_diff": True}
+                if kind != "added":
+                    payload["before_digest"] = "sha256:" + "a" * 64
+                if kind != "deleted":
+                    payload["after_digest"] = "sha256:" + "b" * 64
+                scope.emit("candidate.change", payload, content={"diff": "+x\n-y\n"} if kind != "deleted" else {"before": "gone\n"})
             time.sleep(STEP)
-            passed = OUTCOME != "failure"
-            scope.emit("gate.result", {"gate": "test", "success": passed, "stage": "targeted", "exit_code": 0 if passed else 1})
+            gate_script = SCRIPT.get("gate", "pass")
+            passed = OUTCOME != "failure" and gate_script == "pass"
+            gate_name = {"compile_fail": "compile", "test_fail": "test", "regression_fail": "regression_test"}.get(gate_script, "test")
+            scope.emit("gate.result", {"gate": gate_name, "success": passed, "stage": "targeted", "exit_code": 0 if passed else 1})
             if OUTCOME == "crash":
                 raise RuntimeError("scripted crash inside the run")
             if OUTCOME == "die":
@@ -78,15 +89,16 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 while release and not os.path.exists(release):
                     time.sleep(0.05)
             approved = None
-            if OUTCOME == "review":
+            if OUTCOME == "review" and passed:
                 from kriya.control.launch import request_change_approval
+                scripted = SCRIPT.get("changes") or [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}]
                 awaiting = request_change_approval(
-                    [{"filepath": "src/clamp.py", "content": "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -0,0 +1,2 @@\n+def clamp(v, lo, hi):\n+    return max(lo, min(hi, v))\n"}],
+                    [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted],
                     "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
                 approved = asyncio.run(awaiting) if awaiting is not None else False
         pointer = scope.store_pointer()
-        success = OUTCOME in ("success", "hold") or approved is True
-        rejected = OUTCOME == "review" and not approved
+        success = (OUTCOME in ("success", "hold") and passed) or approved is True
+        rejected = OUTCOME == "review" and passed and not approved
         status = "success" if success else "human_rejected" if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
                    "message": "attempt evidence store", "failure_type": None, "operation": None, "details": pointer, "created_at": started}]

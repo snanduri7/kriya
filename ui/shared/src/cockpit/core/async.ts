@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { failed, loading, type Availability } from './availability';
 import type { ProviderResult } from './provider';
 
+/** Raw technical text a host attached to an error (a child's stderr tail), or undefined. It is shown only behind a disclosure, never in the message. */
+export const technicalDetail = (error: { extra: Record<string, unknown> }): string | undefined => (typeof error.extra.detail === 'string' ? error.extra.detail : undefined);
+
 /** A provider result as an Availability (a typed error keeps its code and message). */
 export function toAvailability<T>(result: ProviderResult<T>): Availability<T> {
-  return result.ok ? { state: 'ready', data: result.data, provenance: result.provenance } : failed(result.error.code, result.error.message);
+  return result.ok ? { state: 'ready', data: result.data, provenance: result.provenance } : failed(result.error.code, result.error.message, technicalDetail(result.error));
 }
 
 /**

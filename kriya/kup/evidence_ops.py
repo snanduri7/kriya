@@ -60,6 +60,15 @@ def _guard(path_kind: str, call):
         raise SnapshotError(policy.EVIDENCE_STORE_UNREADABLE, f"{type(error).__name__}: {error}", path_kind=path_kind) from error
 
 
+def _require_identity(run_id: Any, header: Any, records: Any = ()) -> None:
+    """Evidence binds to its exact run identity: a store is served as run X only if its manifest and every record it yields name run X. A store directory copied or
+    moved under another run's name is refused (typed), never served as that run."""
+    stored = header.get("run_id") if isinstance(header, dict) else None
+    if stored != run_id or any(isinstance(record, dict) and record.get("run_id") != run_id for record in records):
+        raise SnapshotError(policy.EVIDENCE_STORE_UNREADABLE, f"the store found at run {run_id} is not that run's own (its manifest or records name another run); nothing is served from it",
+                            path_kind="store", reason="run_identity_mismatch")
+
+
 # ------------------------------------------------------------------ evidence.manifest
 
 def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
@@ -90,6 +99,7 @@ def manifest(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
                 "blob_file_count": None, "absence": _absence(snapshot, run_id, *absence_inputs[1:], asked=absence_inputs[0]), "link": link}
     else:
         header = _guard("manifest", run.manifest)
+        _require_identity(run_id, header)
         seal = _guard("seal", run.seal)
         line_count, bytes_on_disk, blob_files = _guard("records", run.measure)
         data = {"run_id": run_id, "store": "present", "manifest": header, "seal": seal, "line_count": line_count,
@@ -184,7 +194,10 @@ def _absence(snapshot, evidence_id: Any, state: str, details: Any, asked: Any) -
 def verify(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     run_id = request.get("run_id")
     run = _store_run(cfg, run_id)
-    result = _guard("store", run.verify)
+    chain: List[Dict[str, Any]] = []
+    result = _guard("store", lambda: run.verify(chain))
+    if result.status != reader.NOT_FOUND:
+        _require_identity(run_id, _guard("manifest", run.manifest), chain)
     data = {"run_id": result.run_id, "status": result.status, "record_count": result.record_count, "sealed": result.sealed,
             "broken_seq": result.broken_seq, "detail": result.detail, "seal": result.seal, "blob_problems": list(result.blob_problems),
             "head_digest": result.head_digest, "verified_at": utc_now()}
@@ -298,6 +311,8 @@ def _verified_chain(cfg, run_id: Any):
         raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")
     chain: List[Dict[str, Any]] = []
     result = _guard("store", lambda: run.verify(chain))
+    if result.status != reader.NOT_FOUND:
+        _require_identity(run_id, _guard("manifest", run.manifest), chain)
     live = result.status == reader.UNSEALED or (result.status == reader.TRUNCATED_TAIL and not result.sealed)
     if result.status == reader.NOT_FOUND:
         raise SnapshotError(policy.EVIDENCE_STORE_NOT_FOUND, f"no attempt-evidence store for run {run_id}")

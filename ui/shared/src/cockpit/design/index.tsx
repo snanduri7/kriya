@@ -32,7 +32,7 @@ export function AvailabilityView<T>({ value, notice = false, children }: { value
     case 'loading': return <div className="ck-state muted" role="status">Loading…</div>;
     case 'ready': return <>{children(value.data, [])}</>;
     case 'degraded': return <>{notice ? value.reasons.map((r) => <div key={r} className="ck-state" role="note"><strong>{availabilityTitle(value)}</strong>{r}</div>) : null}{children(value.data, value.reasons)}</>;
-    case 'error': return <div className="ck-state" role="alert"><strong>{availabilityTitle(value)}</strong>{value.message}</div>;
+    case 'error': return <div className="ck-state" role="alert"><strong>{availabilityTitle(value)}</strong>{value.message}{value.detail ? <details><summary className="muted small">Technical detail</summary><span className="mono">{value.detail}</span></details> : null}</div>;
     case 'not_recorded': return <div className="ck-state"><strong>{availabilityTitle(value)}</strong>{value.detail}</div>;
     case 'unavailable': return <div className="ck-state"><strong>{availabilityTitle(value)}</strong>{value.detail}{value.rawDetail ? <details><summary className="muted small">Recorded detail</summary><span className="mono">{value.rawDetail}</span></details> : null}</div>;
   }

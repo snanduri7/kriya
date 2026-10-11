@@ -1,0 +1,151 @@
+{
+ "install_sampler": "ok",
+ "open_folder_to_runs_list_ms": {
+  "ms": 208,
+  "rows": 200,
+  "nodes": 870
+ },
+ "load_more_x5_ms": [
+  {
+   "ms": 42,
+   "rows": 301
+  }
+ ],
+ "select_big_run_to_overview_ms": {
+  "overview_ms": 703,
+  "timeline_visible_ms": 725,
+  "nodes": 16880,
+  "timeline_nodes": 15550,
+  "heap_mb": 14
+ },
+ "tab_validation_ms": {
+  "ms": 21,
+  "panel_nodes": 48,
+  "text_chars": 461
+ },
+ "tab_changes_ms": {
+  "ms": 23,
+  "panel_nodes": 36,
+  "text_chars": 932
+ },
+ "tab_context_ms": {
+  "ms": 21,
+  "panel_nodes": 74,
+  "text_chars": 965
+ },
+ "tab_plan_ms": {
+  "ms": 23,
+  "panel_nodes": 51,
+  "text_chars": 732
+ },
+ "tab_attempts_ms": {
+  "ms": 22,
+  "panel_nodes": 174,
+  "text_chars": 1487
+ },
+ "tab_evidence_ms": {
+  "ms": 36,
+  "panel_nodes": 1542,
+  "text_chars": 13900
+ },
+ "tab_overview_ms": {
+  "ms": 23,
+  "panel_nodes": 38,
+  "text_chars": 2146
+ },
+ "changes_open_first_file_and_diff_ms": {
+  "ms": 22,
+  "changed_files_listed": 6
+ },
+ "raw_events_drawer_ms": {
+  "ms": 27,
+  "nodes": 16902
+ },
+ "baseline_heap": {
+  "heap_mb": 14,
+  "nodes": 16902
+ },
+ "navigation_cycles": {
+  "heaps": [
+   {
+    "cycle": 0,
+    "heap_mb": 14,
+    "nodes": 16883
+   },
+   {
+    "cycle": 20,
+    "heap_mb": 14,
+    "nodes": 1315
+   },
+   {
+    "cycle": 40,
+    "heap_mb": 14,
+    "nodes": 1287
+   },
+   {
+    "cycle": 60,
+    "heap_mb": 14,
+    "nodes": 1287
+   },
+   {
+    "cycle": 80,
+    "heap_mb": 14,
+    "nodes": 1287
+   },
+   {
+    "cycle": 100,
+    "heap_mb": 14,
+    "nodes": 1287
+   }
+  ],
+  "slow_tab_switches": [],
+  "slow_count": 0
+ },
+ "event_loop_lag": {
+  "all": {
+   "samples": 612,
+   "median": 0,
+   "p95": 7,
+   "p99": 8,
+   "max": 126,
+   "over100ms": 1,
+   "over500ms": 0
+  },
+  "open_folder": {
+   "samples": 3,
+   "median": 0,
+   "p95": 4,
+   "p99": 4,
+   "max": 4,
+   "over100ms": 0,
+   "over500ms": 0
+  },
+  "load_more": {
+   "samples": 14,
+   "median": 0,
+   "p95": 11,
+   "p99": 11,
+   "max": 11,
+   "over100ms": 0,
+   "over500ms": 0
+  },
+  "select_big_run_and_tabs": {
+   "samples": 88,
+   "median": 0,
+   "p95": 7,
+   "p99": 126,
+   "max": 126,
+   "over100ms": 1,
+   "over500ms": 0
+  },
+  "navigation_cycles": {
+   "samples": 469,
+   "median": 0,
+   "p95": 7,
+   "p99": 8,
+   "max": 13,
+   "over100ms": 0,
+   "over500ms": 0
+  }
+ }
+}

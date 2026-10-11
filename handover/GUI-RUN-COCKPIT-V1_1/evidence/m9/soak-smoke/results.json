@@ -1,0 +1,114 @@
+{
+ "soak": {
+  "minutes": 2,
+  "counts": {
+   "cycles": 7,
+   "switches": 7,
+   "runsStarted": 2,
+   "approvals": 1,
+   "rejections": 1,
+   "reviewMissed": 0
+  },
+  "errors": [],
+  "error_count": 0,
+  "samples": [
+   {
+    "cycle": 0,
+    "t_s": 33,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 1,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 1,
+    "t_s": 61,
+    "heap_mb": 10,
+    "nodes": 141,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 2,
+    "lag_max": 13
+   },
+   {
+    "cycle": 2,
+    "t_s": 84,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 2,
+    "lag_max": 4
+   },
+   {
+    "cycle": 3,
+    "t_s": 86,
+    "heap_mb": 10,
+    "nodes": 151,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 2,
+    "lag_max": 3
+   },
+   {
+    "cycle": 4,
+    "t_s": 115,
+    "heap_mb": 10,
+    "nodes": 141,
+    "live_intervals": 0,
+    "live_timeouts": 7,
+    "lag_p95": 1,
+    "lag_max": 3
+   },
+   {
+    "cycle": 5,
+    "t_s": 117,
+    "heap_mb": 10,
+    "nodes": 151,
+    "live_intervals": 0,
+    "live_timeouts": 7,
+    "lag_p95": 2,
+    "lag_max": 9
+   },
+   {
+    "cycle": 6,
+    "t_s": 120,
+    "heap_mb": 10,
+    "nodes": 153,
+    "live_intervals": 0,
+    "live_timeouts": 8,
+    "lag_p95": 2,
+    "lag_max": 2
+   }
+  ],
+  "first": {
+   "cycle": 0,
+   "t_s": 33,
+   "heap_mb": 10,
+   "nodes": 71,
+   "live_intervals": 0,
+   "live_timeouts": 1,
+   "lag_p95": 2,
+   "lag_max": 8
+  },
+  "last": {
+   "cycle": 6,
+   "t_s": 120,
+   "heap_mb": 10,
+   "nodes": 153,
+   "live_intervals": 0,
+   "live_timeouts": 8,
+   "lag_p95": 2,
+   "lag_max": 2
+  },
+  "lag_all": {
+   "samples": 2408,
+   "p95": 2,
+   "p99": 2,
+   "max": 13,
+   "over100ms": 0
+  }
+ }
+}

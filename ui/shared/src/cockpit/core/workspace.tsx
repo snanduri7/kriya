@@ -18,6 +18,8 @@ export interface WorkspaceNotice {
   /** The Kriya error code (or HOST_ERROR) that refused the folder, verbatim. */
   code: string;
   message: string;
+  /** Raw technical text (a child's stderr tail), shown only behind a disclosure. */
+  detail?: string;
   /** The folder that was being opened. */
   path: string;
 }
@@ -84,7 +86,7 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     try {
       const described = await provider.describeWorkspace(path);
       if (!described.ok) {
-        setState((s) => ({ ...s, busy: false, notice: { code: described.error.code, message: described.error.message, path } }));
+        setState((s) => ({ ...s, busy: false, notice: { code: described.error.code, message: described.error.message, ...(typeof described.error.extra.detail === 'string' ? { detail: described.error.extra.detail } : {}), path } }));
         return false;
       }
       let recent: string[] | null = null;

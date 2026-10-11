@@ -23,12 +23,13 @@ export type Availability<T> =
   /** `detail` is the semantic explanation shown by default; `rawDetail` is the exact recorded text (paths and all), shown on request. */
   | { state: 'unavailable'; reason: UnavailableReason; detail: string; rawDetail?: string }
   | { state: 'not_recorded'; detail: string }
-  | { state: 'error'; code: string; message: string };
+  /** `message` is the typed, human-readable reason; `detail` is raw technical text (a child's stderr tail), shown only behind a disclosure. */
+  | { state: 'error'; code: string; message: string; detail?: string };
 
 export const loading = <T,>(): Availability<T> => ({ state: 'loading' });
 export const unavailable = <T,>(reason: UnavailableReason, detail: string, rawDetail?: string): Availability<T> => ({ state: 'unavailable', reason, detail, ...(rawDetail !== undefined ? { rawDetail } : {}) });
 export const notRecorded = <T,>(detail: string): Availability<T> => ({ state: 'not_recorded', detail });
-export const failed = <T,>(code: string, message: string): Availability<T> => ({ state: 'error', code, message });
+export const failed = <T,>(code: string, message: string, detail?: string): Availability<T> => ({ state: 'error', code, message, ...(detail ? { detail } : {}) });
 
 export function hasData<T>(a: Availability<T>): a is Extract<Availability<T>, { data: T }> {
   return a.state === 'ready' || a.state === 'degraded';

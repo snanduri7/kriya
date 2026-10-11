@@ -4,6 +4,7 @@
  * verified once per page, not once per module). Nothing is cached across selections: a fresh selection or refresh re-verifies.
  */
 import type { EvidenceManifest, EvidenceVerify } from '../../model/kup';
+import { technicalDetail } from './async';
 import { failed, unavailable, type Availability, type UnavailableReason } from './availability';
 import type { Provenance } from './evidence';
 import type { ProviderError, ProviderResult, UIProvider } from './provider';
@@ -36,7 +37,7 @@ const MAX_PAGES = 200;
 function fromError<T>(error: ProviderError): Availability<T> {
   if (error.code === 'EVIDENCE_STORE_NOT_FOUND') return unavailable('store_absent', error.message);
   if (error.code === 'EVIDENCE_VERIFY_FAILED') return unavailable('unverified', `${error.message}${error.extra.broken_seq ? ` (first bad record ${String(error.extra.broken_seq)})` : ''}`);
-  return failed(error.code, error.message);
+  return failed(error.code, error.message, technicalDetail(error));
 }
 
 export async function loadRunEvidence(provider: UIProvider, runId: string, snapshotId: string | null, signal?: AbortSignal): Promise<Availability<RunEvidence>> {
@@ -98,6 +99,6 @@ export function contentAvailability<T>(result: ProviderResult<T>): Availability<
     case 'EVIDENCE_BLOB_TOO_LARGE': return failed(code, `This part is ${String(extra.bytes_total ?? 'more than the limit of')} bytes; the display limit is 1 MiB, so it is not shown.`);
     case 'EVIDENCE_VERIFY_FAILED': return unavailable('unverified', `The store does not verify (${String(extra.status ?? 'status not given')}); nothing is served from it.`, message);
     case 'EVIDENCE_STORE_NOT_FOUND': return unavailable('store_absent', 'No evidence store is available for this run.', message);
-    default: return failed(code, message);
+    default: return failed(code, message, technicalDetail(result.error));
   }
 }

@@ -1,9 +1,9 @@
 /**
  * Electron main process (gate A-1). The ONLY process that spawns anything, and only the P-25 grammar through
  * kriya_process.ts. Reads no Kriya state, opens no listener, loads only the local renderer bundle.
- * D-9 (development builds): unless KRIYA_UI_ALLOW_REAL_KRIYA=1 is set AND a kriya executable is configured, every KUP query goes to the
- * fixture stand-in (fake-kriya/fake_kriya.mjs). A PACKAGED app has no stand-in and no such gate: it is real, or a typed error naming the setting
- * (GUI-APP-REAL-DEFAULT-001: a double-click launch carries no environment variable).
+ * Backend selection (host_mode.ts): a PACKAGED app has no stand-in and no gate: it is real, or a typed error naming the Settings executable
+ * (GUI-APP-REAL-DEFAULT-001: a double-click launch carries no environment variable). The development stand-in (D-9) and every other development driver live in
+ * dev_drivers.ts, which the shipped product package does not contain.
  * GUI-F-A1: that decision is made ONCE (host_mode.ts) and consulted by both the hostInfo and the query handler, so
  * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
  * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
@@ -26,9 +26,7 @@ import { ApprovalHost } from './approval_host';
 import { ExecutionHost } from './execution_host';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
-import { runCapture } from './capture';
-import { runMeasurement } from './measure';
-import { DEFAULT_SOAK, runSoak } from './soak';
+import type { DevDrivers } from './dev_drivers';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
 import { SettingsStore } from './settings';
 
@@ -38,16 +36,14 @@ const pinnedUserData = resolveUserData(app.getPath('appData'), app.commandLine.h
 app.setName(PRODUCT_NAME);
 if (pinnedUserData !== null) app.setPath('userData', pinnedUserData);
 
-const MEASURE = process.env.KRIYA_UI_MEASURE === '1';
-const SOAK = process.env.KRIYA_UI_SOAK === '1';
-const CAPTURE_DIR = process.env.KRIYA_UI_CAPTURE; // development screenshots only (capture.ts)
-const CAPTURE_STEPS = process.env.KRIYA_UI_CAPTURE_STEPS;
-// Development evidence only (reachable only while the screenshot driver is active): the folders the scripted chooser returns in place of the native dialog,
-// a JSON array where null means the person cancelled. Everything after the dialog - registry, approval, Kriya's validation - is the production path.
-const CAPTURE_CHOICES: Array<string | null> | null = CAPTURE_DIR && process.env.KRIYA_UI_CAPTURE_CHOOSE ? (JSON.parse(process.env.KRIYA_UI_CAPTURE_CHOOSE) as Array<string | null>) : null;
-const TRACE = process.env.KRIYA_UI_TRACE === '1'; // per-request timings and service lifecycle on stderr (measurement)
-const ALLOW_REAL = process.env.KRIYA_UI_ALLOW_REAL_KRIYA === '1';
-const FAKE_KRIYA = join(__dirname, '..', '..', 'fake-kriya', 'fake_kriya.mjs');
+/** Development and evidence drivers (capture, scripted chooser, measurement, soak, tracing, the fixture stand-in): loaded ONLY when this build carries dev_drivers.js. The shipped
+ * product package omits it (mac-app.mjs) and the package check fails if any trace of it is present, so a product has no environment variable that scripts the window,
+ * answers the folder chooser, or selects a stand-in backend. */
+function loadDevDrivers(): DevDrivers | null {
+  try { return (require('./dev_drivers') as typeof import('./dev_drivers')).createDevDrivers(process.env); } catch { return null; }
+}
+const dev = loadDevDrivers();
+const ALLOW_REAL = dev?.allowReal ?? false;
 const RENDERER_DIR = join(__dirname, '..', 'renderer');
 const RENDERER_INDEX = join(RENDERER_DIR, 'index.html');
 // Which bundle this is (the Vite build records it): only an explicit M1-inspector build gets the narrow M1 workspace-setting compatibility.
@@ -67,18 +63,11 @@ let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
 let quitting = false; // set once the person has confirmed interrupting a run and quitting
 
-function errorEnvelope(operation: string, code: string, message: string) {
-  return { schema_version: 1, operation, request_id: `host-${Date.now()}`, observed_at: new Date().toISOString(), source: null, consistency: null, data: null, error: { code, message } };
+/** `detail` is raw technical text (a child's stderr tail): it travels in its own field and the cockpit shows it only behind a "Technical detail" disclosure, never inside the message. */
+function errorEnvelope(operation: string, code: string, message: string, detail?: string) {
+  return { schema_version: 1, operation, request_id: `host-${Date.now()}`, observed_at: new Date().toISOString(), source: null, consistency: null, data: null, error: { code, message, ...(detail ? { detail: detail.slice(-600) } : {}) } };
 }
 
-/** Only the two fixture knobs reach the stand-in; never the ambient environment (P-31). */
-function fakeEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  if (process.env.KRIYA_FAKE_BEHAVIOR) env.KRIYA_FAKE_BEHAVIOR = process.env.KRIYA_FAKE_BEHAVIOR;
-  if (process.env.KRIYA_FAKE_FIXTURES) env.KRIYA_FAKE_FIXTURES = process.env.KRIYA_FAKE_FIXTURES;
-  env.KRIYA_FAKE_STATE = process.env.KRIYA_FAKE_STATE ?? join(app.getPath('userData'), 'fake-kriya-snapshots.json');
-  return env;
-}
 
 function fromOwnedRenderer(event: IpcMainInvokeEvent): boolean { return ownedWebContentsId !== null && event.sender.id === ownedWebContentsId; }
 
@@ -148,17 +137,18 @@ function registerIpc() {
       if (TRANSPORT === 'service') {
         const service = services.get({ executable: host.executable, cwd: dir.directory, env: childEnv.env });
         const served = await service.request(v.value);
-        if (TRACE) process.stderr.write(`[kriya-ui] service ${v.value.operation} ${served.durationMs} ms${service.stats.starts > 0 && service.stats.requests === 1 ? ` (cold: child ready in ${service.stats.lastReadyMs} ms)` : ''}\n`);
+        dev?.trace(`[kriya-ui] service ${v.value.operation} ${served.durationMs} ms${service.stats.starts > 0 && service.stats.requests === 1 ? ` (cold: child ready in ${service.stats.lastReadyMs} ms)` : ''}\n`);
         if (served.kind === 'json') return served.json;
-        return errorEnvelope(v.value.operation, served.code, `${served.message}${served.stderrTail ? ` | stderr: ${served.stderrTail.slice(-300)}` : ''}`);
+        return errorEnvelope(v.value.operation, served.code, served.message, served.stderrTail || undefined);
       }
       outcome = await runKriya({ executable: host.executable, argv, env: childEnv.env, cwd: dir.directory });
     } else {
-      outcome = await runKriya({ executable: process.execPath, argv: [FAKE_KRIYA, ...argv], nodeScript: true, env: fakeEnv(), cwd: dir.directory });
+      if (!dev) return errorEnvelope(v.value.operation, 'HOST_ERROR', 'kriya not launched: this build has no stand-in backend and no Kriya executable is configured');
+      outcome = await dev.runFake(argv, dir.directory);
     }
-    if (TRACE) process.stderr.write(`[kriya-ui] spawn ${v.value.operation} ${outcome.durationMs} ms\n`);
+    dev?.trace(`[kriya-ui] spawn ${v.value.operation} ${outcome.durationMs} ms\n`);
     if (outcome.kind === 'json') return outcome.json;
-    return errorEnvelope(v.value.operation, outcome.code ?? 'HOST_ERROR', `${outcome.message ?? 'unknown'}${outcome.stderrTail ? ` | stderr: ${outcome.stderrTail.slice(-300)}` : ''}`);
+    return errorEnvelope(v.value.operation, outcome.code ?? 'HOST_ERROR', outcome.message ?? 'unknown', outcome.stderrTail || undefined);
   });
   ipcMain.handle(IPC_CHANNELS.openInIde, async (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
@@ -198,7 +188,7 @@ function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return workspaces.choose(async () => {
-      if (CAPTURE_CHOICES) return CAPTURE_CHOICES.shift() ?? null;
+      if (dev?.captureChoices) return dev.captureChoices.shift() ?? null;
       const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
       const options = { title: 'Open Folder', buttonLabel: 'Open', properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> };
       const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
@@ -219,7 +209,7 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     const startedAt = Date.now();
     const result = await execution.start(raw);
-    if (TRACE) process.stderr.write(`[kriya-ui] startRun ${result.started ? `launched ${result.launch_id}` : `refused ${result.refusal?.code}`} in ${Date.now() - startedAt} ms\n`);
+    dev?.trace(`[kriya-ui] startRun ${result.started ? `launched ${result.launch_id}` : `refused ${result.refusal?.code}`} in ${Date.now() - startedAt} ms\n`);
     return result;
   });
   ipcMain.handle(IPC_CHANNELS.decideApproval, async (event, raw: unknown) => {
@@ -251,19 +241,11 @@ function hardenSession() {
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 900, title: WINDOW_TITLE,
-    webPreferences: { ...WEB_PREFERENCES, preload: join(__dirname, 'preload.js'), additionalArguments: MEASURE || SOAK ? ['--kriya-ui-measure'] : [] },
+    webPreferences: { ...WEB_PREFERENCES, ...(dev?.webPreferences ?? {}), preload: join(__dirname, 'preload.js'), additionalArguments: dev?.windowArgs ?? [] },
   });
   ownedWebContentsId = win.webContents.id;
   ownedWindow = win;
-  if (MEASURE) {
-    // Diagnostics for the measurement run only (stderr): load lifecycle, preload errors, renderer console.
-    const log = (m: string) => process.stderr.write(`[measure] ${m}\n`);
-    win.webContents.on('did-finish-load', () => log('did-finish-load'));
-    win.webContents.on('did-fail-load', (_e, code, desc, url) => log(`did-fail-load ${code} ${desc} ${url}`));
-    win.webContents.on('preload-error', (_e, path, error) => log(`preload-error ${path}: ${error.message}`));
-    win.webContents.on('console-message', (event) => log(`console[${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`));
-    win.webContents.on('render-process-gone', (_e, details) => log(`render-process-gone ${details.reason}`));
-  }
+  dev?.attachWindow(win);
   // Closing the only window while a run this host started is in progress would leave the application running with no window and no way back to the run:
   // the same question as quitting, and the window stays until it is answered.
   win.on('close', (event) => {
@@ -284,11 +266,11 @@ app.whenReady().then(async () => {
   execution = new ExecutionHost({
     launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
     preflight: (workspace) => kupQuery({ operation: 'execution.preflight', workspace }),
-    log: TRACE ? (line) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
+    log: dev?.traceLine,
   });
   approvals = new ApprovalHost({
     run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,
-    currentWorkspace: () => workspaces.current(), log: TRACE ? (line) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
+    currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   workspaces = new WorkspaceRegistry({
     getRecent: () => settings.get('recentWorkspaces'), setRecent: (list) => settings.set('recentWorkspaces', list),
@@ -300,34 +282,7 @@ app.whenReady().then(async () => {
   hardenSession();
   registerIpc();
   const win = createWindow();
-  if (SOAK) {
-    try {
-      const n = (k: string, d: number) => Number(process.env[k] ?? d);
-      const file = await runSoak(win, join(__dirname, '..', '..', 'measurements'), { seconds: n('KRIYA_UI_SOAK_SECONDS', DEFAULT_SOAK.seconds), minSelections: n('KRIYA_UI_SOAK_MIN_SELECTIONS', DEFAULT_SOAK.minSelections), sampleSeconds: n('KRIYA_UI_SOAK_SAMPLE_SECONDS', DEFAULT_SOAK.sampleSeconds), warmupSeconds: n('KRIYA_UI_SOAK_WARMUP_SECONDS', DEFAULT_SOAK.warmupSeconds), ceilingMB: n('KRIYA_UI_SOAK_CEILING_MB', DEFAULT_SOAK.ceilingMB) });
-      process.stdout.write(`soak written: ${file}\n`);
-      app.exit(0);
-    } catch (e) {
-      process.stderr.write(`soak failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
-      app.exit(1);
-    }
-  } else if (CAPTURE_DIR && CAPTURE_STEPS) {
-    try {
-      const files = await runCapture(win, CAPTURE_DIR, CAPTURE_STEPS);
-      process.stdout.write(`captured: ${files.join(', ')}\n`);
-    } catch (e) {
-      process.stderr.write(`capture failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
-      app.exit(1);
-    }
-  } else if (MEASURE) {
-    try {
-      const file = await runMeasurement(win, join(__dirname, '..', '..', 'measurements'), Number(process.env.KRIYA_UI_MEASURE_CYCLES ?? 100));
-      process.stdout.write(`measurement written: ${file}\n`);
-      app.exit(0);
-    } catch (e) {
-      process.stderr.write(`measurement failed: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
-      app.exit(1);
-    }
-  }
+  if (dev) await dev.run(win);
 });
 app.on('window-all-closed', () => app.quit());
 // Ends the persistent child cleanly (EOF on its stdin); if the application dies instead, the closed pipe ends the child anyway.
@@ -335,7 +290,7 @@ app.on('window-all-closed', () => app.quit());
 // the run and the launch as interrupted), with a SIGKILL after the grace period. Nothing is left running unobserved.
 /** Asks the person; true = interrupt the run (SIGINT, then SIGKILL after the grace period) and quit. */
 async function confirmInterruptAndQuit(): Promise<boolean> {
-  if (CAPTURE_DIR) return true;
+  if (dev?.captureActive) return true;
   const options = {
     type: 'warning' as const, buttons: ['Interrupt run and quit', 'Keep running'], defaultId: 1, cancelId: 1, message: 'A Kriya run is in progress',
     detail: 'Quitting interrupts it, the same as pressing Ctrl-C in a terminal. Kriya records the interruption; nothing is reported as finished.',

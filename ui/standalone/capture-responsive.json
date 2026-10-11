@@ -1,0 +1,386 @@
+[
+ {
+  "wait": 700,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "install",
+  "js": "(()=>{window.__audit=window.__audit||[];const audit=(label)=>{const vw=window.innerWidth,vh=window.innerHeight;const clipped=[];const nameless=[];const textClipped=[];for(const el of document.querySelectorAll('button,[role=tab],a[href],input,select,textarea,summary,[tabindex]')){const r=el.getBoundingClientRect();if(r.width===0&&r.height===0)continue;const cs=getComputedStyle(el);if(cs.visibility==='hidden'||cs.display==='none')continue;if(r.right>vw+1||r.left<-1)clipped.push((el.textContent||el.getAttribute('aria-label')||el.tagName).trim().slice(0,30));const name=(el.getAttribute('aria-label')||el.textContent||el.getAttribute('title')||'').trim();if(!name&&!(el.labels&&el.labels.length)&&el.tagName!=='INPUT')nameless.push(el.tagName)}for(const el of document.querySelectorAll('div,span,li,button,td,th,h1,h2,h3,strong,pre,code')){const cs=getComputedStyle(el);if((cs.overflowX==='hidden'||cs.textOverflow==='ellipsis')&&el.scrollWidth>el.clientWidth+2&&el.clientWidth>0)textClipped.push((el.textContent||'').trim().slice(0,30))}window.__audit.push({label,vw,vh,hscroll:Math.max(0,document.documentElement.scrollWidth-vw),pageHeightOverflow:document.documentElement.scrollHeight>vh+2,clippedControls:[...new Set(clipped)].slice(0,6),namelessControls:nameless.length,textClippedByHidden:[...new Set(textClipped)].slice(0,4),inspector:!!document.querySelector('[aria-label=\"Inspector\"],[data-module=timeline]'),nodes:document.querySelectorAll('*').length})};window.__audit_fn=audit;window.__audit_fn('welcome@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "welcome-1100.png"
+ },
+ {
+  "wait": 300,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "open",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));document.querySelector('main[aria-label=Welcome] button').click();await W(()=>document.querySelector('nav[aria-label=Destinations]'));await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Acquire snapshot');if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0);return document.querySelectorAll('.ck-list button').length})()",
+  "wait": 600
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "audit_workspace@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click()}await S(450);window.__audit_fn('workspace@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "workspace-1536.png"
+ },
+ {
+  "name": "audit_runs@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click()}{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Implement the whole thing\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"Implement the whole thing\"));if(!b)return 'ROW NOT FOUND: '+\"Implement the whole thing\";b.click()}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);await S(450);window.__audit_fn('runs-overview@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "runs-overview-1536.png"
+ },
+ {
+  "name": "audit_validation@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()}await S(450);window.__audit_fn('validation@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "validation-1536.png"
+ },
+ {
+  "name": "audit_changes@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()}await S(450);const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}window.__audit_fn('changes@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "changes-1536.png"
+ },
+ {
+  "name": "audit_context@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click()}await S(450);window.__audit_fn('context@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "context-1536.png"
+ },
+ {
+  "name": "audit_plan@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click()}await S(450);window.__audit_fn('plan@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "plan-1536.png"
+ },
+ {
+  "name": "audit_attempts@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click()}await S(450);window.__audit_fn('attempts@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "attempts-1536.png"
+ },
+ {
+  "name": "audit_evidence@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click()}await S(450);window.__audit_fn('evidence@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "evidence-1536.png"
+ },
+ {
+  "name": "audit_drawer@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Raw Events');if(b){b.click();await S(500)}window.__audit_fn('bottom-drawer@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "drawer-1536.png"
+ },
+ {
+  "name": "audit_unsealed@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL unsealed run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL unsealed run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL unsealed run\";b.click()}await S(450);await S(400);window.__audit_fn('unsealed@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "special-unsealed-1536.png"
+ },
+ {
+  "name": "audit_tampered@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL tampered run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL tampered run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL tampered run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()};await S(400);window.__audit_fn('tampered@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "special-tampered-1536.png"
+ },
+ {
+  "name": "audit_digestonly@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL digestonly run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL digestonly run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL digestonly run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()};await S(300);const q=document.querySelector('[role=tabpanel] ul button');if(q){q.click();await S(300)};window.__audit_fn('digestonly@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "special-digestonly-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "audit_workspace@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click()}await S(450);window.__audit_fn('workspace@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_runs@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click()}{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Implement the whole thing\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"Implement the whole thing\"));if(!b)return 'ROW NOT FOUND: '+\"Implement the whole thing\";b.click()}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);await S(450);window.__audit_fn('runs-overview@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_validation@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()}await S(450);window.__audit_fn('validation@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_changes@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()}await S(450);const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}window.__audit_fn('changes@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_context@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click()}await S(450);window.__audit_fn('context@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_plan@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click()}await S(450);window.__audit_fn('plan@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_attempts@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click()}await S(450);window.__audit_fn('attempts@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_evidence@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click()}await S(450);window.__audit_fn('evidence@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_drawer@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Raw Events');if(b){b.click();await S(500)}window.__audit_fn('bottom-drawer@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_unsealed@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL unsealed run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL unsealed run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL unsealed run\";b.click()}await S(450);await S(400);window.__audit_fn('unsealed@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_tampered@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL tampered run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL tampered run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL tampered run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()};await S(400);window.__audit_fn('tampered@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_digestonly@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL digestonly run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL digestonly run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL digestonly run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()};await S(300);const q=document.querySelector('[role=tabpanel] ul button');if(q){q.click();await S(300)};window.__audit_fn('digestonly@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "audit_workspace@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click()}await S(450);window.__audit_fn('workspace@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "workspace-1360.png"
+ },
+ {
+  "name": "audit_runs@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click()}{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Implement the whole thing\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"Implement the whole thing\"));if(!b)return 'ROW NOT FOUND: '+\"Implement the whole thing\";b.click()}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);await S(450);window.__audit_fn('runs-overview@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "runs-overview-1360.png"
+ },
+ {
+  "name": "audit_validation@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()}await S(450);window.__audit_fn('validation@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "validation-1360.png"
+ },
+ {
+  "name": "audit_changes@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()}await S(450);const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}window.__audit_fn('changes@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "changes-1360.png"
+ },
+ {
+  "name": "audit_context@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click()}await S(450);window.__audit_fn('context@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "context-1360.png"
+ },
+ {
+  "name": "audit_plan@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click()}await S(450);window.__audit_fn('plan@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "plan-1360.png"
+ },
+ {
+  "name": "audit_attempts@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click()}await S(450);window.__audit_fn('attempts@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "attempts-1360.png"
+ },
+ {
+  "name": "audit_evidence@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click()}await S(450);window.__audit_fn('evidence@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "evidence-1360.png"
+ },
+ {
+  "name": "audit_drawer@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Raw Events');if(b){b.click();await S(500)}window.__audit_fn('bottom-drawer@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "drawer-1360.png"
+ },
+ {
+  "name": "audit_unsealed@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL unsealed run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL unsealed run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL unsealed run\";b.click()}await S(450);await S(400);window.__audit_fn('unsealed@1360');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_tampered@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL tampered run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL tampered run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL tampered run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()};await S(400);window.__audit_fn('tampered@1360');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_digestonly@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL digestonly run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL digestonly run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL digestonly run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()};await S(300);const q=document.querySelector('[role=tabpanel] ul button');if(q){q.click();await S(300)};window.__audit_fn('digestonly@1360');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "audit_workspace@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click()}await S(450);window.__audit_fn('workspace@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_runs@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click()}{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Implement the whole thing\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"Implement the whole thing\"));if(!b)return 'ROW NOT FOUND: '+\"Implement the whole thing\";b.click()}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);await S(450);window.__audit_fn('runs-overview@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_validation@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()}await S(450);window.__audit_fn('validation@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_changes@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()}await S(450);const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}window.__audit_fn('changes@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_context@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click()}await S(450);window.__audit_fn('context@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_plan@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click()}await S(450);window.__audit_fn('plan@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_attempts@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click()}await S(450);window.__audit_fn('attempts@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_evidence@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click()}await S(450);window.__audit_fn('evidence@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_drawer@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Raw Events');if(b){b.click();await S(500)}window.__audit_fn('bottom-drawer@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_unsealed@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL unsealed run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL unsealed run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL unsealed run\";b.click()}await S(450);await S(400);window.__audit_fn('unsealed@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_tampered@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL tampered run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL tampered run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL tampered run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()};await S(400);window.__audit_fn('tampered@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "name": "audit_digestonly@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL digestonly run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL digestonly run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL digestonly run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()};await S(300);const q=document.querySelector('[role=tabpanel] ul button');if(q){q.click();await S(300)};window.__audit_fn('digestonly@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "audit_workspace@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click()}await S(450);window.__audit_fn('workspace@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "workspace-1100.png"
+ },
+ {
+  "name": "audit_runs@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click()}{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Implement the whole thing\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"Implement the whole thing\"));if(!b)return 'ROW NOT FOUND: '+\"Implement the whole thing\";b.click()}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);await S(450);window.__audit_fn('runs-overview@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "runs-overview-1100.png"
+ },
+ {
+  "name": "audit_validation@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()}await S(450);window.__audit_fn('validation@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "validation-1100.png"
+ },
+ {
+  "name": "audit_changes@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()}await S(450);const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}window.__audit_fn('changes@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "changes-1100.png"
+ },
+ {
+  "name": "audit_context@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click()}await S(450);window.__audit_fn('context@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "context-1100.png"
+ },
+ {
+  "name": "audit_plan@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click()}await S(450);window.__audit_fn('plan@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "plan-1100.png"
+ },
+ {
+  "name": "audit_attempts@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click()}await S(450);window.__audit_fn('attempts@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "attempts-1100.png"
+ },
+ {
+  "name": "audit_evidence@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click()}await S(450);window.__audit_fn('evidence@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "evidence-1100.png"
+ },
+ {
+  "name": "audit_drawer@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Raw Events');if(b){b.click();await S(500)}window.__audit_fn('bottom-drawer@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "drawer-1100.png"
+ },
+ {
+  "name": "audit_unsealed@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL unsealed run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL unsealed run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL unsealed run\";b.click()}await S(450);await S(400);window.__audit_fn('unsealed@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "special-unsealed-1100.png"
+ },
+ {
+  "name": "audit_tampered@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL tampered run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL tampered run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL tampered run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click()};await S(400);window.__audit_fn('tampered@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "special-tampered-1100.png"
+ },
+ {
+  "name": "audit_digestonly@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));{const f=document.querySelector('input[aria-label=\"Filter runs\"]');if(f){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"SPECIAL digestonly run\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(250);const b=[...document.querySelectorAll('.ck-list button')].find(x=>x.textContent.includes(\"SPECIAL digestonly run\"));if(!b)return 'ROW NOT FOUND: '+\"SPECIAL digestonly run\";b.click()}await S(450);await S(400);{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click()};await S(300);const q=document.querySelector('[role=tabpanel] ul button');if(q){q.click();await S(300)};window.__audit_fn('digestonly@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "special-digestonly-1100.png"
+ },
+ {
+  "name": "audit_results",
+  "js": "(()=>window.__audit)()",
+  "wait": 100
+ }
+]

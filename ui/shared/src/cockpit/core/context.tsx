@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { Capabilities, RunDetail } from '../../model/kup';
 import type { Selection, SelectionAction } from '../../state/selection';
-import { useAsync, toAvailability } from './async';
+import { technicalDetail, useAsync, toAvailability } from './async';
 import { failed, unavailable, type Availability } from './availability';
 import { CapabilityRegistry } from './capability';
 import { loadLiveRunEvidence, loadRunEvidence, type RunEvidence } from './evidenceClient';
@@ -107,13 +107,13 @@ function SessionProvider({ children }: { children: ReactNode }) {
     let id = acquired;
     if (id === null) {
       const list = await provider.listSnapshots(signal);
-      if (!list.ok) return failed(list.error.code, list.error.message);
+      if (!list.ok) return failed(list.error.code, list.error.message, technicalDetail(list.error));
       const newest = list.data.snapshots[0];
       if (!newest) return unavailable('store_absent', 'No published snapshot yet: acquire one to read run history.');
       id = newest.snapshot_id;
     }
     const verified = await provider.verifySnapshot(id, signal);
-    if (!verified.ok) return failed(verified.error.code, verified.error.message);
+    if (!verified.ok) return failed(verified.error.code, verified.error.message, technicalDetail(verified.error));
     if (verified.data.snapshot_id !== id) return failed('INVALID_RESPONSE', `verification named ${verified.data.snapshot_id}, not the requested ${id}; it is not pinned`);
     return { state: 'ready', data: { snapshotId: id }, provenance: verified.provenance };
   }, { state: 'loading' });
@@ -122,7 +122,7 @@ function SessionProvider({ children }: { children: ReactNode }) {
   const acquire = useCallback(async (workspace?: string) => {
     // The open workspace travels with the acquisition so Kriya's own policy (no acquisition while a run is active there) applies.
     const res = await provider.acquireSnapshot(workspace ?? openWorkspace ?? undefined);
-    if (!res.ok) { setAcquireError(failed(res.error.code, res.error.message)); return; }
+    if (!res.ok) { setAcquireError(failed(res.error.code, res.error.message, technicalDetail(res.error))); return; }
     setAcquireError(null);
     selection.dispatch({ type: 'reset' });
     setAcquired(res.data.snapshot_id);
@@ -169,7 +169,7 @@ function RunContextProvider({ children }: { children: ReactNode }) {
       return { state: 'ready', data: ctx, provenance: evidence.provenance };
     }
     if (detail.state === 'loading') return { state: 'loading' };
-    if (detail.state !== 'ready') return detail.state === 'error' ? failed(detail.code, detail.message) : unavailable('unknown_run', 'The run row is not readable.');
+    if (detail.state !== 'ready') return detail.state === 'error' ? failed(detail.code, detail.message, detail.detail) : unavailable('unknown_run', 'The run row is not readable.');
     const run = detail.data.run;
     const header = evidence.state === 'ready' || evidence.state === 'degraded' ? evidence.data : null;
     const manifest = (header?.manifest.manifest ?? {}) as Record<string, unknown>;

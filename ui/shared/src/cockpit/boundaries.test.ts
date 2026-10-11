@@ -53,4 +53,21 @@ describe('module boundaries', () => {
   it('the production provider has no knowledge of fixtures', () => {
     for (const p of ['./providers/hostProvider.ts', './providers/KriyaProvider.ts']) expect(sources[p]!.toLowerCase().includes('fixture'), p).toBe(false);
   });
+
+  it('the layout files (AppShell, MainWorkspace, rail, panes, toolbar, drawer host) interpret no evidence: no recorder record kind appears in them (hardening, item 5)', () => {
+    const layout = ['AppShell', 'MainWorkspace', 'NavigationRail', 'SecondaryPane', 'ModuleHost', 'GlobalToolbar', 'WorkspaceSwitcher', 'EvidenceDrawer', 'WelcomeScreen', 'ResizeHandle'];
+    const kinds = /candidate\.change|gate\.result|attempt\.(opened|closed|concluded)|model\.(request|response|result)|run_events|evidence_records|developer\.parse|unit\.(opened|closed)|run\.closed|retry\.|fallback\.decision/;
+    for (const name of layout) {
+      const entry = files.find(([p]) => p === `./shell/${name}.tsx`);
+      expect(entry, name).toBeDefined();
+      expect(kinds.test(entry![1].replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), `${name} interprets evidence`).toBe(false);
+    }
+  });
+
+  it('no module and no shell file reaches for Node, Electron, the filesystem, a process or a raw network API (hardening, items 1 and 14)', () => {
+    const forbidden = /from 'node:|require\(|from 'electron'|child_process|\bfetch\(|XMLHttpRequest|WebSocket|\beval\(|new Function\(|dangerouslySetInnerHTML|innerHTML\s*=/;
+    for (const [path, text] of files.filter(([p]) => p.startsWith('./modules/') || p.startsWith('./shell/') || p.startsWith('./core/'))) {
+      expect(forbidden.test(text.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), path).toBe(false);
+    }
+  });
 });

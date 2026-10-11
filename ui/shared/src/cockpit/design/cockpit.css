@@ -77,3 +77,8 @@
 .ck-runbar-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .ck-runbar-head .grow { flex: 1; }
 .ck-runs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px; }
 .ck-filter { width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 4px 8px; font: inherit; color: var(--ck-fg); background: var(--ck-bg); border: 1px solid var(--ck-line); border-radius: 5px; }
+
+/* No animation or smooth scrolling is used today; this keeps it that way if one is ever added: the person's reduced-motion preference always wins. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
