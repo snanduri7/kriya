@@ -543,8 +543,8 @@ async def validate_plan(
         })
         if immutable_edits:
             errors.append(
-                "the goal requires every existing test to keep passing unchanged (TEST_IMMUTABILITY), but the plan "
-                f"schedules an edit or deletion of existing test file(s) {immutable_edits!r}; existing tests are "
+                "the goal requires existing tests to keep passing unchanged (TEST_IMMUTABILITY), but the plan "
+                f"schedules an edit or deletion of existing test file(s) {immutable_edits!r}; those tests are "
                 "immutable in this run - add new tests in a new test file, never by editing or deleting an existing one"
             )
             reason_codes.append("PLAN_EDITS_IMMUTABLE_TEST")

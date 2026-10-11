@@ -667,7 +667,8 @@ def build_structured_plan_repair_prompt(
     if "PLAN_EDITS_IMMUTABLE_TEST" in reason_codes:
         targeted_correction += (
             "- The errors name existing test file(s) a subtask plans to edit or delete, but the goal requires "
-            "every existing test to keep passing unchanged. Existing test files are immutable in this run: keep "
+            "existing tests (every test, or the test files it names) to keep passing unchanged. Those test files "
+            "are immutable in this run: keep "
             "them out of every subtask's planned_files (or list them with action 'read' only if your schema allows "
             "it), and put any new tests the goal asks for in a NEW test file (action 'create') next to the "
             "existing ones.\n"

@@ -1047,27 +1047,44 @@ def _candidate_test_files(candidate_root: str) -> List[str]:
     return test_files
 
 
+def named_preserved_test_files(contract: Any) -> List[str]:
+    """PLAN-NAMED-TEST-IMMUTABILITY-001: the existing test files a PURE regression-preservation statement names ("Every
+    existing test in tests/test_a.py must keep passing unchanged"), read from the sealed contract's named-tests binding
+    (the compiler decided them from the goal's own words and the base tree). Only an entry whose single required claim is
+    REGRESSION_PRESERVATION counts: a statement that also asks for a test to be added (TEST_ADDITION) or for behaviour
+    (BEHAVIOR) is left to the terminal closure, which refuses a candidate-written named test whatever else it claims
+    (``close_unverified_requirements_with_named_tests``). A planning input; never a model input."""
+    from kriya.workflow.contract_compilation import CLOSER_NAMED_TESTS
+    from kriya.workflow.requirements import REGRESSION_PRESERVATION
+
+    if contract is None:
+        return []
+    pure = {entry.requirement_id for entry in getattr(contract, "entries", None) or ()
+            if tuple(entry.required_claims) == (REGRESSION_PRESERVATION,)}
+    return sorted({path for rid, binding in contract.binding_closers(CLOSER_NAMED_TESTS) if rid in pure
+                   for path in binding.detail.get("tests") or ()})
+
+
 def immutable_test_files(contract: Any, workspace_path: str) -> Optional[List[str]]:
-    """PLAN-TEST-IMMUTABILITY-SCOPE-001: the tracked runnable test files of the
-    workspace's HEAD when the sealed verification contract carries a
-    TEST_IMMUTABILITY claim (the goal says existing tests must stay as they
-    are), else None. A planning-time input only: the terminal gate still
-    judges the candidate's test tree against the same base."""
+    """PLAN-TEST-IMMUTABILITY-SCOPE-001: the existing test files a plan may not edit or delete, else None. Two sources:
+    the tracked runnable test files of the workspace's HEAD when the sealed verification contract carries a
+    TEST_IMMUTABILITY claim (the goal says existing tests must stay as they are), and - PLAN-NAMED-TEST-IMMUTABILITY-001 -
+    the test files a pure regression-preservation statement names (``named_preserved_test_files``). A planning-time input
+    only: the terminal gate still judges the candidate's test tree against the same base."""
     from kriya.workflow.file_resolution import is_runnable_test_file
     from kriya.workflow.named_test_oracle import BaseTree
     from kriya.workflow.requirements import TEST_IMMUTABILITY_CLAIM
 
+    frozen = set(named_preserved_test_files(contract))
     entries = getattr(contract, "entries", None) or ()
-    if not any(TEST_IMMUTABILITY_CLAIM in getattr(entry, "required_claims", ()) for entry in entries):
-        return None
-    head = _workspace_head(workspace_path)
-    if not head:
-        return None
-    try:
-        return sorted(path for path in BaseTree(workspace_path, head).paths if is_runnable_test_file(path))
-    except Exception as exc:  # unreadable base: no planning constraint (the terminal gate still refuses)
-        logger.info(f"Immutable test files unavailable for planning: {type(exc).__name__}: {exc}")
-        return None
+    if any(TEST_IMMUTABILITY_CLAIM in getattr(entry, "required_claims", ()) for entry in entries):
+        head = _workspace_head(workspace_path)
+        if head:
+            try:
+                frozen.update(path for path in BaseTree(workspace_path, head).paths if is_runnable_test_file(path))
+            except Exception as exc:  # unreadable base: only the named files constrain planning (the terminal gate still refuses)
+                logger.info(f"Immutable test files unavailable for planning: {type(exc).__name__}: {exc}")
+    return sorted(frozen) or None
 
 
 def _reference_test_files(candidate_root: str, workspace_path: str) -> Optional[List[str]]:
