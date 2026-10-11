@@ -41,7 +41,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const added = review.files.reduce((n, f) => n + f.lines_added, 0);
   const removed = review.files.reduce((n, f) => n + f.lines_removed, 0);
   return (
-    <section className="ck-review" aria-label="Change review" data-review-id={review.review_id}>
+    <section className="ck-review" aria-label="Change review" data-review-id={review.review_id} tabIndex={-1}>
       <div><strong>Review the proposed change.</strong> Kriya paused this run for your decision; nothing is applied to your folder until you approve.</div>
       <ul aria-label="Files in this change" style={{ margin: '4px 0' }}>
         {review.files.map((f) => <li key={f.filepath}><span className="mono">{f.filepath}</span> <span className="muted small">+{f.lines_added} −{f.lines_removed} · diff {shortDigest(f.diff_sha256)}</span></li>)}

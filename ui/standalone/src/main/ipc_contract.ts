@@ -27,10 +27,12 @@ export const IPC_CHANNELS = {
   // in the NATIVE chooser stands for the parent) and Kriya (`workspace.create`) makes the folder. See project_host.ts.
   chooseProjectParent: 'kriya:host:project:choose-parent',
   createProject: 'kriya:host:project:create',
+  // A native notification for one of three durable moments (approval waiting, run finished, run ended without success). A closed kind + the launch id; the host builds the text.
+  notifyRun: 'kriya:host:execution:notify',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';
-export const MENU_COMMANDS = ['openFolder', 'newProject'] as const;
+export const MENU_COMMANDS = ['openFolder', 'newProject', 'showRun'] as const;
 export type MenuCommand = (typeof MENU_COMMANDS)[number];
 export const RECENT_WORKSPACES_MAX = 10;
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Badge, progressCounts, useDispatch, useExecution, type RunView } from '../core';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge, RUN_DOCUMENTS_PAGE, progressCounts, useDispatch, useExecution, useNavigate, useProvider, type RunView } from '../core';
 import { ApprovalReview } from './ApprovalReview';
 
 const STAGE_LABEL: Record<RunView['stage'], string> = { starting: 'Starting', running: 'Running', finished: 'Finished' };
@@ -33,7 +33,20 @@ const detailLines = (d: Record<string, unknown>): string[] => Object.entries(d).
 export function ActiveRunBanner() {
   const ex = useExecution();
   const dispatch = useDispatch();
+  const go = useNavigate();
+  const desktop = useProvider().desktop;
   const run = ex.run;
+  // Back to the run this window started: select it (live while running, its recorded row once finished), open the run documents, and put keyboard focus on the
+  // pending review when there is one. Used by the "Return to run" button, the approval indicator and a clicked notification.
+  const showRun = useCallback(() => {
+    if (!run) return;
+    if (run.stage !== 'finished') dispatch({ type: 'selectLiveRun', launchId: run.launchId });
+    else if (run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
+    go(RUN_DOCUMENTS_PAGE);
+    if (run.stage !== 'finished' && run.review) setTimeout(() => document.querySelector<HTMLElement>('section[aria-label="Change review"]')?.focus(), 0);
+  }, [run, dispatch, go]);
+  // A notification click arrives as the fixed command `showRun` (no payload): the current run is the only run there is.
+  useEffect(() => (desktop ? desktop.onMenuCommand((command) => { if (command === 'showRun') showRun(); }) : undefined), [desktop, showRun]);
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished');
   if (!run) return null;
   const finished = run.stage === 'finished' && run.outcome !== null;
@@ -48,6 +61,12 @@ export function ActiveRunBanner() {
         {!finished ? (run.review ? <Badge tone="warn">approval required</Badge> : <Badge tone="info">{STAGE_LABEL[run.stage]}</Badge>) : <Badge tone={TONE[run.outcome!.kind]}>{run.outcome!.kind.replace('_', ' ')}</Badge>}
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         <span className="grow" />
+        {!finished ? (
+          <>
+            {run.review ? <button type="button" className="ck-primary" onClick={showRun}>1 approval waiting · Go to review</button> : null}
+            <button type="button" onClick={showRun}>Return to run</button>
+          </>
+        ) : null}
         {finished ? (
           <>
             {run.outcome!.traceRunId ? <button type="button" onClick={() => dispatch({ type: 'selectRun', runId: run.outcome!.traceRunId })}>View run</button> : null}

@@ -48,7 +48,11 @@ export interface WorkspaceChoice { chosen: boolean; path: string | null; /** RUN
  * (the path travels for display only) and a later request names only a project NAME; Kriya (`workspace.create`) makes the folder. */
 export interface ProjectParentChoice { chosen: boolean; token: string | null; parent: string | null; refused?: 'RUN_ACTIVE' | null }
 export interface ProjectCreateResult { created: boolean; path: string | null; code: string | null; message: string | null; reason: string | null }
-export type MenuCommand = 'openFolder' | 'newProject';
+/** A native notification for one of three durable moments. The host builds the text; only the closed kind and the launch id cross. */
+export type NotifyKind = 'approval_required' | 'run_succeeded' | 'run_unsuccessful';
+export interface NotifyRequest { kind: NotifyKind; launch_id: string }
+export interface NotifyResult { shown: boolean; reason: string }
+export type MenuCommand = 'openFolder' | 'newProject' | 'showRun';
 export interface WorkspaceHost {
   /** The native folder chooser. Cancelling resolves { chosen: false } and changes nothing. */
   choose(): Promise<WorkspaceChoice>;
@@ -71,6 +75,8 @@ export interface ExecutionHostPort {
   state(): Promise<ExecutionState>;
   /** Review decision (GUI final): the host forwards ONE typed decision to Kriya's `launch-decision` action and reports Kriya's answer. It never decides. */
   decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
+  /** Ask the host for a native notification (approval waiting / run finished / run ended without success). Absent on a host with none. */
+  notify?(request: NotifyRequest): Promise<NotifyResult>;
 }
 
 export interface HostAdapter {

@@ -116,12 +116,13 @@ describe('M5 persistent transport and workspace authority (hardening)', () => {
 describe('M6 execution (hardening): Start Run is the only execution action and it is not a command endpoint', () => {
   const hostTs = read(join(MAIN, 'execution_host.ts'));
   const processTs = read(join(MAIN, 'execution_process.ts'));
-  it('the preload exposes exactly two typed execution messages - no command, no argv, no generic invoke', () => {
+  it('the preload exposes only typed execution messages (start, state, and the closed-kind notification request) - no command, no argv, no generic invoke', () => {
     expect(preloadTs).toContain('startRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.startRun, request)');
     expect(preloadTs).toContain('executionState: () => ipcRenderer.invoke(IPC_CHANNELS.executionState)');
     expect(preloadTs).not.toMatch(/ipcRenderer\.invoke\((?!IPC_CHANNELS\.)/);
     expect(preloadTs).not.toMatch(/spawn|child_process|shell|exec\(/i);
-    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['executionState', 'startRun']);
+    expect(preloadTs).toContain('notifyRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.notifyRun, request)');
+    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['executionState', 'notifyRun', 'startRun']); // (decideApproval and the project steps are classified in their own tests)
   });
   it('both execution handlers verify the sender, and startRun hands the raw request to the host (which validates it) - the handler builds nothing', () => {
     for (const name of ['startRun', 'executionState']) {

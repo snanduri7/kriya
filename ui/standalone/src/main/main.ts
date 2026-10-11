@@ -8,7 +8,7 @@
  * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
  * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
  */
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -24,6 +24,7 @@ import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
 import { ProjectHost } from './project_host';
+import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
@@ -66,6 +67,8 @@ let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
 let approvals: ApprovalHost;
 let projects: ProjectHost;
+let notifications: NotificationHost;
+const liveNotifications = new Set<Notification>(); // a shown notification is kept until it is clicked or closed (otherwise it can be collected before the person sees it)
 let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
 let quitting = false; // set once the person has confirmed interrupting a run and quitting
@@ -245,6 +248,10 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return approvals.decide(raw);
   });
+  ipcMain.handle(IPC_CHANNELS.notifyRun, (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return notifications.notify(raw);
+  });
   ipcMain.handle(IPC_CHANNELS.executionState, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return execution.state();
@@ -309,6 +316,23 @@ app.whenReady().then(async () => {
     create: (parent, name) => kupQuery({ operation: 'workspace.create', parent, name }),
     approveCreated: (path) => { workspaces.approveCreated(path); },
     runActive: () => execution.active(), now: () => Date.now(), mintToken: () => `pt-${randomBytes(16).toString('hex')}`,
+  });
+  const activate = () => {
+    if (ownedWindow && !ownedWindow.isDestroyed()) { if (ownedWindow.isMinimized()) ownedWindow.restore(); ownedWindow.show(); ownedWindow.focus(); ownedWindow.webContents.send(MENU_CHANNEL, 'showRun' satisfies MenuCommand); }
+  };
+  notifications = new NotificationHost({
+    // An evidence/dev build never raises a real notification (it runs unattended on the owner's desktop).
+    supported: () => dev === null && Notification.isSupported(),
+    windowFocused: () => ownedWindow !== null && !ownedWindow.isDestroyed() && ownedWindow.isFocused(),
+    currentLaunch: () => execution.state().launch_id, workspacePath: () => workspaces.current(),
+    show: (spec, onClick) => {
+      const n = new Notification({ title: spec.title, body: spec.body });
+      liveNotifications.add(n);
+      n.on('click', () => { liveNotifications.delete(n); onClick(); });
+      n.on('close', () => { liveNotifications.delete(n); });
+      n.show();
+    },
+    onActivate: activate, now: () => Date.now(),
   });
   workspaces.close(); // a launch starts at the welcome screen: no folder is open until the person opens one
   const command = (name: MenuCommand) => { if (ownedWindow && !ownedWindow.isDestroyed()) ownedWindow.webContents.send(MENU_CHANNEL, name); };

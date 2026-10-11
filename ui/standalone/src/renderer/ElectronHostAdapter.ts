@@ -1,4 +1,4 @@
-import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult } from '@kriya-ui/shared';
+import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -16,6 +16,7 @@ export interface KriyaHostBridge {
   startRun(request: unknown): Promise<unknown>;
   executionState(): Promise<unknown>;
   decideApproval(request: unknown): Promise<unknown>;
+  notifyRun(request: unknown): Promise<unknown>;
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
   measureMode: boolean;
 }
@@ -38,6 +39,7 @@ export class ElectronHostAdapter implements HostAdapter {
       startRun: (request: StartRunRequest) => bridge.startRun(request) as Promise<StartRunResult>,
       state: () => bridge.executionState() as Promise<ExecutionState>,
       decideApproval: (request: DecideApprovalRequest) => bridge.decideApproval(request) as Promise<DecideApprovalResult>,
+      notify: (request: NotifyRequest) => bridge.notifyRun(request) as Promise<NotifyResult>,
     };
   }
   static async create(bridge: KriyaHostBridge): Promise<ElectronHostAdapter> {

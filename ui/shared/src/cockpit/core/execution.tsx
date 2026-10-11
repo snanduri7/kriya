@@ -122,6 +122,17 @@ export function progressCounts(progress: RunProgress): Array<{ label: string; co
 export const UNREADABLE_POLLS = 4;
 const PAGE = 200;
 
+/** The notification a run state warrants, or null. Pure: a pending review (Kriya's record, the run live) is "approval_required"; a recorded success is
+ * "run_succeeded"; any other recorded end except the person's own rejection is "run_unsuccessful". `key` makes each event ask once (a new review is a new event). */
+export function notificationFor(run: RunView): { kind: 'approval_required' | 'run_succeeded' | 'run_unsuccessful'; key: string } | null {
+  if (run.stage !== 'finished' && run.review) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.review.review_id}` };
+  if (run.stage === 'finished' && run.outcome) {
+    if (run.outcome.kind === 'rejected') return null; // the person just decided this themselves
+    return { kind: run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful', key: `${run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful'}:${run.launchId}` };
+  }
+  return null;
+}
+
 /** The outcome, from DURABLE records only. null = not over (or not provably over). Pure: the tests drive it with every combination. */
 export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null, unreadable: string | null = null): RunOutcome | null {
   const outcome = deriveCore(status, notRecorded, host, unreadable);
@@ -375,6 +386,19 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     void tick();
     return () => { live = false; if (timer) clearTimeout(timer); };
   }, [port, provider, launchId, runWorkspace, selection, intervals.hiddenMs, intervals.slowMs, intervals.slowAfterMs, intervals.visibleMs]);
+
+  // Native notifications: only for the three moments a person who left Kriya in the background must come back for, and only from Kriya's DURABLE state (a pending
+  // review in a live launch; a recorded outcome) - never from a process event. Each (kind, launch, review) is asked once; the host decides whether to show it.
+  const notifiedRef = useRef(new Set<string>());
+  useEffect(() => {
+    const ask = port?.notify;
+    if (!ask || !run) return;
+    const event = notificationFor(run);
+    if (!event) return;
+    if (notifiedRef.current.has(event.key)) return;
+    notifiedRef.current.add(event.key);
+    void ask({ kind: event.kind, launch_id: run.launchId }).catch(() => undefined); // a notification that cannot be shown changes nothing about the run
+  }, [port, run]);
 
   const deciderRef = useRef<ReturnType<typeof createDecider> | null>(null);
   useEffect(() => { deciderRef.current = port ? createDecider({ port, run: () => runRef.current, set: setDecision }) : null; }, [port]);

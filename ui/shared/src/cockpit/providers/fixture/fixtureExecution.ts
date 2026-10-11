@@ -6,7 +6,7 @@
  * terminal outcome, a process that dies, a launch Kriya never recorded - is reachable deterministically, without timers and without a model.
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
-import type { ExecutionHostPort } from '../../../host/HostAdapter';
+import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
 import type { DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
 
 export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review';
@@ -47,6 +47,8 @@ export class FixtureExecution {
   private reviewSequence = 1;
   private killed = false;
   private statusFault: string | null = null;
+  /** Every notification the renderer asked the host for (for assertions). */
+  readonly notifications: NotifyRequest[] = [];
   /** Every decision request the host received (for assertions). */
   readonly decisions: DecideApprovalRequest[] = [];
   readonly port: ExecutionHostPort;
@@ -68,6 +70,7 @@ export class FixtureExecution {
       },
       state: async (): Promise<ExecutionState> => this.hostState(),
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
+      notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
     };
   }
 

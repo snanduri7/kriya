@@ -1,5 +1,5 @@
 export { App, type AppDriver, type AppProps } from './App';
-export type { HostAdapter, HostInfo, HostSettings, EditorId, OpenInIdeRequest, OpenInIdeResult, WorkspaceHost, WorkspaceChoice, MenuCommand, ExecutionHostPort, ProjectParentChoice, ProjectCreateResult } from './host/HostAdapter';
+export type { HostAdapter, HostInfo, HostSettings, EditorId, OpenInIdeRequest, OpenInIdeResult, WorkspaceHost, WorkspaceChoice, MenuCommand, ExecutionHostPort, ProjectParentChoice, ProjectCreateResult, NotifyKind, NotifyRequest, NotifyResult } from './host/HostAdapter';
 export * from './model/kup';
 export * from './model/availability';
 export * from './model/normalize';
