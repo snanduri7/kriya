@@ -1,0 +1,7 @@
+total 16
+drwxr-xr-x@  6 sriramnanduri  staff  192 11 Oct 18:55 .
+drwxr-xr-x@  3 sriramnanduri  staff   96 11 Oct 18:53 ..
+drwxr-xr-x@ 13 sriramnanduri  staff  416 11 Oct 18:55 .git
+drwxr-xr-x@  6 sriramnanduri  staff  192 11 Oct 18:54 .kriya
+-rw-r--r--@  1 sriramnanduri  staff   46 11 Oct 18:55 greet.py
+-rw-r--r--@  1 sriramnanduri  staff  180 11 Oct 18:55 test_greet.py
