@@ -1,0 +1,1 @@
+HARNESS ARTIFACT: workspace A (copied scratch folder from an earlier soak) was in MANUAL_ACTION_REQUIRED, so Kriya refused every Start there (approvals 0, reviewMissed 8). Preserved; not a product defect. See soak-10min-clean.

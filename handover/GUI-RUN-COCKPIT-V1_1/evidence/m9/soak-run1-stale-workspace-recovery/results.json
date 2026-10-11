@@ -1,0 +1,484 @@
+{
+ "soak": {
+  "minutes": 30,
+  "counts": {
+   "cycles": 44,
+   "switches": 44,
+   "runsStarted": 15,
+   "approvals": 0,
+   "rejections": 7,
+   "reviewMissed": 8
+  },
+  "errors": [],
+  "error_count": 0,
+  "samples": [
+   {
+    "cycle": 0,
+    "t_s": 33,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 1,
+    "lag_p95": 1,
+    "lag_max": 8
+   },
+   {
+    "cycle": 1,
+    "t_s": 206,
+    "heap_mb": 10,
+    "nodes": 285,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 1,
+    "lag_max": 8
+   },
+   {
+    "cycle": 2,
+    "t_s": 229,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 1,
+    "lag_p95": 1,
+    "lag_max": 8
+   },
+   {
+    "cycle": 3,
+    "t_s": 252,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 1,
+    "lag_p95": 1,
+    "lag_max": 8
+   },
+   {
+    "cycle": 4,
+    "t_s": 280,
+    "heap_mb": 10,
+    "nodes": 281,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 1,
+    "lag_max": 2
+   },
+   {
+    "cycle": 5,
+    "t_s": 303,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 1,
+    "lag_max": 4
+   },
+   {
+    "cycle": 6,
+    "t_s": 306,
+    "heap_mb": 10,
+    "nodes": 179,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 7,
+    "t_s": 479,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 8,
+    "t_s": 482,
+    "heap_mb": 10,
+    "nodes": 179,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 3,
+    "lag_max": 5
+   },
+   {
+    "cycle": 9,
+    "t_s": 505,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 6
+   },
+   {
+    "cycle": 10,
+    "t_s": 513,
+    "heap_mb": 10,
+    "nodes": 281,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 2,
+    "lag_max": 9
+   },
+   {
+    "cycle": 11,
+    "t_s": 536,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 2,
+    "lag_max": 4
+   },
+   {
+    "cycle": 12,
+    "t_s": 539,
+    "heap_mb": 10,
+    "nodes": 183,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 3,
+    "lag_max": 7
+   },
+   {
+    "cycle": 13,
+    "t_s": 712,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 2,
+    "lag_max": 4
+   },
+   {
+    "cycle": 14,
+    "t_s": 715,
+    "heap_mb": 10,
+    "nodes": 183,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 5
+   },
+   {
+    "cycle": 15,
+    "t_s": 738,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 2
+   },
+   {
+    "cycle": 16,
+    "t_s": 745,
+    "heap_mb": 10,
+    "nodes": 281,
+    "live_intervals": 0,
+    "live_timeouts": 7,
+    "lag_p95": 2,
+    "lag_max": 6
+   },
+   {
+    "cycle": 17,
+    "t_s": 768,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 1,
+    "lag_max": 6
+   },
+   {
+    "cycle": 18,
+    "t_s": 771,
+    "heap_mb": 10,
+    "nodes": 187,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 3,
+    "lag_max": 5
+   },
+   {
+    "cycle": 19,
+    "t_s": 944,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 1,
+    "lag_max": 6
+   },
+   {
+    "cycle": 20,
+    "t_s": 947,
+    "heap_mb": 10,
+    "nodes": 187,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 21,
+    "t_s": 970,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 6
+   },
+   {
+    "cycle": 22,
+    "t_s": 978,
+    "heap_mb": 10,
+    "nodes": 281,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 2,
+    "lag_max": 9
+   },
+   {
+    "cycle": 23,
+    "t_s": 1001,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 2,
+    "lag_max": 3
+   },
+   {
+    "cycle": 24,
+    "t_s": 1004,
+    "heap_mb": 10,
+    "nodes": 191,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 3,
+    "lag_max": 3
+   },
+   {
+    "cycle": 25,
+    "t_s": 1177,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 2,
+    "lag_max": 4
+   },
+   {
+    "cycle": 26,
+    "t_s": 1180,
+    "heap_mb": 10,
+    "nodes": 191,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 3,
+    "lag_max": 4
+   },
+   {
+    "cycle": 27,
+    "t_s": 1203,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 7
+   },
+   {
+    "cycle": 28,
+    "t_s": 1211,
+    "heap_mb": 10,
+    "nodes": 278,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 2,
+    "lag_max": 10
+   },
+   {
+    "cycle": 29,
+    "t_s": 1234,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 2,
+    "lag_max": 4
+   },
+   {
+    "cycle": 30,
+    "t_s": 1237,
+    "heap_mb": 10,
+    "nodes": 195,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 31,
+    "t_s": 1411,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 2,
+    "lag_max": 3
+   },
+   {
+    "cycle": 32,
+    "t_s": 1413,
+    "heap_mb": 10,
+    "nodes": 195,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 8
+   },
+   {
+    "cycle": 33,
+    "t_s": 1436,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 3
+   },
+   {
+    "cycle": 34,
+    "t_s": 1444,
+    "heap_mb": 10,
+    "nodes": 278,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 2,
+    "lag_max": 2
+   },
+   {
+    "cycle": 35,
+    "t_s": 1467,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 2,
+    "lag_max": 2
+   },
+   {
+    "cycle": 36,
+    "t_s": 1470,
+    "heap_mb": 10,
+    "nodes": 199,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 2,
+    "lag_max": 7
+   },
+   {
+    "cycle": 37,
+    "t_s": 1644,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 1,
+    "lag_max": 3
+   },
+   {
+    "cycle": 38,
+    "t_s": 1647,
+    "heap_mb": 10,
+    "nodes": 199,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 8,
+    "lag_max": 9
+   },
+   {
+    "cycle": 39,
+    "t_s": 1669,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 2,
+    "lag_p95": 2,
+    "lag_max": 7
+   },
+   {
+    "cycle": 40,
+    "t_s": 1678,
+    "heap_mb": 10,
+    "nodes": 278,
+    "live_intervals": 0,
+    "live_timeouts": 6,
+    "lag_p95": 2,
+    "lag_max": 7
+   },
+   {
+    "cycle": 41,
+    "t_s": 1700,
+    "heap_mb": 10,
+    "nodes": 71,
+    "live_intervals": 0,
+    "live_timeouts": 4,
+    "lag_p95": 1,
+    "lag_max": 8
+   },
+   {
+    "cycle": 42,
+    "t_s": 1703,
+    "heap_mb": 10,
+    "nodes": 203,
+    "live_intervals": 0,
+    "live_timeouts": 5,
+    "lag_p95": 6,
+    "lag_max": 9
+   },
+   {
+    "cycle": 43,
+    "t_s": 1877,
+    "heap_mb": 10,
+    "nodes": 286,
+    "live_intervals": 0,
+    "live_timeouts": 0,
+    "lag_p95": 2,
+    "lag_max": 8
+   }
+  ],
+  "first": {
+   "cycle": 0,
+   "t_s": 33,
+   "heap_mb": 10,
+   "nodes": 71,
+   "live_intervals": 0,
+   "live_timeouts": 1,
+   "lag_p95": 1,
+   "lag_max": 8
+  },
+  "last": {
+   "cycle": 43,
+   "t_s": 1877,
+   "heap_mb": 10,
+   "nodes": 286,
+   "live_intervals": 0,
+   "live_timeouts": 0,
+   "lag_p95": 2,
+   "lag_max": 8
+  },
+  "lag_all": {
+   "samples": 37539,
+   "p95": 2,
+   "p99": 2,
+   "max": 10,
+   "over100ms": 0
+  }
+ }
+}
