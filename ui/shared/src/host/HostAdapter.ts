@@ -64,6 +64,8 @@ export interface WorkspaceHost {
   chooseProjectParent?(): Promise<ProjectParentChoice>;
   /** New Project, step 2: ask Kriya to create `name` inside the chosen parent. */
   createProject?(request: { token: string; name: string }): Promise<ProjectCreateResult>;
+  /** Show the OPEN workspace's folder in the system file manager (Finder). The host reveals the folder it has open; the renderer names no path. Absent on a host that cannot. */
+  revealWorkspace?(): Promise<{ revealed: boolean; reason: string | null }>;
   /** Application-menu commands (File > Open Folder...). Returns the unsubscribe function. */
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }

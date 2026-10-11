@@ -29,6 +29,8 @@ export const IPC_CHANNELS = {
   createProject: 'kriya:host:project:create',
   // A native notification for one of three durable moments (approval waiting, run finished, run ended without success). A closed kind + the launch id; the host builds the text.
   notifyRun: 'kriya:host:execution:notify',
+  // Reveal the open workspace's folder in Finder. No argument: the host reveals the folder IT has open (the renderer names no path).
+  revealWorkspace: 'kriya:host:workspace:reveal',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';

@@ -151,6 +151,7 @@ export class FixtureHost implements HostAdapter {
         this.projectTokens.delete(request.token);
         return { created: true, path, code: null, message: null, reason: null };
       },
+      revealWorkspace: async () => { this.workspaceCalls.push('reveal'); return this.settings.workspacePath ? { revealed: true, reason: null } : { revealed: false, reason: 'no workspace is open' }; },
       recent: async () => [...this.recentList],
       remember: async (path) => { this.workspaceCalls.push(`remember:${path}`); this.recentList = [path, ...this.recentList.filter((p) => p !== path)].slice(0, 10); this.settings.workspacePath = path; return [...this.recentList]; },
       forget: async (path) => { this.workspaceCalls.push(`forget:${path}`); this.recentList = this.recentList.filter((p) => p !== path); if (this.settings.workspacePath === path) this.settings.workspacePath = null; return [...this.recentList]; },

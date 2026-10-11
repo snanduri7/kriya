@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, RUN_DOCUMENTS_PAGE, progressCounts, useDispatch, useExecution, useNavigate, useProvider, type RunView } from '../core';
+import { Badge, CopyText, RUN_DOCUMENTS_PAGE, progressCounts, useDispatch, useExecution, useNavigate, useProvider, type RunView } from '../core';
 import { ApprovalReview } from './ApprovalReview';
 
 const STAGE_LABEL: Record<RunView['stage'], string> = { starting: 'Starting', running: 'Running', finished: 'Finished' };
@@ -57,7 +57,7 @@ export function ActiveRunBanner() {
     <section className="ck-runbar ck-state" role="status" aria-live="polite" aria-label="Active run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-runbar-head">
         <strong>{finished ? run.outcome!.label : run.review ? 'Approval required' : `Run ${STAGE_LABEL[run.stage].toLowerCase()}`}</strong>
-        <span className="muted mono small" title="The launch id is the run id">{run.launchId}</span>
+        <span className="muted mono small" title="The launch id is the run id">{run.launchId}</span> <CopyText text={run.launchId} what="run ID" />
         {!finished ? (run.review ? <Badge tone="warn">approval required</Badge> : <Badge tone="info">{STAGE_LABEL[run.stage]}</Badge>) : <Badge tone={TONE[run.outcome!.kind]}>{run.outcome!.kind.replace('_', ' ')}</Badge>}
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
         <span className="grow" />
@@ -85,6 +85,7 @@ export function ActiveRunBanner() {
       ) : null}
       {finished && run.outcome!.recordedError && run.outcome!.recordedError !== run.outcome!.detail && run.outcome!.kind !== 'success' && run.outcome!.kind !== 'approval_required' ? <div role="note"><strong>Kriya reported:</strong> <span className="mono small">{run.outcome!.recordedError}</span></div> : null}
       {finished && !run.outcome!.approval ? <div>{run.outcome!.detail} <span className="muted small">Source: {run.outcome!.source}.</span></div> : null}
+      {finished && run.outcome!.kind !== 'success' ? <div><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${run.outcome!.label}`, run.outcome!.detail, run.outcome!.recordedError ? `Kriya reported: ${run.outcome!.recordedError}` : null, `Source: ${run.outcome!.source}`].filter(Boolean).join('\n')} /></div> : null}
       {finished && run.outcome!.declined.length ? <div className="muted small">Decisions declined, nothing approved (the run proceeded without them): {run.outcome!.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</div> : null}
       {run.stage === 'starting' && !finished ? <div className="muted">Waiting for Kriya to record the launch…</div> : null}
       {run.status ? (

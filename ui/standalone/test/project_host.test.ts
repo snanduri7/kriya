@@ -153,3 +153,17 @@ describe('authority wiring', () => {
     expect(IPC_CHANNELS.createProject).toBe('kriya:host:project:create');
   });
 });
+
+describe('Reveal in Finder (host)', () => {
+  const main = readFileSync(join(__dirname, '..', 'src', 'main', 'main.ts'), 'utf8');
+  it('reveals only the folder the HOST has open: the handler takes no argument, checks the sender, the folder, and never reveals in an evidence build', () => {
+    const at = main.indexOf('IPC_CHANNELS.revealWorkspace');
+    const body = main.slice(at, at + 700);
+    expect(body).toContain('(event) =>'); // no renderer-supplied argument
+    expect(body.indexOf('fromOwnedRenderer(event)')).toBeLessThan(body.indexOf('workspaces.current()'));
+    expect(body.indexOf('isDirectory(current)')).toBeLessThan(body.indexOf('shell.showItemInFolder(current)'));
+    expect(body.indexOf('if (dev)')).toBeLessThan(body.indexOf('shell.showItemInFolder(current)'));
+    expect((main.match(/shell\./g) ?? []).length).toBe(1); // the one use of Electron's shell module
+    expect(IPC_CHANNELS.revealWorkspace).toBe('kriya:host:workspace:reveal');
+  });
+});

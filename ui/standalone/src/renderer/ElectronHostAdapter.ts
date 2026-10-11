@@ -13,6 +13,7 @@ export interface KriyaHostBridge {
   forgetWorkspace(path: string): Promise<unknown>;
   chooseProjectParent(): Promise<unknown>;
   createProject(request: unknown): Promise<unknown>;
+  revealWorkspace(): Promise<unknown>;
   startRun(request: unknown): Promise<unknown>;
   executionState(): Promise<unknown>;
   decideApproval(request: unknown): Promise<unknown>;
@@ -33,6 +34,7 @@ export class ElectronHostAdapter implements HostAdapter {
       forget: (path) => bridge.forgetWorkspace(path) as Promise<string[]>,
       chooseProjectParent: () => bridge.chooseProjectParent() as Promise<ProjectParentChoice>,
       createProject: (request) => bridge.createProject(request) as Promise<ProjectCreateResult>,
+      revealWorkspace: () => bridge.revealWorkspace() as Promise<{ revealed: boolean; reason: string | null }>,
       onMenuCommand: (listener) => bridge.onMenuCommand(listener),
     };
     this.execution = {

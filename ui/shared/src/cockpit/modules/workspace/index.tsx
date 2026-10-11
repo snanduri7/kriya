@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, KeyValue, Panel, useProvider, useSession, useWorkspace, type ModuleDefinition } from '../../core';
+import { Badge, CopyText, KeyValue, Panel, useProvider, useSession, useWorkspace, type ModuleDefinition } from '../../core';
 import { RunPanel } from './RunPanel';
 import type { WorkspaceDescribe } from '../../../model/kup';
 
@@ -45,6 +45,20 @@ function SnapshotPicker() {
   );
 }
 
+/** Shows the open workspace's folder in Finder. The host reveals the folder IT has open; no path is sent. Absent when the host cannot. */
+function RevealButton() {
+  const provider = useProvider();
+  const [note, setNote] = useState<string | null>(null);
+  if (!provider.desktop?.revealWorkspace) return null;
+  const reveal = () => provider.desktop!.revealWorkspace!();
+  return (
+    <>
+      <button type="button" className="ck-quiet" onClick={() => void reveal().then((r) => setNote(r.revealed ? null : `Could not reveal: ${r.reason ?? 'unknown reason'}`), (e: unknown) => setNote(`Could not reveal: ${e instanceof Error ? e.message : String(e)}`))}>Reveal in Finder</button>
+      {note ? <span className="muted small" role="status">{note}</span> : null}
+    </>
+  );
+}
+
 /** The open workspace as Kriya describes it. Not a file explorer: facts only, each with the words Kriya used. */
 function Workspace() {
   const ws = useWorkspace();
@@ -57,7 +71,7 @@ function Workspace() {
     <Panel title="Workspace">
       <KeyValue items={[
         ['Name', f.name],
-        ['Path', <span key="p" className="mono">{f.workspace}</span>],
+        ['Path', <span key="p"><span className="mono">{f.workspace}</span> <CopyText text={f.workspace} what="workspace path" /> <RevealButton /></span>],
         ...(f.requested !== f.workspace ? [['Chosen as', <span key="r" className="mono">{f.requested}</span>] as const] : []),
         ['Identity', <span key="i" className="mono" title={f.identity}>{f.identity.slice(0, 16)}…</span>],
         ['Repository', repository(f.checkout)],

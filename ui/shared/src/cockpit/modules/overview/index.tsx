@@ -1,4 +1,4 @@
-import { AvailabilityView, KeyValue, Panel, payloadOf, ofKind, useRunContext, useRunEvidence, type ModuleDefinition } from '../../core';
+import { AvailabilityView, CopyText, KeyValue, Panel, payloadOf, ofKind, useRunContext, useRunEvidence, type ModuleDefinition } from '../../core';
 
 function Overview() {
   const run = useRunContext();
@@ -9,7 +9,9 @@ function Overview() {
         <div style={{ display: 'grid', gap: 8 }}>
           <Panel title="Run">
             <KeyValue items={[
+              ['Run ID', <span key="rid"><span className="mono">{ctx.runId}</span> <CopyText text={ctx.runId} what="run ID" /></span>],
               ['Goal', ctx.goal ?? 'not recorded'], ['Stored status', ctx.status === 'in_progress' ? 'Unfinished (the trace row says in_progress; this is not a claim that a run is active)' : ctx.status ?? 'not recorded'],
+              ...(ctx.failureCategory ? [['Failure category', <span key="fc">{ctx.failureCategory} <CopyText text={ctx.failureCategory} what="failure category" /></span>] as const] : []),
               ['Workspace', ctx.workspace.identity ?? 'not recorded'],
               ['Baseline revision', ctx.baseline.revision ?? 'not recorded (no baseline is assumed)'], ['Baseline tree', ctx.baseline.treeHash ?? 'not recorded'],
               ['Evidence store', ctx.evidence.store === 'present' ? `present, capture ${ctx.evidence.captureMode ?? 'not recorded'}` : 'absent'],

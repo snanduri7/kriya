@@ -8,7 +8,7 @@
  * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
  * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
  */
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -226,6 +226,15 @@ function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.createProject, async (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return projects.create(raw);
+  });
+  ipcMain.handle(IPC_CHANNELS.revealWorkspace, (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    const current = workspaces.current(); // the folder the HOST has open; never a renderer-supplied path
+    if (current === null) return { revealed: false, reason: 'no workspace is open' };
+    if (!isDirectory(current)) return { revealed: false, reason: 'the folder is no longer there' };
+    if (dev) return { revealed: false, reason: 'not available in an evidence build' };
+    shell.showItemInFolder(current);
+    return { revealed: true, reason: null };
   });
   ipcMain.handle(IPC_CHANNELS.recentWorkspaces, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
