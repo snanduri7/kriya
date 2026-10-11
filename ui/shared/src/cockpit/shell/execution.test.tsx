@@ -336,6 +336,25 @@ describe('Start Run', () => {
     expect(within(bar).getByText(/exit code 1/)).toBeInTheDocument();
   });
 
+  it('a conclusion awaiting its second confirming poll belongs to ONE launch: the next launch ending the same way is confirmed by ITS OWN two polls (review P3-2)', async () => {
+    const { host } = await openRunPanel({ execution: { outcome: 'never_recorded' } });
+    await typeGoal();
+    await screen.findByText('fixture-model:7b');
+    const polls = () => host.calls.filter((c) => c.operation === 'launch.status').length;
+    const endOnce = async () => {
+      fireEvent.click(startButton());
+      const bar = await banner();
+      await new Promise((r) => setTimeout(r, 150)); // let the in-flight poll of the live process settle, so only post-exit polls are counted
+      const before = polls();
+      act(() => host.exec!.finish());
+      await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'not_recorded'));
+      return polls() - before;
+    };
+    expect(await endOnce()).toBeGreaterThanOrEqual(2); // silence is confirmed by two consecutive polls
+    fireEvent.click(within(await banner()).getByRole('button', { name: /Dismiss/ }));
+    expect(await endOnce()).toBeGreaterThanOrEqual(2); // the second launch is not "pre-confirmed" by the first one's leftover signature
+  });
+
   it('a refusal by the host is shown with its typed code and starts nothing', async () => {
     await openRunPanel({ execution: { refuseStart: { code: 'PREFLIGHT_BLOCKED', message: 'another Kriya run already owns this folder' } } });
     await typeGoal();

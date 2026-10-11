@@ -9,7 +9,7 @@ import type { ModuleDefinition, ModuleRegistry, SelectionField } from './modules
 import type { UIProvider } from './provider';
 import type { RunContext } from './runContext';
 import { useSelectionState, type SelectionStore } from './selectionStore';
-import { ExecutionProvider, type PollIntervals } from './execution';
+import { ExecutionProvider, useExecution, type PollIntervals } from './execution';
 import { WorkspaceProvider, useWorkspacePath } from './workspace';
 
 export interface Services { provider: UIProvider; selection: SelectionStore; registry: ModuleRegistry; /** Tests only: how often a started run is polled. */ pollIntervals?: PollIntervals }
@@ -139,7 +139,11 @@ function RunEvidenceProvider({ children }: { children: ReactNode }) {
   const { snapshotId } = useSession();
   const runId = useSelectionState(selection, (s) => s.runId);
   const live = useSelectionState(selection, (s) => s.liveLaunchId) === runId && runId !== null;
-  const state = useAsync<RunEvidence>(runId ? `evidence:${live ? 'live' : 'row'}:${runId}:${live ? '' : snapshotId ?? ''}` : null, (signal) => (live ? loadLiveRunEvidence(provider, runId!, signal) : loadRunEvidence(provider, runId!, snapshotId, signal)), unavailable('unknown_run', 'Select a run.'));
+  // A live run's evidence is reloaded when a DIFFERENT change comes up for review (another review id / candidate digest): the diff the person is shown must be the
+  // one the pending review names, never the evidence read for an earlier candidate (independent review P2-1).
+  const reviewing = useExecution().run?.review ?? null;
+  const liveKey = reviewing ? `${reviewing.review_id}@${reviewing.candidate_digest}` : '';
+  const state = useAsync<RunEvidence>(runId ? `evidence:${live ? 'live' : 'row'}:${runId}:${live ? liveKey : snapshotId ?? ''}` : null, (signal) => (live ? loadLiveRunEvidence(provider, runId!, signal) : loadRunEvidence(provider, runId!, snapshotId, signal)), unavailable('unknown_run', 'Select a run.'));
   return <RunEvidenceContext.Provider value={state}>{children}</RunEvidenceContext.Provider>;
 }
 

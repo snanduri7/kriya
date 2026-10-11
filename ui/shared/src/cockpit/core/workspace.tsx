@@ -138,7 +138,13 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
 
   const forgetRecent = useCallback(async (path: string) => {
     if (!desktop) return;
-    const recent = await desktop.forget(path);
+    let recent: Awaited<ReturnType<typeof desktop.forget>>;
+    try {
+      recent = await desktop.forget(path);
+    } catch (error) {
+      setState((s) => ({ ...s, notice: { code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), path } }));
+      return;
+    }
     setState((s) => ({ ...s, recent, notice: s.notice?.path === path ? null : s.notice, current: s.current?.path === path ? null : s.current }));
     if (openPath.current === path) settle(null);
   }, [desktop, settle]);

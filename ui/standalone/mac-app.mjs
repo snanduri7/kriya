@@ -17,6 +17,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FRAMEWORK_BINARY, applyProductFuses } from './fuses.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PRODUCT = 'Kriya';
@@ -86,6 +87,11 @@ export function rebrand(dest, { icon, appDir, evidence = false }) {
     }
     cpSync(join(appDir, 'dist', 'renderer'), join(app, 'dist', 'renderer'), { recursive: true });
   }
+  if (appDir && !evidence) {
+    // The product's Electron fuses: RunAsNode, NODE_OPTIONS and --inspect OFF (the stock bundle ships them on). Patched BEFORE the re-sign below.
+    const framework = join(dest, ...FRAMEWORK_BINARY);
+    writeFileSync(framework, applyProductFuses(readFileSync(framework)));
+  }
   execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', dest], { stdio: 'pipe' }); // ad-hoc: a modified bundle must be re-signed to launch on Apple silicon
   return iconNote;
 }
@@ -126,6 +132,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) try {
     const mode = JSON.parse(readFileSync(join(HERE, 'dist', 'renderer', 'ui-mode.json'), 'utf8')).ui;
     if (mode !== 'cockpit') throw new Error(`dist/renderer is a "${mode}" build; only the cockpit is packaged (npm run build)`);
     const evidence = process.argv.includes('--evidence');
+    if (evidence && argValue('--out') === undefined) throw new Error('--evidence requires an explicit --out directory: an evidence package must never overwrite the product package (out/Kriya.app)');
     const note = rebrand(join(out, `${PRODUCT}.app`), { icon, appDir: HERE, evidence });
     if (!evidence) execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs'), '--package', join(out, `${PRODUCT}.app`)], { stdio: 'inherit' });
     const findings = verifyBundle(join(out, `${PRODUCT}.app`));

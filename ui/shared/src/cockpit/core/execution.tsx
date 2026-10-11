@@ -113,20 +113,32 @@ export interface PollIntervals { visibleMs: number; slowMs: number; hiddenMs: nu
 export const DEFAULT_INTERVALS: PollIntervals = { visibleMs: 1000, slowMs: 3000, hiddenMs: 5000, slowAfterMs: 60_000 };
 
 const RECENT_MAX = 12;
+const PROGRESS_COUNTS: Array<[string, string]> = [['unit.opened', 'Units opened'], ['attempt.opened', 'Attempts opened'], ['model.request', 'Model requests'], ['gate.result', 'Gate results']];
+/** The recorded-record tallies the active-run banner shows, labelled. Kept in core: the shell shows facts, it never interprets a record kind. */
+export function progressCounts(progress: RunProgress): Array<{ label: string; count: number }> {
+  return PROGRESS_COUNTS.map(([kind, label]) => ({ label, count: progress.kinds[kind] ?? 0 }));
+}
+/** Consecutive unreadable status polls (with the process gone) after which a run is concluded as "could not be followed". */
+export const UNREADABLE_POLLS = 4;
 const PAGE = 200;
 
 /** The outcome, from DURABLE records only. null = not over (or not provably over). Pure: the tests drive it with every combination. */
-export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): RunOutcome | null {
-  const outcome = deriveCore(status, notRecorded, host);
+export function deriveOutcome(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null, unreadable: string | null = null): RunOutcome | null {
+  const outcome = deriveCore(status, notRecorded, host, unreadable);
   const declined = (status?.launch.declined_decisions ?? []).map((d) => ({ kind: d.kind, reason: d.reason }));
   const recordedError = status?.launch.ended?.error ?? null;
   return outcome === null ? null : { ...outcome, declined, recordedError };
 }
 
-function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null): Omit<RunOutcome, 'declined' | 'recordedError'> | null {
+function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: ExecutionState | null, unreadable: string | null): Omit<RunOutcome, 'declined' | 'recordedError'> | null {
   const exited = host?.phase === 'exited';
   const exitText = host?.exit ? (host.exit.signal ? `signal ${host.exit.signal}` : `exit code ${host.exit.code ?? 'unknown'}`) : 'exit not reported';
   if (status === null) {
+    // The process is gone and Kriya's record has stayed unreadable for several polls (a typed error that is not "no such launch"): the run cannot be followed any
+    // further. Conclude honestly - never hold the workspace locked forever on a record nobody can read (independent review P2-4).
+    if (!notRecorded && unreadable !== null && exited) {
+      return { kind: 'not_recorded', label: 'The run could not be followed', detail: `The execution process ended (${exitText}) and Kriya's launch record stayed unreadable (${unreadable}). What the run did is not known from here; check the folder and Kriya's records in a terminal before running again.`, source: 'Kriya launch record unreadable; the host reports the process exit', traceRunId: null, workflowStatus: null };
+    }
     return notRecorded && exited
       ? { kind: 'not_recorded', label: 'No run was recorded', detail: `The execution process ended (${exitText}) before Kriya recorded a launch. Nothing ran and nothing was changed by Kriya.`, source: 'Kriya has no launch record for this id; the host reports the process exit', traceRunId: null, workflowStatus: null }
       : null;
@@ -216,7 +228,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const workspace = ws.current?.path ?? null;
   const refreshWorkspaceRef = useRef(ws.refresh);
   const [goal, setGoal] = useState('');
-  const [done, setDone] = useState<{ key: string; state: PreflightState } | null>(null);
+  const [done, setDone] = useState<{ key: string; workspace: string; state: PreflightState } | null>(null);
   const [nonce, setNonce] = useState(0);
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
@@ -224,7 +236,6 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [decision, setDecision] = useState<DecisionState>({ state: 'idle' });
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
-  const pendingRef = useRef<string | null>(null);
   const acquireRef = useRef(acquire);
   useEffect(() => { runRef.current = run; acquireRef.current = acquire; refreshWorkspaceRef.current = ws.refresh; });
 
@@ -245,11 +256,11 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     const ac = new AbortController();
     void provider.executionPreflight(workspace, ac.signal).then((r) => {
       if (ac.signal.aborted) return;
-      setDone({ key, state: r.ok ? { state: 'ready', data: r.data } : { state: 'error', error: r.error } });
+      setDone({ key, workspace, state: r.ok ? { state: 'ready', data: r.data } : { state: 'error', error: r.error } });
     });
     return () => ac.abort();
   }, [provider, key, workspace]);
-  const preflight = useMemo<PreflightState>(() => (!port ? { state: 'unavailable', reason: 'This host cannot start a run.' } : key === null ? { state: 'idle' } : done?.key === key ? done.state : done && key !== null && done.key.split('|')[0] === key.split('|')[0] ? done.state : { state: 'loading' }), [port, key, done]);
+  const preflight = useMemo<PreflightState>(() => (!port ? { state: 'unavailable', reason: 'This host cannot start a run.' } : key === null ? { state: 'idle' } : done?.key === key ? done.state : done && done.workspace === workspace ? done.state : { state: 'loading' }), [port, key, done, workspace]);
   // (a re-check of the SAME folder keeps showing the last answer until Kriya's new one arrives; the host re-resolves it authoritatively at Start regardless)
 
   // A run this host started is still executing when the window (re)loads: follow it again instead of relying on this window's memory. The host knows its one
@@ -302,6 +313,8 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const began = performance.now();
+    let errorStreak = 0;
+    let pending: string | null = null; // a conclusion awaiting its confirming poll belongs to THIS launch's effect only: it cannot leak into the next launch (review P3-2)
     const tick = async () => {
       const [hostState, status] = await Promise.all([port.state().catch(() => null), provider.launchStatus(runWorkspace, launchId)]);
       if (!live) return;
@@ -323,13 +336,14 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
           progress = { ...progress, error: `${page.error.code}: ${page.error.message}` };
         }
       }
-      let outcome = deriveOutcome(data, notRecorded, hostState);
+      errorStreak = status.ok || notRecorded ? 0 : errorStreak + 1;
+      let outcome = deriveOutcome(data, notRecorded, hostState, errorStreak >= UNREADABLE_POLLS && !status.ok ? `${status.error.code}` : null);
       // A conclusion drawn from silence (not sealed by the process itself) must be seen by two consecutive polls: a status read and a process-exit read that
       // straddle the process's own final write must never be taken as 'the run did not finish'.
       const uncertain = outcome !== null && (data === null || data.launch.phase !== 'ENDED');
       const signature = uncertain && outcome ? `${outcome.kind}|${hostState?.exit?.code ?? ''}|${hostState?.exit?.signal ?? ''}` : null;
-      const confirmed = signature !== null && pendingRef.current === signature;
-      pendingRef.current = uncertain ? signature : null;
+      const confirmed = signature !== null && pending === signature;
+      pending = uncertain ? signature : null;
       if (uncertain && !confirmed) outcome = null;
       const now = performance.now();
       setRun((prev) => {
@@ -355,7 +369,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         return;
       }
       const hidden = typeof document !== 'undefined' && document.hidden;
-      const delay = more || pendingRef.current !== null ? Math.min(intervals.visibleMs, 250) : hidden ? intervals.hiddenMs : now - began > intervals.slowAfterMs ? intervals.slowMs : intervals.visibleMs;
+      const delay = more || pending !== null ? Math.min(intervals.visibleMs, 250) : hidden ? intervals.hiddenMs : now - began > intervals.slowAfterMs ? intervals.slowMs : intervals.visibleMs;
       timer = setTimeout(() => { void tick(); }, delay);
     };
     void tick();

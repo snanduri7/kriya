@@ -64,10 +64,18 @@ def test_every_read_operation_answers_every_generated_request_with_a_typed_envel
         else:
             data += 1
         answered += 1
-    assert answered == 450 and errors > 0 and data >= 0
+    assert answered == 450 and errors > 0
 
 
 def test_an_unknown_or_non_string_operation_is_a_typed_invalid_request():
     for operation in ("shell.exec", "evidence.__class__", "", "SNAPSHOT.LIST", "history.list; rm -rf /", None, 7, ["history.list"]):
         envelope = run_kup_operation(strict_config(), {"operation": operation})
         assert envelope["data"] is None and envelope["error"]["code"] == policy.INVALID_REQUEST, (operation, envelope)
+
+
+def test_the_fuzz_harness_is_not_vacuous_a_known_good_request_gets_data_and_deep_paths_run():
+    """The generated requests are mostly refusals by design; this control proves the same harness path returns real data for good requests."""
+    cfg = strict_config(evidence={"attempt_recorder": {"content_visibility": "on"}})
+    assert run_kup_operation(cfg, {"operation": "evidence.verify", "run_id": "fz-run"})["data"]["status"] == "VERIFIED"
+    assert len(run_kup_operation(cfg, {"operation": "evidence.records", "run_id": "fz-run", "limit": 2})["data"]["records"]) == 2
+    assert run_kup_operation(cfg, {"operation": "capabilities"})["data"] is not None

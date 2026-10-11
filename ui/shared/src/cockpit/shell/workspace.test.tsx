@@ -180,6 +180,16 @@ describe('a folder Kriya refuses', () => {
     expect(screen.getByRole('button', { name: 'Open empty' })).toBeInTheDocument();
   });
 
+  it('a failing "Remove from recent" shows a typed notice and leaves the list untouched - never an unhandled rejection (review P3-7)', async () => {
+    const { host } = renderWorkspaceShell({ fixture: { workspace: null, recent: ['/fixture/gone', '/fixture/empty'] } });
+    (host.workspace as { forget: (p: string) => Promise<string[]> }).forget = async () => { throw new Error('the settings file cannot be written'); };
+    fireEvent.click(await screen.findByRole('button', { name: 'Open gone' }));
+    const alert = await screen.findByRole('alert');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Remove from recent' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('the settings file cannot be written'));
+    expect(screen.getByRole('button', { name: 'Open empty' })).toBeInTheDocument();
+  });
+
   it('a remembered folder is not trusted: opening it asks Kriya every time', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: null, recent: ['/fixture/empty'] } });
     fireEvent.click(await screen.findByRole('button', { name: 'Open empty' }));

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Badge, useDispatch, useExecution, type RunView } from '../core';
+import { Badge, progressCounts, useDispatch, useExecution, type RunView } from '../core';
 import { ApprovalReview } from './ApprovalReview';
 
 const STAGE_LABEL: Record<RunView['stage'], string> = { starting: 'Starting', running: 'Running', finished: 'Finished' };
-const COUNTS: Array<[string, string]> = [['unit.opened', 'Units opened'], ['attempt.opened', 'Attempts opened'], ['model.request', 'Model requests'], ['gate.result', 'Gate results']];
 
 function clock(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -38,7 +37,7 @@ export function ActiveRunBanner() {
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished');
   if (!run) return null;
   const finished = run.stage === 'finished' && run.outcome !== null;
-  const counts = COUNTS.map(([kind, label]) => [label, run.progress.kinds[kind] ?? 0] as const);
+  const counts = progressCounts(run.progress).map((c) => [c.label, c.count] as const);
   const lines = run.progress.lastSeq;
   const last = run.progress.recent[run.progress.recent.length - 1];
   return (

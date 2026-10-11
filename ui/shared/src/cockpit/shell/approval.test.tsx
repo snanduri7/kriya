@@ -95,6 +95,19 @@ describe('the review of a change', () => {
     expect(within(bar).getByRole('button', { name: 'Approve changes' })).toBeEnabled(); // nothing was recorded; the person can decide again
   });
 
+  it('when Kriya raises a NEW review for the same launch, the live evidence is read again for it (review P2-1) - the diff shown is never the earlier candidate\'s', async () => {
+    const { host, bar, store } = await reachReview({ evidenceContent: true });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    await screen.findByRole('region', { name: 'Changes' });
+    const manifests = () => host.calls.filter((c) => c.operation === 'evidence.manifest').length;
+    await waitFor(() => expect(manifests()).toBeGreaterThan(0));
+    const before = manifests();
+    act(() => host.exec!.replaceReview());
+    await waitFor(() => expect(within(bar).getByRole('region', { name: 'Change review' })).not.toHaveAttribute('data-review-id', REVIEW_ID));
+    await waitFor(() => expect(manifests()).toBeGreaterThan(before)); // fails if the evidence key ignores the review identity
+  });
+
   it('Review changes opens the existing Changes module on the run\'s LIVE evidence (no second diff implementation) and Review validation opens Validation', async () => {
     const { bar, store } = await reachReview({ evidenceContent: true });
     fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
@@ -245,6 +258,11 @@ describe('content visibility and the approval (owner final rule)', () => {
     const review = within(bar).getByRole('region', { name: 'Change review' });
     expect(within(review).queryByText(/Diff hidden/)).toBeNull();
     expect(within(review).getByText(/exact authorized diff/)).toBeInTheDocument();
+    // Before the diff has been opened, the confirmation is the honest "not seen" one: the generic confirmation exists only once this review's own evidence is loaded
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
+    expect(within(bar).getByText(/The diff has not been loaded for this review\./)).toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Cancel' }));
     fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     const doc = await screen.findByRole('region', { name: 'Changes' });
@@ -254,8 +272,19 @@ describe('content visibility and the approval (owner final rule)', () => {
     expect(diff.querySelectorAll('[data-diff-row]').length).toBeGreaterThan(0);
     expect(within(doc).queryByText(/Content not authorized/)).toBeNull();
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
-    expect(within(bar).getByRole('button', { name: 'Confirm approval' })).toBeInTheDocument();
+    await waitFor(() => expect(within(bar).getByRole('button', { name: 'Confirm approval' })).toBeInTheDocument());
     expect(within(bar).queryByRole('button', { name: 'Approve without viewing diff' })).toBeNull();
+    expect(host.exec!.decisions).toEqual([]);
+  });
+
+  it('a digest-only capture can never show the ordinary confirmation: the review says the diff cannot be shown and approving needs the explicit confirmation (review P2-3)', async () => {
+    const { host, bar, store } = await reachReview({ evidenceContent: true, capture: 'digest_only' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    await waitFor(() => expect(within(bar).getByText(/This run recorded digests of the change, not its content/)).toBeInTheDocument());
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).queryByRole('button', { name: 'Confirm approval' })).toBeNull();
+    expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
     expect(host.exec!.decisions).toEqual([]);
   });
 

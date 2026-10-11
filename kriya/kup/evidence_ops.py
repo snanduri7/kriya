@@ -56,7 +56,7 @@ def _guard(path_kind: str, call):
         return call()
     except reader.UnsupportedEvidenceSchema as error:
         raise SnapshotError(policy.EVIDENCE_SCHEMA_UNSUPPORTED, str(error), schema_seen=error.schema_seen) from error
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         raise SnapshotError(policy.EVIDENCE_STORE_UNREADABLE, f"{type(error).__name__}: {error}", path_kind=path_kind) from error
 
 
@@ -114,9 +114,11 @@ def store_summary(cfg, run_id: str) -> Dict[str, Any]:
     if not run.exists:
         return {"state": "absent", "line_count": None, "sealed": False}
     try:
+        if run.manifest().get("run_id") != run_id:  # a store that is not this run's own is never summarized as it
+            return {"state": "unreadable", "line_count": None, "sealed": False}
         sealed = run.seal() is not None
         lines = run.measure()[0]
-    except (OSError, ValueError):
+    except (OSError, ValueError, reader.UnsupportedEvidenceSchema):
         return {"state": "unreadable", "line_count": None, "sealed": False}
     return {"state": "sealed" if sealed else "open", "line_count": lines, "sealed": sealed}
 
@@ -131,7 +133,10 @@ def recorded_workspace_identity(cfg, evidence_id: Optional[str]) -> Tuple[str, O
     try:
         if not run.exists:
             return "unattributed", None
-        recorded = run.manifest().get("workspace_identity")
+        header = run.manifest()
+        if header.get("run_id") != evidence_id:  # a store copied under another run's name attributes nothing to anyone
+            return "unattributed", None
+        recorded = header.get("workspace_identity")
     except (OSError, ValueError, reader.UnsupportedEvidenceSchema):
         return "unattributed", None
     return ("recorded", recorded) if isinstance(recorded, str) and recorded else ("unattributed", None)

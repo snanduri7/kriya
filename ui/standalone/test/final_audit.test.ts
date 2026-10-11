@@ -48,10 +48,12 @@ describe('the shipped product package - item 6', () => {
     const out = execFileSync(process.execPath, [join(ROOT, 'scripts-check-bundle.mjs'), '--package', product], { encoding: 'utf8' });
     expect(out).toContain('check-bundle --package: OK');
   });
-  it('the package check itself refuses a package that contains a driver (negative control on the checker)', () => {
-    const checker = read(ROOT, 'scripts-check-bundle.mjs');
-    for (const needle of ["'dev_drivers'", "'capture'", "'measure'", "'soak'", 'KRIYA_UI_CAPTURE', 'KRIYA_UI_ALLOW_REAL_KRIYA', 'fake_kriya', 'runCapture']) expect(checker).toContain(needle);
-    expect(read(ROOT, 'mac-app.mjs')).toContain("if (!evidence) execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs'), '--package'");
+  it('the CLI check delegates to the tested package_check rules, the packager runs it on every product package, and the product package is patched with the fuses (the rules themselves have real bad-package negative controls in product_hardening.test.ts)', () => {
+    expect(read(ROOT, 'scripts-check-bundle.mjs')).toContain("import('./package_check.mjs')");
+    const packager = read(ROOT, 'mac-app.mjs');
+    expect(packager).toContain("if (!evidence) execFileSync(process.execPath, [join(HERE, 'scripts-check-bundle.mjs'), '--package'");
+    expect(packager).toContain('applyProductFuses(');
+    expect(packager).toContain("--evidence requires an explicit --out");
   });
   it('main.ts reaches the dev drivers only through one guarded require, so a package without the file has none of their behaviour', () => {
     const main = read(MAIN, 'main.ts');

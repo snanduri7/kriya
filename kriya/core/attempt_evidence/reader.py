@@ -125,7 +125,10 @@ class EvidenceRun:
         is not yielded (``verify`` reports it)."""
         complete, _tail = self._lines()
         for raw in complete:
-            record = json.loads(raw)
+            try:
+                record = json.loads(raw)
+            except RecursionError as error:  # a hostile, absurdly nested line is damage, not a crash
+                raise ValueError("record is nested too deeply to be a record") from error
             if not isinstance(record, dict):
                 raise ValueError("record is not a JSON object")
             if record.get("schema") not in model.SUPPORTED_SCHEMAS:
@@ -159,7 +162,7 @@ class EvidenceRun:
         for raw in complete:
             try:
                 record = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):  # RecursionError: an absurdly nested line is damage, not a crash
                 return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
                                     detail="record is not valid JSON")
             if not isinstance(record, dict):
@@ -173,8 +176,12 @@ class EvidenceRun:
             if model.canonical_bytes(record) != raw:
                 return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
                                     detail="record bytes are not canonical")
+            blobs = record.get("blobs", {})
+            if not isinstance(blobs, dict):
+                return Verification(self.run_id, CHAIN_BROKEN, count, False, broken_seq=count + 1,
+                                    detail="record blobs is not an object")
             prev, count = model.digest(raw), count + 1
-            blob_refs.extend(record.get("blobs", {}).values())
+            blob_refs.extend(blobs.values())
             if records_out is not None:
                 records_out.append(record)
         seal = self.seal()

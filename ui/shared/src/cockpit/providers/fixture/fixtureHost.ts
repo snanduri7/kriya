@@ -37,6 +37,8 @@ export interface FixtureHostOptions {
   workspace?: string | null;
   /** capabilities.features.evidence_content. false (the production default) = content is not authorized. */
   evidenceContent?: boolean;
+  /** The capture mode of the evidence store a launch writes while it waits on a review (default 'full'; 'digest_only' keeps digests, not content). */
+  capture?: 'full' | 'digest_only';
   scenarios?: readonly Scenario[];
   /** Extra published snapshot ids the list reports (never readable: verification of them is refused, as for a pruned snapshot). */
   extraSnapshotIds?: readonly string[];
@@ -53,6 +55,7 @@ export class FixtureHost implements HostAdapter {
   readonly exec: FixtureExecution | null;
   readonly execution?: ExecutionHostPort;
   private readonly evidenceContent: boolean;
+  private readonly liveCapture: 'full' | 'digest_only';
   private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', configDirectory: null, kriyaExecutable: null };
   private readonly choices: (string | null)[];
   private recentList: string[];
@@ -68,6 +71,7 @@ export class FixtureHost implements HostAdapter {
     this.exec = options.execution === false ? null : new FixtureExecution(options.execution ?? {});
     if (this.exec) this.execution = this.exec.port;
     this.evidenceContent = options.evidenceContent ?? false;
+    this.liveCapture = options.capture ?? 'full';
     this.choices = [...(options.choices ?? [])];
     this.recentList = [...(options.recent ?? [])];
     if (options.workspace !== undefined) this.settings.workspacePath = options.workspace;
@@ -97,7 +101,7 @@ export class FixtureHost implements HostAdapter {
   private liveReviewScenario(evidenceId: string): Scenario | undefined {
     if (!this.exec || evidenceId !== LAUNCH_ID || !this.exec.reviewPending()) return undefined;
     const template = this.baseScenarios.find((s) => s.id === 'fx-greenfield-success') ?? this.baseScenarios[0]!;
-    return { ...template, id: LAUNCHED_TRACE_ID, evidenceId: LAUNCH_ID, goal: this.exec.goal(), seed: template.seed.store === 'present' ? { ...template.seed, sealed: false } : template.seed };
+    return { ...template, id: LAUNCHED_TRACE_ID, evidenceId: LAUNCH_ID, goal: this.exec.goal(), seed: template.seed.store === 'present' ? { ...template.seed, sealed: false, capture: this.liveCapture } : template.seed };
   }
 
   /** Test hook: the application menu asks the renderer to open the chooser. */
@@ -281,6 +285,8 @@ export class FixtureHost implements HostAdapter {
       }
       case 'launch.status': {
         const status = this.exec?.launchStatus() ?? null;
+        const fault = this.exec?.statusBroken() ?? null;
+        if (fault) return this.err('launch.status', fault, 'the launch record cannot be read', { reason: 'fixture_fault' });
         if (!status || request.launch_id !== LAUNCH_ID) return this.err('launch.status', 'LAUNCH_NOT_FOUND', `no launch ${request.launch_id} is recorded for this folder`, { reason: 'not_recorded' });
         return this.env('launch.status', status, this.live, SOURCE);
       }

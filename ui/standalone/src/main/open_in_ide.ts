@@ -46,7 +46,7 @@ export function planOpenInIde(editorId: EditorId, workspace: string | null, path
   const candidate = isAbsolute(path) ? path : resolve(wsReal, path);
   try { fileReal = realpathSync(candidate); } catch { return { ok: false, editor, reason: 'file does not exist inside the workspace' }; }
   const rel = relative(wsReal, fileReal);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.split(sep)[0] === '..') return { ok: false, editor, reason: 'file is outside the selected workspace' };
+  if (rel === '' || isAbsolute(rel) || rel.split(sep)[0] === '..') return { ok: false, editor, reason: 'file is outside the selected workspace' };
   try { if (!statSync(fileReal).isFile()) return { ok: false, editor, reason: 'target is not a regular file' }; } catch { return { ok: false, editor, reason: 'file is not readable' }; }
   return { ok: true, editor, binary: editor.binary, argv: editor.argv(fileReal, line), realPath: fileReal };
 }

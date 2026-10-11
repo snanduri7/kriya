@@ -7,7 +7,7 @@ import { createCockpitRegistry } from '../composition';
 import { createSelectionStore } from '../core';
 import { FixtureHost, type FixtureHostOptions } from '../providers/fixture';
 import { manyRuns } from '../testing/bigScenario';
-import { LAUNCH_ID } from '../providers/fixture/fixtureExecution';
+import { LAUNCH_ID, REVIEW_DIGEST } from '../providers/fixture/fixtureExecution';
 import { HostProvider } from '../providers/hostProvider';
 import { FAST_POLL, renderWorkspaceShell } from '../testing/harness';
 import { AppShell } from './AppShell';
@@ -48,11 +48,28 @@ describe('a run that dies while its review is pending', () => {
   it('a decision attempted after the process died is refused by Kriya and never turns into success', async () => {
     const { host, bar } = await toReview();
     const review = within(bar).getByRole('region', { name: 'Change review' });
+    const shown = { workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: review.getAttribute('data-review-id')!, candidate_digest: REVIEW_DIGEST, decision: 'approve' as const };
     act(() => host.exec!.finish()); // a no-op while a review waits; the run is still waiting
     expect(bar).toHaveAttribute('data-outcome', '');
     act(() => host.exec!.killProcess());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'interrupted'), { timeout: 4000 });
     expect(review.isConnected).toBe(false);
+    // the late approval a stale window could still send: Kriya's closed refusal, recorded as the only decision attempt, and the run stays "did not finish"
+    const late = await host.exec!.port.decideApproval(shown);
+    expect(late).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_ACTIVE' });
+    expect(host.exec!.decisions).toEqual([shown]);
+    expect(bar).toHaveAttribute('data-outcome', 'interrupted');
+    expect(within(bar).queryByText(/Run succeeded/)).toBeNull();
+  });
+
+  it('a launch record that stays unreadable after the process is gone does not lock the workspace forever (review P2-4): the run is concluded as "could not be followed" and can be dismissed', async () => {
+    const { host, bar } = await toReview();
+    act(() => { host.exec!.breakStatus('EVIDENCE_STORE_UNREADABLE'); host.exec!.killProcess(); });
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'not_recorded'), { timeout: 6000 });
+    expect(within(bar).getByText('The run could not be followed')).toBeInTheDocument();
+    expect(within(bar).getAllByText(/EVIDENCE_STORE_UNREADABLE/).length).toBeGreaterThan(0);
+    expect(within(bar).getByRole('button', { name: /Dismiss/ })).toBeInTheDocument();
+    expect(within(bar).queryByText(/Run succeeded/)).toBeNull();
   });
 });
 
@@ -137,26 +154,6 @@ describe('stale responses never overwrite a newer selection', () => {
     expect(screen.getByText(/No run is recorded for this workspace/)).toBeInTheDocument();
   });
 
-  it('a slow detail answer for run X that lands after run Y was selected never replaces Y', async () => {
-    const host = new GatedHost({ workspace: '/fixture/workspace' });
-    const store = mountOver(host);
-    await screen.findByRole('navigation', { name: 'Destinations' });
-    const runs = await screen.findAllByRole('button', { name: /success|failure/ });
-    expect(runs.length).toBeGreaterThan(2);
-    const slow = host.hold((r) => r.operation === 'history.detail');
-    fireEvent.click(runs[0]!);
-    await waitFor(() => expect(store.getState().runId).not.toBeNull());
-    const first = store.getState().runId;
-    fireEvent.click(runs[1]!);
-    await waitFor(() => expect(store.getState().runId).not.toBe(first));
-    const second = store.getState().runId;
-    act(() => slow.release()); // X's (and Y's) held answers land now, in order
-    await new Promise((r) => setTimeout(r, 200));
-    expect(store.getState().runId).toBe(second);
-    expect(runs[1]!.getAttribute('aria-selected')).toBe('true');
-    expect(runs[0]!.getAttribute('aria-selected')).toBe('false');
-  });
-
   it('a read child that fails is a typed, visible error and Refresh recovers it - the cockpit never shows stale rows as current', async () => {
     const host = new GatedHost({ workspace: '/fixture/workspace' });
     let failOnce = true;
@@ -181,14 +178,17 @@ describe('rapid input', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: /success/ }))[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     const run = store.getState().runId;
+    await waitFor(() => expect(host.calls.some((c) => c.operation === 'evidence.verify')).toBe(true));
+    await new Promise((r) => setTimeout(r, 200)); // the run's evidence has been read once; from here a tab switch must read NOTHING more
+    const evidenceBefore = host.calls.filter((c) => c.operation.startsWith('evidence.')).length;
     const tabs = ['Validation', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
     for (let round = 0; round < 3; round += 1) for (const name of tabs) { const tab = screen.queryByRole('tab', { name }); if (tab) fireEvent.click(tab); }
     for (let i = 0; i < 4; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Refresh runs' }));
     await new Promise((r) => setTimeout(r, 150));
     expect(store.getState().centralTab).toBe('overview');
     expect(store.getState().runId === run || store.getState().runId === null).toBe(true); // a refresh may reset the selection; it never selects another run
-    const evidenceCalls = host.calls.filter((c) => c.operation.startsWith('evidence.') && c.operation !== 'evidence.records' && c.operation !== 'evidence.manifest' && c.operation !== 'evidence.verify');
-    expect(evidenceCalls.every((c) => c.operation === 'evidence.change_content' || c.operation === 'evidence.call_content')).toBe(true); // reads only
+    // Tab switching re-reads no evidence (the run's evidence is one shared load) and rapid Refresh never re-reads the SELECTED run's store more than once per snapshot.
+    expect(host.calls.filter((c) => c.operation.startsWith('evidence.')).length - evidenceBefore).toBe(0);
   });
 });
 

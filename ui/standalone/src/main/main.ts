@@ -26,6 +26,7 @@ import { ApprovalHost } from './approval_host';
 import { ExecutionHost } from './execution_host';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
+import { mustRefuseStart } from './product_guard';
 import type { DevDrivers } from './dev_drivers';
 import { EDITOR_FORMS, planOpenInIde } from './open_in_ide';
 import { SettingsStore } from './settings';
@@ -44,6 +45,10 @@ function loadDevDrivers(): DevDrivers | null {
 }
 const dev = loadDevDrivers();
 const ALLOW_REAL = dev?.allowReal ?? false;
+{
+  const refusal = mustRefuseStart(app.isPackaged, dev !== null, process.argv);
+  if (refusal !== null) { process.stderr.write(`${refusal}\n`); app.exit(2); }
+}
 const RENDERER_DIR = join(__dirname, '..', 'renderer');
 const RENDERER_INDEX = join(RENDERER_DIR, 'index.html');
 // Which bundle this is (the Vite build records it): only an explicit M1-inspector build gets the narrow M1 workspace-setting compatibility.

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Start Run end to end against the REAL Kriya: the real `kriya generate --json --launch-id` command, preflight, launch record, run coordinator
  * (workspace lock + RunRecord), attempt-evidence recorder, trace logger and the real persistent read process. The ONE thing replaced is the workflow body
@@ -33,6 +34,20 @@ const firstGitWorks = gitCandidates(FIXED_PATH)[0]?.works ?? false;
 let counter = 0;
 const mint = () => { counter += 1; return `20261010T1010${String(counter).padStart(2, '0')}-${(0xabcd0000 + counter).toString(16)}`; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Every regular file under the folder (relative path -> sha256 of its bytes), excluding Kriya's own .kriya directory and git's internals. */
+function treeDigest(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.kriya' || entry.name === '.git') continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full); else out[full.slice(root.length + 1)] = createHash('sha256').update(readFileSync(full)).digest('hex');
+    }
+  };
+  walk(root);
+  return out;
+}
 
 describe.skipIf(!available)('Start Run against real Kriya with a controlled workflow body', () => {
   let base = ''; let state = ''; let config = ''; let home = '';
@@ -458,12 +473,12 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     { name: 'brownfield rejection', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'add', '.'); git(d, 'commit', '-qm', 'initial'); }, script: { outcome: 'review', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, decide: 'reject', expect: { terminal: 'FAILURE', kinds: ['modified'], baseline: 'git', review: 'REJECTED' } },
     { name: 'existing files but NO baseline (not a git repository)', setup: (d) => { writeFileSync(join(d, 'a.py'), 'x = 1\n'); }, script: { outcome: 'success', step_ms: 60, changes: [change('a.py', 'modified')], gate: 'pass' }, expect: { terminal: 'SUCCESS', kinds: ['modified'], baseline: 'none' } },
   ];
-  const shapes = { describe: new Set<string>(), preflight: new Set<string>(), argv: new Set<string>() };
+  const shapes = { describe: new Set<string>(), preflight: new Set<string>() };
 
   it.each(CASES.map((c) => [c.name, c] as const))('MATRIX: %s - the same cockpit path, the same module data, the recorded truth', async (_name, c) => {
     const ws = workspace(`matrix-${CASES.indexOf(c)}`);
     c.setup(ws);
-    const before = readdirSync(ws).sort().join(',') + (existsSync(join(ws, 'a.py')) ? readFileSync(join(ws, 'a.py'), 'utf8') : '');
+    const before = treeDigest(ws);
     const h = host(ws, executable(`matrix-${CASES.indexOf(c)}`, c.script));
     const described = (await read({ operation: 'workspace.describe', workspace: ws })).data as Json;
     const preflight = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
@@ -488,12 +503,13 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const records = (await read({ operation: 'evidence.records', run_id: id, kind: ['candidate.change'], limit: 200 })).data as Json;
     const kinds = records.records.map((r: Json) => (r.payload.deleted ? 'deleted' : r.payload.created ? 'added' : 'modified'));
     expect(kinds).toEqual(c.expect.kinds);
+    // independent of the script's own labels: a recorded 'added' change is a path that did NOT exist in the folder before the run, a 'modified'/'deleted' one did
+    c.script.changes.forEach((x: Json, i: number) => expect(kinds[i] === 'added', `${x.path} was in the folder before: ${Object.keys(before).includes(x.path)}`).toBe(!Object.keys(before).includes(x.path)));
     const manifest = ((await read({ operation: 'evidence.manifest', run_id: id })).data as Json).manifest as Json;
     expect(manifest.workspace_identity).toBe(described.identity);
     if (c.expect.baseline === 'none') expect(manifest.base_revision ?? null).toBeNull(); else expect(typeof manifest.base_revision).toBe('string');
     // the workspace is exactly as the person left it (this run applied nothing; the user's uncommitted work is intact)
-    expect(readdirSync(ws).filter((n) => n !== '.kriya').sort().join(',') + (existsSync(join(ws, 'a.py')) ? readFileSync(join(ws, 'a.py'), 'utf8') : '')).toBe(before.replace(/,?\.kriya/, ''));
-    shapes.argv.add(JSON.stringify(h.state().launch_id ? 'one-launch-shape' : 'none'));
+    expect(treeDigest(ws)).toEqual(before); // every file (path AND content), at every depth, exactly as it was; only .kriya/.git bookkeeping is excluded
   }, 180_000);
 
   it('MATRIX: every folder kind produced the same field set from Kriya (one cockpit, one workflow); nothing in the host decided what kind of folder it was', () => {

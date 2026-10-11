@@ -44,7 +44,9 @@ export class FixtureExecution {
   private staleServed = false;
   private reviewStatus: ReviewStatus = 'PENDING';
   private reviewSuperseded = false;
+  private reviewSequence = 1;
   private killed = false;
+  private statusFault: string | null = null;
   /** Every decision request the host received (for assertions). */
   readonly decisions: DecideApprovalRequest[] = [];
   readonly port: ExecutionHostPort;
@@ -82,8 +84,15 @@ export class FixtureExecution {
   reviewPending(): boolean { return this.outcome === 'review' && this.frame === REVIEW_FRAME && this.reviewStatus === 'PENDING'; }
   /** Test hook: the execution process is killed (SIGKILL) where it stands - the launch record stays RUNNING, the workspace lock is released, nothing is sealed. */
   killProcess(): void { this.killed = true; }
+  /** Test hook: Kriya's launch.status answers a typed error (other than not-found) from now on. */
+  breakStatus(code: string | null): void { this.statusFault = code; }
+  statusBroken(): string | null { return this.statusFault; }
   /** Test hook: a retry produced a new candidate, so the review the person was shown is superseded (decisions for it are stale). */
   supersedeReview(): void { this.reviewSuperseded = true; }
+  /** Kriya raises a NEW review for the same launch (another candidate): new review id and digest, the previous identities now stale. */
+  replaceReview(): void { this.reviewSequence += 1; this.reviewSuperseded = false; }
+  private reviewId(): string { return this.reviewSequence === 1 ? REVIEW_ID : 'ra-' + String(this.reviewSequence).padStart(2, '0').repeat(12); }
+  private reviewDigest(): string { return this.reviewSequence === 1 ? REVIEW_DIGEST : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
 
   /** The process is alive (the real host's `active()`): not yet at the final frame. */
   active(): boolean { return this.frame >= 0 && this.frame < 4 && !this.killed; }
@@ -130,8 +139,8 @@ export class FixtureExecution {
     if (this.outcome !== 'review' || this.frame < REVIEW_FRAME) return null;
     const decided = this.reviewStatus !== 'PENDING';
     return {
-      review_id: REVIEW_ID, sequence: 1, kind: 'change_approval', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
-      candidate_digest: REVIEW_DIGEST, files: [{ filepath: 'src/clamp.py', diff_sha256: 'sha256:' + 'c3'.repeat(32), lines_added: 3, lines_removed: 0 }],
+      review_id: this.reviewId(), sequence: this.reviewSequence, kind: 'change_approval', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
+      candidate_digest: this.reviewDigest(), files: [{ filepath: 'src/clamp.py', diff_sha256: 'sha256:' + 'c3'.repeat(32), lines_added: 3, lines_removed: 0 }],
       reason: REVIEW_REASON, reason_truncated: false, reason_sha256: 'sha256:' + 'd4'.repeat(32),
       decision: decided ? { decision: this.reviewStatus === 'APPROVED' ? 'approve' : 'reject', decided_at: '2026-10-10T10:11:30+00:00', source: 'launch-decision' } : null,
     };
@@ -180,12 +189,13 @@ export class FixtureExecution {
     const no = (code: string, message: string): DecideApprovalResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
     if (this.frame < 0 || request.launch_id !== LAUNCH_ID) return no('LAUNCH_NOT_FOUND', `no launch ${request.launch_id} is recorded for this folder`);
     if (request.workspace !== this.launchWorkspace) return no('WRONG_WORKSPACE', 'this launch belongs to a different workspace');
+    if (this.killed) return no('LAUNCH_NOT_ACTIVE', 'the run that was waiting for this decision is no longer running');
     if (this.frame === 4) return no('LAUNCH_ENDED', 'the run has already ended; there is nothing left to approve');
     if (this.outcome !== 'review' || this.frame < REVIEW_FRAME) return no('NOT_PENDING', 'no change is waiting for review in this launch');
-    if (this.reviewSuperseded || request.review_id !== REVIEW_ID || request.candidate_digest !== REVIEW_DIGEST) return no('STALE_REVIEW', 'the change under review is no longer the one you were shown; review it again');
+    if (this.reviewSuperseded || request.review_id !== this.reviewId() || request.candidate_digest !== this.reviewDigest()) return no('STALE_REVIEW', 'the change under review is no longer the one you were shown; review it again');
     if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
     this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
-    return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: REVIEW_ID, decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
+    return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
   }
 
   /** A launch that never got past STARTING (the child died right after writing its record). */

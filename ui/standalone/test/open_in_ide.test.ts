@@ -31,6 +31,16 @@ describe('open in IDE (P-R5, Phase E rules)', () => {
     expect(planOpenInIde('vscode', null, 'src/a.py').ok).toBe(false);
     expect(planOpenInIde('vscode', ws, 'src/a.py', 0).ok).toBe(false);
   });
+  it('a file whose NAME merely starts with two dots is inside the workspace and is opened (review P3-6); the escape refusals still hold', () => {
+    const { ws } = workspace();
+    writeFileSync(join(ws, '..hidden.py'), 'y = 2\n');
+    writeFileSync(join(ws, 'src', '..data'), 'z\n');
+    for (const p of ['..hidden.py', 'src/..data']) {
+      const plan = planOpenInIde('vscode', ws, p);
+      expect(plan.ok, p).toBe(true);
+    }
+    expect(planOpenInIde('vscode', ws, '../ws/../outside.txt').ok).toBe(false);
+  });
   it('IntelliJ and Eclipse stay in the table, marked unverified; VS Code is the verified one', () => {
     expect(EDITOR_FORMS.vscode.verified).toBe(true);
     expect(EDITOR_FORMS.intellij.verified).toBe(false); expect(EDITOR_FORMS.intellij.verificationNote).toContain('unverified');

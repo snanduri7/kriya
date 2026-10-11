@@ -55,10 +55,13 @@ describe('module boundaries', () => {
   });
 
   it('the layout files (AppShell, MainWorkspace, rail, panes, toolbar, drawer host) interpret no evidence: no recorder record kind appears in them (hardening, item 5)', () => {
-    const layout = ['AppShell', 'MainWorkspace', 'NavigationRail', 'SecondaryPane', 'ModuleHost', 'GlobalToolbar', 'WorkspaceSwitcher', 'EvidenceDrawer', 'WelcomeScreen', 'ResizeHandle'];
+    // EVERY non-test file in shell/ (not a hand-picked list), so a new shell component cannot start interpreting records unnoticed (review P3-5).
+    const layout = files.filter(([p]) => p.startsWith('./shell/') && /\.tsx?$/.test(p) && !/\.test\./.test(p)).map(([p]) => p.slice('./shell/'.length).replace(/\.tsx?$/, ''));
+    expect(layout.length).toBeGreaterThan(10);
+    for (const expected of ['AppShell', 'ActiveRunBanner', 'ApprovalReview']) expect(layout).toContain(expected);
     const kinds = /candidate\.change|gate\.result|attempt\.(opened|closed|concluded)|model\.(request|response|result)|run_events|evidence_records|developer\.parse|unit\.(opened|closed)|run\.closed|retry\.|fallback\.decision/;
     for (const name of layout) {
-      const entry = files.find(([p]) => p === `./shell/${name}.tsx`);
+      const entry = files.find(([p]) => p.replace(/\.tsx?$/, '') === `./shell/${name}`);
       expect(entry, name).toBeDefined();
       expect(kinds.test(entry![1].replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), `${name} interprets evidence`).toBe(false);
     }
