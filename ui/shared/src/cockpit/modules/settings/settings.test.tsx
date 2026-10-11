@@ -1,6 +1,6 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderModule } from '../../testing/harness';
+import { renderModule, renderWorkspaceShell } from '../../testing/harness';
 import { settingsModule } from '.';
 
 describe('Settings', () => {
@@ -25,5 +25,31 @@ describe('Settings', () => {
     provider.setSetting = (async (key: never, value: never) => { calls.push(String(key)); return original(key, value); }) as typeof provider.setSetting;
     await screen.findByText('Settings');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('Settings: recents and content note', () => {
+  it('lists remembered folders other than the open one, Forget removes only that entry from the list, Forget all clears them, and nothing is deleted', async () => {
+    const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', recent: ['/fixture/workspace', '/fixture/dirty', '/fixture/empty'] } });
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name: 'Settings' }));
+    const recents = await screen.findByRole('region', { name: 'Recent workspaces' });
+    expect(within(recents).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('/fixture/dirty'), expect.stringContaining('/fixture/empty')]);
+    fireEvent.click(within(recents).getByRole('button', { name: 'Forget /fixture/dirty' }));
+    await waitFor(() => expect(host.workspaceCalls).toEqual(['forget:/fixture/dirty']));
+    await waitFor(() => expect(within(recents).queryByText('/fixture/dirty')).toBeNull());
+    fireEvent.click(within(recents).getByRole('button', { name: 'Forget all' }));
+    await waitFor(() => expect(host.workspaceCalls).toEqual(['forget:/fixture/dirty', 'forget:/fixture/empty']));
+    expect(await within(recents).findByText(/None besides the open workspace/)).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Destinations' })).toBeInTheDocument(); // the open workspace is untouched
+  });
+  it('states whether stored diffs are shown and that the operator, not this app, decides', async () => {
+    renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', evidenceContent: false } });
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name: 'Settings' }));
+    const row = (await screen.findByText('Stored diffs and prompts')).closest('div') as HTMLElement;
+    expect(row).toHaveTextContent('Hidden');
+    expect(row).toHaveTextContent('this application cannot change it');
+    expect(within(row).queryAllByRole('button')).toHaveLength(0);
   });
 });

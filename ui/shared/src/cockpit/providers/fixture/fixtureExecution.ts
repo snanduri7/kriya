@@ -16,6 +16,16 @@ export interface FixtureExecutionOptions {
   outcome?: FixtureOutcome;
   /** Folders whose preflight carries a blocker (code -> message), besides the built-in /fixture/blocked. */
   blockers?: Readonly<Record<string, { code: string; message: string }>>;
+  /** Scripted readiness facts for every folder (DEV/TEST ONLY): what Kriya's preflight reports about configuration, state, tools and approvals. */
+  facts?: {
+    blockers?: ReadonlyArray<{ code: string; message: string }>;
+    gitAvailable?: boolean;
+    authority?: 'no_findings' | 'approved' | 'refused' | 'failed';
+    configFailed?: boolean;
+    stateDirectory?: string | null;
+    observable?: boolean;
+    approvals?: 'change_review' | 'configured_mode';
+  };
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
 }
@@ -115,16 +125,19 @@ export class FixtureExecution {
 
   /** `execution.preflight` for a folder: ready unless the folder is scripted with a blocker. */
   preflight(workspace: string, stateDirectory: string, blocked: { code: string; message: string } | null): Json {
-    const blockers = blocked ? [blocked] : [];
+    const facts = this.options.facts ?? {};
+    const blockers = [...(blocked ? [blocked] : []), ...(facts.blockers ?? [])];
+    const authority = facts.authority ?? 'no_findings';
+    const git = facts.gitAvailable === false ? { tool: 'git', available: false, path: null, reason: 'exits 69: the Xcode license has not been accepted' } : { tool: 'git', available: true, path: '/usr/bin/git' };
     return {
       ready: blockers.length === 0, blockers,
       workspace: { path: workspace, identity: 'ab'.repeat(32), name: workspace.slice(workspace.lastIndexOf('/') + 1) },
-      configuration: { status: 'loaded', source: 'packaged_default', file: null, directory: workspace, discovery: 'Configuration is discovered from the process working directory, which is this folder.', fingerprint: 'cd'.repeat(32), authority: { status: 'no_findings', fields: [] } },
-      state: { directory: stateDirectory, source: 'env', cockpit_directory: stateDirectory, observable_by_cockpit: true },
-      model: { provider: 'openai', model: 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', context_window: 32768, fallback_chain: ['fixture-fallback:3b'], role_overrides: {} },
+      configuration: { status: facts.configFailed ? 'failed' : authority === 'refused' ? 'refused' : 'loaded', source: facts.configFailed ? 'unreadable' : 'packaged_default', file: null, directory: workspace, discovery: 'Configuration is discovered from the process working directory, which is this folder.', fingerprint: facts.configFailed ? null : 'cd'.repeat(32), authority: { status: facts.configFailed ? 'failed' : authority, fields: [] } },
+      state: { directory: facts.stateDirectory === undefined ? stateDirectory : facts.stateDirectory, source: 'env', cockpit_directory: stateDirectory, observable_by_cockpit: facts.observable ?? true },
+      model: facts.configFailed ? null : { provider: 'openai', model: 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', context_window: 32768, fallback_chain: ['fixture-fallback:3b'], role_overrides: {} },
       recovery: { status: 'CLEAN', run_active: false },
-      interaction: { approvals: 'change_review', autonomy_mode: 'human-in-the-loop', knowledge_policy: 'strict', note: 'A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.' },
-      toolchains: { tools: [{ tool: 'python3', available: true, path: '/usr/bin/python3' }, { tool: 'git', available: true, path: '/usr/bin/git' }, { tool: 'java', available: false, path: null }, { tool: 'mvn', available: false, path: null }], note: 'Visibility under this process\'s own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs.' },
+      interaction: facts.approvals === 'configured_mode' ? { approvals: 'configured_mode', autonomy_mode: 'autonomous', knowledge_policy: 'strict', note: 'This folder\'s configuration sets the autonomy mode to \'autonomous\': a routine change is not held for review by this configuration.' } : { approvals: 'change_review', autonomy_mode: 'human-in-the-loop', knowledge_policy: 'strict', note: 'A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.' },
+      toolchains: { tools: [{ tool: 'python3', available: true, path: '/usr/bin/python3' }, git, { tool: 'java', available: false, path: null }, { tool: 'mvn', available: false, path: null }], note: 'Visibility under this process\'s own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs.' },
     };
   }
 

@@ -6,6 +6,7 @@ import { initialSelection } from '../../../state/selection';
 import { createCockpitRegistry } from '../../composition';
 import { createSelectionStore } from '../../core';
 import { FixtureHost, type FixtureHostOptions } from '../../providers/fixture';
+import type { FixtureExecutionOptions } from '../../providers/fixture/fixtureExecution';
 import { HostProvider } from '../../providers/hostProvider';
 import { FAST_POLL, renderWorkspaceShell } from '../../testing/harness';
 import { AppShell } from '../../shell/AppShell';
@@ -226,5 +227,56 @@ describe('stale answers never overwrite a newer workspace', () => {
     expect(within(row(screen.getByRole('region', { name: 'Readiness' }), 'Model server')).getByText('Not reachable')).toBeInTheDocument(); // still B's
     expect(within(section(/^Skills/)).getByText('No Skills were discovered for this folder.')).toBeInTheDocument();
     expect(within(section(/^Skills/)).queryByText('python-testing')).toBeNull();
+  });
+});
+
+describe('readiness matrix: each failure names Kriya\'s fact, its code, and the authority that fixes it', () => {
+  const open = (facts: FixtureExecutionOptions['facts'], extra: FixtureHostOptions = {}) => openPanel({ execution: { outcome: 'success', facts }, ...extra });
+  it('git unavailable: the Git row is red with the reason, the blocker says what to do, Start is off', async () => {
+    const { readiness } = await open({ gitAvailable: false, blockers: [{ code: 'TOOL_UNAVAILABLE', message: 'git is required for every run and exits 69' }] });
+    const git = row(readiness, 'Git (needed by every run)');
+    expect(within(git).getByText('Unavailable')).toBeInTheDocument();
+    expect(git).toHaveTextContent('the Xcode license has not been accepted');
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('TOOL_UNAVAILABLE');
+    expect(alert).toHaveTextContent('accepting the Xcode license makes /usr/bin/git work');
+    expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
+  });
+  it('configuration authority refused: the Configuration row is red and names the terminal action an operator takes', async () => {
+    const { readiness } = await open({ authority: 'refused', blockers: [{ code: 'CONFIG_AUTHORITY_REFUSED', message: '2 field(s) in this folder\'s configuration need an operator approval' }] });
+    const config = row(readiness, 'Configuration');
+    expect(within(config).getByText(/Refused: operator-only fields need an approval/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('`kriya authority approve` in a terminal; this application cannot');
+    expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
+  });
+  it('configuration that does not load: red, "unreadable", with the fix being the kriya.yaml; routing and Skills say they cannot be shown', async () => {
+    const { readiness } = await open({ configFailed: true, blockers: [{ code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration' }] }, { contextMode: 'unavailable' });
+    expect(within(row(readiness, 'Configuration')).getByText('The configuration could not be loaded')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Fix the kriya.yaml in this folder');
+    expect(await within(section(/^Model routing/)).findByText(/Kriya could not resolve this folder's configuration/)).toBeInTheDocument();
+  });
+  it('state directory not resolved / not read by this app: red rows and the operator-environment guidance', async () => {
+    const a = await open({ stateDirectory: null, blockers: [{ code: 'STATE_DIRECTORY_INVALID', message: 'KRIYA_STATE_DIR must be absolute' }] });
+    expect(within(row(a.readiness, 'Run state')).getByText('Not resolved')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('comes from the operator environment (KRIYA_STATE_DIR)');
+    cleanup();
+    const b = await open({ observable: false, blockers: [{ code: 'STATE_DIRECTORY_NOT_OBSERVABLE', message: 'a run here would record into /elsewhere' }] });
+    expect(within(row(b.readiness, 'Run state')).getByText('Not read by this app')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('An operator must align KRIYA_STATE_DIR');
+  });
+  it('unavailable toolchains are listed (java, mvn) but are not blockers: Kriya only learns what a goal needs while it runs', async () => {
+    await openPanel();
+    fireEvent.click(screen.getByText('Run configuration details'));
+    const details = section(/^Run configuration details/);
+    expect(details).toHaveTextContent('unavailable: java, mvn');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled(); // (only because no goal is entered yet)
+  });
+  it('an operator-configured autonomy mode that does not hold changes for review is a warning row quoting Kriya, not a control', async () => {
+    const { readiness } = await open({ approvals: 'configured_mode' });
+    const approvals = row(readiness, 'Approvals');
+    expect(within(approvals).getByText('Autonomy mode autonomous')).toBeInTheDocument();
+    expect(approvals).toHaveTextContent('not held for review by this configuration');
+    expect(within(approvals).queryAllByRole('button')).toHaveLength(0);
   });
 });
