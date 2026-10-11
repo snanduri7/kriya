@@ -162,7 +162,7 @@ function RunContextProvider({ children }: { children: ReactNode }) {
       const revision = text(manifest.base_revision);
       const treeHash = text(manifest.base_tree_hash);
       const ctx: RunContext = {
-        runId, snapshotId, provider: provider.kind, goal: null, status: 'RUNNING', failureCategory: null, storedAttempts: null, milestone: { groupId: null, index: null, total: null },
+        runId, snapshotId, provider: provider.kind, goal: null, status: null, failureCategory: null, storedAttempts: null, milestone: { groupId: null, index: null, total: null },
         workspace: { identity: text(manifest.workspace_identity), path: text(manifest.workspace_path) }, baseline: { revision, treeHash, source: revision || treeHash ? 'recorded' : 'not_recorded' }, changeType: null, capabilities: caps,
         evidence: { store: 'present', captureMode: text(manifest.capture), sealed: evidence.data.verify?.sealed ?? null, verification: evidence.data.verify?.status ?? null, consistency: evidence.data.provenance.records?.consistency?.kind ?? null },
       };

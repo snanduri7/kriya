@@ -50,24 +50,25 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         <button type="button" onClick={() => open(OPEN_TARGETS.validation)}>Review validation</button>
         <span className="grow" />
         {decision.state === 'submitting' ? <Badge tone="info">Recording your decision…</Badge> : null}
-        {decision.state === 'accepted' ? <Badge tone="info">{decision.decision === 'approve' ? 'Approval recorded' : 'Rejection recorded'}</Badge> : null}
+        {decision.state === 'accepted' ? <Badge tone="info">{decision.decision === 'approve' ? 'Approval sent' : 'Rejection sent'}</Badge> : null}
         {!busy && !confirming ? (
           <>
             <button type="button" onClick={() => setConfirming(true)}>Approve changes</button>
-            <button type="button" onClick={() => { void ex.decide('reject'); }}>Reject changes</button>
+            <button type="button" onClick={() => { void ex.decide('reject', review.review_id); }}>Reject changes</button>
           </>
         ) : null}
       </div>
       {confirming && !busy ? (
         <div role="alertdialog" aria-label="Confirm approval" className="ck-state">
           <div><strong>Approve these {review.files.length} file change{review.files.length === 1 ? '' : 's'}?</strong> Kriya will continue its verification and, if it passes, apply the change to your folder.</div>
+          {!caps.has('evidence_content') ? <div role="note"><strong>You have not seen the diff text</strong> (Kriya&apos;s content visibility is off). You would be approving from the file list, the line counts, the digests and the reviewer&apos;s text above.</div> : null}
           <div className="ck-runbar-head">
-            <button type="button" onClick={() => { setConfirming(false); void ex.decide('approve'); }}>Confirm approval</button>
+            <button type="button" onClick={() => { setConfirming(false); void ex.decide('approve', review.review_id); }}>Confirm approval</button>
             <button type="button" onClick={() => setConfirming(false)}>Cancel</button>
           </div>
         </div>
       ) : null}
-      {decision.state === 'accepted' ? <div className="muted small">Kriya recorded your decision and the run is continuing; the outcome below comes from Kriya&apos;s records.</div> : null}
+      {decision.state === 'accepted' ? <div className="muted small">Kriya accepted your decision and is recording it; the run continues only once its own record says so, and the outcome comes from Kriya&apos;s records.</div> : null}
       {decision.state === 'refused' ? <div role="alert"><strong>Kriya did not accept the decision</strong> ({decision.code}): {decision.message}{REFUSAL_HELP[decision.code] ? ` ${REFUSAL_HELP[decision.code]}` : ''}</div> : null}
     </section>
   );

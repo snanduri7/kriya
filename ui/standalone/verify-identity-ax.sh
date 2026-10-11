@@ -9,7 +9,7 @@ D="$(mktemp -d /tmp/kriya-id.XXXXXX)"
 cat > "$D/kriya-ui-settings.json" <<JSON
 {"kriyaExecutable":"$ROOT/.venv/bin/kriya","workspacePath":null,"configDirectory":null,"recentWorkspaces":[]}
 JSON
-HOME="$HOME" KRIYA_UI_ALLOW_REAL_KRIYA=1 "$APP/Contents/MacOS/Kriya" --user-data-dir="$D" >/dev/null 2>&1 &
+HOME="$HOME" "$APP/Contents/MacOS/Kriya" --user-data-dir="$D" >/dev/null 2>&1 &
 sleep 7
 {
   echo "app bundle: $(basename "$APP")  executable: $(ls "$APP/Contents/MacOS")"

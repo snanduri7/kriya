@@ -32,8 +32,9 @@ from kriya.platform.toolchain_locator import tool_visibility
 KNOWLEDGE_POLICY = "strict"
 INTERACTION_REVIEW = ("A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human "
                       "decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.")
-INTERACTION_NO_REVIEW = ("This folder's configuration sets the autonomy mode to {mode!r}, so a change is not held for review by this configuration. Any other step that "
-                         "needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.")
+INTERACTION_NO_REVIEW = ("This folder's configuration sets the autonomy mode to {mode!r}: a routine change is not held for review by this configuration (a change that "
+                         "touches a sensitive path or exceeds the risk threshold still is). Any other step that needs a human decision (a knowledge-gap "
+                         "acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you.")
 INTERACTION_UNKNOWN = ("The configuration could not be resolved, so how changes are approved is unknown. Any step that needs a human decision stops the run "
                        "instead of being approved for you.")
 

@@ -185,22 +185,44 @@ describe('which review can be decided, and the one-decision guard', () => {
     const states: string[] = [];
     const pending = review('PENDING') as unknown as NonNullable<RunView['review']>;
     const decide = createDecider({ port: port as never, run: () => ({ launchId: LAUNCH_ID, workspace: '/w', review: pending } as RunView), set: (s) => states.push(s.state) });
-    const first = decide('approve');
-    const second = decide('reject');
+    const first = decide('approve', REVIEW_ID);
+    const second = decide('reject', REVIEW_ID);
     await second;
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({ workspace: '/w', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
     release({ accepted: true, code: 'ACCEPTED', message: 'ok', launch_id: null, review_id: null, decision: null, decided_at: null } as never);
     await first;
     expect(states).toEqual(['submitting', 'accepted']);
-    await decide('approve'); // free again afterwards (a new review or a refusal)
+    await decide('approve', REVIEW_ID); // free again afterwards (a new review or a refusal)
     expect(sent).toHaveLength(2);
   });
 
   it('nothing is sent when no review is pending', async () => {
     const sent: unknown[] = [];
     const decide = createDecider({ port: { decideApproval: async (r: unknown) => { sent.push(r); } } as never, run: () => ({ launchId: LAUNCH_ID, workspace: '/w', review: null } as RunView), set: () => undefined });
-    await decide('approve');
+    await decide('approve', REVIEW_ID);
     expect(sent).toEqual([]);
+  });
+});
+
+describe('the decision is about the review that was displayed', () => {
+  it('a decision for a review that is no longer the pending one sends nothing and says so', async () => {
+    const sent: unknown[] = [];
+    const states: Array<{ state: string; code?: string }> = [];
+    const pending = review('PENDING') as unknown as NonNullable<RunView['review']>;
+    const decide = createDecider({ port: { decideApproval: async (r: unknown) => { sent.push(r); } } as never, run: () => ({ launchId: LAUNCH_ID, workspace: '/w', review: pending } as RunView), set: (s) => states.push(s as never) });
+    await decide('approve', 'ra-' + '0'.repeat(24)); // the person was looking at a different review
+    expect(sent).toEqual([]);
+    expect(states).toEqual([expect.objectContaining({ state: 'refused', code: 'STALE_REVIEW' })]);
+  });
+  it('the review of a live-selected run claims no stored status (it has no trace row yet) and the confirmation says when the diff text was not seen', async () => {
+    const { host, bar, store } = await reachReview({ evidenceContent: false });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    expect(await screen.findAllByText(/status not recorded/)).not.toHaveLength(0);
+    expect(screen.queryByText('RUNNING')).toBeNull();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    expect(within(bar).getByText(/You have not seen the diff text/)).toBeInTheDocument();
+    expect(host.exec!.decisions).toEqual([]);
   });
 });

@@ -93,7 +93,7 @@ export interface ExecutionApi {
   /** The state of the decision being taken on the pending review (never more than one in flight). */
   decision: DecisionState;
   /** Approve or reject the review that is pending NOW, with the identities Kriya gave it; Kriya validates them and the waiting run - not this window - continues. */
-  decide(decision: 'approve' | 'reject'): Promise<void>;
+  decide(decision: 'approve' | 'reject', displayedReviewId: string): Promise<void>;
 }
 
 export type DecisionState =
@@ -179,12 +179,17 @@ export function activeReview(status: LaunchStatus | null): PendingReview | null 
 
 /** One decision at a time on the review pending NOW. The identities travel exactly as Kriya gave them; Kriya refuses a stale or replayed one. The guard is synchronous:
  * a second call in the same tick never reaches the host. */
-export function createDecider(deps: { port: ExecutionHostPort; run(): RunView | null; set(state: DecisionState): void }): (choice: 'approve' | 'reject') => Promise<void> {
+export function createDecider(deps: { port: ExecutionHostPort; run(): RunView | null; set(state: DecisionState): void }): (choice: 'approve' | 'reject', displayedReviewId: string) => Promise<void> {
   let busy = false;
-  return async (choice) => {
+  return async (choice, displayedReviewId) => {
     const current = deps.run();
     const review = current?.review ?? null;
     if (!current || !review || busy) return;
+    // the person decided on the review they were SHOWN; if the pending review is a different one now, nothing is sent and they are told to look again
+    if (review.review_id !== displayedReviewId) {
+      deps.set({ state: 'refused', reviewId: review.review_id, decision: choice, code: 'STALE_REVIEW', message: 'The change under review is no longer the one you were shown.' });
+      return;
+    }
     busy = true;
     deps.set({ state: 'submitting', reviewId: review.review_id, decision: choice });
     let answer: DecideApprovalResult;
@@ -359,7 +364,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
 
   const deciderRef = useRef<ReturnType<typeof createDecider> | null>(null);
   useEffect(() => { deciderRef.current = port ? createDecider({ port, run: () => runRef.current, set: setDecision }) : null; }, [port]);
-  const decide = useCallback(async (choice: 'approve' | 'reject') => { await deciderRef.current?.(choice); }, []);
+  const decide = useCallback(async (choice: 'approve' | 'reject', displayedReviewId: string) => { await deciderRef.current?.(choice, displayedReviewId); }, []);
 
   const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
   const locked = starting || (run !== null && run.stage !== 'finished');

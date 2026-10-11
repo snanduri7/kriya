@@ -292,13 +292,8 @@ def test_a_launch_that_ends_with_an_undecided_review_never_leaves_it_pending(ws)
 
 def test_a_vanished_host_declines_instead_of_waiting_forever(ws, monkeypatch):
     real = os.getppid()
-    calls = {"n": 0}
-
-    def ppid():
-        calls["n"] += 1
-        return real if calls["n"] == 1 else real + 1
-    monkeypatch.setattr(approval.os, "getppid", ppid)
-    canonical, session = _session(ws)
+    canonical, session = _session(ws)  # the launch opened under `real`
+    monkeypatch.setattr(approval.os, "getppid", lambda: real + 1)  # the host died before the review was even requested
     try:
         with begin_mutating_run(canonical):
             assert asyncio.run(asyncio.wait_for(launch_module.request_change_approval(FILES, REASON), 10)) is False
@@ -395,21 +390,84 @@ def test_a_decision_that_lost_the_race_is_reported_as_already_decided(ws, monkey
     assert seen["code"] == "ALREADY_DECIDED"
 
 
-def test_a_decision_file_can_never_be_overwritten(ws, monkeypatch):
+def test_a_decision_file_can_never_be_overwritten(ws):
     from kriya.control import persistence
-    from kriya.workflow.edit_safety import FileRevisionConflict
     canonical, session = _session(ws)
     try:
         review = "ra-" + "5" * 24
         persistence.save_launch_review_decision(canonical, LID, review, {"decision": "approve"})
         with pytest.raises(FileExistsError):
             persistence.save_launch_review_decision(canonical, LID, review, {"decision": "reject"})
-        # a decision that appears between the existence check and the write changes the base revision and the write is refused
-        monkeypatch.setattr(persistence.os.path, "lexists", lambda _path: False)
-        with pytest.raises(FileRevisionConflict):
-            persistence.save_launch_review_decision(canonical, LID, review, {"decision": "reject"})
-        monkeypatch.undo()
         assert persistence.load_launch_review_decision(canonical, LID, review)["decision"] == "approve"
+        leftovers = [n for n in os.listdir(os.path.dirname(launch_review_decision_path(canonical, LID, review))) if ".staging-" in n]
+        assert leftovers == [], "no staging file is left behind"
+    finally:
+        session.finish(0, None, None)
+
+
+def test_of_many_simultaneous_decisions_exactly_one_is_accepted_and_it_is_the_one_on_disk(ws):
+    """MEASURED defect (independent review F2): the exclusive create was check-then-replace, so two concurrent deciders could both be told 'accepted' with
+    contradictory decisions. Real concurrency: many threads race to decide the same review."""
+    import threading
+    canonical, session = _session(ws)
+    results = []
+    try:
+        with begin_mutating_run(canonical):
+            awaiting = launch_module.request_change_approval(FILES, REASON)
+            awaiting.close()
+            pending = _pending(canonical)
+            gate = threading.Barrier(12)
+
+            def contender(index):
+                gate.wait()
+                try:
+                    results.append((index, _decide(canonical, pending, "approve" if index % 2 == 0 else "reject")["decision"]))
+                except approval.ApprovalRefused as refusal:
+                    results.append((index, refusal.code))
+
+            threads = [threading.Thread(target=contender, args=(i,)) for i in range(12)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+        accepted = [r for r in results if r[1] in ("approve", "reject")]
+        refused = [r for r in results if r[1] not in ("approve", "reject")]
+        assert len(results) == 12 and len(accepted) == 1, results
+        assert all(code == "ALREADY_DECIDED" for _i, code in refused), results
+        from kriya.control.persistence import load_launch_review_decision
+        assert load_launch_review_decision(canonical, LID, pending["review_id"])["decision"] == accepted[0][1], "the accepted decision is the one that is on disk"
+    finally:
+        session.finish(0, None, None)
+
+
+def test_an_unstamped_decision_file_is_not_a_decision(ws):
+    from kriya.control import persistence
+    canonical, session = _session(ws)
+    try:
+        review = "ra-" + "6" * 24
+        path = launch_review_decision_path(canonical, LID, review)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"schema": 1, "launch_id": LID, "review_id": review, "decision": "approve"}, handle)  # written by something other than Kriya's control writer
+        assert persistence.load_launch_review_decision(canonical, LID, review) is None
+    finally:
+        session.finish(0, None, None)
+
+
+def test_a_decision_that_arrives_after_the_review_expired_is_not_honoured_even_if_it_is_valid(ws, monkeypatch):
+    """Consume-time expiry (review F3): a perfectly bound decision file that is already on disk when the waiter looks, but dates from after the review's recorded end,
+    changes nothing - whoever wrote it."""
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", -1.0)  # the review is past its end the moment it is recorded
+    canonical, session = _session(ws)
+    try:
+        with begin_mutating_run(canonical):
+            awaiting = launch_module.request_change_approval(FILES, REASON)
+            pending = _pending(canonical)
+            from kriya.control.persistence import save_launch_review_decision
+            payload = {"schema": 1, "launch_id": LID, "review_id": pending["review_id"], "candidate_digest": pending["candidate_digest"],
+                       "workspace_identity": workspace_identity(canonical), "decision": "approve", "decided_at": "now", "nonce": "x"}
+            save_launch_review_decision(canonical, LID, pending["review_id"], payload)  # present BEFORE the waiter's first look
+            assert asyncio.run(asyncio.wait_for(awaiting, 10)) is False
+        assert _pending(canonical)["status"] == "EXPIRED" and _pending(canonical)["decision"]["source"] == "timeout"
     finally:
         session.finish(0, None, None)
 
@@ -508,17 +566,43 @@ def test_the_cli_action_has_no_option_that_could_broaden_authority():
     assert names == {"launch_id", "review_id", "candidate_digest", "decision"}, "no -y, no always-approve, no autonomy selector"
 
 
-def test_inside_a_launch_the_generate_callback_awaits_a_change_review_and_declines_everything_else(ws, monkeypatch):
+def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_declined_synchronously(ws):
+    import inspect
+
+    import kriya.cli as cli
+    canonical, session = _session(ws)
+    try:
+        for yes in (False, True):  # `--yes` can never take effect inside a launch
+            awaiting = cli._approval_decision(FILES, REASON, yes)
+            assert inspect.iscoroutine(awaiting), "a change is answered by the durable review (an awaitable), never by a boolean"
+            awaiting.close()
+            assert _pending(canonical)["status"] == "PENDING"
+            declined = cli._approval_decision([], "Knowledge Guard found gaps", yes)
+            assert declined is False, "every non-change approval is a plain False: those call sites do not await, and a coroutine would read as truthy (approval)"
+        assert load_launch_record(canonical, LID)["approval_required"]["kind"] == "other_approval"
+    finally:
+        session.finish(0, None, None)
+
+
+def test_outside_a_launch_the_callback_is_the_terminal_behaviour_unchanged(monkeypatch):
+    import kriya.cli as cli
+    asked = []
+    monkeypatch.setattr(cli.click, "confirm", lambda text, **kw: asked.append(text) or True)
+    assert cli._approval_decision(FILES, REASON, False) is True and len(asked) == 1, "no launch: the person is asked at the terminal"
+    asked.clear()
+    assert cli._approval_decision(FILES, REASON, True) is True and asked == [], "--yes keeps its terminal meaning outside a launch"
+    monkeypatch.setattr(cli.click, "confirm", lambda text, **kw: False)
+    assert cli._approval_decision(FILES, REASON, False) is False
+
+
+def test_the_generate_callback_delegates_to_the_tested_function():
     import inspect
 
     import kriya.cli as cli
     source = inspect.getsource(cli._generate_impl)
-    body = source[source.index("    def on_approval("):]
-    body = body[: body.index("\n    def ", 10)]
-    assert body.index("request_change_approval(files, reason)") < body.index("note_approval_required(")
-    assert re.search(r"if note_approval_required\(.*\):\s*\n\s*return False", body), "every non-change approval is declined inside a launch"
-    assert re.search(r"if awaiting is not None:\s*\n\s*return awaiting", body), "a recorded change review is what the callback returns"
-    assert body.index("return awaiting") < body.index("click.confirm")
+    nested = source[source.index("    def on_approval("):]
+    nested = nested[: nested.index("\n    def ", 10)]
+    assert "return _approval_decision(files, reason, yes)" in nested
 
 
 def test_only_the_change_gate_passes_a_non_empty_change_set_to_an_approval_callback():

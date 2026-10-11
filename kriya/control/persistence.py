@@ -25,6 +25,7 @@ write; that is the existing pattern this follows.
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -116,12 +117,19 @@ def launch_review_decision_path(workspace_path: str, launch_id: str, review_id: 
 
 
 def save_launch_review_decision(workspace_path: str, launch_id: str, review_id: str, payload: Dict[str, Any]) -> None:
-    """Writes the decision ONLY if none exists yet (the revision of an absent file is the expected base): a second writer is refused, never overwrites."""
+    """Writes the decision ONLY if none exists yet, ATOMICALLY: the complete, ownership-stamped document is staged beside the final name and then hard-linked to it
+    (`os.link` fails with FileExistsError when the final name exists, whoever created it and however concurrently), so of any number of simultaneous writers exactly
+    one succeeds and nobody ever overwrites a decision. A reader never sees a partial decision: the final name only ever appears complete."""
     path = launch_review_decision_path(workspace_path, launch_id, review_id)
-    if os.path.lexists(path):
-        raise FileExistsError(path)
-    # the expected base is the revision of NO bytes: a decision that appears between this check and the write changes the base and the write is refused
-    _save_json_document(workspace_path, path, payload, derived_from_active_run=False, expected_file_revision=raw_digest(b""))
+    staging = f"{path}.staging-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    try:
+        _save_json_document(workspace_path, staging, payload, derived_from_active_run=False, expected_file_revision=raw_digest(b""))
+        os.link(staging, path)
+    finally:
+        try:
+            os.unlink(staging)
+        except FileNotFoundError:
+            pass
 
 
 def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:
@@ -132,7 +140,7 @@ def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: 
             payload = json.loads(handle.read().decode("utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or "_workspace" not in payload:  # a decision document is always ownership-stamped by Kriya's control writer; an unstamped file is not one
         return None
     try:
         validate_ownership(workspace_path, payload, path)

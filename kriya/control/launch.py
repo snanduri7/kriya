@@ -89,6 +89,7 @@ class LaunchSession:
             "approval_required": None, "declined_decisions": [], "pending_approval": None, "approval_history": [],
         }
         self._review_sequence = 0
+        self.parent_pid = os.getppid()  # the host this process started under: a review whose host is gone is declined (kriya/control/launch_approval.py)
 
     @property
     def record(self) -> Dict[str, Any]:

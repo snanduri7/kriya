@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -510,14 +509,15 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
     expectations = {"on_approval": "note_approval_required(", "on_skill_gap": "decline_decision(", "on_skill_conflict": "decline_decision(",
                     "on_web_lookup": "decline_decision(", "on_web_lookup_query": "decline_decision("}
     for callback, call in expectations.items():
-        body = source[source.index(f"    def {callback}("):]
-        body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
+        if callback == "on_approval":  # the nested callback delegates to the module-level function that tests/test_launch_approval.py exercises by behaviour
+            assert "return _approval_decision(files, reason, yes)" in source[source.index("    def on_approval("):source.index("    def on_skill_gap(")]
+            body = inspect.getsource(cli._approval_decision)
+        else:
+            body = source[source.index(f"    def {callback}("):]
+            body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
         prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(") if marker in body]
         assert call in body, f"{callback} must CALL {call}"
         assert body.index(call) < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
-    approval = source[source.index("    def on_approval("):]
-    approval = approval[: approval.index("\n    def ", 10)]
-    assert re.search(r"if note_approval_required\(.*\):\s*\n\s*return False", approval), "on_approval must DECLINE inside a launch (a prompt with no terminal is a retried failure)"
     assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)
 
 

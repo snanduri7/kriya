@@ -22,7 +22,6 @@ import logging
 import os
 import re
 import secrets
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -123,12 +122,18 @@ async def await_decision(session: Any, review_id: str, digest: str) -> bool:
 
 
 async def _wait(session: Any, review_id: str, digest: str) -> bool:
-    deadline = time.monotonic() + APPROVAL_WAIT_SECONDS
-    parent = os.getppid()
+    # The expiry is the WALL-CLOCK instant Kriya recorded (the same one `decide` enforces), not a monotonic timer that stops while the machine sleeps; and the host is the
+    # parent this PROCESS started under (sampled when the launch opened), so a host that died before the wait began is noticed too.
+    pending = session.record.get("pending_approval") or {}
+    expires = datetime.fromisoformat(str(pending.get("expires_at")))
+    parent = session.parent_pid
     identity = session.record["workspace"]["identity"]
     while True:
         payload = load_launch_review_decision(session.workspace, session.launch_id, review_id)
         if valid_decision_payload(payload, session.launch_id, review_id, digest, identity):
+            if _now() > expires:  # consume-time expiry: a decision file that arrives after the review's end is not honoured, whoever wrote it
+                session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
+                return False
             approved = payload["decision"] == "approve"
             # DURABLE BEFORE RESUME: the record says APPROVED before the workflow is allowed to continue; if that cannot be written, nothing is applied
             if session.resolve_review(review_id, STATUS_APPROVED if approved else STATUS_REJECTED, {"decision": payload["decision"], "decided_at": payload.get("decided_at"), "source": "launch-decision"}):
@@ -137,7 +142,7 @@ async def _wait(session: Any, review_id: str, digest: str) -> bool:
         if os.getppid() != parent:
             session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "host-gone"})
             return False
-        if time.monotonic() > deadline:
+        if _now() > expires:
             session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "timeout"})
             return False
         await asyncio.sleep(POLL_SECONDS)

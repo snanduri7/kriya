@@ -3025,6 +3025,38 @@ def _bind_requirement_disposition(cfg: AppConfig, disposition_path: str, require
     )
 
 
+def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> Any:
+    """The `kriya generate` approval callback (module level so its behaviour is tested directly, not by reading its source).
+
+    Inside a desktop launch (`--launch-id`): a CHANGE (non-empty change set) is held as a durable pending review and the awaitable that resolves to the human's decision is
+    returned - the change gate awaits it. Every other approval (an empty change set: knowledge gap, runtime command, policy action) is declined WITHOUT prompting and a
+    plain False is returned, never an awaitable, because those call sites do not await and an un-awaited coroutine would read as truthy, i.e. as approval. `--yes` can
+    never take effect inside a launch (the launch refuses it, and this returns before consulting it). Outside a launch it is the terminal behaviour, unchanged."""
+    from kriya.control.launch import (
+        note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
+        request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
+    )
+    awaiting = request_change_approval(files, reason)
+    if awaiting is not None:
+        return awaiting
+    if note_approval_required("change_approval" if files else "other_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
+        return False  # a desktop launch never approves on its own and never prompts: declining stops the run cleanly (human_rejected)
+    if yes:
+        click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
+        return True
+
+    click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
+    for f in files:
+        filepath = f.get("filepath", "")
+        content = f.get("content", "")
+        click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
+        lines = content.splitlines()
+        click.echo("\n".join(lines[:15]))
+        if len(lines) > 15:
+            click.echo(f"... and {len(lines) - 15} more lines.")
+    return click.confirm("\nDo you approve applying these changes to the codebase?")
+
+
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
                    acceptance_approval=None, requirements_file=None, verification_authority=None,
@@ -3163,32 +3195,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         sys.stdout.flush()
 
     def on_approval(files: List[Dict[str, str]], reason: str) -> Any:
-        from kriya.control.launch import (
-            note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision it cannot take
-            request_change_approval,  # GUI final: a desktop launch's CHANGE review, answered by `kriya launch-decision`
-        )
-        # ONLY the change gate passes a non-empty change set (tests/test_kup_execution.py pins that). Inside a launch its decision is the human's, taken
-        # through the durable review; every other approval (empty set) is declined without prompting and the awaitable is never returned there, because
-        # those call sites do not await it.
-        awaiting = request_change_approval(files, reason)
-        if awaiting is not None:
-            return awaiting
-        if note_approval_required("change_approval" if files else "other_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
-            return False  # a desktop launch never approves on its own and never prompts: declining stops the run cleanly (human_rejected)
-        if yes:
-            click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
-            return True
-            
-        click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
-        for f in files:
-            filepath = f.get("filepath", "")
-            content = f.get("content", "")
-            click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
-            lines = content.splitlines()
-            click.echo("\n".join(lines[:15]))
-            if len(lines) > 15:
-                click.echo(f"... and {len(lines) - 15} more lines.")
-        return click.confirm("\nDo you approve applying these changes to the codebase?")
+        return _approval_decision(files, reason, yes)
 
     def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
         from kriya.control.launch import (
