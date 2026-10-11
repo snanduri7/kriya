@@ -8,6 +8,8 @@ const dir = join(dirname(fileURLToPath(import.meta.url)), 'dist', 'renderer', 'a
 const markers = ['createFixtureProvider', 'FixtureHost', 'fx-greenfield-success', 'fx-brownfield-modify', 'Create a utility library', 'FixtureExecution', 'fx-launched', 'fixture-model:7b', '20261010T101010-abcdef01'];
 // The M1 inspector is retired from the shipped UI: none of its panels may be in the product bundle (only an explicit legacy build contains them).
 markers.push('Recovery workspace', 'Workspace (recovery assessment)');
+// The legacy inspector's editable executable / configuration-directory panel must not be in the cockpit (host-owned settings, Phase 0).
+markers.push('Absolute executable path. Saving', 'Where Kriya discovers kriya.yaml. Leave blank');
 const bad = [];
 for (const f of readdirSync(dir).filter((n) => n.endsWith('.js'))) {
   const text = readFileSync(join(dir, f), 'utf8');

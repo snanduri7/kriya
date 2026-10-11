@@ -256,6 +256,19 @@ export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; 
   return { ok: true, value: { path: v.path } };
 }
 
+/**
+ * Which settings the RENDERER may write (Phase 0, owner decision 2026-10-11). `kriyaExecutable` and `configDirectory` are host/operator-owned: they decide WHICH program the
+ * app runs and WHICH configuration it discovers, so a (possibly compromised) renderer must never change them. In the cockpit (the shipped product) the renderer may write
+ * only harmless UI preferences (`editor`); `workspacePath` is set by the host's own Open Folder path, not typed. The explicitly separate legacy M1 inspector build keeps its
+ * narrow compatibility (all four keys) and never ships. Operators set the two keys in the host settings file or, for development, the test harness. (Closing a workspace clears `workspacePath`, which is allowed.)
+ */
+export const HOST_OWNED_SETTINGS = ['kriyaExecutable', 'configDirectory'] as const;
+export function rendererMayWrite(key: SettingKey, uiMode: 'cockpit' | 'inspector', value: string | null): boolean {
+  if (uiMode === 'inspector') return true;
+  // clearing the remembered workspace (closing it) is harmless; SETTING it is the host's job (Open Folder), never the renderer's
+  return key === 'editor' || (key === 'workspacePath' && value === null);
+}
+
 export function validateSettingKey(v: unknown): ValidationResult<SettingKey> {
   return typeof v === 'string' && (SETTING_KEYS as readonly string[]).includes(v) ? { ok: true, value: v as SettingKey } : { ok: false, message: 'unknown setting' };
 }

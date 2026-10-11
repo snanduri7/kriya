@@ -4,7 +4,7 @@ import { KeyValue, Panel, useProvider, type ModuleDefinition } from '../../core'
 // The workspace is not a setting: it is chosen with Open Folder (the host only accepts folders the person chose).
 const FIELDS = [['configDirectory', 'Configuration directory'], ['kriyaExecutable', 'Kriya executable']] as const;
 
-/** Host settings only; the Kriya-owned content-visibility authority is never editable here (a host may only narrow it). */
+/** Host-owned values are DISPLAYED only (the host refuses renderer writes to them); the one preference written here is the editor. Host settings only; the Kriya-owned content-visibility authority is never editable here (a host may only narrow it). */
 function Settings() {
   const provider = useProvider();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -19,9 +19,8 @@ function Settings() {
   return (
     <Panel title="Settings">
       <KeyValue items={FIELDS.map(([key, label]) => [label, (
-        <span key={key}>
-          <input aria-label={label} value={values[key] ?? ''} onChange={(e) => setValues({ ...values, [key]: e.target.value })} />{' '}
-          <button type="button" onClick={() => void provider.setSetting(key, values[key] ? values[key]! : null as never).then(() => setSaved(label))}>Save</button>
+        <span key={key} aria-label={label}>
+          <span className="mono">{values[key] || 'default'}</span> <span className="muted small">Managed by the host / operator; not editable here.</span>
         </span>
       )] as const)} />
       <KeyValue items={[['Editor for Open in editor', (

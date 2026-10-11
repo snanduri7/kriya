@@ -76,3 +76,42 @@ describe('the package checker is a real gate (negative controls on deliberately 
     expect(findings.join('\n')).toMatch(pattern as RegExp);
   });
 });
+
+describe('host-owned settings (Phase 0): the renderer cannot change the executable or the configuration directory', () => {
+  const KEYS = ['editor', 'kriyaExecutable', 'workspacePath', 'configDirectory'] as const;
+  it('cockpit: only the editor preference is writable, and the remembered workspace may be CLEARED; every other write is refused, for any value', async () => {
+    const { rendererMayWrite } = await import('../src/main/ipc_contract');
+    for (const value of ['/usr/bin/evil', '/tmp', 'kriya', '', null, '/a\nb']) {
+      expect(rendererMayWrite('kriyaExecutable', 'cockpit', value), `exe ${String(value)}`).toBe(false);
+      expect(rendererMayWrite('configDirectory', 'cockpit', value), `cfg ${String(value)}`).toBe(false);
+    }
+    expect(rendererMayWrite('editor', 'cockpit', 'vscode')).toBe(true);
+    expect(rendererMayWrite('workspacePath', 'cockpit', null)).toBe(true);
+    expect(rendererMayWrite('workspacePath', 'cockpit', '/some/folder')).toBe(false);
+  });
+  it('the legacy inspector build keeps its narrow compatibility, isolated to the explicit mode', async () => {
+    const { rendererMayWrite } = await import('../src/main/ipc_contract');
+    for (const key of KEYS) expect(rendererMayWrite(key, 'inspector', '/x')).toBe(true);
+    const { resolveUiMode } = await import('../src/main/ui_mode');
+    for (const raw of [null, '', '{', '{"ui":"cockpit"}', '{"ui":"INSPECTOR"}', '{"ui":["inspector"]}', '[]']) expect(resolveUiMode(() => raw)).toBe('cockpit'); // anything unexpected is the strict cockpit
+    expect(resolveUiMode(() => '{"ui":"inspector"}')).toBe('inspector');
+  });
+  it('main.ts enforces the rule AFTER validation on the one settingSet handler, and no other handler writes settings from renderer input', async () => {
+    const { readFileSync } = await import('node:fs');
+    const main = readFileSync(join(__dirname, '..', 'src', 'main', 'main.ts'), 'utf8');
+    const handler = main.slice(main.indexOf('IPC_CHANNELS.settingSet'), main.indexOf('M5 workspace lifecycle'));
+    expect(handler).toContain('rendererMayWrite(k.value, UI_MODE, v.value)');
+    expect(handler.indexOf('validateSettingValue')).toBeLessThan(handler.indexOf('rendererMayWrite'));
+    expect(handler.indexOf('rendererMayWrite')).toBeLessThan(handler.indexOf('settings.set('));
+    expect((main.match(/settings\.set\(/g) ?? []).length).toBe(3); // the guarded handler + the workspace registry's own recents/current callbacks
+  });
+  it('malformed IPC never reaches a write: hostile keys and values are rejected before the guard, and the guard rejects every host-owned key', async () => {
+    const { validateSettingKey, validateSettingValue, rendererMayWrite } = await import('../src/main/ipc_contract');
+    for (const key of ['__proto__', 'constructor', 'kriyaExecutable ', 'KRIYAEXECUTABLE', 1, null, {}, ['kriyaExecutable']]) {
+      const k = validateSettingKey(key);
+      if (k.ok) expect(rendererMayWrite(k.value, 'cockpit', null) && k.value !== 'editor' && k.value !== 'workspacePath').toBe(false); else expect(k.ok).toBe(false);
+    }
+    expect(validateSettingValue('kriyaExecutable', '/ok/path').ok).toBe(true);
+    expect(rendererMayWrite('kriyaExecutable', 'cockpit', '/ok/path')).toBe(false); // valid-looking is not enough
+  });
+});

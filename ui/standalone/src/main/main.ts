@@ -17,7 +17,7 @@ import { CONTENT_SECURITY_POLICY, PERMISSION_DECISION, WEB_PREFERENCES } from '.
 import { buildKriyaChildEnv, resolveConfigDirectory } from './child_env';
 import { isFixtureMode, resolveHostMode } from './host_mode';
 import { PRODUCT_NAME, WINDOW_TITLE, aboutPanelOptions, applicationMenuTemplate, resolveUserData } from './identity';
-import { IPC_CHANNELS, LIMITS, MENU_CHANNEL, type MenuCommand, type KupRequest, validateKupRequest, validateOpenInIde, validateSettingKey, validateSettingValue } from './ipc_contract';
+import { IPC_CHANNELS, LIMITS, MENU_CHANNEL, type MenuCommand, type KupRequest, validateKupRequest, validateOpenInIde, rendererMayWrite, validateSettingKey, validateSettingValue } from './ipc_contract';
 import { buildKriyaArgv } from './kriya_argv';
 import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
@@ -183,6 +183,7 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     const k = validateSettingKey(key); if (!k.ok) throw new Error(k.message);
     const v = validateSettingValue(k.value, value); if (!v.ok) throw new Error(v.message);
+    if (!rendererMayWrite(k.value, UI_MODE, v.value)) throw new Error(`${k.value} is managed by the host and cannot be changed from the application window`);
     if (k.value === 'workspacePath') {
       const problem = workspaces.refuseSetting(v.value);
       if (problem) throw new Error(problem);
