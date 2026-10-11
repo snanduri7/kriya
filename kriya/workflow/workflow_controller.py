@@ -4498,6 +4498,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         frozen_files = sorted({path for paths in frozen_file_paths(verification_contract).values() for path in paths})
         # PLAN-DOCUMENTATION-UNIT-VERIFICATION-001: documentation the sealed contract judges itself.
         documentation_paths = documentation_referent_paths(verification_contract)
+        # PLAN-TARGET-GROUNDING-001 (c): manifests that only delegate to a file the goal's own package name occurs in.
+        from kriya.workflow.goal_facts import delegating_shim_targets, goal_facts_block
+
+        shim_targets = delegating_shim_targets(goal, workspace_path)
         baseline_report = None
         if verification_contract.authorities and verification_contract.refusal() is None and kernel_config is not None:
             from kriya.workflow.contract_baseline import BaselineAuthorityReport
@@ -4651,6 +4655,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         localization_block = render_localization_candidates(localization)
         if localization_block:
             authoritative_planner_request += "\n" + localization_block
+        # PLAN-TARGET-GROUNDING-001 (b): where the goal's own names live (declaring supertype, packaging manifests,
+        # delegating shims) - deterministic, provenance-labelled, bounded; evidence only.
+        memory_dir = getattr(getattr(kernel_config, "paths", None), "memory", None)
+        goal_facts_text = goal_facts_block(
+            os.path.join(memory_dir, "dependency_graph.db") if isinstance(memory_dir, str) else None, workspace_path, goal)
+        if goal_facts_text:
+            authoritative_planner_request += goal_facts_text
         # GR-R1A: the operator's explicit, closed requirement contract when one
         # is bound; else the requirements derived from the goal.
         requirement_set = requirement_set_for(goal, bound_requirement_contract(self.workflow_engine))
@@ -4880,6 +4891,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
                         known_requirement_ids=requirement_set.ids,
                         immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
+                        delegating_shims=shim_targets,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -5866,6 +5878,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stack_contract=derive_stack_contract(goal),
                         known_requirement_ids=requirement_set.ids,
                         immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
+                        delegating_shims=shim_targets,
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -6005,6 +6018,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             runtime_verification_required=goal_requires_runtime_behavior(goal),
                             stack_contract=derive_stack_contract(goal),
                             immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
+                        delegating_shims=shim_targets,
                         )
                         if obligation_ledger:
                             obligation_ledger.record(ObligationRecord(
@@ -6213,6 +6227,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # The same sealed planning inputs every other validation of this run uses (independent
                     # review of the repair, finding 2): a revision must not refuse what admission accepted.
                     immutable_test_files=immutable_tests, frozen_files=frozen_files, documentation_paths=documentation_paths,
+                        delegating_shims=shim_targets,
                 )
                 if revision_validation.valid:
                     prior_hash = current_plan_hash

@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -420,6 +420,7 @@ async def validate_plan(
     stack_contract: Optional[StackContract] = None,
     immutable_test_files: Optional[Iterable[str]] = None,
     frozen_files: Optional[Iterable[str]] = None,
+    delegating_shims: Optional[Mapping[str, str]] = None,
     documentation_paths: Optional[Iterable[str]] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
@@ -570,6 +571,24 @@ async def validate_plan(
                 "in the files the goal asks to change and keep every frozen file out of planned_files"
             )
             reason_codes.append("PLAN_EDITS_FROZEN_FILE")
+
+    # PLAN-TARGET-GROUNDING-001 (c): a manifest edit aimed at a delegating shim (setup.py holding only a bare setup()
+    # call) whose delegate (pyproject.toml, with a static [project] table) contains a name the goal writes - and that
+    # delegate is planned by no subtask - cannot hold the change the goal describes (python-slugify: the shim was planned
+    # and the sealed authority refused it after a full unit). Refused here with the exact delegate named.
+    if delegating_shims:
+        from kriya.workflow.goal_facts import shim_plan_errors
+
+        offenders = shim_plan_errors(
+            [(st.id, pf.path, pf.action.value) for st in plan.subtasks for pf in st.planned_files], dict(delegating_shims))
+        if offenders:
+            delegates = sorted({delegating_shims[entry.split(":", 1)[1]] for entry in offenders})
+            errors.append(
+                f"subtask(s) {sorted(set(offenders))!r} plan to edit a delegating shim: its only statement is a bare "
+                f"setup() call, so it declares nothing itself; the packaging metadata and the name the goal writes live "
+                f"in {delegates!r}, which no subtask plans - plan the change in {delegates!r} and keep the shim out of "
+                "planned_files")
+            reason_codes.append("PLAN_TARGETS_DELEGATING_SHIM")
 
     # Repair Guidance audit (2026-09-07, before P7): these three structural
     # checks had NO reason code at all - not merely unwired, genuinely

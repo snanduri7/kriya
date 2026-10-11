@@ -131,6 +131,7 @@ PLANNER_POLICY_REJECTION_CODES = frozenset({
     "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
     "PLAN_EDITS_IMMUTABLE_TEST",
     "PLAN_EDITS_FROZEN_FILE",  # OD-3 (BACKEND-FINAL-CLOSURE-005)
+    "PLAN_TARGETS_DELEGATING_SHIM",  # PLAN-TARGET-GROUNDING-001 (BACKEND-READINESS-V2)
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH", "PLAN_TARGET_UNKNOWN",
     # Milestone plans (kriya/workflow/milestone_validation.py): judged
@@ -672,6 +673,13 @@ def build_structured_plan_repair_prompt(
             "them out of every subtask's planned_files (or list them with action 'read' only if your schema allows "
             "it), and put any new tests the goal asks for in a NEW test file (action 'create') next to the "
             "existing ones.\n"
+        )
+    if "PLAN_TARGETS_DELEGATING_SHIM" in reason_codes:
+        targeted_correction += (
+            "- The errors name a planned file that only delegates (a setup.py whose single statement is a bare "
+            "setup() call) and the file it delegates to, where the goal's own package name is declared. Move the "
+            "change to the delegate file the error names and remove the shim from every subtask's planned_files, "
+            "unless the change genuinely belongs in the shim - then plan the delegate as well.\n"
         )
     if "PLAN_EDITS_FROZEN_FILE" in reason_codes:
         targeted_correction += (
