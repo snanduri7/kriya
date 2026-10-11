@@ -1,0 +1,59 @@
+{
+ "install_sampler": "sampler installed",
+ "idle": "idle",
+ "open_folder": true,
+ "navigation_marks": "nav done",
+ "start_run": true,
+ "run_to_terminal": "success",
+ "after_run_navigation": "done",
+ "event_loop_lag": {
+  "all": {
+   "samples": 1096,
+   "median": 0,
+   "p95": 2,
+   "p99": 3,
+   "max": 6,
+   "over100ms": 0
+  },
+  "idle": {
+   "samples": 200,
+   "median": 0,
+   "p95": 2,
+   "p99": 2,
+   "max": 2,
+   "over100ms": 0
+  },
+  "open_folder": {
+   "samples": 3,
+   "median": 0,
+   "p95": 0,
+   "p99": 0,
+   "max": 0,
+   "over100ms": 0
+  },
+  "navigation": {
+   "samples": 199,
+   "median": 0,
+   "p95": 2,
+   "p99": 2,
+   "max": 3,
+   "over100ms": 0
+  },
+  "active_run": {
+   "samples": 432,
+   "median": 0,
+   "p95": 2,
+   "p99": 3,
+   "max": 3,
+   "over100ms": 0
+  },
+  "after_run": {
+   "samples": 169,
+   "median": 0,
+   "p95": 2,
+   "p99": 5,
+   "max": 6,
+   "over100ms": 0
+  }
+ }
+}

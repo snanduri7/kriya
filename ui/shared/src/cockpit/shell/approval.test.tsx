@@ -2,7 +2,7 @@
  * comes from Kriya's records (the pending review in the launch record, then the sealed outcome). Nothing is auto-approved and nothing is inferred. */
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { deriveOutcome } from '../core';
+import { activeReview, createDecider, deriveOutcome, type RunView } from '../core';
 import type { LaunchStatus } from '../../model/kup';
 import { renderWorkspaceShell } from '../testing/harness';
 import { LAUNCH_ID, REVIEW_DIGEST, REVIEW_ID, REVIEW_REASON } from '../providers/fixture/fixtureExecution';
@@ -47,7 +47,10 @@ describe('the review of a change', () => {
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]).toEqual({ workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
     expect(Object.keys(host.exec!.decisions[0]!).sort()).toEqual(['candidate_digest', 'decision', 'launch_id', 'review_id', 'workspace']);
-    // Kriya's launch record now says APPROVED; the (scripted) workflow continues to its sealed end
+    // Kriya's launch record now says APPROVED: the banner says so, offers no further decision, and the run is still running
+    await within(bar).findByText(/Your approval is recorded by Kriya/);
+    expect(within(bar).queryByRole('region', { name: 'Change review' })).toBeNull();
+    expect(bar).toHaveAttribute('data-outcome', ''); // no outcome yet
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
     expect(within(bar).getByText('Run succeeded')).toBeInTheDocument();
@@ -75,7 +78,7 @@ describe('the review of a change', () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(host.exec!.decisions.length).toBeGreaterThan(0));
     expect(host.exec!.decisions).toHaveLength(1);
-    await waitFor(() => expect(within(bar).getByText('Approval recorded')).toBeInTheDocument());
+    await within(bar).findByText(/Your approval is recorded by Kriya/);
     expect(within(bar).queryByRole('button', { name: 'Approve changes' })).toBeNull();
     expect(within(bar).queryByRole('button', { name: 'Reject changes' })).toBeNull();
   });
@@ -157,5 +160,47 @@ describe('outcomes of a reviewed run come from Kriya\'s durable records only', (
     const outcome = deriveOutcome(status({ pending_approval: review('PENDING') } as never), false, null);
     expect(outcome?.kind).not.toBe('rejected');
     expect(outcome?.kind).not.toBe('success');
+  });
+});
+
+describe('which review can be decided, and the one-decision guard', () => {
+  const live = (reviewStatus: string, over: { phase?: string; liveness?: string } = {}) => status({ phase: over.phase ?? 'RUNNING', pending_approval: review(reviewStatus) as never, ended: null } as never, {}) as LaunchStatus & { liveness: string };
+  it('only a PENDING review in a RUNNING, live launch is actionable', () => {
+    const cases: Array<[string, string, string, boolean]> = [
+      ['PENDING', 'RUNNING', 'live', true], ['APPROVED', 'RUNNING', 'live', false], ['REJECTED', 'RUNNING', 'live', false], ['EXPIRED', 'RUNNING', 'live', false],
+      ['PENDING', 'ENDED', 'ended', false], ['PENDING', 'STARTING', 'starting', false], ['PENDING', 'STARTING', 'live', false], ['PENDING', 'ENDED', 'live', false], ['PENDING', 'RUNNING', 'interrupted', false],
+    ];
+    for (const [reviewStatus, phase, liveness, actionable] of cases) {
+      const s = live(reviewStatus, { phase });
+      (s as { liveness: string }).liveness = liveness;
+      expect(activeReview(s) !== null, `${reviewStatus}/${phase}/${liveness}`).toBe(actionable);
+    }
+    expect(activeReview(null)).toBeNull();
+  });
+
+  it('two decisions in the same tick reach the host once, with the identities of the review that was pending', async () => {
+    const sent: unknown[] = [];
+    let release: (v: never) => void = () => undefined;
+    const port = { startRun: async () => { throw new Error('no'); }, state: async () => { throw new Error('no'); }, decideApproval: (request: unknown) => { sent.push(request); return sent.length > 1 ? Promise.resolve({ accepted: false, code: 'X', message: 'x' }) : new Promise((resolve) => { release = resolve as never; }); } };
+    const states: string[] = [];
+    const pending = review('PENDING') as unknown as NonNullable<RunView['review']>;
+    const decide = createDecider({ port: port as never, run: () => ({ launchId: LAUNCH_ID, workspace: '/w', review: pending } as RunView), set: (s) => states.push(s.state) });
+    const first = decide('approve');
+    const second = decide('reject');
+    await second;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({ workspace: '/w', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
+    release({ accepted: true, code: 'ACCEPTED', message: 'ok', launch_id: null, review_id: null, decision: null, decided_at: null } as never);
+    await first;
+    expect(states).toEqual(['submitting', 'accepted']);
+    await decide('approve'); // free again afterwards (a new review or a refusal)
+    expect(sent).toHaveLength(2);
+  });
+
+  it('nothing is sent when no review is pending', async () => {
+    const sent: unknown[] = [];
+    const decide = createDecider({ port: { decideApproval: async (r: unknown) => { sent.push(r); } } as never, run: () => ({ launchId: LAUNCH_ID, workspace: '/w', review: null } as RunView), set: () => undefined });
+    await decide('approve');
+    expect(sent).toEqual([]);
   });
 });

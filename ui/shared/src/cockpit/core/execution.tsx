@@ -11,6 +11,7 @@
  * the outcome is durable. When it is, the Runs/Timeline/Overview/... modules are refreshed through the ordinary snapshot path - they never see a special case.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { ExecutionHostPort } from '../../host/HostAdapter';
 import type { DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
@@ -169,6 +170,35 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
   return null;
 }
 
+/** The change review a run is waiting on RIGHT NOW: a PENDING review in a RUNNING launch whose workspace lock this launch holds. Any other combination (decided, expired,
+ * the launch ended or its process gone) is not actionable, so no decision control is offered for it. Pure: the tests drive it with every combination. */
+export function activeReview(status: LaunchStatus | null): PendingReview | null {
+  const pending = status?.launch.pending_approval ?? null;
+  return status && pending && status.launch.phase === 'RUNNING' && status.liveness === 'live' && pending.status === 'PENDING' ? pending : null;
+}
+
+/** One decision at a time on the review pending NOW. The identities travel exactly as Kriya gave them; Kriya refuses a stale or replayed one. The guard is synchronous:
+ * a second call in the same tick never reaches the host. */
+export function createDecider(deps: { port: ExecutionHostPort; run(): RunView | null; set(state: DecisionState): void }): (choice: 'approve' | 'reject') => Promise<void> {
+  let busy = false;
+  return async (choice) => {
+    const current = deps.run();
+    const review = current?.review ?? null;
+    if (!current || !review || busy) return;
+    busy = true;
+    deps.set({ state: 'submitting', reviewId: review.review_id, decision: choice });
+    let answer: DecideApprovalResult;
+    try {
+      answer = await deps.port.decideApproval({ workspace: current.workspace, launch_id: current.launchId, review_id: review.review_id, candidate_digest: review.candidate_digest, decision: choice });
+    } catch (error) {
+      answer = { accepted: false, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), launch_id: null, review_id: null, decision: null, decided_at: null };
+    } finally {
+      busy = false;
+    }
+    deps.set(answer.accepted ? { state: 'accepted', reviewId: review.review_id, decision: choice } : { state: 'refused', reviewId: review.review_id, decision: choice, code: answer.code, message: answer.message });
+  };
+}
+
 function brief(record: Record<string, unknown>): BriefRecord {
   const text = (v: unknown) => (typeof v === 'string' ? v : null);
   const num = (v: unknown) => (typeof v === 'number' ? v : null);
@@ -187,7 +217,6 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [decision, setDecision] = useState<DecisionState>({ state: 'idle' });
-  const decidingRef = useRef(false);
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
   const pendingRef = useRef<string | null>(null);
@@ -301,8 +330,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
       setRun((prev) => {
         if (!prev || prev.launchId !== launchId) return prev;
         const stage: RunStage = outcome ? 'finished' : data && data.launch.phase === 'RUNNING' ? 'running' : 'starting';
-        const pending = data?.launch.pending_approval ?? null;
-        const review = !outcome && data && data.launch.phase === 'RUNNING' && data.liveness === 'live' && pending && pending.status === 'PENDING' ? pending : null;
+        const review = outcome ? null : activeReview(data);
         return {
           ...prev, host: hostState ?? prev.host, status: data ?? prev.status, progress, stage, outcome, review,
           statusError: status.ok || notRecorded ? null : status.error,
@@ -329,23 +357,9 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     return () => { live = false; if (timer) clearTimeout(timer); };
   }, [port, provider, launchId, runWorkspace, selection, intervals.hiddenMs, intervals.slowMs, intervals.slowAfterMs, intervals.visibleMs]);
 
-  // One decision at a time, taken on the review that is pending NOW. The identities travel exactly as Kriya gave them; Kriya refuses a stale or replayed one.
-  const decide = useCallback(async (choice: 'approve' | 'reject') => {
-    const current = runRef.current;
-    const review = current?.review ?? null;
-    if (!port || !current || !review || decidingRef.current) return;
-    decidingRef.current = true; // synchronous: a second click in the same tick never reaches the host
-    setDecision({ state: 'submitting', reviewId: review.review_id, decision: choice });
-    let answer: DecideApprovalResult;
-    try {
-      answer = await port.decideApproval({ workspace: current.workspace, launch_id: current.launchId, review_id: review.review_id, candidate_digest: review.candidate_digest, decision: choice });
-    } catch (error) {
-      answer = { accepted: false, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), launch_id: null, review_id: null, decision: null, decided_at: null };
-    } finally {
-      decidingRef.current = false;
-    }
-    setDecision(answer.accepted ? { state: 'accepted', reviewId: review.review_id, decision: choice } : { state: 'refused', reviewId: review.review_id, decision: choice, code: answer.code, message: answer.message });
-  }, [port]);
+  const deciderRef = useRef<ReturnType<typeof createDecider> | null>(null);
+  useEffect(() => { deciderRef.current = port ? createDecider({ port, run: () => runRef.current, set: setDecision }) : null; }, [port]);
+  const decide = useCallback(async (choice: 'approve' | 'reject') => { await deciderRef.current?.(choice); }, []);
 
   const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
   const locked = starting || (run !== null && run.stage !== 'finished');

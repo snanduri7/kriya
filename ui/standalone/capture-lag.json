@@ -1,0 +1,129 @@
+[
+ {
+  "wait": 800
+ },
+ {
+  "name": "install_sampler",
+  "js": "(()=>{window.__lag=[];window.__marks=[];let last=performance.now();window.__t=setInterval(()=>{const n=performance.now();window.__lag.push(Math.max(0,Math.round(n-last-50)));last=n},50);window.__marks.push(['start', window.__lag.length]);return 'sampler installed'})()",
+  "wait": 100
+ },
+ {
+  "name": "idle",
+  "js": "(()=>{window.__marks.push(['idle_begin', window.__lag.length]);return 'idle'})()",
+  "wait": 10000
+ },
+ {
+  "name": "open_folder",
+  "js": "(async()=>{const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});window.__marks.push(['open_folder_begin', window.__lag.length]);document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);window.__marks.push(['open_folder_end', window.__lag.length]);return ok})()",
+  "wait": 1500
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]').click();})()",
+  "wait": 700
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 700
+ },
+ {
+  "name": "navigation_marks",
+  "js": "(()=>{window.__marks.push(['navigation_end', window.__lag.length]);return 'nav done'})()",
+  "wait": 100
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 800
+ },
+ {
+  "js": "(()=>{const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Add a clamp(value, low, high) function with tests.\");ta.dispatchEvent(new Event('input',{bubbles:true}));})()",
+  "wait": 600
+ },
+ {
+  "name": "start_run",
+  "js": "(async()=>{const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});window.__marks.push(['run_begin', window.__lag.length]);[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run').click();return await W(()=>document.querySelector('[aria-label=\"Active run\"]'),60000)})()",
+  "wait": 300
+ },
+ {
+  "name": "run_to_terminal",
+  "js": "(async()=>{const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]')&&document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished',300000);window.__marks.push(['run_end', window.__lag.length]);return ok?document.querySelector('[aria-label=\"Active run\"]').dataset.outcome:'TIMEOUT'})()",
+  "wait": 1500
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 1500
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "js": "(()=>{{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click();}})()",
+  "wait": 900
+ },
+ {
+  "name": "after_run_navigation",
+  "js": "(()=>{window.__marks.push(['after_end', window.__lag.length]);return 'done'})()",
+  "wait": 3000
+ },
+ {
+  "name": "event_loop_lag",
+  "js": "(()=>{clearInterval(window.__t);const pct=(a,p)=>a.length?a.slice().sort((x,y)=>x-y)[Math.min(a.length-1,Math.floor(a.length*p))]:null;const seg=(s,e)=>{const a=window.__lag.slice(s,e);return {samples:a.length,median:pct(a,.5),p95:pct(a,.95),p99:pct(a,.99),max:a.length?Math.max(...a):null,over100ms:a.filter(x=>x>100).length}};const m=Object.fromEntries(window.__marks);const out={all:seg(0,window.__lag.length),idle:seg(m.idle_begin,m.open_folder_begin),open_folder:seg(m.open_folder_begin,m.open_folder_end),navigation:seg(m.open_folder_end,m.navigation_end),active_run:seg(m.run_begin,m.run_end),after_run:seg(m.run_end,m.after_end)};return out})()",
+  "wait": 100
+ }
+]

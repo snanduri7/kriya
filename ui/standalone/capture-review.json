@@ -1,0 +1,148 @@
+[
+ {
+  "wait": 800,
+  "file": "01-welcome.png",
+  "width": 1536,
+  "height": 960
+ },
+ {
+  "name": "open_folder_to_workspace_ms",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 600
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]').click();})()",
+  "wait": 800
+ },
+ {
+  "name": "preflight_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});await W(()=>document.body.innerText.includes('Configuration digest'),60000);return document.querySelector('#ck-goal').closest('section').innerText})()",
+  "wait": 400,
+  "file": "02-workspace-goal-preflight.png"
+ },
+ {
+  "js": "(()=>{const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,\"Update greet(name) so it returns \\\"Hello, <name>!\\\" while preserving the public function signature and keeping the project tests passing.\");ta.dispatchEvent(new Event('input',{bubbles:true}));})()",
+  "wait": 500,
+  "file": "03-goal-entered.png"
+ },
+ {
+  "name": "start_click_to_banner_ms",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Start Run').click();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]'),60000);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()",
+  "wait": 400,
+  "file": "04-launching.png"
+ },
+ {
+  "name": "wait_review_or_finish",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});await W(()=>document.querySelector('[aria-label=\"Change review\"]')||(document.querySelector('[aria-label=\"Active run\"]')&&document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished'));return document.querySelector('[aria-label=\"Change review\"]')?'REVIEW_PENDING':'FINISHED_WITHOUT_REVIEW:'+document.querySelector('[aria-label=\"Active run\"]').dataset.outcome})()",
+  "wait": 1500,
+  "file": "05-review-or-finish.png"
+ },
+ {
+  "name": "review_panel_text",
+  "js": "(()=>document.querySelector('[aria-label=\"Change review\"]')?document.querySelector('[aria-label=\"Change review\"]').innerText:null)()",
+  "wait": 200
+ },
+ {
+  "name": "banner_text_at_review",
+  "js": "(()=>document.querySelector('[aria-label=\"Active run\"]')?document.querySelector('[aria-label=\"Active run\"]').innerText:null)()",
+  "wait": 200
+ },
+ {
+  "name": "open_changes",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Review changes').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 1500,
+  "file": "06-review-changes.png"
+ },
+ {
+  "name": "open_changes_first_file",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';const b=document.querySelector('[role=tabpanel] ul button');if(b){b.click();await W(()=>/diff|@@|\\+\\+\\+/.test(document.querySelector('[role=tabpanel]').innerText),20000)}return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 1200,
+  "file": "07-review-changes-detail.png"
+ },
+ {
+  "name": "open_validation",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Review validation').click();await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>20,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 1500,
+  "file": "08-review-validation.png"
+ },
+ {
+  "name": "approve_click",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});if(!document.querySelector('[aria-label=\"Change review\"]'))return 'no review';const t0=performance.now();[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Approve changes').click();await W(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval'),5000);return 'confirm shown'})()",
+  "wait": 600,
+  "file": "09-approve-confirm.png"
+ },
+ {
+  "name": "approve_confirm",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const c=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirm approval');if(!c)return 'no confirm';const t0=performance.now();c.click();await W(()=>!document.querySelector('[aria-label=\"Change review\"]')||/recorded/i.test(document.querySelector('[aria-label=\"Change review\"]').innerText),30000);return Math.round(performance.now()-t0)})()",
+  "wait": 800,
+  "file": "10-approval-recorded.png"
+ },
+ {
+  "name": "wait_terminal",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});const t0=performance.now();const ok=await W(()=>document.querySelector('[aria-label=\"Active run\"]')&&document.querySelector('[aria-label=\"Active run\"]').dataset.stage==='finished');return ok?{ms:Math.round(performance.now()-t0),outcome:document.querySelector('[aria-label=\"Active run\"]').dataset.outcome}:'TIMEOUT'})()",
+  "wait": 2500,
+  "file": "11-terminal.png"
+ },
+ {
+  "name": "terminal_banner_text",
+  "js": "(()=>document.querySelector('[aria-label=\"Active run\"]').innerText)()",
+  "wait": 100
+ },
+ {
+  "name": "timing",
+  "js": "(()=>JSON.parse(document.querySelector('[aria-label=\"Active run\"]').dataset.timing))()",
+  "wait": 100
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]').click();})()",
+  "wait": 1500,
+  "file": "12-run-overview.png"
+ },
+ {
+  "name": "tab_overview_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Overview');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "13-final-overview.png"
+ },
+ {
+  "name": "tab_validation_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Validation');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "14-final-validation.png"
+ },
+ {
+  "name": "tab_changes_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Changes');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "15-final-changes.png"
+ },
+ {
+  "name": "tab_context_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Context');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "16-final-context.png"
+ },
+ {
+  "name": "tab_plan_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Plan');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "17-final-plan.png"
+ },
+ {
+  "name": "tab_attempts_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Attempts');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "18-final-attempts.png"
+ },
+ {
+  "name": "tab_evidence_text",
+  "js": "(async()=>{const W=(f,ms=2700000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='Evidence');if(t)t.click();}await W(()=>document.querySelector('[role=tabpanel]')&&document.querySelector('[role=tabpanel]').innerText.length>10,30000);return document.querySelector('[role=tabpanel]').innerText})()",
+  "wait": 900,
+  "file": "19-final-evidence.png"
+ },
+ {
+  "name": "runs_list_text",
+  "js": "(()=>document.querySelector('.ck-list')?document.querySelector('.ck-list').innerText:null)()",
+  "wait": 100
+ }
+]

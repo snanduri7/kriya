@@ -43,7 +43,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
       <div className="muted small" role="note">
         {caps.has('evidence_content')
           ? 'Open Changes to read the diff and Validation to see the gate results - both read this run\'s live evidence.'
-          : 'Kriya\'s content visibility is off, so the diff text is not shown here. The file list, line counts and digests above are Kriya\'s own metadata; Validation still shows the recorded gate results.'}
+          : 'Kriya\'s content visibility is off, so the diff text is not shown here. The file list, line counts and digests above are Kriya\'s own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.'}
       </div>
       <div className="ck-runbar-head">
         <button type="button" onClick={() => open(OPEN_TARGETS.changes)}>Review changes</button>

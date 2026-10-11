@@ -57,6 +57,7 @@ export function ActiveRunBanner() {
         ) : null}
       </div>
       {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
+      {!finished && !run.review && run.status?.launch.phase === 'RUNNING' && (run.status.launch.pending_approval?.status === 'APPROVED' || run.status.launch.pending_approval?.status === 'REJECTED') ? <div role="note"><strong>Your {run.status.launch.pending_approval.status === 'APPROVED' ? 'approval' : 'rejection'} is recorded by Kriya</strong>; the run is continuing from it. Its outcome will come from Kriya&apos;s records.</div> : null}
       {finished && run.outcome!.approval ? (
         <div>
           <div><strong>{APPROVAL_KIND[run.outcome!.approval.kind] ?? run.outcome!.approval.kind}.</strong> {run.outcome!.approval.reason}</div>
