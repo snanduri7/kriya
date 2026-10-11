@@ -17,7 +17,7 @@
  },
  {
   "name": "open",
-  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));document.querySelector('main[aria-label=Welcome] button').click();await W(()=>document.querySelector('nav[aria-label=Destinations]'));await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Acquire snapshot');if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0);return document.querySelectorAll('.ck-list button').length})()",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();await W(()=>document.querySelector('nav[aria-label=Destinations]'));await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Acquire snapshot');if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0);return document.querySelectorAll('.ck-list button').length})()",
   "wait": 600
  },
  {

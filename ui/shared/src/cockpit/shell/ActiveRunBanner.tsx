@@ -43,7 +43,12 @@ export function ActiveRunBanner() {
     if (run.stage !== 'finished') dispatch({ type: 'selectLiveRun', launchId: run.launchId });
     else if (run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     go(RUN_DOCUMENTS_PAGE);
-    if (run.stage !== 'finished' && run.review) setTimeout(() => document.querySelector<HTMLElement>('section[aria-label="Change review"]')?.focus(), 0);
+    if (run.stage !== 'finished' && run.review) {
+      // the page may still be rendering: try for a short while until the review section exists
+      let tries = 0;
+      const focus = () => { const el = document.querySelector<HTMLElement>('section[aria-label="Change review"]'); if (el) el.focus(); else if (tries++ < 10) setTimeout(focus, 50); };
+      setTimeout(focus, 0);
+    }
   }, [run, dispatch, go]);
   // A notification click arrives as the fixed command `showRun` (no payload): the current run is the only run there is.
   useEffect(() => (desktop ? desktop.onMenuCommand((command) => { if (command === 'showRun') showRun(); }) : undefined), [desktop, showRun]);

@@ -16,7 +16,7 @@ const dismiss = `const d=[...document.querySelectorAll('button')].find(b=>b.text
 const steps = [];
 const add = (s) => steps.push(s);
 add({ wait: 800, file: '01-welcome.png', width: 1536, height: 960 });
-add({ name: 'open_folder_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600 });
+add({ name: 'open_folder_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600 });
 add({ name: 'open_folder_to_runs_ms', js: `(async()=>{${W}return await W(()=>document.body.innerText.includes('Runs'))})()`, wait: 400, file: '02-runs-empty-existing-project.png' });
 add({ js: `(()=>{${nav('Workspace')}})()`, wait: 600, file: '03-workspace.png' });
 add({ name: 'preflight_ms', js: `(async()=>{${W}const t0=performance.now();const ok=await ${ready};${goalSet('Update greet(name) so it returns "Hello, <name>!" while keeping the tests passing.')}return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600, file: '04-goal-preflight.png' });

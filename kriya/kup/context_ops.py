@@ -14,6 +14,7 @@ Both resolve the configuration exactly as ``execution.preflight`` does (the fold
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import urllib.error
@@ -30,6 +31,8 @@ from kriya.kup.workspace_ops import validated_workspace
 ROLES = ("planner", "architect", "developer", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 MAX_SKILLS = 500
 PROBE_TIMEOUT_SECONDS = 3.0
+PROBE_DEADLINE_SECONDS = 4.0  # the WHOLE probe, however many endpoints: the persistent service answers one request at a time, so this read must be short
+PROBE_MAX_ENDPOINTS = 6
 PROBE_MAX_BYTES = 1024 * 1024
 MAX_PROBED_MODELS_LISTED = 200
 
@@ -129,6 +132,16 @@ def context(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]:
     return envelope("execution.context", request_id, data=data, source=None, consistency=live_consistency())
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is never followed: the egress check judged the CONFIGURED endpoint only, and a followed redirect would reach an unchecked host with the credential."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _probe(endpoint_url: str, api_key: str, egress_policy: str) -> Dict[str, Any]:
     safe = _safe_endpoint(endpoint_url)
     if egress_policy == "local_only" and not is_local_url(endpoint_url):
@@ -136,7 +149,7 @@ def _probe(endpoint_url: str, api_key: str, egress_policy: str) -> Dict[str, Any
     url = f"{endpoint_url.rstrip('/')}/models"
     request = urllib.request.Request(url=url, headers={"Authorization": f"Bearer {api_key}"})
     try:
-        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT_SECONDS) as response:  # noqa: S310 - scheme/host gated by the egress check above
+        with _OPENER.open(request, timeout=PROBE_TIMEOUT_SECONDS) as response:  # noqa: S310 - scheme/host gated by the egress check above; redirects are refused
             body = response.read(PROBE_MAX_BYTES + 1)
             status = response.getcode()
         if len(body) > PROBE_MAX_BYTES:
@@ -158,7 +171,6 @@ def model_probe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]
     if wcfg is None:
         return envelope("execution.model_probe", request_id, data={"available": False, "unavailable_reason": failure, "authority_status": authority["status"], "endpoints": [], "roles": []},
                         source=None, consistency=live_consistency())
-    bindings: Dict[str, Dict[str, Any]] = {}  # per DISTINCT endpoint: one probe; the key never contains a credential
     wanted: List[Dict[str, Any]] = []
     sources = [("default", wcfg.llm.base_url, wcfg.llm.api_key, wcfg.llm.model)]
     for role in ROLES:
@@ -169,18 +181,33 @@ def model_probe(cfg, request: Dict[str, Any], request_id: str) -> Dict[str, Any]
             sources.append((role, role_cfg.llm.base_url, role_cfg.llm.api_key, role_cfg.llm.model))
     for entry in wcfg.llm_chain:
         sources.append(("fallback", entry.base_url, entry.api_key, entry.model))
+    # one probe per distinct (endpoint, credential): two bindings that differ only in the key are judged with their own key. Probes run in parallel under ONE overall deadline.
+    distinct: Dict[tuple, str] = {}
+    for _who, base_url, api_key, _model in sources:
+        distinct.setdefault((_safe_endpoint(base_url), api_key), base_url)
+    skipped = len(distinct) > PROBE_MAX_ENDPOINTS
+    chosen = dict(list(distinct.items())[:PROBE_MAX_ENDPOINTS])
+    results: Dict[tuple, Dict[str, Any]] = {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(chosen)), thread_name_prefix="kup-probe")
+    try:
+        futures = {pool.submit(_probe, url, key[1], wcfg.autonomy.egress_policy): key for key, url in chosen.items()}
+        done, pending = concurrent.futures.wait(futures, timeout=PROBE_DEADLINE_SECONDS)
+        for future in done:
+            results[futures[future]] = future.result()
+        for future in pending:  # a resolver or connect that outlived the deadline: reported, and the worker thread is left to finish on its own
+            results[futures[future]] = {"endpoint": futures[future][0], "state": "unreachable", "reason": f"no answer within {PROBE_DEADLINE_SECONDS:g} s", "models": []}
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     for who, base_url, api_key, model in sources:
-        key = _safe_endpoint(base_url)
-        if key not in bindings:
-            bindings[key] = _probe(base_url, api_key, wcfg.autonomy.egress_policy)
-        probe = bindings[key]
+        key = (_safe_endpoint(base_url), api_key)
+        probe = results.get(key, {"endpoint": key[0], "state": "not_probed", "reason": f"more than {PROBE_MAX_ENDPOINTS} distinct endpoints are configured; the rest are not checked", "models": []})
         state = probe["state"]
-        wanted.append({"for": who, "model": model, "endpoint": key,
+        wanted.append({"for": who, "model": model, "endpoint": key[0],
                        "available": (model in probe["models"]) if state == "reachable" else None,
                        "state": "model_present" if state == "reachable" and model in probe["models"] else "model_missing" if state == "reachable" else state})
+    endpoint_rows = [{"endpoint": k[0], "state": v["state"], "reason": v["reason"], "model_count": len(v["models"])} for k, v in results.items()]
     data = {"available": True, "unavailable_reason": None, "authority_status": authority["status"], "egress_policy": wcfg.autonomy.egress_policy,
-            "endpoints": [{"endpoint": k, "state": v["state"], "reason": v["reason"], "model_count": len(v["models"])} for k, v in bindings.items()],
-            "roles": wanted, "timeout_seconds": PROBE_TIMEOUT_SECONDS,
+            "endpoints": endpoint_rows, "roles": wanted, "timeout_seconds": PROBE_DEADLINE_SECONDS, "truncated": skipped,
             "note": "A single bounded GET /models per distinct local endpoint, made now. It proves the server answered and lists the models it serves; it does not prove a model can complete a request."}
     return envelope("execution.model_probe", request_id, data=data, source=None, consistency=live_consistency())
 

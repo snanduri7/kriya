@@ -16,7 +16,7 @@ const steps = [];
 const add = (s) => steps.push(s);
 add({ wait: 800, file: '01-welcome.png', width: 1600, height: 1000 });
 // 1. Open Folder (the scripted chooser stands in for the native dialog ONLY; everything after is the production path) -> an EMPTY folder
-add({ name: 'open_empty_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500 });
+add({ name: 'open_empty_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500 });
 add({ name: 'preflight_ready_ms', js: `(async()=>{${W}${nav('Workspace')}const t0=performance.now();const ok=await ${ready};return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500, file: '02-goal-preflight-empty-folder.png' });
 add({ js: `(()=>{${goalSet('Create a utility library with a clamp(value, low, high) function and unit tests.')}})()`, wait: 500, file: '03-goal-entered.png' });
 // 2. Start Run: click -> acknowledgement (banner), then the run being observed

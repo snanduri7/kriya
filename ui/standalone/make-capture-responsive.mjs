@@ -19,7 +19,7 @@ const SHOT = new Set([1536, 1360, 1100]);
 add({ wait: 700, width: 1100, height: 820 });
 add({ name: 'install', js: `(()=>{${AUDIT}window.__audit_fn('welcome@1100');return 'ok'})()`, wait: 200, file: 'welcome-1100.png' });
 add({ wait: 300, width: 1536, height: 1024 });
-add({ name: 'open', js: `(async()=>{${W}document.querySelector('main[aria-label=Welcome] button').click();await W(()=>document.querySelector('nav[aria-label=Destinations]'));await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Acquire snapshot');if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0);return document.querySelectorAll('.ck-list button').length})()`, wait: 600 });
+add({ name: 'open', js: `(async()=>{${W}[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();await W(()=>document.querySelector('nav[aria-label=Destinations]'));await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Acquire snapshot');if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0);return document.querySelectorAll('.ck-list button').length})()`, wait: 600 });
 for (const [w, h] of SIZES) {
   const f = (label) => (SHOT.has(w) ? { file: `${label}-${w}.png` } : {});
   add({ wait: 350, width: w, height: h });

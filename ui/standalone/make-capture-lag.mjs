@@ -20,7 +20,7 @@ const add = (s) => steps.push(s);
 add({ wait: 800 });
 add({ name: 'install_sampler', js: `(()=>{window.__lag=[];window.__marks=[];let last=performance.now();window.__t=setInterval(()=>{const n=performance.now();window.__lag.push(Math.max(0,Math.round(n-last-50)));last=n},50);${mark('start')}return 'sampler installed'})()`, wait: 100 });
 add({ name: 'idle', js: `(()=>{${mark('idle_begin')}return 'idle'})()`, wait: 10000 });
-add({ name: 'open_folder', js: `(async()=>{${W}${mark('open_folder_begin')}document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);${mark('open_folder_end')}return ok})()`, wait: 1500 });
+add({ name: 'open_folder', js: `(async()=>{${W}${mark('open_folder_begin')}[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);${mark('open_folder_end')}return ok})()`, wait: 1500 });
 // ordinary navigation: every destination and every central tab, several times, with human-scale pauses (no screenshots)
 for (let round = 0; round < 3; round += 1) {
   for (const dest of ['Runs', 'Workspace', 'Settings', 'Runs']) add({ js: `(()=>{${nav(dest)}})()`, wait: 700 });

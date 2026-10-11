@@ -31,9 +31,8 @@ export interface NotificationDeps {
 }
 
 const NAME_MAX = 60;
-/** A retry inside one launch can raise a second review; approval notifications may repeat per launch, but at most this many and never closer than this apart. */
+/** A retry inside one launch can raise a second review (the renderer asks once per review): approval notifications may repeat per launch, at most this many. */
 export const APPROVAL_REPEAT_MAX = 4;
-export const APPROVAL_REPEAT_GAP_MS = 20_000;
 
 /** The folder's last path segment with control and bidi characters removed, bounded; null when nothing printable remains. */
 export function folderLabel(path: string | null): string | null {
@@ -67,9 +66,8 @@ export class NotificationHost {
     if (this.deps.currentLaunch() !== launch) return { shown: false, reason: 'unknown_launch' };
     if (kind === 'approval_required') {
       const seen = this.approvals.get(launch);
-      const now = this.deps.now();
-      if (seen && (seen.count >= APPROVAL_REPEAT_MAX || now - seen.at < APPROVAL_REPEAT_GAP_MS)) return { shown: false, reason: 'duplicate' };
-      this.approvals.set(launch, { count: (seen?.count ?? 0) + 1, at: now }); // consumed even when not shown: a later focus change must not replay an old event
+      if (seen && seen.count >= APPROVAL_REPEAT_MAX) return { shown: false, reason: 'duplicate' };
+      this.approvals.set(launch, { count: (seen?.count ?? 0) + 1, at: this.deps.now() }); // consumed even when not shown: a later focus change must not replay an old event
       while (this.approvals.size > 20) this.approvals.delete(this.approvals.keys().next().value as string);
     } else {
       const key = `${kind}:${launch}`;

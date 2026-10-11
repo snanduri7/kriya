@@ -20,7 +20,7 @@ const GOAL = 'Update greet(name) so it returns "Hello, <name>!" while preserving
 const steps = [];
 const add = (s) => steps.push(s);
 add({ wait: 800, file: '01-welcome.png', width: 1536, height: 960 });
-add({ name: 'open_folder_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600 });
+add({ name: 'open_folder_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600 });
 add({ js: `(()=>{${nav('Workspace')}})()`, wait: 800 });
 add({ name: 'preflight_text', js: `(async()=>{${W}await W(()=>document.body.innerText.includes('Configuration digest'),60000);return document.querySelector('#ck-goal').closest('section').innerText})()`, wait: 400, file: '02-workspace-goal-preflight.png' });
 add({ js: `(()=>{${goalSet(GOAL)}})()`, wait: 500, file: '03-goal-entered.png' });

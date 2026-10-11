@@ -6,10 +6,11 @@ import type { ExecutionContext, ExecutionModelProbe } from '../../../model/kup';
  * whether the configured model server answers (`execution.model_probe`, one bounded local GET). Both are asked again whenever `nonce` or the workspace changes; an
  * answer for an earlier workspace/nonce is never shown (useAsync keys every answer and aborts the superseded request).
  */
-export function useRunSetup(workspace: string | null, nonce: number): { context: Availability<ExecutionContext>; probe: Availability<ExecutionModelProbe> } {
+export function useRunSetup(workspace: string | null, nonce: number, runActive = false): { context: Availability<ExecutionContext>; probe: Availability<ExecutionModelProbe> } {
   const provider = useProvider();
   const none = <T,>(): Availability<T> => unavailable('unknown_run', 'No workspace is open.');
   const context = useAsync<ExecutionContext>(workspace === null ? null : `ctx:${workspace}:${nonce}`, async (signal) => toAvailability(await provider.executionContext(workspace!, signal)), none());
-  const probe = useAsync<ExecutionModelProbe>(workspace === null ? null : `probe:${workspace}:${nonce}`, async (signal) => toAvailability(await provider.executionModelProbe(workspace!, signal)), none());
-  return { context, probe };
+  // While a run is in progress the persistent Kriya service must stay free for the run's own polling and review reads: the (bounded) model probe waits until the run ends.
+  const probe = useAsync<ExecutionModelProbe>(workspace === null || runActive ? null : `probe:${workspace}:${nonce}`, async (signal) => toAvailability(await provider.executionModelProbe(workspace!, signal)), none());
+  return { context, probe: runActive ? unavailable<ExecutionModelProbe>('pending', 'Not checked while a run is in progress.') : probe };
 }

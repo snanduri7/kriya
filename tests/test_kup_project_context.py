@@ -292,7 +292,7 @@ def _probe(ws):
 
 
 def test_probe_reports_reachability_and_model_presence_with_one_get_per_endpoint(project, server, monkeypatch):
-    _resolved(monkeypatch, llm={"base_url": server, "model": "present-model", "api_key": "k1"}, agent_llms={"planner": {"llm": {"base_url": server, "model": "absent-model"}}})
+    _resolved(monkeypatch, llm={"base_url": server, "model": "present-model", "api_key": "k1"}, agent_llms={"planner": {"llm": {"base_url": server, "model": "absent-model", "api_key": "k1"}}})
     data = _probe(project)["data"]
     assert len(_Models.seen) == 1 and _Models.seen[0][0] == "/v1/models"  # one GET for the one distinct endpoint
     assert data["endpoints"][0]["state"] == "reachable" and data["endpoints"][0]["model_count"] == 2
@@ -407,3 +407,61 @@ def test_many_skills_are_summarised_within_the_cap_and_report_the_true_total(tmp
     summary = context_ops.skills_summary(cfg, str(tmp_path))
     assert summary["total"] == context_ops.MAX_SKILLS + 40 and len(summary["items"]) == context_ops.MAX_SKILLS and summary["truncated"] is True
     assert [s["name"] for s in summary["items"]] == sorted(s["name"] for s in summary["items"])
+
+
+# ------------------------------------------------------------------ review fixes: redirects, deadline, credentials
+
+class _Redirect(http.server.BaseHTTPRequestHandler):
+    target = ""
+    def do_GET(self):  # noqa: N802
+        self.send_response(302)
+        self.send_header("Location", _Redirect.target)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+
+
+def test_probe_never_follows_a_redirect_so_the_key_cannot_reach_an_unchecked_host(project, server, monkeypatch):
+    redirector = http.server.HTTPServer(("127.0.0.1", 0), _Redirect)
+    threading.Thread(target=redirector.serve_forever, daemon=True).start()
+    _Redirect.target = server.replace("/v1", "") + "/models"  # a second loopback server standing in for "an unchecked host"
+    try:
+        _resolved(monkeypatch, llm={"base_url": f"http://127.0.0.1:{redirector.server_address[1]}/v1", "model": "present-model", "api_key": "SECRET"}, autonomy={"egress_policy": "local_only"})
+        data = _probe(project)["data"]
+    finally:
+        redirector.shutdown()
+    assert _Models.seen == []  # the redirect target was never contacted, so it never saw the Authorization header
+    assert data["endpoints"][0]["state"] == "error" and "302" in data["endpoints"][0]["reason"]
+    assert "SECRET" not in json.dumps(data)
+
+
+def test_the_whole_probe_is_bounded_even_when_every_endpoint_blackholes(project, monkeypatch):
+    import time
+
+    from kriya.kup import context_ops
+    monkeypatch.setattr(context_ops, "PROBE_DEADLINE_SECONDS", 0.5)
+    monkeypatch.setattr(context_ops, "_probe", lambda url, key, policy_: time.sleep(5) or {"endpoint": url, "state": "reachable", "reason": None, "models": []})
+    chain = [{"model": f"m{i}", "base_url": f"http://127.0.0.{i + 2}:11434/v1"} for i in range(5)]
+    _resolved(monkeypatch, llm={"base_url": "http://127.0.0.1:1/v1", "model": "m"}, llm_chain=chain)
+    started = time.monotonic()
+    data = _probe(project)["data"]
+    assert time.monotonic() - started < 2.0  # not 6 x 5 s
+    assert all(e["state"] == "unreachable" and "no answer within" in e["reason"] for e in data["endpoints"])
+
+
+def test_more_than_the_cap_of_distinct_endpoints_is_reported_not_silently_dropped(project, monkeypatch):
+    from kriya.kup import context_ops
+    monkeypatch.setattr(context_ops, "_probe", lambda url, key, policy_: {"endpoint": url, "state": "reachable", "reason": None, "models": ["m"]})
+    chain = [{"model": f"m{i}", "base_url": f"http://127.0.0.{i + 2}:11434/v1"} for i in range(context_ops.PROBE_MAX_ENDPOINTS + 2)]
+    _resolved(monkeypatch, llm={"base_url": "http://127.0.0.1:1/v1", "model": "m"}, llm_chain=chain)
+    data = _probe(project)["data"]
+    assert data["truncated"] is True and len(data["endpoints"]) == context_ops.PROBE_MAX_ENDPOINTS
+    assert [r["state"] for r in data["roles"]].count("not_probed") >= 2
+
+
+def test_two_bindings_that_differ_only_in_the_credential_are_each_judged_with_their_own_key(project, server, monkeypatch):
+    _resolved(monkeypatch, llm={"base_url": server, "model": "present-model", "api_key": "key-A"}, agent_llms={"planner": {"llm": {"base_url": server, "model": "present-model", "api_key": "key-B"}}})
+    data = _probe(project)["data"]
+    assert sorted(h[1] for h in _Models.seen) == ["Bearer key-A", "Bearer key-B"]
+    assert len(data["endpoints"]) == 2

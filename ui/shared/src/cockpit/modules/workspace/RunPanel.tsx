@@ -36,7 +36,7 @@ interface Row { label: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'neutral';
 /** The model-server row from the probe: only what the probe measured. */
 function modelRow(probe: Availability<ExecutionModelProbe>): Row {
   if (probe.state === 'loading') return { label: 'Model server', tone: 'info', status: 'Checking…' };
-  if (!hasData(probe)) return { label: 'Model server', tone: 'neutral', status: 'Not checked', detail: probe.state === 'error' ? `${probe.message} (${probe.code})` : undefined };
+  if (!hasData(probe)) return { label: 'Model server', tone: 'neutral', status: 'Not checked', detail: probe.state === 'error' ? `${probe.message} (${probe.code})` : probe.state === 'unavailable' ? probe.detail : undefined };
   if (!probe.data.available) return { label: 'Model server', tone: 'neutral', status: 'Not checked', detail: 'The configuration did not load, so there is nothing to check.' };
   const bad = probe.data.roles.filter((r) => r.state === 'unreachable' || r.state === 'error' || r.state === 'model_missing');
   const unchecked = probe.data.roles.filter((r) => r.state === 'not_probed' || r.state === 'unreadable');
@@ -129,7 +129,7 @@ export function RunPanel() {
   const ex = useExecution();
   const workspace = useWorkspacePath();
   const [nonce, setNonce] = useState(0);
-  const { context, probe } = useRunSetup(workspace, nonce);
+  const { context, probe } = useRunSetup(workspace, nonce, ex.locked);
   const pre = ex.preflight.state === 'ready' ? ex.preflight.data : null;
   const blockers = pre ? pre.blockers : [];
   const empty = ex.goal.trim().length === 0;

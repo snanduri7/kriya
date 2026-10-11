@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { APPROVAL_REPEAT_GAP_MS, APPROVAL_REPEAT_MAX, NOTIFY_KINDS, NotificationHost, folderLabel, notificationText } from '../src/main/notification_host';
+import { APPROVAL_REPEAT_MAX, NOTIFY_KINDS, NotificationHost, folderLabel, notificationText } from '../src/main/notification_host';
 
 const LID = '20261011T101010-abcdef01';
 function make(over: Partial<{ supported: boolean; focused: boolean; launch: string | null; path: string | null }> = {}) {
@@ -77,14 +77,9 @@ describe('when it is shown', () => {
     expect(host.notify({ kind: 'run_succeeded', launch_id: LID }).shown).toBe(true); // a different kind is a different event
     expect(shown).toHaveLength(2);
   });
-  it('approval notifications may repeat for a retry, but not closer than the gap and not more than the cap', () => {
-    const { host, shown, tick } = make();
-    expect(host.notify({ kind: 'approval_required', launch_id: LID }).shown).toBe(true);
-    expect(host.notify({ kind: 'approval_required', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
-    tick(APPROVAL_REPEAT_GAP_MS - 1);
-    expect(host.notify({ kind: 'approval_required', launch_id: LID }).shown).toBe(false);
-    for (let i = 1; i < APPROVAL_REPEAT_MAX; i += 1) { tick(APPROVAL_REPEAT_GAP_MS); expect(host.notify({ kind: 'approval_required', launch_id: LID }).shown, `repeat ${i}`).toBe(true); }
-    tick(APPROVAL_REPEAT_GAP_MS);
+  it('approval notifications repeat for a retry (a quick second review is NOT dropped) up to the per-launch cap', () => {
+    const { host, shown } = make();
+    for (let i = 0; i < APPROVAL_REPEAT_MAX; i += 1) expect(host.notify({ kind: 'approval_required', launch_id: LID }).shown, `review ${i + 1}`).toBe(true);
     expect(host.notify({ kind: 'approval_required', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
     expect(shown).toHaveLength(APPROVAL_REPEAT_MAX);
   });

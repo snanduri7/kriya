@@ -59,6 +59,18 @@ describe('readiness', () => {
     expect(model).toHaveTextContent('non-local endpoint, not contacted under local_only');
   });
 
+  it('no model probe is made while a run is in progress (the persistent service must stay free for the run\'s own reads); it is asked again after the run ends', async () => {
+    const { host } = await openPanel();
+    const probes = () => host.calls.filter((c) => c.operation === 'execution.model_probe').length;
+    await waitFor(() => expect(probes()).toBe(1));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Do it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Run' }));
+    await screen.findByRole('status', { name: 'Active run' });
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(probes()).toBe(1);
+  });
+
   it('the probe is asked once per check and again only when the person checks again', async () => {
     const { host, readiness } = await openPanel();
     await waitFor(() => expect(within(row(readiness, 'Model server')).getByText(/Answering/)).toBeInTheDocument());

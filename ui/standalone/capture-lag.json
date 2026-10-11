@@ -14,7 +14,7 @@
  },
  {
   "name": "open_folder",
-  "js": "(async()=>{const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});window.__marks.push(['open_folder_begin', window.__lag.length]);document.querySelector('main[aria-label=Welcome] button').click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);window.__marks.push(['open_folder_end', window.__lag.length]);return ok})()",
+  "js": "(async()=>{const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});window.__marks.push(['open_folder_begin', window.__lag.length]);[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);window.__marks.push(['open_folder_end', window.__lag.length]);return ok})()",
   "wait": 1500
  },
  {

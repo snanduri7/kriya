@@ -29,7 +29,7 @@ const samples=[];const errors=[];const counts={cycles:0,switches:0,runsStarted:0
 let lagFrom=0;
 const step=async(name,f)=>{try{return await f()}catch(e){errors.push({cycle:counts.cycles,name,error:String(e&&e.message||e).slice(0,160)})}};
 // first open (scripted chooser #1)
-document.querySelector('main[aria-label=Welcome] button').click();await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);
+[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);
 while(performance.now()-t0<END){
   const c=counts.cycles;
   await step('switch',async()=>{const sw=document.querySelector('button[aria-label="Switch workspace"]');sw.click();await S(120);const item=[...document.querySelectorAll('[role=menuitem]')].find(x=>x.textContent.includes('Open Folder'));if(item){item.click();counts.switches++}await S(600);await W(()=>document.querySelector('nav[aria-label=Destinations]'),30000)});
