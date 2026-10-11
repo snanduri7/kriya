@@ -27,6 +27,7 @@ from kriya.core.llm import is_local_url
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.workspace_ops import validated_workspace
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 ROLES = ("planner", "architect", "developer", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 MAX_SKILLS = 500
@@ -84,8 +85,7 @@ def skills_summary(cfg, workspace: str) -> Dict[str, Any]:
     shared = os.path.realpath(get_global_skills_dir())
     items = []
     for skill in sorted(engine.list_skills(), key=lambda s: s.name.lower())[:MAX_SKILLS]:
-        path = os.path.realpath(skill.source_path) if skill.source_path else None
-        origin = "kriya_install" if path and (path == shared or path.startswith(shared + os.sep)) else "workspace_or_configured"
+        origin = "kriya_install" if skill.source_path and path_relation(shared, skill.source_path) is PathRelation.WITHIN else "workspace_or_configured"
         items.append({
             "name": skill.name, "description": skill.description, "category": skill.category, "tags": list(skill.tags)[:20],
             "supported_versions": skill.supported_versions, "verified": skill.verified, "verified_context": skill.verified_context,

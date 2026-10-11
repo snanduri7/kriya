@@ -39,7 +39,7 @@ INVENTORY = {
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
     ("kriya/tools/service_runtime.py", "urlopen"): (
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
-    ("kriya/kup/context_ops.py", "urlopen"): (
+    ("kriya/kup/context_ops.py", "build_opener"): (
         1, "autonomy.egress_policy: execution.model_probe makes ONE bounded GET <base_url>/models (3 s, 1 MiB cap) per distinct endpoint, the same probe `kriya doctor` "
            "makes, and REFUSES (never attempts, never sends the key to) a non-local endpoint under local_only; endpoints are SEC-009 config, credentials are never returned"),
     ("kriya/production_doctor.py", "urlopen"): (
@@ -69,7 +69,7 @@ def _network_clients():
                     base = func.value.id if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) else None
                     if base == "httpx" and attr in ("Client", "AsyncClient"):
                         found[(rel, f"httpx.{attr}")] += 1
-                    elif attr in ("AsyncOpenAI", "OpenAI", "urlopen", "HTTPConnection", "HTTPSConnection"):
+                    elif attr in ("AsyncOpenAI", "OpenAI", "urlopen", "build_opener", "HTTPConnection", "HTTPSConnection"):
                         found[(rel, attr)] += 1
                     elif base == "socket" and attr == "create_connection":
                         found[(rel, "socket.create_connection")] += 1
