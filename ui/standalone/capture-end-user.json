@@ -1,0 +1,317 @@
+[
+ {
+  "wait": 700,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "install",
+  "js": "(()=>{window.__audit=window.__audit||[];window.__checks=window.__checks||[];const audit=(label)=>{const vw=window.innerWidth,vh=window.innerHeight;const clipped=[];const nameless=[];const textClipped=[];for(const el of document.querySelectorAll('button,[role=tab],a[href],input,select,textarea,summary,[tabindex]')){const r=el.getBoundingClientRect();if(r.width===0&&r.height===0)continue;const cs=getComputedStyle(el);if(cs.visibility==='hidden'||cs.display==='none')continue;if(r.right>vw+1||r.left<-1)clipped.push((el.textContent||el.getAttribute('aria-label')||el.tagName).trim().slice(0,30));const name=(el.getAttribute('aria-label')||el.textContent||el.getAttribute('title')||'').trim();if(!name&&!(el.labels&&el.labels.length)&&el.tagName!=='INPUT')nameless.push(el.tagName)}for(const el of document.querySelectorAll('div,span,li,button,td,th,h1,h2,h3,strong,pre,code,p')){const cs=getComputedStyle(el);if((cs.overflowX==='hidden'||cs.textOverflow==='ellipsis')&&el.scrollWidth>el.clientWidth+2&&el.clientWidth>0)textClipped.push((el.textContent||'').trim().slice(0,30))}window.__audit.push({label,vw,vh,hscroll:Math.max(0,document.documentElement.scrollWidth-vw),clippedControls:[...new Set(clipped)].slice(0,6),namelessControls:nameless.length,textClippedByHidden:[...new Set(textClipped)].slice(0,4),nodes:document.querySelectorAll('*').length})};window.__audit_fn=audit;window.__check=(name,ok,detail)=>window.__checks.push({name,ok:!!ok,detail:detail??null});return 'ok'})()",
+  "wait": 200
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "welcome@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));await W(()=>document.querySelector('main[aria-label=Welcome]'));await S(300);window.__audit_fn('welcome@1536');window.__check('welcome has New Project and Open Folder at 1536',!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\"))&&!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Open Folder…\")));return 'ok'})()",
+  "wait": 900,
+  "file": "welcome-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "welcome@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));await W(()=>document.querySelector('main[aria-label=Welcome]'));await S(300);window.__audit_fn('welcome@1440');window.__check('welcome has New Project and Open Folder at 1440',!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\"))&&!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Open Folder…\")));return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "welcome@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));await W(()=>document.querySelector('main[aria-label=Welcome]'));await S(300);window.__audit_fn('welcome@1360');window.__check('welcome has New Project and Open Folder at 1360',!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\"))&&!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Open Folder…\")));return 'ok'})()",
+  "wait": 900,
+  "file": "welcome-1360.png"
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "welcome@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));await W(()=>document.querySelector('main[aria-label=Welcome]'));await S(300);window.__audit_fn('welcome@1180');window.__check('welcome has New Project and Open Folder at 1180',!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\"))&&!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Open Folder…\")));return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "welcome@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));await W(()=>document.querySelector('main[aria-label=Welcome]'));await S(300);window.__audit_fn('welcome@1100');window.__check('welcome has New Project and Open Folder at 1100',!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\"))&&!!([...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Open Folder…\")));return 'ok'})()",
+  "wait": 900,
+  "file": "welcome-1100.png"
+ },
+ {
+  "wait": 300,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "open_dialog",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\").click();await W(()=>document.querySelector('[role=dialog][aria-label=\"New Project\"]'));await S(300);const d=document.querySelector('[role=dialog][aria-label=\"New Project\"]');window.__check('dialog is modal',d.getAttribute('aria-modal')==='true');window.__check('name field focused on open',document.activeElement&&document.activeElement.id==='ck-project-name',document.activeElement&&document.activeElement.tagName);window.__check('Create disabled with no name',[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Create project\").disabled);return 'ok'})()",
+  "wait": 200
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "dialog@1536",
+  "js": "(async()=>{await new Promise(r=>setTimeout(r,250));window.__audit_fn('new-project-dialog@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "new-project-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "dialog@1440",
+  "js": "(async()=>{await new Promise(r=>setTimeout(r,250));window.__audit_fn('new-project-dialog@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "dialog@1360",
+  "js": "(async()=>{await new Promise(r=>setTimeout(r,250));window.__audit_fn('new-project-dialog@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "new-project-1360.png"
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "dialog@1180",
+  "js": "(async()=>{await new Promise(r=>setTimeout(r,250));window.__audit_fn('new-project-dialog@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "dialog@1100",
+  "js": "(async()=>{await new Promise(r=>setTimeout(r,250));window.__audit_fn('new-project-dialog@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "new-project-1100.png"
+ },
+ {
+  "name": "dialog_escape_and_reopen",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const d=document.querySelector('[role=dialog][aria-label=\"New Project\"]');d.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await S(300);window.__check('Escape closes the dialog',!document.querySelector('[role=dialog][aria-label=\"New Project\"]'));return 'ok'})()",
+  "wait": 200
+ },
+ {
+  "name": "refused_then_created",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"New Project…\").click();await W(()=>document.querySelector('[role=dialog][aria-label=\"New Project\"]'));await S(200);{const f=document.querySelector(\"#ck-project-name\");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"../escape\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(100);[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Create project\").click();await W(()=>document.querySelector('#ck-project-error'),20000);const err=document.querySelector('#ck-project-error');window.__check('invalid name refused with Kriya\\'s code',/invalid_name/.test(err.textContent),err.textContent.slice(0,120));window.__check('dialog stays open after a refusal',!!document.querySelector('[role=dialog][aria-label=\"New Project\"]'));window.__audit_fn('new-project-error@1536');{const f=document.querySelector(\"#ck-project-name\");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(f,\"Audit Project ü\");f.dispatchEvent(new Event('input',{bubbles:true}))}await S(100);const f=document.querySelector('#ck-project-name');f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);await S(500);window.__check('project opened after Enter',!!document.querySelector('nav[aria-label=Destinations]'));window.__check('dialog closed after create',!document.querySelector('[role=dialog][aria-label=\"New Project\"]'));return 'ok'})()",
+  "wait": 600
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "workspace@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click();await W(()=>document.querySelector('section[aria-label=Readiness]'),30000);await W(()=>/Answering|Not reachable|not served|Not checked/.test(document.querySelector('section[aria-label=Readiness]').innerText),20000);for(const d of document.querySelectorAll('details.ck-setup'))d.open=true;await S(500);window.__audit_fn('readiness@1536');return 'ok'})()",
+  "wait": 900,
+  "file": "readiness-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "workspace@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click();await W(()=>document.querySelector('section[aria-label=Readiness]'),30000);await W(()=>/Answering|Not reachable|not served|Not checked/.test(document.querySelector('section[aria-label=Readiness]').innerText),20000);for(const d of document.querySelectorAll('details.ck-setup'))d.open=true;await S(500);window.__audit_fn('readiness@1440');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "workspace@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click();await W(()=>document.querySelector('section[aria-label=Readiness]'),30000);await W(()=>/Answering|Not reachable|not served|Not checked/.test(document.querySelector('section[aria-label=Readiness]').innerText),20000);for(const d of document.querySelectorAll('details.ck-setup'))d.open=true;await S(500);window.__audit_fn('readiness@1360');return 'ok'})()",
+  "wait": 900,
+  "file": "readiness-1360.png"
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "workspace@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click();await W(()=>document.querySelector('section[aria-label=Readiness]'),30000);await W(()=>/Answering|Not reachable|not served|Not checked/.test(document.querySelector('section[aria-label=Readiness]').innerText),20000);for(const d of document.querySelectorAll('details.ck-setup'))d.open=true;await S(500);window.__audit_fn('readiness@1180');return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "workspace@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Workspace]');if(b)b.click();await W(()=>document.querySelector('section[aria-label=Readiness]'),30000);await W(()=>/Answering|Not reachable|not served|Not checked/.test(document.querySelector('section[aria-label=Readiness]').innerText),20000);for(const d of document.querySelectorAll('details.ck-setup'))d.open=true;await S(500);window.__audit_fn('readiness@1100');return 'ok'})()",
+  "wait": 900,
+  "file": "readiness-1100.png"
+ },
+ {
+  "name": "readiness_content",
+  "js": "(()=>{const r=document.querySelector('section[aria-label=Readiness]').innerText;window.__check('readiness lists Git',/Git \\(needed by every run\\)/.test(r));window.__check('readiness lists Model server',/Model server/.test(r));window.__check('routing table has 7 roles',document.querySelectorAll('table[aria-label=\"Model routing\"] tbody tr').length===7);window.__check('skills say automatic',/Selected automatically by Kriya/.test(document.body.innerText));window.__check('no control to edit skills/tools',![...document.querySelectorAll('details.ck-setup')].slice(0,3).some(d=>d.querySelector('input,textarea,select')));return 'ok'})()",
+  "wait": 100
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "settings@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]');if(b)b.click();await S(500);window.__audit_fn('settings@1536');window.__check('settings has no free-text field at 1536',document.querySelectorAll('main input[type=text],main textarea').length===0);return 'ok'})()",
+  "wait": 900,
+  "file": "settings-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "settings@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]');if(b)b.click();await S(500);window.__audit_fn('settings@1440');window.__check('settings has no free-text field at 1440',document.querySelectorAll('main input[type=text],main textarea').length===0);return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "settings@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]');if(b)b.click();await S(500);window.__audit_fn('settings@1360');window.__check('settings has no free-text field at 1360',document.querySelectorAll('main input[type=text],main textarea').length===0);return 'ok'})()",
+  "wait": 900,
+  "file": "settings-1360.png"
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "settings@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]');if(b)b.click();await S(500);window.__audit_fn('settings@1180');window.__check('settings has no free-text field at 1180',document.querySelectorAll('main input[type=text],main textarea').length===0);return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "settings@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Settings]');if(b)b.click();await S(500);window.__audit_fn('settings@1100');window.__check('settings has no free-text field at 1100',document.querySelectorAll('main input[type=text],main textarea').length===0);return 'ok'})()",
+  "wait": 900,
+  "file": "settings-1100.png"
+ },
+ {
+  "wait": 300,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "open_big",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));document.querySelector('button[aria-label=\"Switch workspace\"]').click();await S(200);[...document.querySelectorAll('[role=menuitem]')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();await W(()=>{const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');return b&&!document.querySelector('.ck-state[role=status]')},60000);const b=document.querySelector('nav[aria-label=Destinations] button[aria-label=Runs]');if(b)b.click();await W(()=>document.querySelectorAll('.ck-list button').length>0||[...document.querySelectorAll('button')].some(x=>x.textContent.trim()==='Acquire snapshot'),30000);const a=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()===\"Acquire snapshot\");if(a)a.click();await W(()=>document.querySelectorAll('.ck-list button').length>0,60000);return document.querySelectorAll('.ck-list button').length})()",
+  "wait": 600
+ },
+ {
+  "wait": 350,
+  "width": 1536,
+  "height": 1024
+ },
+ {
+  "name": "runs_filters@1536",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const sel=document.querySelector('select[aria-label=Status]');sel.value='success';sel.dispatchEvent(new Event('change',{bubbles:true}));await S(300);const status=document.querySelector('[role=status][aria-live],.ck-secondary [role=status]');window.__audit_fn('runs-filters@1536');window.__check('filter shows a count at 1536',/of \\d+ loaded run\\(s\\) match/.test(document.querySelector('.ck-secondary').innerText),document.querySelector('.ck-secondary').innerText.slice(-120));sel.value='all';sel.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()",
+  "wait": 900,
+  "file": "runs-filters-1536.png"
+ },
+ {
+  "wait": 350,
+  "width": 1440,
+  "height": 960
+ },
+ {
+  "name": "runs_filters@1440",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const sel=document.querySelector('select[aria-label=Status]');sel.value='success';sel.dispatchEvent(new Event('change',{bubbles:true}));await S(300);const status=document.querySelector('[role=status][aria-live],.ck-secondary [role=status]');window.__audit_fn('runs-filters@1440');window.__check('filter shows a count at 1440',/of \\d+ loaded run\\(s\\) match/.test(document.querySelector('.ck-secondary').innerText),document.querySelector('.ck-secondary').innerText.slice(-120));sel.value='all';sel.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1360,
+  "height": 900
+ },
+ {
+  "name": "runs_filters@1360",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const sel=document.querySelector('select[aria-label=Status]');sel.value='success';sel.dispatchEvent(new Event('change',{bubbles:true}));await S(300);const status=document.querySelector('[role=status][aria-live],.ck-secondary [role=status]');window.__audit_fn('runs-filters@1360');window.__check('filter shows a count at 1360',/of \\d+ loaded run\\(s\\) match/.test(document.querySelector('.ck-secondary').innerText),document.querySelector('.ck-secondary').innerText.slice(-120));sel.value='all';sel.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()",
+  "wait": 900,
+  "file": "runs-filters-1360.png"
+ },
+ {
+  "wait": 350,
+  "width": 1180,
+  "height": 860
+ },
+ {
+  "name": "runs_filters@1180",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const sel=document.querySelector('select[aria-label=Status]');sel.value='success';sel.dispatchEvent(new Event('change',{bubbles:true}));await S(300);const status=document.querySelector('[role=status][aria-live],.ck-secondary [role=status]');window.__audit_fn('runs-filters@1180');window.__check('filter shows a count at 1180',/of \\d+ loaded run\\(s\\) match/.test(document.querySelector('.ck-secondary').innerText),document.querySelector('.ck-secondary').innerText.slice(-120));sel.value='all';sel.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()",
+  "wait": 150
+ },
+ {
+  "wait": 350,
+  "width": 1100,
+  "height": 820
+ },
+ {
+  "name": "runs_filters@1100",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},25);setTimeout(()=>{clearInterval(i);r(false)},ms)});const S=(ms)=>new Promise(r=>setTimeout(r,ms));const sel=document.querySelector('select[aria-label=Status]');sel.value='success';sel.dispatchEvent(new Event('change',{bubbles:true}));await S(300);const status=document.querySelector('[role=status][aria-live],.ck-secondary [role=status]');window.__audit_fn('runs-filters@1100');window.__check('filter shows a count at 1100',/of \\d+ loaded run\\(s\\) match/.test(document.querySelector('.ck-secondary').innerText),document.querySelector('.ck-secondary').innerText.slice(-120));sel.value='all';sel.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()",
+  "wait": 900,
+  "file": "runs-filters-1100.png"
+ },
+ {
+  "name": "results",
+  "js": "(()=>({audit:window.__audit,checks:window.__checks}))()",
+  "wait": 100
+ }
+]

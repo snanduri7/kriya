@@ -1,0 +1,439 @@
+{
+ "install": "ok",
+ "welcome@1536": "ok",
+ "welcome@1440": "ok",
+ "welcome@1360": "ok",
+ "welcome@1180": "ok",
+ "welcome@1100": "ok",
+ "open_dialog": "ok",
+ "dialog@1536": "ok",
+ "dialog@1440": "ok",
+ "dialog@1360": "ok",
+ "dialog@1180": "ok",
+ "dialog@1100": "ok",
+ "dialog_escape_and_reopen": "ok",
+ "refused_then_created": "ok",
+ "workspace@1536": "ok",
+ "workspace@1440": "ok",
+ "workspace@1360": "ok",
+ "workspace@1180": "ok",
+ "workspace@1100": "ok",
+ "readiness_content": "ok",
+ "settings@1536": "ok",
+ "settings@1440": "ok",
+ "settings@1360": "ok",
+ "settings@1180": "ok",
+ "settings@1100": "ok",
+ "open_big": 200,
+ "runs_filters@1536": "ok",
+ "runs_filters@1440": "ok",
+ "runs_filters@1360": "ok",
+ "runs_filters@1180": "ok",
+ "runs_filters@1100": "ok",
+ "results": {
+  "audit": [
+   {
+    "label": "welcome@1536",
+    "vw": 1536,
+    "vh": 998,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 28
+   },
+   {
+    "label": "welcome@1440",
+    "vw": 1440,
+    "vh": 960,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 28
+   },
+   {
+    "label": "welcome@1360",
+    "vw": 1360,
+    "vh": 900,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 28
+   },
+   {
+    "label": "welcome@1180",
+    "vw": 1180,
+    "vh": 860,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 28
+   },
+   {
+    "label": "welcome@1100",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 28
+   },
+   {
+    "label": "new-project-dialog@1536",
+    "vw": 1536,
+    "vh": 998,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 40
+   },
+   {
+    "label": "new-project-dialog@1440",
+    "vw": 1440,
+    "vh": 960,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 40
+   },
+   {
+    "label": "new-project-dialog@1360",
+    "vw": 1360,
+    "vh": 900,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 40
+   },
+   {
+    "label": "new-project-dialog@1180",
+    "vw": 1180,
+    "vh": 860,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 40
+   },
+   {
+    "label": "new-project-dialog@1100",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 40
+   },
+   {
+    "label": "new-project-error@1536",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 44
+   },
+   {
+    "label": "readiness@1536",
+    "vw": 1536,
+    "vh": 998,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 275
+   },
+   {
+    "label": "readiness@1440",
+    "vw": 1440,
+    "vh": 960,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 275
+   },
+   {
+    "label": "readiness@1360",
+    "vw": 1360,
+    "vh": 900,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 275
+   },
+   {
+    "label": "readiness@1180",
+    "vw": 1180,
+    "vh": 860,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 275
+   },
+   {
+    "label": "readiness@1100",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 275
+   },
+   {
+    "label": "settings@1536",
+    "vw": 1536,
+    "vh": 998,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 68
+   },
+   {
+    "label": "settings@1440",
+    "vw": 1440,
+    "vh": 960,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 68
+   },
+   {
+    "label": "settings@1360",
+    "vw": 1360,
+    "vh": 900,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 68
+   },
+   {
+    "label": "settings@1180",
+    "vw": 1180,
+    "vh": 860,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 68
+   },
+   {
+    "label": "settings@1100",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 68
+   },
+   {
+    "label": "runs-filters@1536",
+    "vw": 1536,
+    "vh": 998,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 727
+   },
+   {
+    "label": "runs-filters@1440",
+    "vw": 1440,
+    "vh": 960,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 727
+   },
+   {
+    "label": "runs-filters@1360",
+    "vw": 1360,
+    "vh": 900,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 727
+   },
+   {
+    "label": "runs-filters@1180",
+    "vw": 1180,
+    "vh": 860,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 717
+   },
+   {
+    "label": "runs-filters@1100",
+    "vw": 1100,
+    "vh": 820,
+    "hscroll": 0,
+    "clippedControls": [],
+    "namelessControls": 0,
+    "textClippedByHidden": [],
+    "nodes": 717
+   }
+  ],
+  "checks": [
+   {
+    "name": "welcome has New Project and Open Folder at 1536",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "welcome has New Project and Open Folder at 1440",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "welcome has New Project and Open Folder at 1360",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "welcome has New Project and Open Folder at 1180",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "welcome has New Project and Open Folder at 1100",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "dialog is modal",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "name field focused on open",
+    "ok": true,
+    "detail": "INPUT"
+   },
+   {
+    "name": "Create disabled with no name",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "Escape closes the dialog",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "invalid name refused with Kriya's code",
+    "ok": true,
+    "detail": "The project was not createdthe project name is not valid: it must not contain a slash, a colon or a control character (I"
+   },
+   {
+    "name": "dialog stays open after a refusal",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "project opened after Enter",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "dialog closed after create",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "readiness lists Git",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "readiness lists Model server",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "routing table has 7 roles",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "skills say automatic",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "no control to edit skills/tools",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "settings has no free-text field at 1536",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "settings has no free-text field at 1440",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "settings has no free-text field at 1360",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "settings has no free-text field at 1180",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "settings has no free-text field at 1100",
+    "ok": true,
+    "detail": null
+   },
+   {
+    "name": "filter shows a count at 1536",
+    "ok": true,
+    "detail": "0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.\nLoad more runs"
+   },
+   {
+    "name": "filter shows a count at 1440",
+    "ok": true,
+    "detail": "0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.\nLoad more runs"
+   },
+   {
+    "name": "filter shows a count at 1360",
+    "ok": true,
+    "detail": "0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.\nLoad more runs"
+   },
+   {
+    "name": "filter shows a count at 1180",
+    "ok": true,
+    "detail": "0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.\nLoad more runs"
+   },
+   {
+    "name": "filter shows a count at 1100",
+    "ok": true,
+    "detail": "0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.\nLoad more runs"
+   }
+  ]
+ }
+}
