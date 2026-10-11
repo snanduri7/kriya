@@ -17,7 +17,7 @@ async function reachReview(fixture: Record<string, unknown> = {}) {
   await screen.findByRole('navigation', { name: 'Destinations' });
   goTo('Workspace');
   fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-  await screen.findByText('fixture-model:7b');
+  await screen.findByRole('region', { name: 'Readiness' });
   fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
   const bar = await banner();
   for (let i = 0; i < 3; i += 1) act(() => mounted.host.exec!.advance());

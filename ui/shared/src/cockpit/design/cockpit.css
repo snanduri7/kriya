@@ -87,3 +87,13 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.ck-readiness { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--ck-line); border-radius: 6px; }
+.ck-readiness-head { margin-bottom: 4px; }
+.ck-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ck-check-label { display: inline-block; min-width: 190px; font-weight: 600; }
+.ck-setup { margin: 8px 0; border: 1px solid var(--ck-line); border-radius: 6px; padding: 4px 10px; }
+.ck-setup > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.ck-setup > summary:focus-visible { outline: 2px solid var(--ck-accent); outline-offset: 2px; }
+.ck-skills { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+.ck-table { width: 100%; border-collapse: collapse; } .ck-table th, .ck-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--ck-line); vertical-align: top; } .ck-table thead th { color: var(--ck-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }

@@ -124,7 +124,7 @@ describe('New Project from the welcome screen', () => {
     await screen.findByRole('navigation', { name: 'Destinations' });
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name: 'Workspace' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Do a thing' } });
-    await screen.findByText('fixture-model:7b');
+    await screen.findByRole('region', { name: 'Readiness' });
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
     await waitFor(() => expect(host.exec!.active()).toBe(true));
     // the toolbar menu is disabled while a run is active; the menu command (Cmd+N) still reaches the provider, which the host refuses

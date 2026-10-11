@@ -22,7 +22,7 @@ async function startRun(fixture: FixtureHostOptions = {}) {
   await screen.findByRole('navigation', { name: 'Destinations' });
   goTo('Workspace');
   fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-  await screen.findByText('fixture-model:7b');
+  await screen.findByRole('region', { name: 'Readiness' });
   fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
   return { ...mounted, bar: await banner() };
 }
@@ -249,7 +249,7 @@ describe('the other order of arrival: a LATE OLD answer never overwrites a NEWER
     await screen.findByRole('navigation', { name: 'Destinations' });
     goTo('Workspace');
     fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-    await screen.findByText('fixture-model:7b');
+    await screen.findByRole('region', { name: 'Readiness' });
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
     await banner();
     const held = host.hold((r) => r.operation === 'launch.status'); // the NEXT poll waits on this read

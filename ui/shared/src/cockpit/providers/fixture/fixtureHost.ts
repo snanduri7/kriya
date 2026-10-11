@@ -56,10 +56,12 @@ export interface FixtureHostOptions {
   projectParents?: readonly (string | null)[];
   /** Scripted refusals of the next project creations, in order (consumed one per attempt; none left = success). */
   projectRefusals?: readonly { code: string; message: string; reason?: string | null }[];
-  /** What `execution.context` reports (default 'full'). */
+  /** What `execution.context` reports (default 'full'), optionally per folder. */
   contextMode?: FixtureContextMode;
-  /** What `execution.model_probe` reports (default 'present'). */
+  contextModeByWorkspace?: Readonly<Record<string, FixtureContextMode>>;
+  /** What `execution.model_probe` reports (default 'present'), optionally per folder. */
   probeMode?: FixtureProbeMode;
+  probeModeByWorkspace?: Readonly<Record<string, FixtureProbeMode>>;
   /** The folders the scripted chooser returns, in order (null = the person cancels). Empty = every choice is a cancel. */
   choices?: readonly (string | null)[];
   /** Folders remembered from an earlier session (most recent first). */
@@ -92,6 +94,8 @@ export class FixtureHost implements HostAdapter {
   private readonly projectParents: (string | null)[];
   private projectRefusals: { code: string; message: string; reason?: string | null }[];
   private readonly contextMode: FixtureContextMode;
+  private readonly contextModeByWorkspace: Readonly<Record<string, FixtureContextMode>>;
+  private readonly probeModeByWorkspace: Readonly<Record<string, FixtureProbeMode>>;
   probeMode: FixtureProbeMode;
   /** Folders created through New Project in this session (empty plain folders, no runs). */
   readonly createdFolders = new Set<string>();
@@ -117,6 +121,8 @@ export class FixtureHost implements HostAdapter {
     this.projectRefusals = [...(options.projectRefusals ?? [])];
     this.contextMode = options.contextMode ?? 'full';
     this.probeMode = options.probeMode ?? 'present';
+    this.contextModeByWorkspace = options.contextModeByWorkspace ?? {};
+    this.probeModeByWorkspace = options.probeModeByWorkspace ?? {};
     this.recentList = [...(options.recent ?? [])];
     if (options.workspace !== undefined) this.settings.workspacePath = options.workspace;
     this.workspace = {
@@ -355,17 +361,18 @@ export class FixtureHost implements HostAdapter {
       case 'execution.context': {
         if (!this.folder(request.workspace)) return this.err('execution.context', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
         const name = request.workspace.slice(request.workspace.lastIndexOf('/') + 1);
-        const unavailable = this.contextMode === 'unavailable';
+        const mode = this.contextModeByWorkspace[request.workspace] ?? this.contextMode;
+        const unavailable = mode === 'unavailable';
         return this.env('execution.context', {
           workspace: { path: request.workspace, name, identity: 'ab'.repeat(32) }, available: !unavailable,
           unavailable_reason: unavailable ? { code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration (fixture)' } : null, authority_status: unavailable ? 'failed' : 'no_findings',
-          routing: unavailable ? [] : fixtureRouting(), skills: unavailable ? null : fixtureSkills(this.contextMode), tools: unavailable ? null : fixtureTools(this.contextMode),
+          routing: unavailable ? [] : fixtureRouting(), skills: unavailable ? null : fixtureSkills(mode), tools: unavailable ? null : fixtureTools(mode),
           egress: unavailable ? null : { policy: 'local_only', web_lookup_enabled: false },
         }, this.live, null);
       }
       case 'execution.model_probe': {
         if (!this.folder(request.workspace)) return this.err('execution.model_probe', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
-        const mode = this.probeMode;
+        const mode = this.probeModeByWorkspace[request.workspace] ?? this.probeMode;
         if (mode === 'unavailable') return this.env('execution.model_probe', { available: false, unavailable_reason: { code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration (fixture)' }, authority_status: 'failed', endpoints: [], roles: [] }, this.live, null);
         const state = mode === 'present' || mode === 'missing' ? 'reachable' : mode;
         const roleState = mode === 'present' ? 'model_present' : mode === 'missing' ? 'model_missing' : mode;
