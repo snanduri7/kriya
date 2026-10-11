@@ -135,3 +135,7 @@ Launch -> Open Folder -> Goal -> Start -> Observe worked on the packaged app (op
 2. GUI-LAUNCH-TRACE-LINK-001: wrong trace id recorded, so the cockpit showed `no run ... in snapshot` and `No evidence store` on every tab although the store was present and sealed.
 Not a defect: the banner said "Approval required" - that was true (a change approval was reached); the run only looked contradictory because of defect 1.
 The smoke has NOT been repeated after the fixes (needs the owner's go-ahead).
+
+## App icon 2026-10-11 (GUI-APP-ICON-001 closed)
+
+The owner chose logo concept B (agent loop). `ui/standalone/assets/Kriya.svg` is the source; `node make-icon.mjs` produces `assets/Kriya.icns` (transparent corners, all ten standard sizes) and `npm run package:mac` installs it. The packaged app verifies with no default-icon warning. Brand/trademark vetting is the owner's.
