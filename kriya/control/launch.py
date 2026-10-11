@@ -79,6 +79,7 @@ class LaunchSession:
         self.workspace = workspace
         self.launch_id = launch_id
         self._claimed = False
+        self._trace_run_id: Optional[str] = None
         self._record: Dict[str, Any] = {
             "schema": LAUNCH_SCHEMA, "kind": "kriya.launch", "launch_id": launch_id,
             "workspace": {"path": workspace, "identity": workspace_identity},
@@ -112,7 +113,9 @@ class LaunchSession:
 
     def note_approval_required(self, kind: str, reason: str, details: Dict[str, Any]) -> None:
         """A step that needs a human decision was reached. The desktop has no approval action (owner decision: never auto-approved), so the run stops;
-        this records WHICH decision and why, before the prompt finds no terminal. The first one is kept (it is the one that stopped the run)."""
+        this records WHICH decision and why. The CALLER then declines (returns False) without prompting, so the workflow stops cleanly with the human-rejected
+        outcome; a prompt with no terminal raises click.Abort, which the workflow counts as a failed attempt and RETRIES (MEASURED in the second live smoke).
+        The first one is kept (it is the one that stopped the run)."""
         if self._record.get("approval_required") is not None:
             return
         self._record["approval_required"] = {"kind": kind, "reason": reason[:400], "details": details, "noted_at": _now()}
@@ -134,6 +137,14 @@ class LaunchSession:
         except Exception as error:
             logger.error("Launch %s: declined decision not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
 
+    def note_trace_row(self, trace_run_id: str, run_events: Any) -> None:
+        """A traces.db row was written. It belongs to THIS launch only if its recorded ``evidence.attempt_store`` event names the launch's run id - the same
+        link the read side resolves (evidence.manifest from_trace). The workflow result's own ``run_id`` is not that id on every path (MEASURED: a checkpoint id)."""
+        for event in run_events if isinstance(run_events, list) else []:
+            details = event.get("details") if isinstance(event, dict) and event.get("kind") == "evidence.attempt_store" else None
+            if isinstance(details, dict) and details.get("run_id") == self.launch_id:
+                self._trace_run_id = trace_run_id
+
     def claim_run_id(self, workspace: str) -> Optional[str]:
         """The id the first top-level run in this launch's workspace must use (once)."""
         if self._claimed or workspace != self.workspace:
@@ -153,7 +164,7 @@ class LaunchSession:
             gaps = [g for g in (result.get("gap_report") or {}).get("gaps", []) if isinstance(g, dict)]
             self.note_approval_required("knowledge_gap_acknowledgement", "KnowledgeGuard found libraries Kriya has no verified information for; acknowledging the gap is a human decision",
                                         {"libraries": [str(g.get("library")) for g in gaps][:20]})
-        trace_id = result.get("run_id") if isinstance(result.get("run_id"), str) else None
+        trace_id = self._trace_run_id
         message = error or _text(result.get("error"))
         self._transition(PHASE_ENDED, ended={
             "at": _now(), "exit_code": exit_code, "workflow_status": _text(result.get("status")),
@@ -190,13 +201,26 @@ def claim_run_id(workspace: str) -> Optional[str]:
     return _ACTIVE.claim_run_id(workspace) if _ACTIVE is not None else None
 
 
-def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> None:
-    """Called by the interactive callbacks of `kriya generate` before they would prompt. A no-op outside a desktop launch. Never raises."""
+def note_approval_required(kind: str, reason: str, details: Dict[str, Any]) -> bool:
+    """Called by the interactive callbacks of `kriya generate` before they would prompt. Inside a desktop launch: record the decision and return True (the
+    caller then DECLINES without prompting - nothing is approved). Outside a launch: return False and change nothing. Never raises."""
     try:
-        if _ACTIVE is not None:
-            _ACTIVE.note_approval_required(kind, reason, details)
+        if _ACTIVE is None:
+            return False
+        _ACTIVE.note_approval_required(kind, reason, details)
+        return True
     except Exception as error:  # observational
         logger.error("Launch: approval requirement not recorded (%s: %s)", type(error).__name__, error)
+        return True
+
+
+def note_trace_row(trace_run_id: str, run_events: Any) -> None:
+    """Called by TraceLogger.log_run after a row is written. A no-op outside a desktop launch. Never raises."""
+    try:
+        if _ACTIVE is not None:
+            _ACTIVE.note_trace_row(trace_run_id, run_events)
+    except Exception as error:  # observational
+        logger.error("Launch: trace row not linked (%s: %s)", type(error).__name__, error)
 
 
 def decline_decision(kind: str, reason: str, details: Dict[str, Any]) -> bool:

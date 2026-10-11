@@ -126,3 +126,12 @@ BACKEND-FINAL-CLOSURE-005 stands: **4/12 GENUINE, solver NOT READY under the >= 
 The M8 report said Launch -> Open Folder passed. That was true only for launches carrying `KRIYA_UI_ALLOW_REAL_KRIYA=1`, which every test, capture and the live smoke set. A normal double-click launch has no such variable, so the packaged app used the fixture stand-in, whose script is not shipped, and Open Folder failed (`stdout was not JSON ... MODULE_NOT_FOUND`).
 Fix: a packaged app (`app.isPackaged`) is always real, or a typed error naming the Settings executable; development builds keep the gate. No security boundary changed (child environment, absolute-path rule, workspace gating untouched).
 Process lesson: the closure checklist now requires the packaged app to be launched the way a person launches it (no environment variables) before any Launch/Open Folder claim.
+
+## Second live smoke 2026-10-11 (packaged app, launched without any environment variable): two defects found and fixed
+
+Run `20261011T082817-c6a3ee50`, real planner/architect/developer calls, evidence sealed (178 records), git working. Evidence kept unchanged in `evidence/m8/live-smoke-2/` (PRE-FIX).
+Launch -> Open Folder -> Goal -> Start -> Observe worked on the packaged app (open 151 ms, Start acknowledged in 102 ms, polling 15-76 ms). Two defects in MY launch layer surfaced, neither visible to scripted runs:
+1. GUI-LAUNCH-APPROVAL-ABORT-001: the approval callback prompted with no terminal; `click.Abort` was counted as a failed attempt and retried. The run ended `quality_gates_exhausted` after 4 attempts instead of stopping at the approval. Fixed: a launch declines (workflow outcome human_rejected), nothing is approved.
+2. GUI-LAUNCH-TRACE-LINK-001: wrong trace id recorded, so the cockpit showed `no run ... in snapshot` and `No evidence store` on every tab although the store was present and sealed.
+Not a defect: the banner said "Approval required" - that was true (a change approval was reached); the run only looked contradictory because of defect 1.
+The smoke has NOT been repeated after the fixes (needs the owner's go-ahead).

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -258,7 +259,8 @@ def test_a_launch_runs_the_real_path_noninteractively_and_seals_its_record(ws, m
     assert record["phase"] == "ENDED" and [h["phase"] for h in record["history"]] == ["STARTING", "RUNNING", "ENDED"]
     assert record["workspace"] == {"path": canonical, "identity": workspace_identity(canonical)}
     assert record["run"]["run_id"] == LID and record["preflight"]["ready"] is True and record["options"] == {"knowledge_policy": "strict", "interactive": False}
-    assert record["ended"]["exit_code"] == 0 and record["ended"]["workflow_status"] == "success" and record["ended"]["trace_run_id"] == "ab12cd34"
+    assert record["ended"]["exit_code"] == 0 and record["ended"]["workflow_status"] == "success"
+    assert record["ended"]["trace_run_id"] is None, "no traces.db row linked to this launch was written, and the result's own run_id is never trusted as one"
     assert _last_json(result)["status"] == "success"
 
 
@@ -450,8 +452,40 @@ def test_a_decision_the_desktop_cannot_make_is_recorded_with_kriyas_reason_and_t
 
 
 def test_the_note_is_a_noop_outside_a_desktop_launch(ws):
-    launch_module.note_approval_required("change_approval", "x", {})  # no active session: nothing raised, nothing written
+    assert launch_module.note_approval_required("change_approval", "x", {}) is False  # no active session: nothing raised, nothing written, the caller may prompt
     assert not os.path.exists(os.path.join(canonical_workspace(str(ws)), ".kriya"))
+
+
+def test_inside_a_launch_the_approval_note_tells_the_caller_to_decline_instead_of_prompting(ws):
+    """MEASURED (second live smoke): the callback prompted, click.confirm found no terminal and raised Abort, the workflow counted it as a failed attempt and
+    retried three more times (quality_gates_exhausted). The note must report 'inside a launch' so the callback returns False (-> human_rejected)."""
+    _canonical, session = _open_session(ws)
+    try:
+        assert launch_module.note_approval_required("change_approval", "review policy", {"files": ["a"]}) is True
+    finally:
+        session.finish(1, None, None)
+
+
+def test_the_launch_links_the_trace_row_whose_recorded_store_names_its_run_not_the_results_run_id(ws, monkeypatch):
+    """MEASURED: the workflow result's run_id was a checkpoint id (20261011T082819-2cada8bc) while the traces.db row was 34ad53c0, so the cockpit selected a run
+    that does not exist. The link is the row's own evidence.attempt_store event, the same one the read side resolves."""
+    import kriya.cli as cli
+    from kriya.core.trace import TraceLogger
+
+    def fake(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
+        with begin_mutating_run(os.getcwd()) as context:
+            store = {"kind": "evidence.attempt_store", "details": {"run_id": context.run_id, "status": "OPEN"}}
+            other = {"kind": "evidence.attempt_store", "details": {"run_id": "20200101T000000-00000000", "status": "OPEN"}}
+            db = os.path.join(os.environ["KRIYA_STATE_DIR"], "traces.db")
+            TraceLogger(db).log_run(run_id="34ad53c0", goal="x", duration_sec=1.0, attempts=1, status="failure", files_modified=[], run_events=[store])
+            TraceLogger(db).log_run(run_id="aaaa1111", goal="x", duration_sec=1.0, attempts=1, status="failure", files_modified=[], run_events=[other])
+            output.result = {"status": "failure", "quality_gates_passed": False, "run_id": "20261011T082819-2cada8bc", "failure_category": "quality_gates_exhausted"}
+        sys.exit(1)
+
+    monkeypatch.setattr(cli, "_generate_impl", fake)
+    result = _launch(ws, monkeypatch)
+    assert result.exit_code == 1, result.output
+    assert load_launch_record(canonical_workspace(str(ws)), LID)["ended"]["trace_run_id"] == "34ad53c0"
 
 
 def test_a_strict_knowledge_gap_stop_is_recorded_as_an_acknowledgement_the_desktop_cannot_give(ws):
@@ -481,6 +515,9 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
         prompts = [body.index(marker) for marker in ("click.confirm(", "click.prompt(") if marker in body]
         assert call in body, f"{callback} must CALL {call}"
         assert body.index(call) < min(prompts), f"{callback} must record the decision BEFORE it can prompt"
+    approval = source[source.index("    def on_approval("):]
+    approval = approval[: approval.index("\n    def ", 10)]
+    assert re.search(r"if note_approval_required\(.*\):\s*\n\s*return False", approval), "on_approval must DECLINE inside a launch (a prompt with no terminal is a retried failure)"
     assert "True, KNOWLEDGE_POLICY" not in inspect.getsource(cli._launched_generate)
 
 

@@ -3146,7 +3146,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         from kriya.control.launch import (
             note_approval_required,  # GUI M7: recorded when a desktop launch reaches a human decision
         )
-        note_approval_required("change_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]})
+        if note_approval_required("change_approval", reason, {"files": [str(f.get("filepath", "")) for f in files][:50]}):
+            return False  # a desktop launch never approves and never prompts: declining stops the run cleanly (human_rejected)
         if yes:
             click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
             return True

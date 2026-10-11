@@ -1,5 +1,5 @@
 #!/bin/sh
-# M8.6: the ONE live GUI smoke. Usage: run-live-smoke.sh <output dir>
+# Launched with NO KRIYA_UI_ALLOW_REAL_KRIYA (GUI-APP-REAL-DEFAULT-001: the packaged app is real by default). M8.6 live GUI smoke. Usage: run-live-smoke.sh <output dir>
 # The PACKAGED Kriya.app, the real read process, the real `kriya generate` workflow and the already-configured local model (packaged defaults; no profile
 # or Ollama change). HOME is the operator's real HOME (qualification/authority stores are read from it) but KRIYA_STATE_DIR is a scratch directory, so
 # nothing is added to the owner's own run history. The project is a disposable folder outside every repository.
@@ -19,7 +19,7 @@ cat > "$BASE/data/kriya-ui-settings.json" <<JSON
 JSON
 echo "$BASE" > "$OUT/scratch-path.txt"
 cd "$UI"
-HOME="$HOME" KRIYA_STATE_DIR="$BASE/state" KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_UI_TRACE=1 \
+HOME="$HOME" KRIYA_STATE_DIR="$BASE/state" KRIYA_UI_TRACE=1 \
 KRIYA_UI_CAPTURE="$OUT" KRIYA_UI_CAPTURE_STEPS="$UI/capture-live.json" \
 KRIYA_UI_CAPTURE_CHOOSE="[\"$BASE/ws/hello-project\"]" \
   "$APP/Contents/MacOS/Kriya" --user-data-dir="$BASE/data" 2> "$OUT/trace.log" | tail -3

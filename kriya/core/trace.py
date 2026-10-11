@@ -158,6 +158,8 @@ class TraceLogger:
                 events_json, evidence_json, generation_metrics_json, failure_report_json, enforce_run_id
             ))
             conn.commit()
+        from kriya.control.launch import note_trace_row  # a desktop launch links its own row; a no-op otherwise
+        note_trace_row(run_id, run_events)
 
     def log_milestone_plan(
         self,
