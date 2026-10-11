@@ -197,6 +197,41 @@ class CodeIntelligenceService:
     def _by_name(self, name: str) -> List[Symbol]:
         return self.store.by_name(name, self._shadowed()) + [s for s in self._overlay_symbols() if s.name == name]
 
+    def _declared_members(self, type_symbol: Symbol, member: str) -> List[Symbol]:
+        """The members named ``member`` that ``type_symbol`` itself declares (overloads included)."""
+        key = f"{type_symbol.lookup_key}.{member}"
+        return self.store.by_lookup_key(key, self._shadowed()) + [s for s in self._overlay_symbols() if s.lookup_key == key]
+
+    def inherited_members(self, owner: str, member: str) -> List[Symbol]:
+        """PLAN-TARGET-GROUNDING-001: the declarations of ``member`` that the type(s) named ``owner`` INHERIT, found at the
+        nearest supertype level that declares it - empty when the owner declares ``member`` itself, when no supertype does,
+        or when ``owner`` names no type. STRUCTURAL: supertypes are the names a declaration writes after ``extends`` /
+        ``implements`` (type arguments removed) resolved by simple name; nothing is type-resolved, so an ambiguous simple
+        name contributes every type of that name. Bounded by MAX_INHERITANCE_DEPTH and a visited set (a cycle ends).
+        A goal saying ``Element.absUrl`` where only ``Node`` declares ``absUrl`` is the case it exists for."""
+        found: Dict[str, Symbol] = {}
+        for owner_type in (s for s in self.find_symbol(owner) if s.is_type):
+            if self._declared_members(owner_type, member):
+                continue
+            seen = {owner_type.symbol_id}
+            level = [owner_type]
+            for _depth in range(loc.MAX_INHERITANCE_DEPTH):
+                upper: List[Symbol] = []
+                for current in level:
+                    for written in (*current.extends, *current.implements):
+                        for supertype in (s for s in self._by_name(written.rsplit(".", 1)[-1]) if s.is_type):
+                            if supertype.symbol_id not in seen:
+                                seen.add(supertype.symbol_id)
+                                upper.append(supertype)
+                declared = [m for supertype in upper for m in self._declared_members(supertype, member)]
+                if declared:
+                    found.update({m.symbol_id: m for m in declared})
+                    break
+                level = upper
+                if not level:
+                    break
+        return sorted(found.values(), key=lambda s: s.symbol_id)[:loc.MAX_SIMPLE_MATCHES]
+
     def _resolve_path(self, mentioned: str) -> List[str]:
         mentioned = mentioned.replace("\\", "/")
         if os.path.isabs(mentioned):
@@ -396,6 +431,12 @@ class CodeIntelligenceService:
                             named_types[symbol.symbol_id] = symbol
                         continue
                     self._credit(evidence, meta, symbol, "qualified_symbol", weight)
+                    if symbol.parent_id:
+                        owners.add(symbol.lookup_key.rsplit(".", 1)[0])
+            if not matches and "." in name:
+                owner_name, member_name = name.rsplit(".", 1)
+                for symbol in self.inherited_members(owner_name, member_name):
+                    self._credit(evidence, meta, symbol, "inherited_member", loc.INHERITED_MEMBER)
                     if symbol.parent_id:
                         owners.add(symbol.lookup_key.rsplit(".", 1)[0])
         for mentioned in signals.paths:

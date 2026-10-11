@@ -57,6 +57,11 @@ CONSTRUCTION_SITE = OWNER_NAMED
 MAX_TYPE_MENTIONS = 200
 # A top hit at or above this score rests on exact evidence.
 EXACT_EVIDENCE = QUALIFIED_SUFFIX
+# A goal-stated ``Owner.member`` the owner does not declare but a supertype of it does (structural ``extends`` /
+# ``implements`` as written): the same statement as a qualified suffix match, resolved through inheritance.
+INHERITED_MEMBER = QUALIFIED_SUFFIX
+# How many supertype hops an inherited-member lookup follows (bounded; a cycle ends at the visited set).
+MAX_INHERITANCE_DEPTH = 8
 
 _EXTENSIONS = r"(?:java|py|xml|properties|ya?ml|kt|scala|groovy)"
 _PY_TRACE_RE = re.compile(r'File "([^"]+)", line (\d+)')

@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package, estimate_tokens
@@ -112,10 +112,37 @@ class LocalizationCandidate:
     signature: str
     score: float
     channels: Tuple[Tuple[str, float], ...]
+    # PLAN-TARGET-GROUNDING-001: how many same-named overloads this entry stands for (1 = not folded).
+    overloads: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"symbol_id": self.symbol_id, "path": self.path, "kind": self.kind, "lookup_key": self.lookup_key,
+        data = {"symbol_id": self.symbol_id, "path": self.path, "kind": self.kind, "lookup_key": self.lookup_key,
                 "score": self.score, "channels": [c for c, _ in self.channels]}
+        if self.overloads > 1:
+            data["overloads"] = self.overloads
+        return data
+
+
+# The Planner's map is built from a wider pool than it shows so that folding overloads (one entry per qualified name)
+# leaves LOCALIZATION_LIMIT distinct names: fifteen overloads of one name must not fill every slot.
+LOCALIZATION_FOLD_POOL = 4
+
+
+def fold_overloads(candidates: Sequence[LocalizationCandidate], limit: int = LOCALIZATION_LIMIT) -> List[LocalizationCandidate]:
+    """One candidate per qualified name (``lookup_key``), best-scoring overload first, carrying the overload count; the
+    order of first appearance (best first) is kept and the list is cut to ``limit``. Overloads of one name are the same
+    localization statement, not independent evidence."""
+    counts: Dict[str, int] = {}
+    for candidate in candidates:
+        counts[candidate.lookup_key] = counts.get(candidate.lookup_key, 0) + 1
+    folded: List[LocalizationCandidate] = []
+    seen = set()
+    for candidate in candidates:
+        if candidate.lookup_key in seen:
+            continue
+        seen.add(candidate.lookup_key)
+        folded.append(replace(candidate, overloads=counts[candidate.lookup_key]))
+    return folded[:limit]
 
 
 # Room for an annotated signature or a configuration entry's own values.
@@ -132,9 +159,10 @@ def render_localization_candidates(candidates: Sequence[LocalizationCandidate]) 
              "never write authority) ==="]
     for rank, candidate in enumerate(candidates, 1):
         signature = " ".join(candidate.signature.split())[:CANDIDATE_SIGNATURE_CHARS]
+        overload_note = f" (+{candidate.overloads - 1} overloads)" if candidate.overloads > 1 else ""
         lines.append(f"{rank}. [{candidate.kind}] {candidate.lookup_key} - {candidate.path}"
-                     f"{' - ' + signature if signature else ''} (via {', '.join(c for c, _ in candidate.channels)})"
-                     f" id={candidate.symbol_id}")
+                     f"{' - ' + signature if signature else ''}{overload_note} "
+                     f"(via {', '.join(c for c, _ in candidate.channels)}) id={candidate.symbol_id}")
     lines.append("A subtask that changes one of these may name it in mutation_targets: "
                  '[{"target_id": <id exactly as listed>, "file": <its path>, "action": "modify", '
                  '"requirement_ids": [...]}]; that file must then be in the subtask\'s planned_files. '
@@ -533,7 +561,8 @@ async def localization_candidates(cfg: Any, workspace_path: str, text: str,
                     semantic = store.query(query_emb, top_k=loc.SEMANTIC_CHUNKS, fingerprint=fingerprint)
             finally:
                 store.close()
-        return fused_localization(service.current_view(), text, semantic, limit)
+        return fold_overloads(
+            fused_localization(service.current_view(), text, semantic, limit * LOCALIZATION_FOLD_POOL), limit)
     finally:
         service.close()
 
