@@ -60,6 +60,14 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _workspace_describe(cfg, request, request_id)
         if operation in ("execution.preflight", "launch.status"):
             return _execution(cfg, operation, request, request_id)
+        if operation == "workspace.create":
+            from kriya.kup import project_ops
+
+            return project_ops.create(cfg, request, request_id)
+        if operation in ("execution.context", "execution.model_probe"):
+            from kriya.kup import context_ops
+
+            return (context_ops.context if operation == "execution.context" else context_ops.model_probe)(cfg, request, request_id)
         if operation in ("evidence.manifest", "evidence.verify", "evidence.records", "evidence.change_content", "evidence.call_content"):
             return _evidence(cfg, operation, request, request_id)
         return error_envelope(operation or "unknown", request_id, policy.INVALID_REQUEST, f"unknown operation {operation!r}")

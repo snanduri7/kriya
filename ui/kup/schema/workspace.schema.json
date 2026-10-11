@@ -164,6 +164,118 @@
       },
       "additionalProperties": true
     },
+    "WorkspaceCreate": {
+      "description": "data of `workspace.create` (end-user experience): ONE new empty project folder was created by Kriya. Nothing else was written.",
+      "type": "object",
+      "required": ["workspace", "name", "parent", "identity", "created", "git_initialized", "note"],
+      "properties": {
+        "workspace": { "type": "string" }, "name": { "type": "string" }, "parent": { "type": "string" }, "identity": { "type": "string" },
+        "created": { "const": true }, "git_initialized": { "const": false }, "note": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "ExecutionContext": {
+      "description": "data of `execution.context`: the Skills, tools and per-role model routing a run in this folder would have, from the resolved configuration and files; starts no process and touches no network. Rule text, commands, arguments, environment and credentials are never included.",
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "routing", "skills", "tools", "egress"],
+      "properties": {
+        "workspace": { "type": "object", "required": ["path", "name", "identity"], "properties": { "path": { "type": "string" }, "name": { "type": "string" }, "identity": { "type": "string" } }, "additionalProperties": true },
+        "available": { "type": "boolean" },
+        "unavailable_reason": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true }] },
+        "authority_status": { "type": "string" },
+        "routing": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "provider", "model", "endpoint", "context_window", "source", "fallback"],
+            "properties": {
+              "role": { "type": "string" }, "provider": { "type": "string" }, "model": { "type": "string" }, "endpoint": { "type": "string" },
+              "context_window": { "type": "integer" }, "source": { "enum": ["default", "override"] }, "fallback": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": true
+          }
+        },
+        "skills": {
+          "oneOf": [{ "type": "null" }, {
+            "type": "object",
+            "required": ["items", "total", "truncated", "selection", "selection_note", "management"],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "description", "category", "tags", "supported_versions", "verified", "origin", "rule_count", "staged_rule_count"],
+                  "properties": {
+                    "name": { "type": "string" }, "description": { "type": "string" }, "category": { "type": "string" }, "tags": { "type": "array", "items": { "type": "string" } },
+                    "supported_versions": { "type": "string" }, "verified": { "type": "boolean" },
+                    "verified_context": { "oneOf": [{ "type": "null" }, { "type": "string" }] }, "verified_at": { "oneOf": [{ "type": "null" }, { "type": "string" }] },
+                    "gap_acknowledged": { "type": "boolean" }, "origin": { "enum": ["kriya_install", "workspace_or_configured"] },
+                    "rule_count": { "type": "integer" }, "has_instructions": { "type": "boolean" }, "example_count": { "type": "integer" }, "staged_rule_count": { "type": "integer" }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "total": { "type": "integer" }, "truncated": { "type": "boolean" }, "selection": { "const": "automatic" }, "selection_note": { "type": "string" }, "management": { "type": "string" }
+            },
+            "additionalProperties": true
+          }]
+        },
+        "tools": {
+          "oneOf": [{ "type": "null" }, {
+            "type": "object",
+            "required": ["plugins", "mcp_servers", "health", "management", "health_note"],
+            "properties": {
+              "plugins": { "type": "object", "required": ["directory", "enabled"], "properties": { "directory": { "type": "string" }, "enabled": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": true },
+              "mcp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "declared_capabilities"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "declared_capabilities": { "type": "object", "required": ["workspace_read", "workspace_write", "network"], "properties": { "workspace_read": { "type": "boolean" }, "workspace_write": { "type": "boolean" }, "network": { "type": "string" } }, "additionalProperties": true }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "health": { "const": "not_checked" }, "management": { "type": "string" }, "health_note": { "type": "string" }
+            },
+            "additionalProperties": true
+          }]
+        },
+        "egress": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["policy", "web_lookup_enabled"], "properties": { "policy": { "type": "string" }, "web_lookup_enabled": { "type": "boolean" } }, "additionalProperties": true }] }
+      },
+      "additionalProperties": true
+    },
+    "ExecutionModelProbe": {
+      "description": "data of `execution.model_probe`: one bounded local GET /models per distinct endpoint, made now.",
+      "type": "object",
+      "required": ["available", "unavailable_reason", "authority_status", "endpoints", "roles"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "unavailable_reason": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true }] },
+        "authority_status": { "type": "string" },
+        "egress_policy": { "type": "string" },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["endpoint", "state", "reason", "model_count"],
+            "properties": { "endpoint": { "type": "string" }, "state": { "enum": ["reachable", "unreachable", "error", "unreadable", "not_probed"] }, "reason": { "oneOf": [{ "type": "null" }, { "type": "string" }] }, "model_count": { "type": "integer" } },
+            "additionalProperties": true
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["for", "model", "endpoint", "available", "state"],
+            "properties": { "for": { "type": "string" }, "model": { "type": "string" }, "endpoint": { "type": "string" }, "available": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] }, "state": { "enum": ["model_present", "model_missing", "unreachable", "error", "unreadable", "not_probed"] } },
+            "additionalProperties": true
+          }
+        },
+        "timeout_seconds": { "type": "number" }, "note": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "LaunchStatus": {
       "description": "data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.",
       "type": "object",

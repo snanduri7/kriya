@@ -15,7 +15,7 @@ public class ExecutionPreflightState {
     private String cockpitDirectory;
     private String directory;
     private Boolean observableByCockpit;
-    private Source source;
+    private StateSource source;
 
     @JsonProperty("cockpit_directory")
     public String getCockpitDirectory() { return cockpitDirectory; }
@@ -33,7 +33,7 @@ public class ExecutionPreflightState {
     public void setObservableByCockpit(Boolean value) { this.observableByCockpit = value; }
 
     @JsonProperty("source")
-    public Source getSource() { return source; }
+    public StateSource getSource() { return source; }
     @JsonProperty("source")
-    public void setSource(Source value) { this.source = value; }
+    public void setSource(StateSource value) { this.source = value; }
 }

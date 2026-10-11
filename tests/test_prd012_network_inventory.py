@@ -39,6 +39,9 @@ INVENTORY = {
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
     ("kriya/tools/service_runtime.py", "urlopen"): (
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
+    ("kriya/kup/context_ops.py", "urlopen"): (
+        1, "autonomy.egress_policy: execution.model_probe makes ONE bounded GET <base_url>/models (3 s, 1 MiB cap) per distinct endpoint, the same probe `kriya doctor` "
+           "makes, and REFUSES (never attempts, never sends the key to) a non-local endpoint under local_only; endpoints are SEC-009 config, credentials are never returned"),
     ("kriya/production_doctor.py", "urlopen"): (
         1, "doctor probe of the configured llm/embedding endpoints (SEC-009 config)"),
     ("kriya/core/model_runtime.py", "urlopen"): (

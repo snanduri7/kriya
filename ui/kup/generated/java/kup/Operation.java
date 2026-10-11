@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
+    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
@@ -17,6 +17,8 @@ public enum Operation {
             case EVIDENCE_MANIFEST: return "evidence.manifest";
             case EVIDENCE_RECORDS: return "evidence.records";
             case EVIDENCE_VERIFY: return "evidence.verify";
+            case EXECUTION_CONTEXT: return "execution.context";
+            case EXECUTION_MODEL_PROBE: return "execution.model_probe";
             case EXECUTION_PREFLIGHT: return "execution.preflight";
             case HISTORY_DETAIL: return "history.detail";
             case HISTORY_LIST: return "history.list";
@@ -26,6 +28,7 @@ public enum Operation {
             case SNAPSHOT_LIST: return "snapshot.list";
             case SNAPSHOT_PRUNE: return "snapshot.prune";
             case SNAPSHOT_VERIFY: return "snapshot.verify";
+            case WORKSPACE_CREATE: return "workspace.create";
             case WORKSPACE_DESCRIBE: return "workspace.describe";
             case WORKSPACE_STATUS: return "workspace.status";
         }
@@ -40,6 +43,8 @@ public enum Operation {
         if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;
         if (value.equals("evidence.records")) return EVIDENCE_RECORDS;
         if (value.equals("evidence.verify")) return EVIDENCE_VERIFY;
+        if (value.equals("execution.context")) return EXECUTION_CONTEXT;
+        if (value.equals("execution.model_probe")) return EXECUTION_MODEL_PROBE;
         if (value.equals("execution.preflight")) return EXECUTION_PREFLIGHT;
         if (value.equals("history.detail")) return HISTORY_DETAIL;
         if (value.equals("history.list")) return HISTORY_LIST;
@@ -49,6 +54,7 @@ public enum Operation {
         if (value.equals("snapshot.list")) return SNAPSHOT_LIST;
         if (value.equals("snapshot.prune")) return SNAPSHOT_PRUNE;
         if (value.equals("snapshot.verify")) return SNAPSHOT_VERIFY;
+        if (value.equals("workspace.create")) return WORKSPACE_CREATE;
         if (value.equals("workspace.describe")) return WORKSPACE_DESCRIBE;
         if (value.equals("workspace.status")) return WORKSPACE_STATUS;
         throw new IOException("Cannot deserialize Operation");

@@ -20,6 +20,8 @@ public class KupRequest {
     private String cursor;
     private Long limit;
     private String runid;
+    private String name;
+    private String parent;
     private String launchid;
     private Boolean fromTrace;
     private Long attempt;
@@ -76,6 +78,23 @@ public class KupRequest {
     public String getRunid() { return runid; }
     @JsonProperty("run_id")
     public void setRunid(String value) { this.runid = value; }
+
+    /**
+     * ONE folder name (validated again by Kriya): no separator, no colon, no control character,
+     * no leading dot.
+     */
+    @JsonProperty("name")
+    public String getName() { return name; }
+    @JsonProperty("name")
+    public void setName(String value) { this.name = value; }
+
+    /**
+     * Absolute path without control characters.
+     */
+    @JsonProperty("parent")
+    public String getParent() { return parent; }
+    @JsonProperty("parent")
+    public void setParent(String value) { this.parent = value; }
 
     /**
      * The shape of a Kriya run id; the launch id IS the run id.

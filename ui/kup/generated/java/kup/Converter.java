@@ -28,6 +28,9 @@
 //     WorkspaceDescribe data = Converter.WorkspaceDescribeFromJsonString(jsonString);
 //     ExecutionPreflight data = Converter.ExecutionPreflightFromJsonString(jsonString);
 //     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
+//     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
+//     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
+//     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
 //     Consistency data = Converter.ConsistencyFromJsonString(jsonString);
 //     SnapshotSummary data = Converter.SnapshotSummaryFromJsonString(jsonString);
 //     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
@@ -234,6 +237,30 @@ public class Converter {
 
     public static String LaunchStatusToJsonString(LaunchStatus obj) throws JsonProcessingException {
         return getLaunchStatusObjectWriter().writeValueAsString(obj);
+    }
+
+    public static WorkspaceCreate WorkspaceCreateFromJsonString(String json) throws IOException {
+        return getWorkspaceCreateObjectReader().readValue(json);
+    }
+
+    public static String WorkspaceCreateToJsonString(WorkspaceCreate obj) throws JsonProcessingException {
+        return getWorkspaceCreateObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ExecutionContext ExecutionContextFromJsonString(String json) throws IOException {
+        return getExecutionContextObjectReader().readValue(json);
+    }
+
+    public static String ExecutionContextToJsonString(ExecutionContext obj) throws JsonProcessingException {
+        return getExecutionContextObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ExecutionModelProbe ExecutionModelProbeFromJsonString(String json) throws IOException {
+        return getExecutionModelProbeObjectReader().readValue(json);
+    }
+
+    public static String ExecutionModelProbeToJsonString(ExecutionModelProbe obj) throws JsonProcessingException {
+        return getExecutionModelProbeObjectWriter().writeValueAsString(obj);
     }
 
     public static Consistency ConsistencyFromJsonString(String json) throws IOException {
@@ -906,6 +933,99 @@ public class Converter {
     private static ObjectWriter getLaunchStatusObjectWriter() {
         if (LaunchStatusWriter == null) instantiateLaunchStatusMapper();
         return LaunchStatusWriter;
+    }
+
+    private static ObjectReader WorkspaceCreateReader;
+    private static ObjectWriter WorkspaceCreateWriter;
+
+    private static void instantiateWorkspaceCreateMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        WorkspaceCreateReader = mapper.readerFor(WorkspaceCreate.class);
+        WorkspaceCreateWriter = mapper.writerFor(WorkspaceCreate.class);
+    }
+
+    private static ObjectReader getWorkspaceCreateObjectReader() {
+        if (WorkspaceCreateReader == null) instantiateWorkspaceCreateMapper();
+        return WorkspaceCreateReader;
+    }
+
+    private static ObjectWriter getWorkspaceCreateObjectWriter() {
+        if (WorkspaceCreateWriter == null) instantiateWorkspaceCreateMapper();
+        return WorkspaceCreateWriter;
+    }
+
+    private static ObjectReader ExecutionContextReader;
+    private static ObjectWriter ExecutionContextWriter;
+
+    private static void instantiateExecutionContextMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ExecutionContextReader = mapper.readerFor(ExecutionContext.class);
+        ExecutionContextWriter = mapper.writerFor(ExecutionContext.class);
+    }
+
+    private static ObjectReader getExecutionContextObjectReader() {
+        if (ExecutionContextReader == null) instantiateExecutionContextMapper();
+        return ExecutionContextReader;
+    }
+
+    private static ObjectWriter getExecutionContextObjectWriter() {
+        if (ExecutionContextWriter == null) instantiateExecutionContextMapper();
+        return ExecutionContextWriter;
+    }
+
+    private static ObjectReader ExecutionModelProbeReader;
+    private static ObjectWriter ExecutionModelProbeWriter;
+
+    private static void instantiateExecutionModelProbeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ExecutionModelProbeReader = mapper.readerFor(ExecutionModelProbe.class);
+        ExecutionModelProbeWriter = mapper.writerFor(ExecutionModelProbe.class);
+    }
+
+    private static ObjectReader getExecutionModelProbeObjectReader() {
+        if (ExecutionModelProbeReader == null) instantiateExecutionModelProbeMapper();
+        return ExecutionModelProbeReader;
+    }
+
+    private static ObjectWriter getExecutionModelProbeObjectWriter() {
+        if (ExecutionModelProbeWriter == null) instantiateExecutionModelProbeMapper();
+        return ExecutionModelProbeWriter;
     }
 
     private static ObjectReader ConsistencyReader;

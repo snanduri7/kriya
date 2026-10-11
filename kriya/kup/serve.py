@@ -50,6 +50,9 @@ ARGUMENTS: Dict[str, frozenset] = {
     "workspace.describe": frozenset({"workspace"}),
     "execution.preflight": frozenset({"workspace"}),
     "launch.status": frozenset({"workspace", "launch_id"}),
+    "workspace.create": frozenset({"parent", "name"}),
+    "execution.context": frozenset({"workspace"}),
+    "execution.model_probe": frozenset({"workspace"}),
     "evidence.manifest": frozenset({"run_id", "snapshot_id", "from_trace"}),
     "evidence.verify": frozenset({"run_id"}),
     "evidence.records": _EVIDENCE_RECORDS,
@@ -119,7 +122,7 @@ def answer(request: Dict[str, Any], config_path: Optional[str], trust_file: Opti
 
     operation, request_id = request["operation"], request["id"]
     cfg = None
-    if operation != "workspace.status":  # the one operation that, like `kriya runs status`, loads no configuration
+    if operation not in ("workspace.status", "workspace.create"):  # operations that, like `kriya runs status`, load no configuration (creating a folder must work when a configuration is broken)
         try:
             cfg = load_config(config_path, trust_file=trust_file)  # per request: SECURITY_AUTHORITY is never read once and kept
         except Exception as error:  # noqa: BLE001 - any load failure is the typed D-7 envelope, as the one-shot command does

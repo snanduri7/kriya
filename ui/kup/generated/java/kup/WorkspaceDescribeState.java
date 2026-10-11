@@ -13,7 +13,7 @@ public class WorkspaceDescribeState {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private String directory;
-    private Source source;
+    private StateSource source;
     private boolean traceDatabasePresent;
 
     @JsonProperty("directory")
@@ -22,9 +22,9 @@ public class WorkspaceDescribeState {
     public void setDirectory(String value) { this.directory = value; }
 
     @JsonProperty("source")
-    public Source getSource() { return source; }
+    public StateSource getSource() { return source; }
     @JsonProperty("source")
-    public void setSource(Source value) { this.source = value; }
+    public void setSource(StateSource value) { this.source = value; }
 
     @JsonProperty("trace_database_present")
     public boolean getTraceDatabasePresent() { return traceDatabasePresent; }

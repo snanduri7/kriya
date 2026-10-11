@@ -37,6 +37,9 @@ OPERATIONS = (
     "workspace.describe",  # read-only facts Kriya reports about a folder the desktop host picked (GUI M5)
     "execution.preflight",  # what a run in a folder would be: configuration, state, models, authority, observability (GUI M6)
     "launch.status",  # one desktop launch read back from durable records (GUI M6)
+    "workspace.create",  # create ONE new empty project folder (end-user experience); the only operation that makes a user-visible folder
+    "execution.context",  # Skills, tools and per-role model routing a run in a folder would have; configuration/file-derived, starts nothing
+    "execution.model_probe",  # one bounded local GET /models per distinct endpoint: is the model server answering and does it serve the model
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",

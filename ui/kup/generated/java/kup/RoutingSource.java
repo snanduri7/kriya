@@ -5,24 +5,22 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Source {
-    CONFIG, DEFAULT, ENV;
+public enum RoutingSource {
+    DEFAULT, OVERRIDE;
 
     @JsonValue
     public String toValue() {
         switch (this) {
-            case CONFIG: return "config";
             case DEFAULT: return "default";
-            case ENV: return "env";
+            case OVERRIDE: return "override";
         }
         return null;
     }
 
     @JsonCreator
-    public static Source forValue(String value) throws IOException {
-        if (value.equals("config")) return CONFIG;
+    public static RoutingSource forValue(String value) throws IOException {
         if (value.equals("default")) return DEFAULT;
-        if (value.equals("env")) return ENV;
-        throw new IOException("Cannot deserialize Source");
+        if (value.equals("override")) return OVERRIDE;
+        throw new IOException("Cannot deserialize RoutingSource");
     }
 }

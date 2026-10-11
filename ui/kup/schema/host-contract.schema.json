@@ -239,6 +239,28 @@
         },
         {
           "type": "object",
+          "required": ["operation", "parent", "name"],
+          "properties": {
+            "operation": { "const": "workspace.create" },
+            "parent": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." },
+            "name": { "type": "string", "minLength": 1, "maxLength": 100, "description": "ONE folder name (validated again by Kriya): no separator, no colon, no control character, no leading dot." }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "execution.context" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "execution.model_probe" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "required": [
             "operation",
             "workspace",

@@ -52,6 +52,9 @@ export interface Envelope {
     | 'workspace.describe'
     | 'execution.preflight'
     | 'launch.status'
+    | 'workspace.create'
+    | 'execution.context'
+    | 'execution.model_probe'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -753,6 +756,136 @@ export interface LaunchStatus {
   [k: string]: unknown;
 }
 
+// ---- WorkspaceCreate (workspace.schema.json#/$defs/WorkspaceCreate) ----
+/**
+ * data of `workspace.create` (end-user experience): ONE new empty project folder was created by Kriya. Nothing else was written.
+ */
+export interface WorkspaceCreate {
+  workspace: string;
+  name: string;
+  parent: string;
+  identity: string;
+  created: true;
+  git_initialized: false;
+  note: string;
+  [k: string]: unknown;
+}
+
+// ---- ExecutionContext (workspace.schema.json#/$defs/ExecutionContext) ----
+/**
+ * data of `execution.context`: the Skills, tools and per-role model routing a run in this folder would have, from the resolved configuration and files; starts no process and touches no network. Rule text, commands, arguments, environment and credentials are never included.
+ */
+export interface ExecutionContext {
+  workspace: {
+    path: string;
+    name: string;
+    identity: string;
+    [k: string]: unknown;
+  };
+  available: boolean;
+  unavailable_reason: null | {
+    code: string;
+    message: string;
+    [k: string]: unknown;
+  };
+  authority_status: string;
+  routing: {
+    role: string;
+    provider: string;
+    model: string;
+    endpoint: string;
+    context_window: number;
+    source: 'default' | 'override';
+    fallback: string[];
+    [k: string]: unknown;
+  }[];
+  skills: null | {
+    items: {
+      name: string;
+      description: string;
+      category: string;
+      tags: string[];
+      supported_versions: string;
+      verified: boolean;
+      verified_context?: null | string;
+      verified_at?: null | string;
+      gap_acknowledged?: boolean;
+      origin: 'kriya_install' | 'workspace_or_configured';
+      rule_count: number;
+      has_instructions?: boolean;
+      example_count?: number;
+      staged_rule_count: number;
+      [k: string]: unknown;
+    }[];
+    total: number;
+    truncated: boolean;
+    selection: 'automatic';
+    selection_note: string;
+    management: string;
+    [k: string]: unknown;
+  };
+  tools: null | {
+    plugins: {
+      directory: string;
+      enabled: string[];
+      [k: string]: unknown;
+    };
+    mcp_servers: {
+      name: string;
+      declared_capabilities: {
+        workspace_read: boolean;
+        workspace_write: boolean;
+        network: string;
+        [k: string]: unknown;
+      };
+      [k: string]: unknown;
+    }[];
+    health: 'not_checked';
+    management: string;
+    health_note: string;
+    [k: string]: unknown;
+  };
+  egress: null | {
+    policy: string;
+    web_lookup_enabled: boolean;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+// ---- ExecutionModelProbe (workspace.schema.json#/$defs/ExecutionModelProbe) ----
+/**
+ * data of `execution.model_probe`: one bounded local GET /models per distinct endpoint, made now.
+ */
+export interface ExecutionModelProbe {
+  available: boolean;
+  unavailable_reason: null | {
+    code: string;
+    message: string;
+    [k: string]: unknown;
+  };
+  authority_status: string;
+  egress_policy?: string;
+  endpoints: {
+    endpoint: string;
+    state: 'reachable' | 'unreachable' | 'error' | 'unreadable' | 'not_probed';
+    reason: null | string;
+    model_count: number;
+    [k: string]: unknown;
+  }[];
+  roles: {
+    for: string;
+    model: string;
+    endpoint: string;
+    available: null | boolean;
+    state: 'model_present' | 'model_missing' | 'unreachable' | 'error' | 'unreadable' | 'not_probed';
+    [k: string]: unknown;
+  }[];
+  timeout_seconds?: number;
+  note?: string;
+  [k: string]: unknown;
+}
+
 // ---- Consistency (common.schema.json#/$defs/Consistency) ----
 /**
  * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed attempt-evidence store whose chain, every referenced blob and seal were verified in the same invocation, for the head_digest reported; never returned for an unsealed or failing store.
@@ -1075,6 +1208,31 @@ export type KupRequest =
     }
   | {
       operation: 'execution.preflight';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'workspace.create';
+      /**
+       * Absolute path without control characters.
+       */
+      parent: string;
+      /**
+       * ONE folder name (validated again by Kriya): no separator, no colon, no control character, no leading dot.
+       */
+      name: string;
+    }
+  | {
+      operation: 'execution.context';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'execution.model_probe';
       /**
        * Absolute path without control characters.
        */
