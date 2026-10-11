@@ -120,3 +120,9 @@ BACKEND-FINAL-CLOSURE-005 stands: **4/12 GENUINE, solver NOT READY under the >= 
 1. **Run `sudo xcodebuild -license`** (accept once) so `/usr/bin/git` works; the cockpit's preflight then clears. Or decide on `GUI-EXEC-GIT-SHIM-001`'s PATH alternative.
 2. **Native dialog check:** launch `ui/standalone/out/Kriya.app`; File > Open Folder... (and Cmd+O) must show the macOS folder chooser; Cancel must leave the current workspace unchanged; choosing a disposable folder must open it (its name appears in the toolbar).
 3. Supply an approved icon (`ui/standalone/assets/Kriya.icns`) when one exists.
+
+## Correction 2026-10-11: GUI-APP-REAL-DEFAULT-001 (found by the owner)
+
+The M8 report said Launch -> Open Folder passed. That was true only for launches carrying `KRIYA_UI_ALLOW_REAL_KRIYA=1`, which every test, capture and the live smoke set. A normal double-click launch has no such variable, so the packaged app used the fixture stand-in, whose script is not shipped, and Open Folder failed (`stdout was not JSON ... MODULE_NOT_FOUND`).
+Fix: a packaged app (`app.isPackaged`) is always real, or a typed error naming the Settings executable; development builds keep the gate. No security boundary changed (child environment, absolute-path rule, workspace gating untouched).
+Process lesson: the closure checklist now requires the packaged app to be launched the way a person launches it (no environment variables) before any Launch/Open Folder claim.

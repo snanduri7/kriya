@@ -1,8 +1,9 @@
 /**
  * Electron main process (gate A-1). The ONLY process that spawns anything, and only the P-25 grammar through
  * kriya_process.ts. Reads no Kriya state, opens no listener, loads only the local renderer bundle.
- * D-9: unless KRIYA_UI_ALLOW_REAL_KRIYA=1 is set AND a kriya executable is configured, every KUP query goes to the
- * fixture stand-in (fake-kriya/fake_kriya.mjs). Remove that gate only after the owner lifts matrix protection.
+ * D-9 (development builds): unless KRIYA_UI_ALLOW_REAL_KRIYA=1 is set AND a kriya executable is configured, every KUP query goes to the
+ * fixture stand-in (fake-kriya/fake_kriya.mjs). A PACKAGED app has no stand-in and no such gate: it is real, or a typed error naming the setting
+ * (GUI-APP-REAL-DEFAULT-001: a double-click launch carries no environment variable).
  * GUI-F-A1: that decision is made ONCE (host_mode.ts) and consulted by both the hostInfo and the query handler, so
  * the trust strip never shows a host state the queries do not use; a configured executable that does not exist is
  * a typed HOST_ERROR on every call (like an invalid configuration directory, F-5), never a silent fixture answer.
@@ -87,7 +88,7 @@ function configDirectory() { return resolveConfigDirectory(settings.get('configD
 async function kupQuery(request: KupRequest): Promise<unknown> {
   const refused = workspaces.refuse(request);
   if (refused) return errorEnvelope(request.operation, 'INVALID_REQUEST', refused);
-  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync, app.isPackaged);
   if (host.mode !== 'real') return errorEnvelope(request.operation, 'HOST_ERROR', 'kriya not launched: no real Kriya executable is configured');
   const dir = configDirectory();
   if (!dir.ok) return errorEnvelope(request.operation, 'HOST_ERROR', `kriya not launched: ${dir.message}`);
@@ -99,7 +100,7 @@ async function kupQuery(request: KupRequest): Promise<unknown> {
 
 /** The executable and fixed child environment for an EXECUTION process (null = fixture stand-in: no execution backend). */
 function prepareExecution() {
-  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+  const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync, app.isPackaged);
   if (host.mode === 'fixture') return null;
   if (host.mode === 'error') return { ok: false as const, message: host.message };
   const childEnv = buildKriyaChildEnv(process.env);
@@ -116,7 +117,7 @@ function mintLaunchId(): string {
 function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.hostInfo, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
-    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync, app.isPackaged);
     const dir = configDirectory();
     return { kind: 'electron', hostVersion: HOST_VERSION, fixtureMode: isFixtureMode(host), configDirectory: dir.ok ? dir.directory : null, configDirectorySource: dir.ok ? dir.source : 'invalid', configDirectoryProblem: dir.ok ? null : dir.message };
   });
@@ -130,7 +131,7 @@ function registerIpc() {
     const argv = buildKriyaArgv(v.value);
     // GUI-F-A1: the same decision hostInfo reports; a configured executable that does not exist is refused here,
     // never answered by the stand-in.
-    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync);
+    const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync, app.isPackaged);
     if (host.mode === 'error') return errorEnvelope(v.value.operation, 'HOST_ERROR', `kriya not launched: ${host.message}`);
     // F-5: the child's working directory is the validated configuration directory, in BOTH modes; a missing or invalid
     // one is a typed refusal, never a fallback to Electron's own launch directory.

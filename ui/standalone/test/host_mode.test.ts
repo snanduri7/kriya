@@ -51,12 +51,30 @@ describe('resolveHostMode: one rule for hostInfo and query', () => {
 describe('main.ts consults the one decision for BOTH handlers (trust strip == query behaviour)', () => {
   const mainTs = readFileSync(join(__dirname, '..', 'src', 'main', 'main.ts'), 'utf8');
   it('hostInfo and query each call resolveHostMode, and no handler re-derives real mode from the setting alone', () => {
-    expect((mainTs.match(/resolveHostMode\(ALLOW_REAL, settings\.get\('kriyaExecutable'\), existsSync\)/g) ?? []).length).toBe(4); // hostInfo, the renderer's query, the host's own preflight ask (kupQuery) and the execution launch (prepareExecution)
+    expect((mainTs.match(/resolveHostMode\(ALLOW_REAL, settings\.get\('kriyaExecutable'\), existsSync, app\.isPackaged\)/g) ?? []).length).toBe(4); // hostInfo, the renderer's query, the host's own preflight ask (kupQuery) and the execution launch (prepareExecution)
     expect(mainTs).toContain("fixtureMode: isFixtureMode(");
     expect(mainTs).not.toMatch(/!!settings\.get\('kriyaExecutable'\)/);
     expect(mainTs).not.toMatch(/ALLOW_REAL && configured/);
   });
   it('an error mode is a typed HOST_ERROR before any child is spawned', () => {
     expect(mainTs).toMatch(/host\.mode === 'error'\) return errorEnvelope\(v\.value\.operation, 'HOST_ERROR', `kriya not launched: \$\{host\.message\}`\)/);
+  });
+  it('a PACKAGED app never reaches the fixture stand-in, with or without the development gate (GUI-APP-REAL-DEFAULT-001)', () => {
+    for (const allow of [true, false]) {
+      expect(resolveHostMode(allow, EXE, present, true), `allow=${allow}`).toEqual({ mode: 'real', executable: EXE });
+      for (const unset of [null, undefined, ''] as const) {
+        const mode = resolveHostMode(allow, unset, present, true);
+        expect(mode.mode, `allow=${allow} configured=${String(unset)}`).toBe('error');
+        expect(mode.mode === 'error' && mode.message).toMatch(/Settings/);
+      }
+      expect(resolveHostMode(allow, '/nowhere/kriya', absent, true).mode).toBe('error');
+    }
+  });
+  it('a development build keeps the D-9 gate (the stand-in is still reachable there)', () => {
+    expect(resolveHostMode(false, EXE, present, false)).toEqual({ mode: 'fixture' });
+    expect(resolveHostMode(false, EXE, present)).toEqual({ mode: 'fixture' });
+  });
+  it('main.ts passes app.isPackaged and the shipped bundle contains no stand-in script to fall back to', () => {
+    expect(mainTs).toContain('app.isPackaged');
   });
 });
