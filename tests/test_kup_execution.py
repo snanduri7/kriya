@@ -636,3 +636,15 @@ def test_preflight_reports_the_configured_autonomy_mode_and_never_changes_it():
     assert shown["approvals"] == "configured_mode" and shown["autonomy_mode"] == "autonomous" and "autonomous" in shown["note"]
     assert autonomous.autonomy.mode == "autonomous", "the report must not alter the configuration"
     assert _interaction(None)["approvals"] == "unknown"
+
+
+@pytest.mark.parametrize("content", ["llm: [broken\n", "llm:\n  model: [unclosed\n", "\t: not yaml at all\n", "- a\n- b\n"])
+def test_preflight_of_a_folder_with_an_unreadable_kriya_yaml_is_a_typed_blocker_never_a_traceback(ws, content):
+    """Found while building the end-user context view: resolve_config_state() raised for malformed YAML OUTSIDE the typed handler, so the preflight (and the
+    cockpit's readiness panel) crashed with an internal fault instead of naming the configuration problem."""
+    (ws / "kriya.yaml").write_text(content)
+    env = _preflight(ws)
+    assert env["error"] is None
+    data = env["data"]
+    assert data["ready"] is False and data["model"] is None and data["configuration"]["status"] == "failed"
+    assert [b["code"] for b in data["blockers"]] == ["CONFIG_LOAD_FAILED"]

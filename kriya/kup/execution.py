@@ -80,7 +80,10 @@ def _load_in(workspace: str):
         previous = os.getcwd()
         os.chdir(workspace)
         try:
-            state = resolve_config_state()
+            try:
+                state = resolve_config_state()
+            except Exception as error:  # a malformed kriya.yaml fails here, before any classification: a typed blocker, never a traceback
+                return None, None, {"status": "failed", "fields": []}, _blocker("CONFIG_LOAD_FAILED", f"{type(error).__name__}: {str(error)[:300]}")
             try:
                 cfg = load_config()
             except ConfigAuthorityError as error:
@@ -120,7 +123,8 @@ def build_preflight(workspace: str, cockpit_state_directory: Optional[str] = Non
         blockers.append(_blocker("TOOL_UNAVAILABLE", f"git is required for every run and {why}{later}"))
     configuration: Dict[str, Any] = {
         "status": "loaded" if cfg is not None else ("refused" if authority["status"] == "refused" else "failed"),
-        "source": state.config_source or "packaged_default", "file": state.config_path, "directory": workspace, "discovery": DISCOVERY,
+        "source": (state.config_source or "packaged_default") if state is not None else "unreadable",
+        "file": state.config_path if state is not None else None, "directory": workspace, "discovery": DISCOVERY,
         "authority": authority, "fingerprint": None,
     }
     runtime_state: Dict[str, Any] = {"directory": None, "source": None, "cockpit_directory": cockpit_state_directory, "observable_by_cockpit": None}
