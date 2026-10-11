@@ -332,3 +332,78 @@ def test_the_new_operations_are_advertised_and_dispatchable_only_with_their_exac
         assert op in caps["operations"]
     assert all(caps["features"][f] is True for f in ("workspace_create", "skills_view", "tools_view", "model_probe"))
     assert serve.ARGUMENTS["execution.context"] == frozenset({"workspace"}) and serve.ARGUMENTS["execution.model_probe"] == frozenset({"workspace"})
+
+
+# ------------------------------------------------------------------ bounded fuzz / property
+
+def test_fuzzed_names_never_escape_or_create_more_than_one_child_and_never_crash(tmp_path):
+    """Property over 4000 seeded random names (Unicode, controls, separators, bidi, long): the operation always answers with an envelope; when it creates, the folder is
+    exactly one new directory directly inside the parent whose name is the NFC form of the input; otherwise nothing at all changed."""
+    import random
+    rng = random.Random(20261011)
+    alphabet = list("abcXYZ019 ._-:/\\\u0000\n\t~$`'\"*?%") + ["é", "é", "プ", "日", "🙂", "‮", "​", " ", "﻿", "..", "./", "../"]
+    parent = tmp_path / "p"
+    parent.mkdir()
+    created = 0
+    for _ in range(4000):
+        name = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 14)))
+        before = sorted(os.listdir(parent))
+        env = _create(parent, name)
+        assert (env["data"] is None) != (env["error"] is None)
+        after = sorted(os.listdir(parent))
+        if env["error"] is None:
+            created += 1
+            assert len(after) == len(before) + 1 and set(before) <= set(after)
+            (new,) = set(after) - set(before)
+            assert new == unicodedata.normalize("NFC", name) and os.path.isdir(parent / new) and os.listdir(parent / new) == []
+            assert env["data"]["workspace"] == os.path.realpath(parent / new)
+        else:
+            assert after == before, (name, env["error"])
+    assert created > 100  # the generator does produce valid names, so the "created" branch above really ran
+    assert not any(os.path.exists(p) for p in (tmp_path / "x", tmp_path / "..x"))
+    # nothing was created outside the parent
+    assert sorted(os.listdir(tmp_path)) == ["p"]
+
+
+def test_fuzzed_requests_to_the_new_operations_always_answer_with_a_typed_envelope(tmp_path):
+    import random
+    rng = random.Random(7)
+    values = [None, 0, 1, -1, True, "", "relative", "/", "/no/such", str(tmp_path), str(tmp_path) + "/\u0000", "x" * 5000, [], {}, ["a"], {"a": 1}, 3.5, "🙂"]
+    for operation in ("workspace.create", "execution.context", "execution.model_probe"):
+        for _ in range(300):
+            request = {"operation": operation}
+            for key in rng.sample(["parent", "name", "workspace", "extra"], rng.randint(0, 4)):
+                request[key] = rng.choice(values)
+            env = run_kup_operation(AppConfig(), request)
+            assert (env["data"] is None) != (env["error"] is None), request
+            if env["error"]:
+                assert env["error"]["code"] in policy.ERROR_CODES, env["error"]
+
+
+def test_a_path_too_long_for_the_filesystem_is_a_typed_refusal_not_a_crash_and_leaves_nothing(tmp_path):
+    segment = "d" * 200
+    deep = tmp_path
+    while len(str(deep)) < 900:
+        deep = deep / segment
+        deep.mkdir()
+    env = _create(deep, "ü" * 100)
+    assert (env["data"] is None) != (env["error"] is None)
+    if env["error"]:  # the platform refused: typed, with a reason, and nothing half-made
+        assert env["error"]["code"] in (policy.WORKSPACE_UNAVAILABLE, policy.INVALID_REQUEST) and env["error"].get("reason") in ("create_failed", "permission_denied", "parent_not_found", "invalid_parent")
+        assert os.listdir(deep) == []
+    else:
+        assert os.path.isdir(env["data"]["workspace"])
+
+
+def test_many_skills_are_summarised_within_the_cap_and_report_the_true_total(tmp_path, monkeypatch):
+    from kriya.kup import context_ops
+
+    skills = tmp_path / "skills"
+    for i in range(context_ops.MAX_SKILLS + 40):
+        d = skills / f"s{i:04d}"
+        d.mkdir(parents=True)
+        (d / "skill.yaml").write_text(f"name: s{i:04d}\ndescription: d\n")
+    cfg = AppConfig(paths={"skills": str(skills)}, skills={"load_global": False, "load_cwd": False})
+    summary = context_ops.skills_summary(cfg, str(tmp_path))
+    assert summary["total"] == context_ops.MAX_SKILLS + 40 and len(summary["items"]) == context_ops.MAX_SKILLS and summary["truncated"] is True
+    assert [s["name"] for s in summary["items"]] == sorted(s["name"] for s in summary["items"])

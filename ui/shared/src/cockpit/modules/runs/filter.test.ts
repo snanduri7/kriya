@@ -65,3 +65,14 @@ describe('filterRuns', () => {
     }
   });
 });
+
+describe('scale', () => {
+  it('filters 50,000 loaded rows with every filter active in well under a second', () => {
+    const many = Array.from({ length: 50_000 }, (_, i) => run({ run_id: `r${i}`, goal: `goal ${i % 97} ünï ${i}`, status: i % 3 === 0 ? 'failure' : 'success', timestamp: `2026-10-${String(1 + (i % 28)).padStart(2, '0')} 08:00:00` }));
+    const t0 = performance.now();
+    const out = filterRuns(many, { query: 'goal 4', status: 'failure', range: '30d' }, NOW);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(out.runs.length).toBeGreaterThan(0);
+    expect(out.runs.every((r) => r.status === 'failure' && /goal 4/.test(r.goal ?? ''))).toBe(true);
+  });
+});
