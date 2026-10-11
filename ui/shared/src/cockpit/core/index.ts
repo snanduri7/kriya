@@ -12,7 +12,7 @@ export * from './records';
 export * from './runContext';
 export * from './selectors';
 export * from './selectionStore';
-export { WorkspaceProvider, useWorkspace, useWorkspacePath, type OpenWorkspace, type WorkspaceApi, type WorkspaceNotice, type WorkspaceState } from './workspace';
+export { WorkspaceProvider, useWorkspace, useWorkspacePath, type NewProjectDraft, type OpenWorkspace, type WorkspaceApi, type WorkspaceNotice, type WorkspaceState } from './workspace';
 export { CockpitProviders, ModuleScope, useCapabilities, useDispatch, useModuleSelection, useProvider, useRunContext, useRunDetail, useRunEvidence, useServices, useSession, useShellSelection, type Services, type Session } from './context';
 export * from '../design';
 export * from './deep';

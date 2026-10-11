@@ -23,10 +23,14 @@ export const IPC_CHANNELS = {
   // GUI final: the review decision. ONE typed action (workspace + the identities Kriya gave the pending review + approve|reject); the host forwards it to
   // Kriya's review-decision action and reports Kriya's answer. The renderer cannot name a command, an option or a different authority.
   decideApproval: 'kriya:host:execution:decide',
+  // End-user experience: New Project. Two typed steps; the renderer never names where a project is created (an opaque token for a folder the person chose
+  // in the NATIVE chooser stands for the parent) and Kriya (`workspace.create`) makes the folder. See project_host.ts.
+  chooseProjectParent: 'kriya:host:project:choose-parent',
+  createProject: 'kriya:host:project:create',
 } as const;
 /** Main -> renderer notifications (one-way; the preload exposes a subscription, never a send). */
 export const MENU_CHANNEL = 'kriya:host:menu';
-export const MENU_COMMANDS = ['openFolder'] as const;
+export const MENU_COMMANDS = ['openFolder', 'newProject'] as const;
 export type MenuCommand = (typeof MENU_COMMANDS)[number];
 export const RECENT_WORKSPACES_MAX = 10;
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -73,6 +77,9 @@ export type KupRequest =
   | { operation: 'workspace.describe'; workspace: string }
   | { operation: 'execution.preflight'; workspace: string }
   | { operation: 'launch.status'; workspace: string; launch_id: string }
+  | { operation: 'workspace.create'; parent: string; name: string }
+  | { operation: 'execution.context'; workspace: string }
+  | { operation: 'execution.model_probe'; workspace: string }
   | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
   | { operation: 'evidence.change_content'; run_id: string; seq: number; part: string }
@@ -173,8 +180,13 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       return { ok: true, value: { operation: v.operation, run_id: r.value, seq: v.seq, part: v.part } };
     }
     case 'evidence.records': return validateEvidenceRecords(v, keys);
+    case 'workspace.create':
+      // Never reachable from the renderer's generic query channel: creating a folder needs the token-gated, native-chooser flow (project_host.ts).
+      return { ok: false, message: 'workspace.create is not available through the query channel' };
     case 'workspace.status':
     case 'workspace.describe':
+    case 'execution.context':
+    case 'execution.model_probe':
     case 'execution.preflight': {
       if (keys.join() !== 'operation,workspace') return { ok: false, message: `${v.operation} takes exactly workspace` };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;

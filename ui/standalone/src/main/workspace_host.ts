@@ -50,6 +50,14 @@ export class WorkspaceRegistry {
     return { chosen: true, path: valid.value, refused: null };
   }
 
+  /** A folder Kriya created at the person's explicit request (New Project) is an approved workspace, like one chosen with the native chooser. */
+  approveCreated(path: string): boolean {
+    const valid = validateWorkspacePath(path);
+    if (!valid.ok) return false;
+    this.picked.add(valid.value);
+    return true;
+  }
+
   /**
    * Approved = the person chose it with the native chooser this session, or it is remembered. M1 COMPATIBILITY (legacyInspector builds only): the
    * folder the person typed into the inspector's own "Recovery workspace" setting, as the accepted M1 behaved. A cockpit build never takes this branch.

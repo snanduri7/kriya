@@ -1,4 +1,4 @@
-import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '@kriya-ui/shared';
+import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -11,6 +11,8 @@ export interface KriyaHostBridge {
   recentWorkspaces(): Promise<unknown>;
   rememberWorkspace(path: string): Promise<unknown>;
   forgetWorkspace(path: string): Promise<unknown>;
+  chooseProjectParent(): Promise<unknown>;
+  createProject(request: unknown): Promise<unknown>;
   startRun(request: unknown): Promise<unknown>;
   executionState(): Promise<unknown>;
   decideApproval(request: unknown): Promise<unknown>;
@@ -28,6 +30,8 @@ export class ElectronHostAdapter implements HostAdapter {
       recent: () => bridge.recentWorkspaces() as Promise<string[]>,
       remember: (path) => bridge.rememberWorkspace(path) as Promise<string[]>,
       forget: (path) => bridge.forgetWorkspace(path) as Promise<string[]>,
+      chooseProjectParent: () => bridge.chooseProjectParent() as Promise<ProjectParentChoice>,
+      createProject: (request) => bridge.createProject(request) as Promise<ProjectCreateResult>,
       onMenuCommand: (listener) => bridge.onMenuCommand(listener),
     };
     this.execution = {

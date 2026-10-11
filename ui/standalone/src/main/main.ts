@@ -23,6 +23,7 @@ import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
+import { ProjectHost } from './project_host';
 import { ExecutionHost } from './execution_host';
 import { launchExecution } from './execution_process';
 import { resolveUiMode } from './ui_mode';
@@ -64,6 +65,7 @@ let settings: SettingsStore;
 let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
 let approvals: ApprovalHost;
+let projects: ProjectHost;
 let ownedWebContentsId: number | null = null;
 let ownedWindow: BrowserWindow | null = null;
 let quitting = false; // set once the person has confirmed interrupting a run and quitting
@@ -124,7 +126,10 @@ function registerIpc() {
     // M5: a request may name a folder only if the person chose it (native chooser this session, or the recent list).
     const refused = workspaces.refuse(v.value);
     if (refused) return errorEnvelope(v.value.operation, 'INVALID_REQUEST', refused);
-    const argv = buildKriyaArgv(v.value);
+    // The one-shot command line. The operations only the persistent service serves have none: held as a typed refusal for the one-shot paths, never a thrown error.
+    let argv: string[] = [];
+    let oneShotRefusal: string | null = null;
+    try { argv = buildKriyaArgv(v.value); } catch (error) { oneShotRefusal = error instanceof Error ? error.message : String(error); }
     // GUI-F-A1: the same decision hostInfo reports; a configured executable that does not exist is refused here,
     // never answered by the stand-in.
     const host = resolveHostMode(ALLOW_REAL, settings.get('kriyaExecutable'), existsSync, app.isPackaged);
@@ -146,9 +151,11 @@ function registerIpc() {
         if (served.kind === 'json') return served.json;
         return errorEnvelope(v.value.operation, served.code, served.message, served.stderrTail || undefined);
       }
+      if (oneShotRefusal) return errorEnvelope(v.value.operation, 'HOST_ERROR', oneShotRefusal);
       outcome = await runKriya({ executable: host.executable, argv, env: childEnv.env, cwd: dir.directory });
     } else {
       if (!dev) return errorEnvelope(v.value.operation, 'HOST_ERROR', 'kriya not launched: this build has no stand-in backend and no Kriya executable is configured');
+      if (oneShotRefusal) return errorEnvelope(v.value.operation, 'HOST_ERROR', oneShotRefusal);
       outcome = await dev.runFake(argv, dir.directory);
     }
     dev?.trace(`[kriya-ui] spawn ${v.value.operation} ${outcome.durationMs} ms\n`);
@@ -200,6 +207,22 @@ function registerIpc() {
       const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
       return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
     });
+  });
+  // End-user experience: New Project. The native chooser runs HERE; the renderer gets an opaque token for the parent folder and later asks for a name to be
+  // created inside it. Kriya (`workspace.create`) makes the folder; this process never touches the filesystem for it.
+  ipcMain.handle(IPC_CHANNELS.chooseProjectParent, async (event) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return projects.chooseParent(async () => {
+      if (dev?.captureChoices) return dev.captureChoices.shift() ?? null;
+      const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options = { title: 'New Project - choose where to create it', buttonLabel: 'Choose', properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> };
+      const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+      return result.canceled || result.filePaths.length !== 1 ? null : result.filePaths[0]!;
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.createProject, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return projects.create(raw);
   });
   ipcMain.handle(IPC_CHANNELS.recentWorkspaces, (event) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
@@ -282,9 +305,14 @@ app.whenReady().then(async () => {
     getRecent: () => settings.get('recentWorkspaces'), setRecent: (list) => settings.set('recentWorkspaces', list),
     getCurrent: () => settings.get('workspacePath'), setCurrent: (path) => settings.set('workspacePath', path),
   }, undefined, { legacyInspector: UI_MODE === 'inspector', runActive: () => execution.active() });
+  projects = new ProjectHost({
+    create: (parent, name) => kupQuery({ operation: 'workspace.create', parent, name }),
+    approveCreated: (path) => { workspaces.approveCreated(path); },
+    runActive: () => execution.active(), now: () => Date.now(), mintToken: () => `pt-${randomBytes(16).toString('hex')}`,
+  });
   workspaces.close(); // a launch starts at the welcome screen: no folder is open until the person opens one
   const command = (name: MenuCommand) => { if (ownedWindow && !ownedWindow.isDestroyed()) ownedWindow.webContents.send(MENU_CHANNEL, name); };
-  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', PRODUCT_NAME, { openFolder: () => command('openFolder') })));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', PRODUCT_NAME, { openFolder: () => command('openFolder'), newProject: () => command('newProject') })));
   hardenSession();
   registerIpc();
   const win = createWindow();

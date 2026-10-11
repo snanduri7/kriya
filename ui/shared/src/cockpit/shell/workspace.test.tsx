@@ -88,7 +88,7 @@ describe('Open Folder', () => {
     await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     const menu = await screen.findByRole('menu', { name: 'Workspace menu' });
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^Open Folder…/), 'dirty', 'Close workspace']);
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^New Project…/), expect.stringMatching(/^Open Folder…/), 'dirty', 'Close workspace']);
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Open Folder…/ }));
     await waitFor(() => expect(host.workspaceCalls).toContain('remember:/fixture/empty'));
   });
@@ -248,6 +248,6 @@ describe('same-named folders are told apart where the name alone would be ambigu
     await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     const menu = await screen.findByRole('menu', { name: 'Workspace menu' });
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^Open Folder…/), 'dirty — other', 'dirty — fixture', 'empty', 'Close workspace']);
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^New Project…/), expect.stringMatching(/^Open Folder…/), 'dirty — other', 'dirty — fixture', 'empty', 'Close workspace']);
   });
 });

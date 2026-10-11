@@ -44,7 +44,11 @@ export interface HostInfo {
 /** The desktop's folder lifecycle (GUI M5). The host owns the NATIVE chooser and the remembered list; it returns paths and nothing else - what a
  * folder is (identity, Git, state) is Kriya's answer (`workspace.describe`). A host without a native chooser (a browser test host) omits it. */
 export interface WorkspaceChoice { chosen: boolean; path: string | null; /** RUN_ACTIVE: a run this host started is in progress, so the workspace cannot change (M6). */ refused?: 'RUN_ACTIVE' | null }
-export type MenuCommand = 'openFolder';
+/** New Project (end-user experience). The renderer never names where a project is created: the NATIVE chooser returns an opaque token for the parent folder
+ * (the path travels for display only) and a later request names only a project NAME; Kriya (`workspace.create`) makes the folder. */
+export interface ProjectParentChoice { chosen: boolean; token: string | null; parent: string | null; refused?: 'RUN_ACTIVE' | null }
+export interface ProjectCreateResult { created: boolean; path: string | null; code: string | null; message: string | null; reason: string | null }
+export type MenuCommand = 'openFolder' | 'newProject';
 export interface WorkspaceHost {
   /** The native folder chooser. Cancelling resolves { chosen: false } and changes nothing. */
   choose(): Promise<WorkspaceChoice>;
@@ -52,6 +56,10 @@ export interface WorkspaceHost {
   /** Makes an already-validated folder the current workspace and the most recent one; resolves the new recent list. */
   remember(path: string): Promise<string[]>;
   forget(path: string): Promise<string[]>;
+  /** New Project, step 1: the native chooser for the PARENT folder. Absent on a host that cannot create projects. */
+  chooseProjectParent?(): Promise<ProjectParentChoice>;
+  /** New Project, step 2: ask Kriya to create `name` inside the chosen parent. */
+  createProject?(request: { token: string; name: string }): Promise<ProjectCreateResult>;
   /** Application-menu commands (File > Open Folder...). Returns the unsubscribe function. */
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }

@@ -21,8 +21,8 @@ describe('Electron main (product files) - items 2, 7, 10, 14', () => {
     }
   });
   it('the IPC surface is exactly the typed allowlist - a new channel fails here until it is classified', () => {
-    expect(Object.keys(IPC_CHANNELS).sort()).toEqual(['chooseWorkspace', 'clipboardWrite', 'decideApproval', 'executionState', 'forgetWorkspace', 'hostInfo', 'openInIde', 'query', 'recentWorkspaces', 'rememberWorkspace', 'settingGet', 'settingSet', 'startRun']);
-    expect(ALLOWED_CHANNELS).toHaveLength(13);
+    expect(Object.keys(IPC_CHANNELS).sort()).toEqual(['chooseProjectParent', 'chooseWorkspace', 'clipboardWrite', 'createProject', 'decideApproval', 'executionState', 'forgetWorkspace', 'hostInfo', 'openInIde', 'query', 'recentWorkspaces', 'rememberWorkspace', 'settingGet', 'settingSet', 'startRun']);
+    expect(ALLOWED_CHANNELS).toHaveLength(15);
     const handled = [...read(MAIN, 'main.ts').matchAll(/ipcMain\.handle\(IPC_CHANNELS\.(\w+)/g)].map((m) => m[1]).sort();
     expect(handled).toEqual(Object.keys(IPC_CHANNELS).sort()); // every channel has exactly one handler, and nothing is handled that is not in the allowlist
     expect(read(MAIN, 'main.ts')).not.toMatch(/ipcMain\.(on|once|handleOnce)\(/);

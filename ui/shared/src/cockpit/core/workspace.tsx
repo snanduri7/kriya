@@ -24,6 +24,15 @@ export interface WorkspaceNotice {
   path: string;
 }
 
+/** The New Project dialog's state. `parent` is shown to the person; only the opaque `token` ever goes back to the host. */
+export interface NewProjectDraft {
+  parent: string;
+  token: string;
+  busy: boolean;
+  /** Kriya's (or the host's) typed refusal of the last attempt, verbatim; `reason` is Kriya's finer code (already_exists, invalid_name, permission_denied...). */
+  error: { code: string; message: string; reason: string | null } | null;
+}
+
 export interface OpenWorkspace { path: string; facts: WorkspaceDescribe; provenance: Provenance }
 
 export interface WorkspaceState {
@@ -39,6 +48,15 @@ export interface WorkspaceState {
 }
 
 export interface WorkspaceApi extends WorkspaceState {
+  /** Whether this host can create projects (it has the native chooser AND the typed create step). */
+  canCreate: boolean;
+  /** The New Project dialog, once a parent folder was chosen; null otherwise. */
+  project: NewProjectDraft | null;
+  /** Native chooser for the PARENT folder, then the dialog asks for a name. Cancelling changes nothing. */
+  beginProject(): Promise<void>;
+  /** Ask Kriya to create `name` in the chosen parent, then open it through the ordinary validated open. */
+  createProject(name: string): Promise<void>;
+  cancelProject(): void;
   /** The native chooser, then the validated open. Cancelling changes nothing. */
   openFolder(): Promise<void>;
   /** The same validated open for a remembered folder. */
@@ -67,6 +85,7 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
   const desktop = provider.desktop;
   const [state, setState] = useState<WorkspaceState>({ ...INITIAL, canChoose: desktop !== null });
   const openingRef = useRef(false);
+  const projectRef = useRef<NewProjectDraft | null>(null);
   const changed = useRef(onChanged);
   useEffect(() => { changed.current = onChanged; });
   // The folder that is open, as a ref so a change can be told from a first open: only LEAVING one workspace for another (or for none) clears what
@@ -122,6 +141,53 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
     return () => { live = false; };
   }, [provider, desktop, open]);
 
+  const [project, setProjectState] = useState<NewProjectDraft | null>(null);
+  const setProject = useCallback((next: NewProjectDraft | null) => { projectRef.current = next; setProjectState(next); }, []);
+  const creatingRef = useRef(false);
+  const canCreate = desktop !== null && typeof desktop.chooseProjectParent === 'function' && typeof desktop.createProject === 'function';
+
+  const beginProject = useCallback(async () => {
+    if (!desktop?.chooseProjectParent || openingRef.current || creatingRef.current) return;
+    const choice = await desktop.chooseProjectParent();
+    if (choice.refused === 'RUN_ACTIVE') {
+      setState((s) => ({ ...s, notice: { code: 'RUN_ACTIVE', message: 'A run is in progress; a project cannot be created until it ends.', path: s.current?.path ?? '' } }));
+      return;
+    }
+    if (!choice.chosen || choice.token === null || choice.parent === null) return; // cancelling is normal: nothing changes
+    setState((s) => ({ ...s, notice: null }));
+    setProject({ parent: choice.parent, token: choice.token, busy: false, error: null });
+  }, [desktop, setProject]);
+
+  const createProject = useCallback(async (name: string) => {
+    if (!desktop?.createProject || creatingRef.current || openingRef.current) return;
+    const draft = projectRef.current;
+    if (!draft) return;
+    creatingRef.current = true; // synchronous: a second Enter/click in the same tick never reaches the host
+    setProject({ ...draft, busy: true, error: null });
+    try {
+      let result;
+      try {
+        result = await desktop.createProject({ token: draft.token, name });
+      } catch (error) {
+        setProject({ ...draft, busy: false, error: { code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), reason: null } });
+        return;
+      }
+      if (!result.created || result.path === null) {
+        setProject({ ...draft, busy: false, error: { code: result.code ?? 'HOST_ERROR', message: result.message ?? 'The project was not created.', reason: result.reason } });
+        return;
+      }
+      const created = result.path;
+      const opened = await open(created, { remember: true });
+      setProject(null);
+      // The folder exists but Kriya refused to open it: say so plainly (the person must know a folder was made), keeping Kriya's own code.
+      if (!opened) setState((s) => (s.notice && s.notice.path === created ? { ...s, notice: { ...s.notice, message: `The project folder was created at ${created}, but it could not be opened. ${s.notice.message}` } } : s));
+    } finally {
+      creatingRef.current = false;
+    }
+  }, [desktop, open, setProject]);
+
+  const cancelProject = useCallback(() => { if (!creatingRef.current) setProject(null); }, [setProject]);
+
   const openFolder = useCallback(async () => {
     if (!desktop || openingRef.current) return;
     const choice = await desktop.choose();
@@ -168,9 +234,9 @@ export function WorkspaceProvider({ provider, onChanged, children }: { provider:
   // The application menu (File > Open Folder...) and the welcome screen are the same action.
   useEffect(() => {
     if (!desktop) return undefined;
-    return desktop.onMenuCommand((command) => { if (command === 'openFolder') void openFolder(); });
-  }, [desktop, openFolder]);
+    return desktop.onMenuCommand((command) => { if (command === 'openFolder') void openFolder(); else if (command === 'newProject') void beginProject(); });
+  }, [desktop, openFolder, beginProject]);
 
-  const api = useMemo<WorkspaceApi>(() => ({ ...state, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close }), [state, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close]);
+  const api = useMemo<WorkspaceApi>(() => ({ ...state, canCreate, project, beginProject, createProject, cancelProject, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close }), [state, canCreate, project, beginProject, createProject, cancelProject, openFolder, openRecent, forgetRecent, dismissNotice, refresh, close]);
   return <WorkspaceContext.Provider value={api}>{children}</WorkspaceContext.Provider>;
 }

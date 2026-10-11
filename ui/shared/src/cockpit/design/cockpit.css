@@ -68,6 +68,11 @@
 .ck-switcher { position: relative; } .ck-menu { position: absolute; z-index: 5; top: 100%; left: 0; min-width: 220px; margin-top: 4px; padding: 4px; display: flex; flex-direction: column; gap: 2px; background: var(--ck-raised); border: 1px solid var(--ck-line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
 .ck-menu button { text-align: left; border-color: transparent; background: transparent; } .ck-menu button:hover, .ck-menu button:focus-visible { background: var(--ck-accent-bg); }
 .ck-notice { margin: 6px 12px 0; }
+.ck-tagline { margin: 4px 0 14px; max-width: 46ch; color: var(--ck-muted); line-height: 1.5; font-size: 14px; }
+.ck-welcome-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ck-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.5); padding: 16px; }
+.ck-modal { display: flex; flex-direction: column; gap: 8px; width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 16px; background: var(--ck-raised); border: 1px solid var(--ck-line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.ck-modal h2 { margin: 0; font-size: 16px; } .ck-modal-actions { display: flex; gap: 8px; margin-top: 6px; }
 
 .ck-label { display: block; margin: 0 0 4px; font-weight: 600; }
 .ck-goal { width: 100%; box-sizing: border-box; resize: vertical; min-height: 84px; padding: 6px 8px; font: inherit; color: var(--ck-fg); background: var(--ck-bg); border: 1px solid var(--ck-line); border-radius: 5px; }

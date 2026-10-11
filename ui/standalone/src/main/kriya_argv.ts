@@ -57,6 +57,11 @@ export function buildKriyaArgv(request: KupRequest): string[] {
       return ['traces', '--json', '--execution-preflight', request.workspace];
     case 'launch.status':
       return ['traces', '--json', '--launch-status', request.launch_id, '--workspace', request.workspace];
+    case 'workspace.create':
+    case 'execution.context':
+    case 'execution.model_probe':
+      // Served by the persistent Kriya service only (the one-shot grammar has no flag for them, by design).
+      throw new Error(`${request.operation} is served only by the persistent Kriya service`);
     default: {
       const never: never = request;
       throw new Error(`operation outside the grammar: ${JSON.stringify(never)}`);

@@ -15,6 +15,7 @@ export function folderLabels(paths: readonly string[]): Map<string, string> {
 
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 export const OPEN_FOLDER_SHORTCUT = MAC ? '⌘O' : 'Ctrl+O';
+export const NEW_PROJECT_SHORTCUT = MAC ? '⌘N' : 'Ctrl+N';
 
 /** What the person sees before any folder is open: the product name, Open Folder, and the folders they opened before. No runs, no fixtures, no assumptions. */
 export function WelcomeScreen() {
@@ -23,9 +24,10 @@ export function WelcomeScreen() {
   return (
     <main className="ck-welcome" aria-label="Welcome">
       <h1>Kriya</h1>
-      <p className="muted">Open a folder to inspect its runs.</p>
+      <p className="ck-tagline">Give Kriya an engineering goal. Watch it plan, execute, validate, recover, and prove what happened.</p>
       {ws.canChoose ? (
-        <p>
+        <p className="ck-welcome-actions">
+          {ws.canCreate ? <><button type="button" className="ck-primary" disabled={ws.busy} onClick={() => void ws.beginProject()}>New Project…</button>{' '}<span className="muted small">{NEW_PROJECT_SHORTCUT}</span>{' '}</> : null}
           <button type="button" className="ck-primary" disabled={ws.busy} onClick={() => void ws.openFolder()}>Open Folder…</button>{' '}
           <span className="muted small">{OPEN_FOLDER_SHORTCUT}</span>
         </p>

@@ -5,6 +5,7 @@ import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
 import { GlobalToolbar, type ToolbarToggles } from './GlobalToolbar';
 import { MainWorkspace } from './MainWorkspace';
+import { NewProjectDialog } from './NewProjectDialog';
 import { ModuleHost } from './ModuleHost';
 import { NavigationRail } from './NavigationRail';
 import { SecondaryPane } from './SecondaryPane';
@@ -120,6 +121,7 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
       </div>
       )}
       {folderOpen && workspace ? <EvidenceDrawer modules={drawer} /> : null}
+      <NewProjectDialog />
     </div>
     </NavigationContext.Provider>
   );

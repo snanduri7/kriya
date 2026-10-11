@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useExecution, useWorkspace } from '../core';
-import { OPEN_FOLDER_SHORTCUT, folderLabels } from './WelcomeScreen';
+import { NEW_PROJECT_SHORTCUT, OPEN_FOLDER_SHORTCUT, folderLabels } from './WelcomeScreen';
 
 /** The toolbar's workspace control: the open workspace's NAME (the exact path belongs to the Workspace page), with Open Folder, the recent folders and Close. */
 export function WorkspaceSwitcher() {
@@ -27,6 +27,7 @@ export function WorkspaceSwitcher() {
       </button>
       {open ? (
         <div className="ck-menu" role="menu" aria-label="Workspace menu">
+          {ws.canChoose && ws.canCreate ? <button type="button" role="menuitem" onClick={() => choose(ws.beginProject)}>New Project… <span className="muted small">{NEW_PROJECT_SHORTCUT}</span></button> : null}
           {ws.canChoose ? <button type="button" role="menuitem" onClick={() => choose(ws.openFolder)}>Open Folder… <span className="muted small">{OPEN_FOLDER_SHORTCUT}</span></button> : null}
           {others.map((path) => (
             <button type="button" role="menuitem" key={path} onClick={() => choose(() => ws.openRecent(path))}>{labels.get(path)}</button>

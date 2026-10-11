@@ -31,12 +31,16 @@ describe('main-process identity', () => {
   it('File > Open Folder... exists on every platform with Cmd/Ctrl+O, calls only the injected command, and the word Electron appears nowhere', () => {
     for (const mac of [true, false]) {
       const calls: string[] = [];
-      const template = applicationMenuTemplate(mac, 'Kriya', { openFolder: () => calls.push('openFolder') });
+      const template = applicationMenuTemplate(mac, 'Kriya', { openFolder: () => calls.push('openFolder'), newProject: () => calls.push('newProject') });
       const file = template.find((m) => m.label === 'File');
       const item = (file?.submenu as Array<{ label?: string; accelerator?: string; click?: () => void }>).find((i) => i.label === 'Open Folder…');
       expect(item?.accelerator, `mac=${mac}`).toBe('CmdOrCtrl+O');
       item?.click?.();
       expect(calls).toEqual(['openFolder']);
+      const created = (file?.submenu as Array<{ label?: string; accelerator?: string; click?: () => void }>).find((i) => i.label === 'New Project…');
+      expect(created?.accelerator, `mac=${mac}`).toBe('CmdOrCtrl+N');
+      created?.click?.();
+      expect(calls).toEqual(['openFolder', 'newProject']);
       expect(JSON.stringify(template)).not.toMatch(/electron/i);
     }
     expect(() => applicationMenuTemplate(true)).not.toThrow(); // the default menu has an inert command, never undefined
@@ -60,7 +64,7 @@ describe('main-process identity', () => {
     expect(main).toContain('title: WINDOW_TITLE');
     expect(main).toContain("win.on('page-title-updated', (e) => e.preventDefault())");
     expect(main).toContain('Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(');
-    expect(main).toContain("{ openFolder: () => command('openFolder') }");
+    expect(main).toContain("{ openFolder: () => command('openFolder'), newProject: () => command('newProject') }");
     expect(main).toContain('app.setAboutPanelOptions(aboutPanelOptions(');
     expect(main).not.toMatch(/run inspector/);
   });

@@ -6,7 +6,7 @@
  */
 import { validate, validateData } from '@kriya-ui/kup';
 import type { HostAdapter, HostSettings } from '../../host/HostAdapter';
-import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus } from '../../model/kup';
+import type { Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, KupRequest, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe } from '../../model/kup';
 import type { ChangeContentQuery, ProviderKind, ProviderResult, RecordsQuery, UIProvider } from '../core/provider';
 
 export class HostProvider implements UIProvider {
@@ -52,6 +52,8 @@ export class HostProvider implements UIProvider {
   workspaceStatus(workspace: string, signal?: AbortSignal) { return this.call<WorkspaceStatus>({ operation: 'workspace.status', workspace }, signal); }
   describeWorkspace(workspace: string, signal?: AbortSignal) { return this.call<WorkspaceDescribe>({ operation: 'workspace.describe', workspace }, signal); }
   executionPreflight(workspace: string, signal?: AbortSignal) { return this.call<ExecutionPreflight>({ operation: 'execution.preflight', workspace }, signal); }
+  executionContext(workspace: string, signal?: AbortSignal) { return this.call<ExecutionContext>({ operation: 'execution.context', workspace }, signal); }
+  executionModelProbe(workspace: string, signal?: AbortSignal) { return this.call<ExecutionModelProbe>({ operation: 'execution.model_probe', workspace }, signal); }
   launchStatus(workspace: string, launchId: string, signal?: AbortSignal) { return this.call<LaunchStatus>({ operation: 'launch.status', workspace, launch_id: launchId }, signal); }
   evidenceManifest(runId: string, options: { snapshotId?: string; fromTrace?: boolean } = {}, signal?: AbortSignal) {
     return this.call<EvidenceManifest>({ operation: 'evidence.manifest', run_id: runId, ...(options.snapshotId ? { snapshot_id: options.snapshotId } : {}), ...(options.fromTrace ? { from_trace: true } : {}) }, signal);

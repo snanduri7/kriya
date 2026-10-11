@@ -25,8 +25,8 @@ export function aboutPanelOptions(version: string): { applicationName: string; a
 }
 
 /** The macOS application menu. Labels are explicit (`About Kriya`, `Hide Kriya`, `Quit Kriya`), never derived from the Electron binary's name. */
-export interface MenuCommands { openFolder(): void }
-const NO_COMMANDS: MenuCommands = { openFolder: () => undefined };
+export interface MenuCommands { openFolder(): void; newProject(): void }
+const NO_COMMANDS: MenuCommands = { openFolder: () => undefined, newProject: () => undefined };
 
 export function applicationMenuTemplate(isMac: boolean, name: string = PRODUCT_NAME, commands: MenuCommands = NO_COMMANDS): MenuItemConstructorOptions[] {
   const appMenu: MenuItemConstructorOptions = {
@@ -44,10 +44,11 @@ export function applicationMenuTemplate(isMac: boolean, name: string = PRODUCT_N
     ],
   };
   // File > Open Folder... (Cmd+O / Ctrl+O): the same action as the welcome screen and the toolbar. It only asks the renderer to open the chooser.
+  const newProject: MenuItemConstructorOptions = { label: 'New Project…', accelerator: 'CmdOrCtrl+N', click: () => commands.newProject() };
   const openFolder: MenuItemConstructorOptions = { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => commands.openFolder() };
   const file: MenuItemConstructorOptions = isMac
-    ? { label: 'File', submenu: [openFolder, { type: 'separator' }, { role: 'close', label: 'Close Window' }] }
-    : { label: 'File', submenu: [openFolder, { type: 'separator' }, { role: 'quit', label: `Quit ${name}` }] };
+    ? { label: 'File', submenu: [newProject, openFolder, { type: 'separator' }, { role: 'close', label: 'Close Window' }] }
+    : { label: 'File', submenu: [newProject, openFolder, { type: 'separator' }, { role: 'quit', label: `Quit ${name}` }] };
   const edit: MenuItemConstructorOptions = { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] };
   const view: MenuItemConstructorOptions = { label: 'View', submenu: [{ role: 'togglefullscreen' }] };
   const windowMenu: MenuItemConstructorOptions = { label: 'Window', role: 'windowMenu' };

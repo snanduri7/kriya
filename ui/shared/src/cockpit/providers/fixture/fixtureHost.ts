@@ -3,7 +3,7 @@
  * (full KUP envelopes with typed errors), and the provider layer validates every answer against the same generated schemas, so
  * FixtureProvider = HostProvider over this host. DEV/TEST ONLY: nothing outside fixture code and tests may import this file.
  */
-import type { ExecutionHostPort, HostAdapter, HostInfo, HostSettings, MenuCommand, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost } from '../../../host/HostAdapter';
+import type { ExecutionHostPort, HostAdapter, HostInfo, HostSettings, MenuCommand, OpenInIdeRequest, OpenInIdeResult, ProjectCreateResult, ProjectParentChoice, WorkspaceChoice, WorkspaceHost } from '../../../host/HostAdapter';
 import type { KupEnvelope, KupRequest } from '../../../model/kup';
 import { FixtureExecution, LAUNCHED_TRACE_ID, LAUNCH_ID, type FixtureExecutionOptions } from './fixtureExecution';
 import { SCENARIOS, type Scenario, type SeedRecord } from './scenarios';
@@ -28,7 +28,38 @@ export const FIXTURE_FOLDERS: Readonly<Record<string, { checkout: Json; recovery
   '/fixture/blocked': { checkout: { state: 'checkout_root', root: '/fixture/blocked', head: 'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', branch: 'main', detached: false, dirty: false, changed_entries: 0, changed_truncated: false, reason: null }, recovery: 'RECOVERY_AVAILABLE', runs: 'none' },
 };
 
+/** What the fixture's `execution.context` / `execution.model_probe` report (DEV/TEST ONLY): the shapes Kriya returns, with scripted content. */
+export type FixtureContextMode = 'full' | 'empty' | 'unavailable' | 'many';
+export type FixtureProbeMode = 'present' | 'missing' | 'unreachable' | 'not_probed' | 'unavailable';
+
+const fixtureRouting = (probe = false) => ['planner', 'architect', 'developer', 'reviewer', 'run_verifier', 'skill_gap', 'spec_compliance'].map((role) => ({
+  role, provider: 'openai', model: role === 'planner' ? 'fixture-planner:14b' : 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', context_window: 32768,
+  source: role === 'planner' ? 'override' : 'default', fallback: role === 'developer' && !probe ? ['fixture-fallback:3b'] : [],
+}));
+const fixtureSkills = (mode: FixtureContextMode) => {
+  const base = [
+    { name: 'python-testing', description: 'Pytest conventions for generated tests', category: 'Language', tags: ['python', 'pytest'], supported_versions: '*', verified: true, verified_context: 'passed the runtime verification gate', verified_at: '2026-10-01', gap_acknowledged: false, origin: 'kriya_install', rule_count: 12, has_instructions: true, example_count: 2, staged_rule_count: 0 },
+    { name: 'spring-boot', description: 'Spring Boot service layout', category: 'Framework', tags: ['java', 'spring'], supported_versions: '>=3.0.0', verified: false, verified_context: null, verified_at: null, gap_acknowledged: false, origin: 'workspace_or_configured', rule_count: 5, has_instructions: false, example_count: 0, staged_rule_count: 3 },
+  ];
+  const items = mode === 'empty' ? [] : mode === 'many' ? Array.from({ length: 300 }, (_, i) => ({ ...base[i % 2]!, name: `skill-${String(i).padStart(3, '0')}` })) : base;
+  return { items, total: items.length, truncated: false, selection: 'automatic', selection_note: 'Kriya selects Skills automatically for each run from the goal and the repository; there is no manual selection. The Skills a run used are recorded with the run.', management: 'Skills are created, reviewed and promoted with `kriya skills` in a terminal; this application does not change them.' };
+};
+const fixtureTools = (mode: FixtureContextMode) => ({
+  plugins: { directory: './plugins', enabled: mode === 'empty' ? [] : ['core_tools'] },
+  mcp_servers: mode === 'empty' ? [] : [{ name: 'filesystem', declared_capabilities: { workspace_read: true, workspace_write: false, network: 'denied' } }, { name: 'issues', declared_capabilities: { workspace_read: false, workspace_write: false, network: 'allowed' } }],
+  health: 'not_checked', management: 'Tools, MCP servers and their invocation approvals are operator-managed (configuration and `kriya mcp`); this application shows them and changes nothing.',
+  health_note: "A server's health is learned only by starting it (`kriya mcp inspect`); opening a folder never starts one.",
+});
+
 export interface FixtureHostOptions {
+  /** The parent folders the scripted New Project chooser returns, in order (null = the person cancels). */
+  projectParents?: readonly (string | null)[];
+  /** Scripted refusals of the next project creations, in order (consumed one per attempt; none left = success). */
+  projectRefusals?: readonly { code: string; message: string; reason?: string | null }[];
+  /** What `execution.context` reports (default 'full'). */
+  contextMode?: FixtureContextMode;
+  /** What `execution.model_probe` reports (default 'present'). */
+  probeMode?: FixtureProbeMode;
   /** The folders the scripted chooser returns, in order (null = the person cancels). Empty = every choice is a cancel. */
   choices?: readonly (string | null)[];
   /** Folders remembered from an earlier session (most recent first). */
@@ -58,6 +89,15 @@ export class FixtureHost implements HostAdapter {
   private readonly liveCapture: 'full' | 'digest_only';
   private settings: Partial<HostSettings> = { editor: 'vscode', workspacePath: '/fixture/workspace', configDirectory: null, kriyaExecutable: null };
   private readonly choices: (string | null)[];
+  private readonly projectParents: (string | null)[];
+  private projectRefusals: { code: string; message: string; reason?: string | null }[];
+  private readonly contextMode: FixtureContextMode;
+  probeMode: FixtureProbeMode;
+  /** Folders created through New Project in this session (empty plain folders, no runs). */
+  readonly createdFolders = new Set<string>();
+  private nextProject = 0;
+  /** token -> parent for the parent choices the fixture issued (a request with any other token is refused, as the real host does). */
+  private readonly projectTokens = new Map<string, string>();
   private recentList: string[];
   private readonly menuListeners = new Set<(command: MenuCommand) => void>();
   /** What the host was asked to do, for assertions: the chooser opened, folders remembered or forgotten. */
@@ -73,6 +113,10 @@ export class FixtureHost implements HostAdapter {
     this.evidenceContent = options.evidenceContent ?? false;
     this.liveCapture = options.capture ?? 'full';
     this.choices = [...(options.choices ?? [])];
+    this.projectParents = [...(options.projectParents ?? [])];
+    this.projectRefusals = [...(options.projectRefusals ?? [])];
+    this.contextMode = options.contextMode ?? 'full';
+    this.probeMode = options.probeMode ?? 'present';
     this.recentList = [...(options.recent ?? [])];
     if (options.workspace !== undefined) this.settings.workspacePath = options.workspace;
     this.workspace = {
@@ -81,6 +125,25 @@ export class FixtureHost implements HostAdapter {
         const next = this.choices.shift();
         if (this.exec?.active()) return { chosen: false, path: null, refused: 'RUN_ACTIVE' };
         return next === undefined || next === null ? { chosen: false, path: null } : { chosen: true, path: next };
+      },
+      chooseProjectParent: async (): Promise<ProjectParentChoice> => {
+        this.workspaceCalls.push('chooseProjectParent');
+        if (this.exec?.active()) return { chosen: false, token: null, parent: null, refused: 'RUN_ACTIVE' };
+        const next = this.projectParents.shift();
+        if (next === undefined || next === null) return { chosen: false, token: null, parent: null };
+        const token = `pt-${String(++this.nextProject).padStart(32, '0')}`;
+        this.projectTokens.set(token, next);
+        return { chosen: true, token, parent: next };
+      },
+      createProject: async (request): Promise<ProjectCreateResult> => {
+        this.workspaceCalls.push(`createProject:${request.name}`);
+        if (!this.projectTokens.has(request.token)) return { created: false, path: null, code: 'PARENT_EXPIRED', message: 'the parent folder choice has expired; choose the folder again', reason: null };
+        const refusal = this.projectRefusals.shift();
+        if (refusal) return { created: false, path: null, code: refusal.code, message: refusal.message, reason: refusal.reason ?? null };
+        const path = `/fixture/new/${request.name}`;
+        this.createdFolders.add(path);
+        this.projectTokens.delete(request.token);
+        return { created: true, path, code: null, message: null, reason: null };
       },
       recent: async () => [...this.recentList],
       remember: async (path) => { this.workspaceCalls.push(`remember:${path}`); this.recentList = [path, ...this.recentList.filter((p) => p !== path)].slice(0, 10); this.settings.workspacePath = path; return [...this.recentList]; },
@@ -107,8 +170,13 @@ export class FixtureHost implements HostAdapter {
   /** Test hook: the application menu asks the renderer to open the chooser. */
   menu(command: MenuCommand): void { for (const l of [...this.menuListeners]) l(command); }
 
+  /** A known fixture folder, or a project created in this session (an empty plain folder). */
+  private folder(workspace: string) {
+    return FIXTURE_FOLDERS[workspace] ?? (this.createdFolders.has(workspace) ? FIXTURE_FOLDERS['/fixture/empty'] : undefined);
+  }
+
   private describeFolder(workspace: string): KupEnvelope {
-    const known = FIXTURE_FOLDERS[workspace];
+    const known = this.folder(workspace);
     if (!known) return this.err('workspace.describe', 'WORKSPACE_UNAVAILABLE', `no such folder: ${workspace}`, { reason: 'not_found' });
     const name = workspace.slice(workspace.lastIndexOf('/') + 1);
     return this.env('workspace.describe', {
@@ -278,10 +346,36 @@ export class FixtureHost implements HostAdapter {
       case 'workspace.status': return this.env('workspace.status', { workspace: request.workspace, run_active: false, status: 'CLEAN', exit_code: 0, assessment: { workspace_path: request.workspace, status: 'CLEAN', run_active: null, records: [], evidence: [], unreadable_records: [], evidence_error: null } }, this.live, null);
       case 'workspace.describe': return this.describeFolder(request.workspace);
       case 'execution.preflight': {
-        const known = FIXTURE_FOLDERS[request.workspace];
+        const known = this.folder(request.workspace);
         if (!known || !this.exec) return this.err('execution.preflight', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
         const blocked = known.recovery && known.recovery !== 'CLEAN' ? { code: 'RECOVERY_REQUIRED', message: `the folder's last run left it in state ${known.recovery}; recover it (kriya runs recover) before starting another` } : null;
         return this.env('execution.preflight', this.exec.preflight(request.workspace, SOURCE.state_directory, blocked), this.live, SOURCE);
+      }
+      case 'workspace.create': return this.err('workspace.create', 'INVALID_REQUEST', 'the fixture host creates projects through its workspace port only');
+      case 'execution.context': {
+        if (!this.folder(request.workspace)) return this.err('execution.context', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const name = request.workspace.slice(request.workspace.lastIndexOf('/') + 1);
+        const unavailable = this.contextMode === 'unavailable';
+        return this.env('execution.context', {
+          workspace: { path: request.workspace, name, identity: 'ab'.repeat(32) }, available: !unavailable,
+          unavailable_reason: unavailable ? { code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration (fixture)' } : null, authority_status: unavailable ? 'failed' : 'no_findings',
+          routing: unavailable ? [] : fixtureRouting(), skills: unavailable ? null : fixtureSkills(this.contextMode), tools: unavailable ? null : fixtureTools(this.contextMode),
+          egress: unavailable ? null : { policy: 'local_only', web_lookup_enabled: false },
+        }, this.live, null);
+      }
+      case 'execution.model_probe': {
+        if (!this.folder(request.workspace)) return this.err('execution.model_probe', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const mode = this.probeMode;
+        if (mode === 'unavailable') return this.env('execution.model_probe', { available: false, unavailable_reason: { code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration (fixture)' }, authority_status: 'failed', endpoints: [], roles: [] }, this.live, null);
+        const state = mode === 'present' || mode === 'missing' ? 'reachable' : mode;
+        const roleState = mode === 'present' ? 'model_present' : mode === 'missing' ? 'model_missing' : mode;
+        return this.env('execution.model_probe', {
+          available: true, unavailable_reason: null, authority_status: 'no_findings', egress_policy: 'local_only', timeout_seconds: 3,
+          endpoints: [{ endpoint: 'http://localhost:11434/v1', state, reason: state === 'unreachable' ? 'Connection refused' : state === 'not_probed' ? 'the endpoint is not local and the egress policy is local_only' : null, model_count: state === 'reachable' ? 4 : 0 }],
+          roles: [{ for: 'default', model: 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', available: roleState === 'model_present' ? true : roleState === 'model_missing' ? false : null, state: roleState },
+                  { for: 'planner', model: 'fixture-planner:14b', endpoint: 'http://localhost:11434/v1', available: roleState === 'model_present' ? true : roleState === 'model_missing' ? false : null, state: roleState }],
+          note: 'A single bounded GET /models per distinct local endpoint, made now. It proves the server answered and lists the models it serves; it does not prove a model can complete a request.',
+        }, this.live, null);
       }
       case 'launch.status': {
         const status = this.exec?.launchStatus() ?? null;
