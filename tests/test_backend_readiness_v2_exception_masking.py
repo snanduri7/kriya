@@ -268,3 +268,40 @@ def test_the_run_start_content_decides_what_is_new_not_the_last_staged_state():
     # a file with no recorded run-start content falls back to the pre-write content
     state.all_original_contents = {}
     _reject_exception_masking(state, PATH, widened, widened)
+
+
+def test_a_test_that_asserts_no_error_escapes_is_not_masking():
+    """Found by replaying the guard over the recorded S4_A candidates: the Developer's own regression test wrote
+    `catch (java.lang.Error e) { throw new AssertionError(..., e); }` - an Error re-raised as an Error - and a first version
+    of the rule flagged it, because AssertionError is exempt as a CAUGHT type in test files and so was not read as an Error
+    when thrown."""
+    test_path = "src/test/java/demo/ParserTest.java"
+    test = """package demo;
+public class ParserTest {
+    @org.junit.Test
+    public void noError() {
+        try {
+            Parser.compile("[");
+        } catch (java.lang.Error e) {
+            throw new AssertionError("must not throw java.lang.Error, got: " + e, e);
+        }
+    }
+}
+"""
+    assert find_unsafe_exception_masking(test_path, test, None) is None
+    assert find_unsafe_exception_masking(PATH, test, None) is None   # the same shape in main source is also a re-raise
+    # but swallowing it in a test is still judged
+    assert find_unsafe_exception_masking(test_path, test.replace('throw new AssertionError("must not throw java.lang.Error, got: " + e, e);', "return;"), None) is not None
+
+
+def test_the_real_recorded_s4a_file_bytes_are_rejected_against_the_real_base():
+    """The whole PathCompiler.java at the S4_A base and the exact file Kriya's run applied (the false success)."""
+    import pathlib
+
+    directory = pathlib.Path(__file__).parent / "fixtures" / "exception_masking"
+    base = (directory / "PathCompiler.base.java.txt").read_text()
+    candidate = (directory / "PathCompiler.s4a_candidate.java.txt").read_text()
+    path = "json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java"
+    finding = find_unsafe_exception_masking(path, candidate, base)
+    assert finding is not None and "line 76 newly catches Throwable" in finding
+    assert find_unsafe_exception_masking(path, base, base) is None

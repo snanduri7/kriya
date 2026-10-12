@@ -563,7 +563,7 @@ def normalize_failure_text(raw: str) -> str:
     failure normalize identically; two genuinely different failures never
     collapse to the same normalized text merely because both happen to
     reference, say, a temp path or a timestamp."""
-    text = _LOCAL_HOST_FAILURE.sub(rf"\1{_PLACEHOLDER}: {_PLACEHOLDER}", raw or "")
+    text = _LOCAL_HOST_FAILURE.sub(rf"\1{_PLACEHOLDER}", raw or "")
     for pattern in _VOLATILE_PATTERNS:
         text = pattern.sub(_PLACEHOLDER, text)
     return text

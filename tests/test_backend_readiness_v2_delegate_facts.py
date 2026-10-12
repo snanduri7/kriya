@@ -118,6 +118,6 @@ def test_the_number_of_facts_is_bounded(tmp_path):
 
 
 def test_only_java_declarations_are_read(tmp_path):
-    python = {"lib/node.py": "class Node:\n    def absUrl(self, key):\n        return Strings.resolve(key)\n",
+    python = {"lib/node.py": "class Node:\n    def absUrl(self, key):\n        return Strings.resolve(key);\n",
               "lib/strings.py": "class Strings:\n    @staticmethod\n    def resolve(key):\n        return key\n"}
     assert _facts(tmp_path, python, "Node.absUrl() is wrong.") == []

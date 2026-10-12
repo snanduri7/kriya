@@ -56,11 +56,14 @@ def _simple(name: str) -> str:
     return name.strip().rsplit(".", 1)[-1]
 
 
-def _is_catastrophic(name: str, test_side: bool) -> bool:
+def _is_error_type(name: str) -> bool:
     simple = _simple(name)
-    if simple == "AssertionError" and test_side:
-        return False
     return simple in _ERROR_NAMES or simple.endswith("Error")
+
+
+def _is_catastrophic(name: str, test_side: bool) -> bool:
+    """A caught type that is judged. ``AssertionError`` is exempt in test files (catching it is the "expected failure" idiom)."""
+    return _is_error_type(name) and not (_simple(name) == "AssertionError" and test_side)
 
 
 def _body(stripped: str, open_index: int) -> Optional[str]:
@@ -94,7 +97,7 @@ def _top_level_statements(body: str) -> List[str]:
     return statements
 
 
-def _propagates(body: str, variable: str, test_side: bool) -> bool:
+def _propagates(body: str, variable: str) -> bool:
     if _EXIT_RE.search(body):
         return False
     statements = _top_level_statements(body)
@@ -104,7 +107,7 @@ def _propagates(body: str, variable: str, test_side: bool) -> bool:
     if last == f"throw {variable};":
         return True
     match = _THROW_NEW_RE.match(last)
-    return bool(match and _is_catastrophic(match.group(1), test_side))
+    return bool(match and _is_error_type(match.group(1)))
 
 
 def masking_clauses(path: str, source: str) -> List[MaskingClause]:
@@ -119,7 +122,7 @@ def masking_clauses(path: str, source: str) -> List[MaskingClause]:
         if not any(_is_catastrophic(t, test_side) for t in types):
             continue
         body = _body(stripped, match.end() - 1)
-        if body is None or _propagates(body, match.group(2), test_side):
+        if body is None or _propagates(body, match.group(2)):
             continue
         line = stripped.count("\n", 0, match.start()) + 1
         found.append(MaskingClause(types, match.group(2), line, " ".join(source.splitlines()[line - 1].split())[:160]))

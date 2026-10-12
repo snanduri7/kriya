@@ -70,8 +70,9 @@ def test_the_redirect_is_not_a_way_around_the_goal_nothing_else_is_touched(tmp_p
     plan = _plan()
     exists = lambda rel: (workspace / rel).exists()  # noqa: E731
     # a test the goal did not freeze is left exactly as planned
-    assert redirect_immutable_test_edits(plan, ["other/Frozen.java"], exists) == (plan, [])
-    assert redirect_immutable_test_edits(plan, [], exists) == (plan, [])
+    for frozen in (["other/Frozen.java"], []):
+        unchanged, records = redirect_immutable_test_edits(plan, frozen, exists)
+        assert unchanged is plan and records == []   # the very same object: nothing was rebuilt
     # a DELETE of a frozen test is never rewritten: it stays a typed validator violation
     deleting = plan.model_copy(deep=True)
     deleting.subtasks[0].planned_files[0].action = FileAction.DELETE

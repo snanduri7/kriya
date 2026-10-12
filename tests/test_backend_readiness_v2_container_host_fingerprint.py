@@ -76,3 +76,20 @@ def test_only_a_repeated_container_id_host_is_normalised():
 def test_the_normalised_text_names_the_failure_kind_and_reason_still(text):
     out = normalize_failure_text(text)
     assert out.startswith("UnknownHost") and out.endswith(": x") and "9018ce6664da" not in out
+
+
+def test_a_result_recorded_under_the_old_comparison_rules_is_not_the_same_environment():
+    """The fingerprint rules changed, so a stored full-suite result from before must not be reused or compared as the same
+    run: the comparison version is part of the verification-policy identity."""
+    from unittest.mock import patch
+
+    from kriya.workflow import baseline_policy, validation_baseline
+    from kriya.workflow.validation_baseline import BASELINE_COMPARISON_VERSION
+
+    from _strict_doubles import strict_config
+
+    autonomy = strict_config().autonomy
+    current = baseline_policy.verification_policy_identity(autonomy)
+    assert current["comparison_version"] == BASELINE_COMPARISON_VERSION >= 3
+    with patch.object(validation_baseline, "BASELINE_COMPARISON_VERSION", 2):
+        assert baseline_policy.verification_policy_identity(autonomy) != current
