@@ -2,6 +2,8 @@
 
 Executable under test: branch `backend/readiness-v2`, execution HEAD `fdd308dc72df3105c92c40ac547166546bfae540` (tooling-only commit on top of `bdbd19b`). Product code is byte-identical to the fully tested revision `497a98d` (`git diff 497a98d..HEAD` touches only `handover/` files; product paths changed since the full suite: none). Frozen configuration: `~/kriya-m1-live/backend-readiness-v2/cohort-final/FREEZE.json` (written on a clean tree before the first case). One cohort, serial, one run per case, 120 s cool-down, no intervention, no rerun. Driver log: `cohort-final/cohort.log` (`invalid=0 false_success=0`). Evidence directories: `primary/P5-T*-v6f`, `cohort-002/C2-S*-v6f`.
 
+Record numbers in this document are 0-based indexes into `records.jsonl` (store `seq` = index + 1).
+
 ## 1. Result table (every oracle exit routed through the wired preflight; 0 ENVIRONMENT_UNAVAILABLE, 0 INDETERMINATE in the cohort)
 
 | Case | Classification | Kriya | Oracle accept / regress | Key gate / notes |
@@ -23,7 +25,7 @@ Counts: GENUINE **8/12**; CODE-WRITING GENUINE **6/10** (T1, T4, T5, S1_A, S2_A,
 
 ## 2. Formal gate: FAIL
 
-Rule: GENUINE >= 8/12 AND FALSE_SUCCESS = 0 AND FALSE_NEGATIVE = 0 AND authority = 0 AND corruption = 0 AND leaks = 0 AND no unresolved invalid environment. GENUINE meets the threshold (8/12), but FALSE_NEGATIVE = 1 (T2), so **BACKEND SOLVER READINESS GATE: FAIL**. The result is not re-interpreted to reach a pass: the classification uses the same method as the previous cohorts' false-negative audit (doc 05 section 5: sealed-store candidate, independent frozen oracle, no model rerun).
+Rule: GENUINE >= 8/12 AND FALSE_SUCCESS = 0 AND FALSE_NEGATIVE = 0 AND authority = 0 AND corruption = 0 AND leaks = 0 AND no unresolved invalid environment. GENUINE meets the threshold (8/12), but FALSE_NEGATIVE = 1 (T2), so **BACKEND SOLVER READINESS GATE: FAIL**. The result is not re-interpreted to reach a pass: the classification extends the previous cohorts' false-negative audit method (doc 05 section 5: sealed-store candidate, independent frozen oracle, no model rerun) to the unit-level staged file, which the run never exported. If the owner reads T2 as SAFE_FAILURE plus a separate architecture defect, the numeric gate would read 8/12 with FN 0; this document does not take that reading.
 
 ## 3. S3_A contract-gate trajectory: INTERMEDIATE CONTRACT REPAIR PATH EXERCISED
 
@@ -35,17 +37,18 @@ Rule: GENUINE >= 8/12 AND FALSE_SUCCESS = 0 AND FALSE_NEGATIVE = 0 AND authority
 | s1 | 2 | - | `diagnosis_mismatch` (candidate refused before the gate) |
 | s1 | 3 | 9 / 7 | PASSED |
 | s2 (StrBuilder) | 1 | 9 / 2 | VIOLATED (2) |
+| s2 | 2 | - | `diagnosis_mismatch` |
 | s2 | 3 | 9 / 2 | PASSED |
 
 The typed `deterministic_contract_violation` was recorded (`failure.recorded`, recovery action `targeted`, structured failure text with goal line, character span, requirement id, expected/observed) and the next attempt's candidate passed the relevant examples. The violation reached repair in both units and the repaired candidate is the one that was committed. Causal reading: CONSISTENT WITH the contract feedback having shaped the final candidate (the repair prompt carried the failing examples and the retry then satisfied them); a counterfactual run without the gate does not exist, so a causal claim beyond that is UNKNOWN. Other cases: no other Java task has an ENFORCED goal-example form (T3 matcher form is SHADOW, S4_A/S4_B forms are shadow/unsupported), so no other `contract_feedback.evaluated` event occurred.
 
 ## 4. S4_A semantic-safety audit
 
-`unsafe_exception_masking` (staging guard, authority `quality_gate`) refused the candidate at attempts 2 and 5 (operations `targeted` and `fallback_targeted`); no Throwable/Error-catch candidate reached any gate result or the workspace. The run ended after 11 attempts (anchored_edit / compile / test / operation_contract failures) with no commit-eligible candidate, so there was no final batch and therefore no terminal `semantic_safety` gate result to inspect (the terminal gate ran and passed on T1, T3, T4, T5, S1_A, S2_A, S3_A). The last staged candidate contains one `catch (Exception e)` in PathCompiler.java (not Throwable/Error) and the frozen oracle rejects it (hidden 4 of 6 failing). The guard was not modified.
+`unsafe_exception_masking` (staging guard, authority `quality_gate`) refused the candidate at attempts 2 and 5 (operations `targeted` and `fallback_targeted`); no Throwable/Error-catch candidate reached any gate result or the workspace. The run ended after 11 attempts (ANCHOR_NOT_IN_FILE at attempts 1, 3, 6, 11; compile, test, diagnosis_mismatch, INVALID_EDIT_PROTOCOL and operation_contract failures in between) with no commit-eligible candidate, so there was no final batch and therefore no terminal `semantic_safety` gate result to inspect (the terminal gate ran and passed on T1, T3, T4, T5, S1_A, S2_A, S3_A). The last staged candidate contains one `catch (Exception e)` in PathCompiler.java (not Throwable/Error) and the frozen oracle rejects it (hidden 4 of 6 failing). The guard was not modified.
 
 ## 5. T2 trajectory and false-negative audit
 
-- Plan (this run): s1 authorized scope `StringUtil.java` (the correct file; the earlier cohorts planned `Node.java`), s2 authorized scope `ElementTest.java` (add a regression test). Developer requests for s1 (records 3, 36, 64) carried the GOAL-NAMED FACTS block and the `DERIVED_DETERMINISTIC` delegate callee source (`resolve(`), i.e. the Stage C Developer context reached the model.
+- Plan (this run): s1 authorized scope `StringUtil.java` (the correct file; the earlier cohorts planned `Node.java`), s2 authorized scope `ElementTest.java` (add a regression test). Developer requests for s1 (0-based record indexes 36 and 64 are the s1 Developer requests; index 3 is the Planner request and carries the same blocks) carried the GOAL-NAMED FACTS block and the `DERIVED_DETERMINISTIC` delegate callee source (`resolve(`), i.e. the Stage C Developer context reached the model.
 - s1: attempt 1 proposed content refused as `diagnosis_mismatch`; attempt 2 (targeted) STAGED `StringUtil.java` (digest `15751cfa67c9695fcb845e3cba3b7d7cf92bf3976075d5d929b84b1b1f94f804`), compile PASS, tests 2390 PASS, goal_spec PASS, regression PASS; unit RETURNED with gates passed.
 - s2: `CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE: ... src/test/java/org/jsoup/nodes/ElementTest.java: no authoritative full source, and no exact source for any located edit region. Nothing was sent to the model.` Recovery: `stop_environment`; run FAILURE, `NOT_COMMITTED`.
 - Independent oracle on the preserved staged candidate (base tree + that one file, no model call): accept PASS (hidden 1/1, upstream suite 2392 tests 0 failures, TAMPERED=[]), regress PASS (2390/0). Result `cohort-final/false_negative_audit.json`.
