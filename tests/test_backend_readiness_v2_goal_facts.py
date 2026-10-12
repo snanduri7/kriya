@@ -209,5 +209,6 @@ def test_the_enforce_planner_request_carries_the_block_and_validation_gets_the_s
     else:
         requests, validate = _capture_enforce_planner(tmp_path, JAVA_PATHS, MEMBER_GOAL)
         assert "=== GOAL-NAMED FACTS" in requests[0] and "lib.nodes.Node.absUrl at" in requests[0]
+        assert "returns the result of Strings.resolve(...)" in requests[0]  # the delegate fact reaches the real Planner request
         assert validate.call_args.kwargs["delegating_shims"] == {}
     assert requests[0].startswith("Original product request:\n" + (DEP_GOAL if name == "python_manifest" else MEMBER_GOAL))

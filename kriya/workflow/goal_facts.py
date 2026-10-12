@@ -39,6 +39,7 @@ _MAX_LINE_CHARS = 160
 _MAX_TOKENS = 24
 _MAX_MANIFEST_HITS = 6
 _MAX_MEMBER_FACTS = 6
+_MAX_DELEGATE_FACTS = 4
 MAX_BLOCK_CHARS = 1800
 
 # A hyphen- or underscore-joined name (a package/module/dependency spelling): ``text-unidecode``, ``text_unidecode``.
@@ -191,9 +192,10 @@ class GoalFacts:
     members: List[str] = field(default_factory=list)
     manifests: List[ManifestHit] = field(default_factory=list)
     shims: Dict[str, str] = field(default_factory=dict)
+    delegates: List[str] = field(default_factory=list)
 
     def empty(self) -> bool:
-        return not (self.members or self.manifests or self.shims)
+        return not (self.members or self.manifests or self.shims or self.delegates)
 
 
 def member_facts(view: Any, goal: str) -> List[str]:
@@ -220,10 +222,56 @@ def member_facts(view: Any, goal: str) -> List[str]:
     return lines
 
 
+_RETURN_RE = re.compile(r"\breturn\s+([^;]+);")
+_STATIC_CALL_RE = re.compile(r"\b([A-Z]\w*)\.([a-z_]\w*)\s*\(")
+
+
+def delegate_facts(view: Any, goal: str) -> List[str]:
+    """BACKEND-READINESS-V2 (T2): one line per goal-named ``Owner.member`` whose returned value is computed by another
+    project method. Live: the goal named ``Element.absUrl``; its declaration (Node.absUrl) only ends in
+    ``return StringUtil.resolve(...)``, so the behaviour the goal describes lives in the callee, yet two candidates were
+    written into the delegate (one reimplemented the resolution there and broke eight existing tests, the other fixed
+    only half of it). The Planner had even listed the callee as a preserved reference. Read from the member's own source and
+    the structural index: the LAST ``return`` of a Java member whose expression calls ``Type.method(`` on a project type that
+    declares ``method`` (another file), for a goal-named member with exactly ONE declaration. Names where the value comes
+    from; never says what to change. Java only."""
+    from kriya.code_intel import locate as loc
+    from kriya.workflow.edit_safety import strip_java_comments_and_strings
+
+    lines: List[str] = []
+    for name in loc.extract_signals(goal).qualified:
+        if "." not in name:
+            continue
+        owner, member = name.rsplit(".", 1)
+        declared = [s for s in view.find_symbol(f"{owner}.{member}") if s.is_callable and s.path.endswith(".java")]
+        declared = declared or [s for s in view.inherited_members(owner, member) if s.is_callable and s.path.endswith(".java")]
+        if len(declared) != 1:
+            continue  # an overloaded name (a setup call in an example) does not say which declaration the goal means
+        for symbol in declared:
+            source = view.get_member(symbol.symbol_id)
+            returns = _RETURN_RE.findall(strip_java_comments_and_strings(source.text)) if source else []
+            call = _STATIC_CALL_RE.search(returns[-1]) if returns else None
+            if call is None:
+                continue
+            callee_type, callee = call.groups()
+            targets = [t for t in view.find_symbol(f"{callee_type}.{callee}")
+                       if t.is_callable and t.path != symbol.path]
+            if not targets:
+                continue
+            where = ", ".join(f"{t.path}:{t.declaration.start_line}" for t in targets[:3])
+            more = f" (+{len(targets) - 3} more)" if len(targets) > 3 else ""
+            lines.append(f"{symbol.lookup_key} ({symbol.path}:{symbol.declaration.start_line}) returns the result of "
+                         f"{callee_type}.{callee}(...); that method is declared at {where}{more}")
+            if len(lines) >= _MAX_DELEGATE_FACTS:
+                return lines
+    return lines
+
+
 def build_goal_facts(goal: str, workspace_path: str, view: Optional[Any] = None) -> GoalFacts:
     facts = GoalFacts(manifests=manifest_hits(goal, workspace_path))
     if view is not None:
         facts.members = member_facts(view, goal)
+        facts.delegates = delegate_facts(view, goal)
     if facts.manifests:
         hit_files = {hit.path for hit in facts.manifests}
         facts.shims = {shim: delegate for shim, delegate in delegating_shims(workspace_path).items()
@@ -238,6 +286,7 @@ def render_goal_facts(facts: GoalFacts) -> str:
     lines = ["", "=== GOAL-NAMED FACTS (DERIVED_DETERMINISTIC: read from the current repository files and the structural "
              "index, not model output; a name with no line here was not found) ==="]
     lines.extend(f"- {line}" for line in facts.members)
+    lines.extend(f"- {line}" for line in facts.delegates)
     lines.extend(f"- \"{hit.token}\" occurs in {hit.path}:{hit.line}: {hit.text}" for hit in facts.manifests)
     lines.extend(f"- {shim} is a delegating shim (its only statement is a bare setup() call); the packaging metadata "
                  f"it delegates to is declared in {delegate}" for shim, delegate in sorted(facts.shims.items()))
