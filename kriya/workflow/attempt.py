@@ -114,6 +114,7 @@ from kriya.workflow.edit_safety import (
     find_structural_corruption,
     read_file_revision,
 )
+from kriya.workflow.exception_masking import find_unsafe_exception_masking
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
     _build_quality_gate_failure,
@@ -1744,6 +1745,32 @@ def _reject_explanatory_prose(
             "language's comment syntax for genuine documentation."
         ),
         raw_output=contamination,
+        file_locations=[FileLocation(filepath=filepath)],
+        likely_files=[filepath], failed_content={filepath: content},
+        attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _reject_exception_masking(
+    state: GenerationState, filepath: str, content: str, baseline: Optional[str],
+) -> None:
+    """BACKEND-READINESS-V2 (S4_A): a candidate that newly catches/swallows ``Error``/``Throwable`` hides the crash it
+    was asked to fix. ``baseline``: the file before this write; the pristine run-start content wins when known, so a
+    masking clause an earlier attempt introduced is still the candidate's. Runs on every attempt, repairs included."""
+    pristine = state.all_original_contents.get(filepath, baseline)
+    masking = find_unsafe_exception_masking(filepath, content, pristine)
+    if not masking:
+        return
+    guidance = (
+        "Catching Error/Throwable hides the failure instead of fixing the code that raises it; fix the cause "
+        "(for a StackOverflowError, the unbounded recursion or loop) and do not widen a catch to Error/Throwable."
+    )
+    failure = Failure(
+        type="unsafe_exception_masking",
+        message=f"UNSAFE EXCEPTION MASKING in {filepath}: {masking}. {guidance}",
+        raw_output=f"{masking}. {guidance}",
         file_locations=[FileLocation(filepath=filepath)],
         likely_files=[filepath], failed_content={filepath: content},
         attempt=state.attempt_number,
@@ -8818,6 +8845,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
             _reject_explanatory_prose(state, filepath, new_content, orig_text)
+            _reject_exception_masking(state, filepath, new_content, orig_text)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=new_content,
@@ -8961,6 +8989,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
 
             # A new file's prior content is empty: all of it is the candidate's.
             _reject_explanatory_prose(state, filepath, content, prior_content)
+            _reject_exception_masking(state, filepath, content, prior_content)
             staged_writes.append(StagedFileWrite(
                 target_path=full_path,
                 content=content,

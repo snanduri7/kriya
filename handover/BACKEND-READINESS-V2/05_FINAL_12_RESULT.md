@@ -38,7 +38,7 @@ S6_A have 0 hidden-only units (leak check INCONCLUSIVE in sensitivity, stated as
   verification. Not separately re-audited event-by-event in this record.
 
 # CLOSURE AUDIT (2026-10-12, records-only; no cohort, no product change, no model call)
-Script: `closure-audit/authority_audit.py` (reads the 12 sealed stores). Evidence: `~/kriya-m1-live/backend-readiness-v2/closure/`.
+Script: `closure-audit/authority_audit.py.txt` (reads the 12 sealed stores). Evidence: `~/kriya-m1-live/backend-readiness-v2/closure/`.
 
 ## 1. Authority event audit (MEASURED over `records.jsonl` of all 12 runs)
 Checks per case: every STAGED `candidate.change` path lies inside the `authorized_write_scope` of the unit in force (and every `authority.snapshot` scope is
