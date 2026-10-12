@@ -161,3 +161,28 @@ fails): status VIOLATED, a typed `deterministic_contract_violation` failure with
 classes per owner: A violation -> repair -> GENUINE; B violation -> repair -> SAFE_FAILURE; C first candidate passes -> GENUINE;
 D passes examples, oracle rejects; E still NOT_RELEVANT despite the proven relation (implementation defect); F new architecture/
 safety defect -> STOP. Anything else is recorded as measured, not rationalised.
+
+## B-relevance focused T3 run RESULT (label `-b2`, run `20261012T215725-b61335ed`, Kriya a41a311 = product code of d1eed1d; evidence `~/kriya-m1-live/backend-readiness-v2/primary/P5-T3-b2/`, driver log `stageB2_T3.log`)
+
+MEASURED (sealed store, `contract_feedback.evaluated` seq 53, s1 attempt 1): `compiled_examples 4, relevant 4, status PASSED, violations 0, 20.6 s`; every
+relevance record `RELEVANT_DIRECT_DEPENDENCY / DELEGATES_TO`, target `org.hamcrest.Matchers.equalToCompressingWhiteSpace`, related type
+`org.hamcrest.text.IsEqualCompressingWhiteSpace`, touched `hamcrest/.../text/IsEqualCompressingWhiteSpace.java`, provenance recorded. The
+prediction held (relevance fired; E did not occur; no F). s1 closed on attempt 1: the candidate
+(`replaceAll("\\p{IsWhite_Space}+", " ").trim()`) satisfied all four explicit examples, so the first candidate passed (owner class C): Kriya
+`success`, quality gates passed, plan_repair_attempts 1 (plan-level, within the existing budget), frozen oracle accept PASS (hidden gradle 2/2,
+signatures identical) and regress PASS (489 tests, 0 failures). Classification: **C - first candidate passes all explicit examples -> GENUINE**.
+The repair-delivery path (violation -> `deterministic_contract_violation` -> existing retry) was NOT exercised live by this candidate; it is
+proven by the deterministic tests (`test_a_dependency_violation_reaches_the_existing_repair_path_with_its_relation`) and by the replay
+(recorded `Character.isWhitespace` candidates are relevant and VIOLATED). Not rerun for variance. No new architecture defect appeared.
+
+## Final product validation (relevance completion)
+
+- Product HEAD: `9de5404` (the rename below) over `d1eed1d` (review fixes) over `197a3fa`. The live run executed `d1eed1d` code; `9de5404` changes only
+  a function name (`assess` -> `assess_relevance`).
+- Full pytest run 1 (on `a41a311`): 3 failed / 10674 passed: two registered TEST-DEADLINE-TIMING-001 tests, and
+  `tests/test_qual_config_001.py::test_every_production_assessment_passes_the_configured_policy` - MY defect (the model-qualification tripwire matches
+  any production call named `assess`; my new function had that name). Fixed in `9de5404` (rename; test passes).
+- Full pytest run 2 (the one extra run, after the repair): 1 failed / 10676 passed - `tests/test_launch_approval.py::test_if_the_approval_cannot_be_recorded_nothing_is_approved`
+  (a 0.5 s `APPROVAL_WAIT_SECONDS` async test under -n 8 load; passes 2/2 in isolation; unrelated to this branch; already registered as TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001; disclosed, not rerun for a
+  prettier result). `test_provider_contract_001a.py` 47/47 in isolation.
+- ruff 0 findings; pylint exit 0; relevance mutation suite 22/22 killed; replay 8/8 expected verdicts.
