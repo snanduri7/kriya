@@ -63,3 +63,66 @@ Product code: `248154b` (B) over `aafe352` (A); one own defect found by the cano
 - The one additional canonical run allowed for a branch-caused repair, on `6636daf`: **2 failed, 10648 passed** (`final_full_pytest_run2.log`); both failures are in `tests/test_provider_contract_001a.py` (the two deadline tests of the registered `TEST-DEADLINE-TIMING-001`; the file passes 2/2 in isolation). No branch-caused failure remains. Not rerun to obtain a prettier result.
 - ruff: zero findings; pylint (`kriya plugins/core_tools tests`): exit 0.
 - Mutation: A 26/26 killed (incl. 9 added by the review); B 25/25 killed (+3 for the review fixes); one equivalent mutant noted and removed with the reverted git-clone code.
+
+---
+
+# B relevance completion (owner decision 2026-10-12, HEAD 7477c90 before this work)
+
+Owner ruling: the T3 intermediate-relevance defect (class F above) is fixed INSIDE the bounded cycle as a correctness completion
+of Change B (not a new slot); same-module relevance is forbidden (module ownership decides WHERE the class runs, never WHETHER
+an example is relevant); no cohort; no C; no new retry budget.
+
+## Offline proof of the T3 target -> implementation relationship (read-only, before any product change)
+
+| Field | Value | Status |
+|---|---|---|
+| PUBLIC TARGET | `org.hamcrest.Matchers.equalToCompressingWhiteSpace(String)` (the factory the four enforced examples call) | MEASURED (goal text, compiled example `qualified_type`/`method`) |
+| DECLARING FILE | `hamcrest/src/main/java/org/hamcrest/Matchers.java` (exactly one declaration of that method; overload count 1) | MEASURED (`parse_file`) |
+| DIRECT CALLEE | the method's last `return` is `IsEqualCompressingWhiteSpace.equalToCompressingWhiteSpace(expectedString)` | MEASURED: `delegation.delegate_call` -> `('IsEqualCompressingWhiteSpace', 'equalToCompressingWhiteSpace')` |
+| IMPLEMENTATION FILE | `hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java` (the only main unit of that name; `.kriya/` copies are excluded by the resolver) | TRACED (`resolve_java_type` / `main_source_path` skip `.kriya`) |
+| SOURCE OF RELATIONSHIP | source text of the target method, read by the structural parser + the delegate reader already shared by the Planner (`goal_facts.delegate_facts`) and the Developer context (`packing`) | TRACED |
+| EXISTING FACT THAT REPRESENTS IT | `code_intel.delegation.delegate_call` (Type.method( on the last return) | TRACED; no new analyzer |
+| NOT followed | `Matchers.equalToIgnoringWhiteSpace` ends in an UNQUALIFIED `equalToCompressingWhiteSpace(` (same class) - not a one-hop project-type reference, so it is correctly not followed (bounded rule) | MEASURED |
+
+A deterministic relationship exists without a new heuristic, so the cycle continues (the stop condition was not met).
+
+## Architecture (`kriya/workflow/contract_relevance.py`, wired in `contract_feedback.py`)
+
+Per compiled example the relevance is one of RELEVANT_DIRECT_TARGET, RELEVANT_DIRECT_DEPENDENCY, NOT_RELEVANT, UNKNOWN (UNKNOWN
+is never promoted; the example waits for the terminal gate). The dependency relation is keyed on the example's FACTORY METHOD,
+never on its type (a facade type has many methods, so "type delegates to the touched file" would be same-module relevance under
+another name), one hop, direction target -> callee:
+1. the target type declares that method EXACTLY once (else UNKNOWN: an overload does not say which declaration the goal means);
+2. its last `return` calls `Type.method(` (DELEGATES_TO) or directly constructs `new Type(` (CONSTRUCTS) a project type that
+   resolves to exactly one main unit (ambiguous -> UNKNOWN; not a project type -> no relation) declared in a TOUCHED file (that
+   file must declare the type, and for DELEGATES_TO the called method);
+3. or a touched type DIRECTLY extends/implements the target type AND declares a method of the same name (OVERRIDES; an explicit
+   import of a different type with that simple name shadows a same-package one).
+A relevant example's `source_path` becomes the touched file (what repair should look at), and the relation (target, relationship,
+related type, declaring file, touched file, provenance) is carried in the outcome summary, the ledger event details, the repair
+message (`RELATION:` line) and the failure diagnostics. `ContractOutcome.status` keeps its closed set. Only the INTERMEDIATE gate
+consults relevance (a structural test pins that no other module imports it); terminal acceptance is untouched. Reuse: structural
+parser, `delegate_call` (+ the 8-line sibling `constructed_type` for the `return new T(` reading - the one small generic
+addition, because CONSTRUCTS had no existing reader), `resolve_java_type`/`main_source_path`. The report dicts gained a `method`
+key (the sealed class source and its digest are unchanged; the key is report-only).
+
+Same-module alone is INSUFFICIENT (CONFIRMED by test): touching BImpl/ChainA/ChainB/an unrelated class of the same package or a
+class of another module leaves an example on `Facade.a` NOT_RELEVANT.
+
+## Tests / mutation / replay
+
+- `tests/test_contract_relevance_001.py` (23 tests): all 15 owner matrix rows (direct target; constructs; delegates; override;
+  unrelated same-module; different module; undeterminable -> UNKNOWN not run; one hop only; comment/string "claims" ignored;
+  module ownership independent; a violation reaches `_run_contract_feedback_gate` as `deterministic_contract_violation` with the
+  relation; terminal untouched; no task/repository identity in the code). Rows 11/12 are in the real-Gradle replay below.
+- Mutation (scratch `mutate_c.py`, 19 + 2 mutants): dependency disabled, same-directory sufficient, any touched file overrides,
+  UNKNOWN promoted, override direction inverted, provenance dropped (both sites), keyed on type not method, source_path not the
+  touched file, override ignoring the method, import-shadow rule removed, direct rule removed, candidate root not bound in the
+  workflow, evaluate ignoring the root, ambiguity not UNKNOWN, summary/diagnostics/message relation dropped, CONSTRUCTS removed,
+  overload resolved by first: ALL KILLED. One survivor (`path == declaring` guard in the callee check) was PROVEN redundant (the
+  direct rule runs first and returns for that case) and the dead clause was removed; one provenance site was unasserted and a
+  test assertion was added (then killed).
+- Replay on recorded T3 subjects (8 subjects, real Gradle under OCI + OD-1 metadata, production path derive -> relevance -> run
+  -> judge; `module-replay/module_replay_relevance.json`, earlier 24-run evidence kept): recorded GENUINE candidate (v2 regex):
+  all 4 examples RELEVANT_DIRECT_DEPENDENCY/DELEGATES_TO and PASS; recorded v2f and v6f `Character.isWhitespace` candidates:
+  all 4 RELEVANT and VIOLATED; near-miss subjects VIOLATED; the unchanged base has no relevant example (NOT_RELEVANT x4).

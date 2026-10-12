@@ -143,7 +143,7 @@ class GoalExample:
                 "span": [self.start, self.end], "text": self.text, "requirement_id": self.requirement_id,
                 "expect": self.expect.value if self.expect else None, "expected": self.expected,
                 "exception": self.exception, "regression_wording": self.regression_wording,
-                "enforced": self.enforced, "qualified_type": self.qualified_type}
+                "enforced": self.enforced, "qualified_type": self.qualified_type, "method": self.method}
 
 
 @dataclass

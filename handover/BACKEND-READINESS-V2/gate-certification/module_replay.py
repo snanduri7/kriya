@@ -33,12 +33,13 @@ from kriya.config.config import AppConfig  # noqa: E402
 from kriya.tools.validate import PolymorphicValidator  # noqa: E402
 from kriya.workflow import acceptance_jvm as jvm  # noqa: E402
 from kriya.workflow import acceptance_oracle as ao  # noqa: E402
+from kriya.workflow import contract_feedback as cf  # noqa: E402
 from kriya.workflow import example_oracle_java as ej  # noqa: E402
 from kriya.workflow import goal_example_forms as gef  # noqa: E402
 from kriya.workflow.requirements import derive_requirements  # noqa: E402
 
 TASK = "T3"
-RESULT = g.OUT / "module_replay.json"
+RESULT = g.OUT / "module_replay_relevance.json"  # the earlier module_replay.json (24 runs, pre-relevance) is kept as history
 JAVA_HOME = "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home"
 # (subject, role, source): role "correct" must PASS, "wrong" must be VIOLATED, "inert" is recorded only (no defect a goal example expresses)
 ARMS = [("base", "wrong"), ("good", "correct"), ("unrelated", "correct"), ("near_miss_unicode_only", "wrong"),
@@ -95,6 +96,9 @@ def replay(subject: str, role: str, files, arm, repeat: int) -> dict:
         if artifact is None:
             return {**row, "verdict": "NO_ARTIFACT", "detail": report.get("refusal")}
         row["injection_path"] = artifact.java["injection_path"]
+        # owner decision 2026-10-12: the behavioral relevance of every compiled example to the subject's changed files
+        _relevant, records = cf.assess_examples(cf.contract_examples(artifact, report, str(tree)), changed, str(tree))
+        row["relevance"] = [r.to_dict() for r in records]
         autonomy = production_autonomy()
 
         def factory(root: str) -> PolymorphicValidator:

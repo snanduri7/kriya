@@ -69,7 +69,7 @@ class JavaGoalExample:
     def to_dict(self) -> Dict[str, Any]:
         return {"form": self.form, "requirement_id": self.requirement_id, "lines": [self.line], "source": self.source,
                 "expression": f"{self.type_name}.{self.method}({self.arguments})", "expected": self.expected,
-                "exception": self.exception, "qualified_type": self.qualified_type}
+                "exception": self.exception, "qualified_type": self.qualified_type, "method": self.method}
 
 
 @dataclass

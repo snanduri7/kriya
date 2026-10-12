@@ -1219,7 +1219,7 @@ def build_contract_feedback(engine: Any, candidate_root: str, workspace_path: st
     if not examples:
         return None
     return ContractFeedback(
-        artifact=artifact, examples=examples,
+        artifact=artifact, examples=examples, candidate_root=candidate_root,
         execute=lambda art, touched: _run_contract_acceptance(
             art, touched, candidate_root=candidate_root, workspace_path=workspace_path, autonomy_cfg=autonomy_cfg))
 
