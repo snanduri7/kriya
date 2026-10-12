@@ -121,7 +121,7 @@ class TestStatus(str, Enum):
 
 # The PRE/POST comparison's own identity: a stored full-suite result is only
 # reused under the same comparison rules (part of the environment identity).
-BASELINE_COMPARISON_VERSION = 2  # 2: Maven Surefire summary fingerprint + per-test outcomes
+BASELINE_COMPARISON_VERSION = 3  # 2: Maven Surefire summary fingerprint + per-test outcomes; 3: container-id host name is not failure identity
 
 
 @dataclass(frozen=True)
@@ -547,6 +547,13 @@ _VOLATILE_PATTERNS: Tuple[re.Pattern, ...] = (
     re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),
 )
 _PLACEHOLDER = "<volatile>"
+# BACKEND-READINESS-V2 (S3_A): a JDK 8 host-resolution failure reads "UnknownHostException: <host>: <host>: <reason>" (Surefire's
+# Results block abbreviates it to "UnknownHost <host>: <host>: <reason>"). Inside a contained run the machine's own name is a
+# fresh 12-hex container id every time (measured: 9018ce6664da, 3af07587f48d, 09f035760c7f for the same 16 failing tests),
+# so the identical failure never fingerprinted equal across two runs: 16 pre-existing errors were reported CHANGED_FAILURE
+# and blocked every candidate. Only a 12-hex container-id host is stripped; any other host name, or any other message,
+# still differs.
+_LOCAL_HOST_FAILURE = re.compile(r"(UnknownHost(?:Exception:)? )([0-9a-f]{12}): \2(?=: )")
 
 
 def normalize_failure_text(raw: str) -> str:
@@ -556,7 +563,7 @@ def normalize_failure_text(raw: str) -> str:
     failure normalize identically; two genuinely different failures never
     collapse to the same normalized text merely because both happen to
     reference, say, a temp path or a timestamp."""
-    text = raw or ""
+    text = _LOCAL_HOST_FAILURE.sub(rf"\1{_PLACEHOLDER}: {_PLACEHOLDER}", raw or "")
     for pattern in _VOLATILE_PATTERNS:
         text = pattern.sub(_PLACEHOLDER, text)
     return text
