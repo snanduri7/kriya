@@ -70,3 +70,11 @@ Host-environment note (gate strength): the oracles do not pin the host. The T-Py
 
 ## 5. Phase 1 conclusion
 No gate is INVALID. Eleven gates are VALID; S4_A is VALID-WITH-LIMITS under the pre-registered rule. No qualification semantics, threshold or oracle were changed. This clears Stage A to continue to Stage B (see 12 and 13 for the other two properties; 15 for the suite decision).
+
+## 6. JDK 8 vs JDK 17 verdict equivalence for S3_A and S4_A (Stage B, owner item 4)
+MEASURED (`gate-certification/jdk_equivalence.py`, result `gate-cert/jdk_equivalence.json`, logs `gate-cert/logs/jdk8-*`): the test-running part of each frozen ACCEPT script (hidden tests, upstream suite, and for S3_A the javap COMPAT diff on the JDK 8-built classes) was re-run inside the images Kriya itself uses (`maven:3.9-eclipse-temurin-8`, `gradle:8-jdk8`) for every control arm; the JDK 17 side is the recorded host run.
+| Task | Arms | JDK 8 classification = JDK 17 classification |
+|---|---|---|
+| S3_A | base REJECT, good ACCEPT, near-miss StrBuilder-only REJECT, near-miss TextStringBuilder-only REJECT, unrelated ACCEPT | 5/5 equal, component exit codes identical |
+| S4_A | base REJECT, good ACCEPT, final-12 `catch (Throwable)` masking ACCEPT (oracle blind spot, guard covers it), unrelated ACCEPT | 4/4 equal, component exit codes identical |
+Result: classification equivalent on all 9 arms; no qualification-validity conflict; nothing in the oracles changed. Not re-executed under JDK 8 (disclosed): the host file-hash tamper gate (JDK-independent by construction) and the S3_A `apibreak` arm (prior evidence 2026-10-08, differs only in the COMPAT component, which was exercised on the other arms). Containers had network, unlike Kriya's own network-off gate runs. Verdict: JDK EQUIVALENCE PROVEN for the controls above.
