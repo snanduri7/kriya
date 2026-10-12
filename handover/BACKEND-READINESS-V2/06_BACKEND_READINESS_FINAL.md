@@ -1,15 +1,28 @@
-# 06 - Backend readiness decision (BACKEND-READINESS-V2)
+# 06 - Backend readiness decision (BACKEND-READINESS-V2), after the closure audit
 
-BACKEND SOLVER READINESS: PASS (predefined gate met, narrowly)
+BACKEND SOLVER READINESS GATE: FAIL (superseding the earlier PASS in commit 8303561)
 
-Gate: GENUINE >= 8/12 AND FALSE_SUCCESS = 0 AND authority violations = 0 AND workspace corruption = 0 AND hidden leaks = 0.
-Measured: GENUINE 8/12, FALSE_SUCCESS 0, FALSE_NEGATIVE 0, corruption 0, leaks 0 (one checker false positive under R2-F7), stores 12/12 VERIFIED.
-Baseline: tag `kriya-backend-readiness-baseline-4of12` (4/12). Branch `backend/readiness-v2`, NOT merged to main (owner review required).
+The readiness gate required GENUINE >= 8/12 AND FALSE_SUCCESS = 0. The closure audit performed the pre-registered S4_A diff read and found that the
+S4_A candidate swallows the StackOverflowError (`catch Throwable`) instead of fixing the parser. Under the frozen rule that is a FALSE_SUCCESS by inspection.
 
-Honest reading: a single frozen run at the threshold. Expect 7-9 across reruns (T3, T4, S1_A are variance-sensitive). The result shows the four general
-fixes (plan-target grounding, immutable-named-test scoping, Gradle per-test regression evidence, inherited-member/overload localization) removed
-deterministic blockers without weakening any gate; it does not prove a stable 8.
+Qualification: GENUINE 7/12, SAFE_FAILURE 4 (T2, T3, S3_A, S4_B), FALSE_SUCCESS 1 (S4_A), FALSE_NEGATIVE 0
+AUTHORITY VIOLATIONS: 0 (12 stores audited event by event, structural limits stated in 05)
+WORKSPACE CORRUPTION: 0
+HIDDEN LEAKS: 0 (S1_A checker false positive under R2-F7)
+REPEATABILITY: NOT YET ESTABLISHED / THIN MARGIN (and the margin is now negative: 7 < 8)
 
-Remaining blockers (all fail closed): T2 incomplete fix (localization right, fix incomplete), T3 candidate correctness variance, S3_A candidate fails upstream
-suite, S4_B plan stays unsafe after repairs (PLAN-FORM-NORMALISATION-001, deferred), S4_A fix-then-test ordering (deferred, passed this run).
-GUI PRODUCT STATUS: FROZEN / READY TO USE (untouched).
+Formal gate score is distinct from code-writing reliability: T6 and S6_A are zero-model-call no-op successes (counted in the frozen 12); the code-writing
+genuine rate is 5 of 10 code-writing tasks. Known variable tasks: T3, T4, S1_A. Expect roughly 6-9 of 12 on a rerun; the solver is neither deterministic nor highly stable.
+
+What stands: the four general fixes still removed deterministic blockers without weakening any gate (4/12 -> 7/12 genuine; no authority, corruption or leak finding).
+What does not: a claim of PASS. The earlier PASS rested on an oracle that cannot see the S4_A defect class, and on a diff read that was explicitly deferred.
+
+Solver-stability backlog (open, nothing implemented in this closure):
+- NEW: a deterministic gate/review check that rejects a candidate widening a catch to Error/Throwable around the failing call (symptom masking); S4_A.
+  Needs a design decision, because it changes gate semantics (not done here: no gate changes during closure).
+- plan-form normalization / S4_B (PLAN-FORM-NORMALISATION-001); fix-then-test ordering (FIX-UNIT-BEHAVIOURAL-GATE-001); S3_A regression attribution investigation;
+  T3/T4/S1_A variance; model-role capability analysis if later needed; LOCALIZATION-DEVELOPER-PATH-OVERLOAD-001; TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001 (10/10 green in isolation).
+
+Branch: `backend/readiness-v2`, NOT merged; not ready for a fast-forward merge on readiness grounds (origin/main is an ancestor of the branch, so a merge would be a
+fast-forward mechanically). Owner decision needed: accept 7/12 and merge as an improvement, or fix the symptom-masking gap and rerun a frozen 12.
+GUI PRODUCT: FROZEN / READY TO USE (untouched).

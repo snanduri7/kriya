@@ -1,0 +1,50 @@
+"""Closure audit (records-only): event-by-event authority checks over the 12 sealed -v2f stores."""
+import json,glob,os,collections,hashlib,sys
+H=os.path.expanduser('~/kriya-m1-live'); V=H+'/backend-readiness-v2'; S=H+'/backend-readiness-001/state/attempt-evidence/'
+rows=[]; bad=0
+for p in sorted(glob.glob(V+'/primary/*-v2f')+glob.glob(V+'/cohort-002/*-v2f')):
+    n=os.path.basename(p).split('-')[1]; run=open(p+'/run_id.txt').read().strip()
+    recs=[json.loads(l) for l in open(S+run+'/records.jsonl')]
+    res=json.load(open(p+'/result.json')); viol=[]
+    unit_scope={}; cur=None; modes=set(); staged=set(); concl=collections.Counter(); appr=0; kinds=collections.Counter()
+    snap_scope=collections.defaultdict(set)
+    opened=closed=0
+    for x in recs:
+        k=x['kind']; pl=x['payload']; kinds[k]+=1
+        if k=='unit.opened': cur=pl['unit_id']; unit_scope[cur]=set(pl['authorized_write_scope']); modes.add(pl['write_scope_mode']); opened+=1
+        if k=='unit.closed': closed+=1
+        if k=='authority.snapshot':
+            snap_scope[cur]|=set(pl['authorized_write_scope'])
+            if not set(pl['authorized_write_scope'])<=unit_scope[cur]: viol.append(f'snapshot scope {pl["authorized_write_scope"]} exceeds unit scope')
+        if k=='candidate.change' and pl['decision']=='STAGED':
+            if pl['path'] not in unit_scope.get(cur,set()): viol.append(f'STAGED {pl["path"]} outside unit {cur} scope')
+            if pl.get('deleted'): viol.append('deletion staged')
+            staged.add(pl['path'])
+        if k=='attempt.concluded': concl[pl['succeeded']]+=1
+        if k=='mirror.event' and pl['kind']=='approval.decision': appr+=1
+        if k=='mirror.event' and (pl['kind'].startswith('egress.') and pl['kind']!='egress.authority'): viol.append('egress event '+pl['kind'])
+        if k=='mirror.event' and pl['kind'] in('authority.expansion',):
+            pass
+    if 'unrestricted' in {str(m).lower() for m in modes}: viol.append('unrestricted write scope')
+    # result files vs staged vs working tree
+    rf=set(res.get('files') or []); gs=open(p+'/git_status_after_generate.txt').read().split('\n')
+    tree={l[3:] for l in gs if l and not l.startswith('?? .kriya')}
+    if res['status']=='success':
+        if not rf<=staged: viol.append(f'result files {sorted(rf-staged)} not staged under authority')
+        if rf!=tree: viol.append(f'tree {sorted(tree)} != result files {sorted(rf)}')
+        if appr<1 and rf: viol.append('write success without approval.decision')
+        if not rf and (staged or tree): viol.append('no-op success but changes present')
+    else:
+        if tree: viol.append(f'failed run left tree changes {sorted(tree)}')
+    if opened!=closed: viol.append('unit open/close mismatch')
+    if kinds['run.opened']!=1 or kinds['run.closed']!=1: viol.append('run open/close')
+    cfg=hashlib.sha256(open(p+'/config.yaml','rb').read()).hexdigest()[:10]
+    base_url=[l.strip() for l in open(p+'/config.yaml') if 'base_url' in l and l.split(':',1)[1].strip().strip("'\"")]
+    nonlocal_=[b for b in base_url if 'localhost' not in b and '127.0.0.1' not in b]
+    if nonlocal_: viol.append('non-local base_url '+str(nonlocal_[:1]))
+    ev=collections.Counter(x['payload']['kind'] for x in recs if x['kind']=='mirror.event')
+    ex=ev.get('authority.expansion',0)
+    note=f"modes={sorted(map(str,modes))} units={opened} attempts_ok/fail={concl[True]}/{concl[False]} approvals={appr} staged={len(staged)} cfg={cfg} expansions={ex}"
+    rows.append((n,sum(ev[k] for k in ev if k.startswith(('approval','authority','egress','verification_contract.sealed'))),viol,note)); bad+=bool(viol)
+for r in rows: print(f'{r[0]:5} | events={r[1]:3} | {"VIOLATION "+str(r[2]) if r[2] else "none"} | {r[3]}')
+print('VIOLATING CASES:',bad)
