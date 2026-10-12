@@ -146,3 +146,18 @@ Post-review: 27 tests; mutation `mutate_d.py` 22 mutants ALL KILLED (3 initial s
 call that is only the head of the returned expression, a callee type lacking the named method, and varargs); ruff 0, pylint 0;
 real-Gradle replay re-run on the final code: identical verdicts (good + recorded GENUINE PASS and relevant; v2f/v6f
 isWhitespace VIOLATED and relevant; near misses VIOLATED; unchanged base NOT_RELEVANT).
+
+## B-relevance focused T3 run: PRE-REGISTERED PREDICTION (written and committed before the run; label `-b2`)
+
+Run: exactly one `run_focused_stageD.sh T3` with `LABEL=-b2 TAG=ws-b2`, on the clean committed tree (product HEAD = the review-fix commit
+`d1eed1d`), no rerun for variance. Earlier `-b1` evidence is untouched.
+
+Prediction: for a unit that edits `hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java`, every
+`contract_feedback.evaluated` record shows `relevant: 4` (not 0) with `relevance[*].status = RELEVANT_DIRECT_DEPENDENCY`,
+`relationship = DELEGATES_TO`, `related_type = org.hamcrest.text.IsEqualCompressingWhiteSpace`, `target = org.hamcrest.Matchers.
+equalToCompressingWhiteSpace`, `module = hamcrest`. If the candidate repeats the `Character.isWhitespace` family (example 3, U+00A0,
+fails): status VIOLATED, a typed `deterministic_contract_violation` failure with the exact example, the `RELATION:` line and
+`likely_files = [IsEqualCompressingWhiteSpace.java]`, entering repair inside the EXISTING retry budget (no extra attempt). Outcome
+classes per owner: A violation -> repair -> GENUINE; B violation -> repair -> SAFE_FAILURE; C first candidate passes -> GENUINE;
+D passes examples, oracle rejects; E still NOT_RELEVANT despite the proven relation (implementation defect); F new architecture/
+safety defect -> STOP. Anything else is recorded as measured, not rationalised.
