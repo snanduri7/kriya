@@ -80,12 +80,17 @@ class JavaExampleCompilation:
     # two forms above, and everything the broader classifier saw but does NOT enforce (observational, never a verdict).
     graduated: List[Any] = field(default_factory=list)
     shadow: List[Dict[str, Any]] = field(default_factory=list)
+    # The repository's own license header (the leading block comment of a type the examples call), copied verbatim: a validate-phase
+    # license check (Apache RAT, measured on S3_A) rejects an injected source file without it, which would leave every example
+    # unevaluated (ACCEPTANCE_EVIDENCE_INDETERMINATE). "" when the repository has none.
+    license_header: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"compiler_version": EXAMPLE_COMPILER_VERSION, "java_compiler_version": JAVA_EXAMPLE_COMPILER_VERSION,
                 "examples": [e.to_dict() for e in self.examples], "rejected": list(self.rejected),
                 "graduated_examples": [e.to_dict() for e in self.graduated], "shadow_examples": list(self.shadow),
-                "modules": sorted({e.qualified_type for e in self.examples} | {e.qualified_type for e in self.graduated})}
+                "modules": sorted({e.qualified_type for e in self.examples} | {e.qualified_type for e in self.graduated}),
+                "license_header_sha256": hashlib.sha256(self.license_header.encode("utf-8")).hexdigest() if self.license_header else None}
 
 
 def _split_arguments(text: str) -> Optional[List[str]]:
@@ -204,7 +209,42 @@ def recognize_java_examples(goal: str, requirement_set: RequirementSet, candidat
         compilation.examples.append(JavaGoalExample(FORM_JAVA_LITERAL, rid, number, line.strip(), call.group("type"),
                                                     qualified, call.group("method"), ", ".join(arguments), expected=expected))
     _add_classified_forms(compilation, goal, requirement_set, candidate_root)
+    compilation.license_header = repository_license_header(
+        candidate_root, [e.qualified_type for e in (*compilation.examples, *compilation.graduated)])
     return compilation
+
+
+_LICENSE_BLOCK = re.compile(r"\A\s*(/\*.*?\*/)", re.S)
+
+
+def repository_license_header(candidate_root: str, qualified_types: Sequence[str]) -> str:
+    """The leading ``/* ... */`` license comment of the first named type's main compilation unit, or "" (deterministic: a verbatim
+    copy of text already in the repository, never written by a model). One walk for all types."""
+    wanted = [qualified.rsplit(".", 1)[-1] for qualified in qualified_types]
+    if not wanted:
+        return ""
+    found: Dict[str, str] = {}
+    main_marker = os.sep.join(_MAIN_ROOT)
+    for current, dirs, files in os.walk(candidate_root):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", ".kriya", "target", "build", "node_modules"))
+        if main_marker not in current:
+            continue
+        for simple in wanted:
+            if simple not in found and f"{simple}.java" in files:
+                found[simple] = os.path.join(current, f"{simple}.java")
+        if len(found) == len(set(wanted)):
+            break
+    for simple in wanted:
+        if simple in found:
+            try:
+                with open(found[simple], "r", encoding="utf-8", errors="replace") as handle:
+                    head = handle.read(8192)
+            except OSError:
+                continue
+            block = _LICENSE_BLOCK.match(head)
+            if block and re.search(r"licen[sc]e", block.group(1), re.I):
+                return block.group(1) + "\n"
+    return ""
 
 
 def _add_classified_forms(compilation: JavaExampleCompilation, goal: str, requirement_set: RequirementSet,
@@ -236,7 +276,7 @@ def compile_java_example_class(compilation: JavaExampleCompilation) -> Optional[
                      | {e.qualified_type for e in graduated if e.qualified_type and "." in e.qualified_type}
                      | {e.assertion_type for e in graduated if e.assertion_type and "." in e.assertion_type}
                      | {e.exception for e in graduated if e.exception and not e.exception.startswith("java.lang.")})
-    out = [f"package {JAVA_EXAMPLE_PACKAGE};", "",
+    out = ([compilation.license_header.rstrip("\n"), ""] if compilation.license_header else []) + [f"package {JAVA_EXAMPLE_PACKAGE};", "",
            "// Kriya-derived acceptance class (VERIFICATION-CONTRACT-003 / JAVA-EXAMPLE-COMPILER-001, compiler version",
            f"// {EXAMPLE_COMPILER_VERSION}.{JAVA_EXAMPLE_COMPILER_VERSION}): the goal's own example lines, compiled deterministically; never prose.",
            "import static org.junit.jupiter.api.Assertions.assertEquals;",

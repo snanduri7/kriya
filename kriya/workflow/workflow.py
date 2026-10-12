@@ -5087,6 +5087,11 @@ class WorkflowEngine:
         worktree_path = workspace_path
         try:
             worktree_path = create_git_worktree(workspace_path)
+            if os.path.realpath(worktree_path) == os.path.realpath(workspace_path):
+                # BACKEND-READINESS-V2 (D0): the invariant create_git_worktree already keeps (a sandbox path or an error),
+                # asserted where the direct path depends on it. In-place generation could not even commit (the terminal
+                # revision guard sees its own writes as a conflict) and left unsafe bytes behind on a refused run.
+                raise RuntimeError("the isolated generation sandbox resolves to the application workspace itself")
             logger.info(f"Isolated sandbox worktree created at: {worktree_path}")
             mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
         except WorktreeSyncError as sync_error:

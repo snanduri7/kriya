@@ -90,7 +90,21 @@ def preflight(task: str) -> tuple[str, str]:
     return ("VIABLE", reason) if verdict == REJECT else (verdict, reason)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "preflight":
-        for name in sys.argv[2].split(","):
+def main(argv: list[str]) -> int:
+    """``classify <exit> <log>`` prints ``VERDICT<TAB>reason`` and exits 0 for PASS, 1 REJECT, 3 ENVIRONMENT_UNAVAILABLE,
+    4 INDETERMINATE (so a wrapper can never mistake an environment problem for a candidate rejection);
+    ``preflight T1,T2`` runs the baseline viability check."""
+    if len(argv) == 4 and argv[1] == "classify":
+        verdict, reason = classify_run(int(argv[2]), Path(argv[3]).read_text(errors="replace"))
+        print(f"{verdict}\t{reason}")
+        return {PASS: 0, REJECT: 1, ENVIRONMENT_UNAVAILABLE: 3, INDETERMINATE: 4}[verdict]
+    if len(argv) == 3 and argv[1] == "preflight":
+        for name in argv[2].split(","):
             print(name, *preflight(name))
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -206,3 +206,35 @@ def test_overload_sensitive_literals_of_the_instance_form_are_not_enforced(tmp_p
     example = _only(f"new Calc().twice(2) -> {literal}", _tree(tmp_path, STATIC))
     assert example.status is Status.AMBIGUOUS and "return type" in example.reason
     assert _only(f"new Calc().twice(2) -> {literal.replace(chr(39), chr(34))}", _tree(tmp_path / 'x', STATIC)).status in (Status.COMPILED, Status.AMBIGUOUS)
+
+
+# --- the repository license header (Apache RAT rejected the injected class on S3_A) ---------------------------------------
+
+LICENSE = ("/*\n * Licensed to the Apache Software Foundation (ASF) under one or more\n * contributor license agreements.\n"
+           " * the package com.example is mentioned in this header on purpose\n */\n")
+
+
+def test_the_generated_class_carries_the_repository_license_header_verbatim(tmp_path):
+    from kriya.workflow import example_oracle_java as ej
+    from kriya.workflow.acceptance_jvm import parse_java_acceptance
+    from kriya.workflow.requirements import derive_requirements
+
+    root = _tree(tmp_path, ("src/main/java/demo/Builder.java",))
+    (tmp_path / "tree" / "src/main/java/demo/Builder.java").write_text(LICENSE + "package demo;\npublic class Builder {}\n")
+    goal = 'Fix.\n\nnew Builder("abab").last("") -> 4\n'
+    compilation = ej.recognize_java_examples(goal, derive_requirements(goal), root)
+    source = ej.compile_java_example_class(compilation)
+    assert compilation.license_header == LICENSE and source.startswith(LICENSE.rstrip("\n") + "\n\npackage kriya.examples;")
+    cases, java = parse_java_acceptance(source.encode())  # the header (even one that says "package") does not confuse the B2-c parser
+    assert len(cases) == 1 and java["package"] == "kriya.examples"
+
+
+def test_no_license_comment_means_no_header_and_a_non_license_comment_is_not_copied(tmp_path):
+    from kriya.workflow import example_oracle_java as ej
+    from kriya.workflow.requirements import derive_requirements
+
+    root = _tree(tmp_path, ("src/main/java/demo/Builder.java",))
+    goal = 'Fix.\n\nnew Builder("abab").last("") -> 4\n'
+    assert ej.recognize_java_examples(goal, derive_requirements(goal), root).license_header == ""  # file is just "package x;"
+    (tmp_path / "tree" / "src/main/java/demo/Builder.java").write_text("/* scratch notes about nothing */\npackage demo;\n")
+    assert ej.recognize_java_examples(goal, derive_requirements(goal), root).license_header == ""
