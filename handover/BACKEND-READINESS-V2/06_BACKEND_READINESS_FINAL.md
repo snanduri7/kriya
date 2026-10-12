@@ -26,3 +26,6 @@ Solver-stability backlog (open, nothing implemented in this closure):
 Branch: `backend/readiness-v2`, NOT merged; not ready for a fast-forward merge on readiness grounds (origin/main is an ancestor of the branch, so a merge would be a
 fast-forward mechanically). Owner decision needed: accept 7/12 and merge as an improvement, or fix the symptom-masking gap and rerun a frozen 12.
 GUI PRODUCT: FROZEN / READY TO USE (untouched).
+
+## Update 2026-10-12 (comprehensive cycle)
+Product fixes and the focused live runs are in 07-10. Result unchanged: GENUINE 7/12, BACKEND SOLVER READINESS: FAIL, SOLVER REPEATABILITY: NOT ESTABLISHED. No frozen 12 was run (see 10). Canonical full pytest on c6b845a: 10431 passed, 2 failed (test_lr_r1_m1_0_inventory pin - branch-caused, fixed; test_launch_approval - known TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001 flake, passes in isolation).
