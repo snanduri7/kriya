@@ -26,9 +26,9 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 
-from kriya.workflow.edit_safety import strip_java_comments_and_strings
+from kriya.workflow.edit_safety import StagedFileWrite, strip_java_comments_and_strings
 from kriya.workflow.named_test_oracle import _is_test_side
 
 UNSAFE_EXCEPTION_MASKING = "UNSAFE_EXCEPTION_MASKING"
@@ -130,8 +130,8 @@ def masking_clauses(path: str, source: str) -> List[MaskingClause]:
 
 
 def find_unsafe_exception_masking(path: str, content: str, baseline: Optional[str] = None) -> Optional[str]:
-    """Description of the first masking catch clause the candidate ADDED relative to ``baseline`` (None = no baseline /
-    a new file), or None. Counted per sorted caught-type tuple so a pre-existing clause is never a finding by presence,
+    """Description of the first masking catch clause the candidate ADDED relative to ``baseline`` (None = no baseline: a new file, or an in-place run where the
+    pre-run text is unavailable; then every masking clause counts), or None. Counted per sorted caught-type tuple so a pre-existing clause is never a finding by presence,
     while widening ``Exception`` to ``Throwable`` (a new ``Throwable`` clause) is."""
     candidate = masking_clauses(path, content)
     if not candidate:
@@ -144,3 +144,19 @@ def find_unsafe_exception_masking(path: str, content: str, baseline: Optional[st
         return (f"{UNSAFE_EXCEPTION_MASKING}: line {clause.line} newly catches {'|'.join(clause.types)} "
                 f"without rethrowing it as an Error: `{clause.snippet}`")
     return None
+
+
+def find_masking_in_batch(
+    writes: Iterable[StagedFileWrite], baseline_for: Callable[[StagedFileWrite], Optional[str]],
+) -> List[Tuple[str, str]]:
+    """The rule on a FINAL batch (what a commit will write), whatever route produced its bytes: ``(target_path,
+    description)`` for every non-deleted write that newly masks, against ``baseline_for(write)`` (the text the write
+    replaces, None for a new file). The terminal gates of both commit boundaries use this one decision."""
+    findings: List[Tuple[str, str]] = []
+    for write in writes:
+        if write.delete:
+            continue
+        found = find_unsafe_exception_masking(write.target_path, write.content, baseline_for(write))
+        if found:
+            findings.append((write.target_path, found))
+    return findings

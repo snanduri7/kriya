@@ -14,10 +14,17 @@ workspace (PRD-004). The gates run in a fixed order, and each emits one
    gate. Its status is the outcome's (passed, passed_with_warnings,
    accepted_risk, failed, unknown, unavailable, disabled - never "passed"
    for disabled);
-5. terminal_obligations: the MA8 terminal aggregation over the ledger;
-6. original_requirements: the user's own requirements (PRD-020), judged by
+5. semantic_safety (BACKEND-READINESS-V2): the exception-masking rule
+   (kriya/workflow/exception_masking.py) on the exact batch the commit will
+   write, against the real workspace's current files. The staging guard in
+   attempt.py sees only what the Developer response stages; this gate judges
+   the final state, so a masking result is refused whichever route (Developer
+   write, anchored edit, repair, tool or shell write) left it in the
+   candidate. Deterministic, before the model-backed requirement gate;
+6. terminal_obligations: the MA8 terminal aggregation over the ledger;
+7. original_requirements: the user's own requirements (PRD-020), judged by
    the verifier and closed by deterministic evidence where it exists;
-7. artifact_registry: the candidate's artifact facts, derived for recording
+8. artifact_registry: the candidate's artifact facts, derived for recording
    after the commit.
 
 A gate that raises is a failed gate with an INDETERMINATE message, never a
@@ -51,6 +58,7 @@ from kriya.workflow.edit_safety import (
     content_revision,
     read_file_revision,
 )
+from kriya.workflow.exception_masking import find_masking_in_batch
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -235,6 +243,8 @@ class TerminalGateReport:
     # blocking message (None when the result permits the commit).
     static_analysis: Optional[StaticAnalysisGateResult] = None
     static_analysis_gap: Optional[str] = None
+    # BACKEND-READINESS-V2: the final-state exception-masking verdict (None = no finding).
+    semantic_safety_gap: Optional[str] = None
     # The binding of the batch these gates verified (None when it could not
     # be materialized: the commit then refuses, VERIFIED_CANDIDATE_EVIDENCE_MISSING).
     verified_candidate: Optional[CandidateVerificationBinding] = None
@@ -243,7 +253,8 @@ class TerminalGateReport:
     def commit_eligible(self) -> bool:
         return self.ran and not any((
             self.migration_gap, self.stack_contract_gap, self.preserved_reference_gap,
-            self.static_analysis_gap, self.terminal_obligation_gap, self.requirement_gap, self.artifact_error,
+            self.static_analysis_gap, self.semantic_safety_gap, self.terminal_obligation_gap, self.requirement_gap,
+            self.artifact_error,
         ))
 
     def global_gaps(self) -> Tuple[Tuple[str, Optional[str]], ...]:
@@ -253,6 +264,7 @@ class TerminalGateReport:
             ("global_stack_contract_gap", self.stack_contract_gap),
             ("global_preserved_reference_gap", self.preserved_reference_gap),
             ("global_static_analysis_gap", self.static_analysis_gap),
+            ("global_semantic_safety_gap", self.semantic_safety_gap),
             ("global_terminal_obligation_gap", self.terminal_obligation_gap),
             ("global_requirement_gap", self.requirement_gap),
         )
@@ -269,6 +281,7 @@ def _record_terminal_report(report: TerminalGateReport) -> None:
     gates = (("migration", report.migration_gap), ("stack_contract", report.stack_contract_gap),
              ("preserved_references", report.preserved_reference_gap),
              ("static_analysis", report.static_analysis_gap),
+             ("semantic_safety", report.semantic_safety_gap),
              ("terminal_obligations", report.terminal_obligation_gap),
              ("original_requirements", report.requirement_gap), ("artifact_registry", report.artifact_error))
     for gate, gap in gates:
@@ -304,6 +317,11 @@ class TerminalGateService:
             static_analysis_gap or (banner(static_analysis) if static_analysis is not None else None),
         )
 
+        semantic_safety_gap = self._semantic_safety_gap(request)
+        await emit_gate_outcome(
+            "semantic_safety", "failed" if semantic_safety_gap else "passed", semantic_safety_gap,
+        )
+
         terminal_obligation_gap = self._terminal_obligation_gap(request)
         await emit_gate_outcome(
             "terminal_obligations", "failed" if terminal_obligation_gap else "passed", terminal_obligation_gap,
@@ -328,7 +346,7 @@ class TerminalGateService:
             ran=True, migration_gap=migration_gap, stack_contract_gap=stack_contract_gap,
             preserved_reference_gap=preserved_reference_gap, terminal_obligation_gap=terminal_obligation_gap,
             static_analysis=static_analysis, static_analysis_gap=static_analysis_gap,
-            requirement_gap=requirement_gap, artifact_error=artifact_error,
+            semantic_safety_gap=semantic_safety_gap, requirement_gap=requirement_gap, artifact_error=artifact_error,
             requirement_closure_attempts=tuple(closure_attempts), candidate_derived_artifacts=derived,
             verified_candidate=verified_candidate,
         )
@@ -419,6 +437,39 @@ class TerminalGateService:
             return gap
         except Exception as error:
             return f"STACK CONTRACT FINAL-STATE CHECK INDETERMINATE: {type(error).__name__}: {error}"
+
+    @staticmethod
+    def _semantic_safety_gap(request: TerminalGateRequest) -> Optional[str]:
+        """The exception-masking rule on the FINAL state: every Java file of the batch the commit will write, against
+        the real workspace file it replaces (a new file has no baseline). Route-independent by construction: it reads
+        what will be written, not how it got there."""
+        try:
+            writes = request.commit_batch()
+        except CandidateMaterializationError:
+            return None  # no bound candidate: the commit refuses it (VERIFIED_CANDIDATE_EVIDENCE_MISSING)
+        except Exception as error:
+            return f"SEMANTIC SAFETY FINAL-STATE CHECK INDETERMINATE: {type(error).__name__}: {error}"
+
+        in_place = os.path.realpath(request.candidate_root) == os.path.realpath(request.workspace_path)
+
+        def workspace_baseline(write: StagedFileWrite) -> Optional[str]:
+            # In-place run (no sandbox): the workspace file IS the candidate, so there is no pre-run text to diff
+            # against. Fail closed: every masking clause counts as new.
+            if in_place or write.expected_base_exists is False or not os.path.isfile(write.base_path):
+                return None
+            with open(write.base_path, "r", encoding="utf-8", errors="replace") as handle:
+                return handle.read()
+
+        try:
+            findings = [
+                f"{os.path.relpath(target, request.workspace_path)}: {found}"
+                for target, found in find_masking_in_batch(writes, workspace_baseline)
+            ]
+        except Exception as error:
+            return f"SEMANTIC SAFETY FINAL-STATE CHECK INDETERMINATE: {type(error).__name__}: {error}"
+        if findings:
+            return "SEMANTIC SAFETY VIOLATED (final candidate): " + "; ".join(findings)
+        return None
 
     def _preserved_reference_gap(self, request: TerminalGateRequest) -> Optional[str]:
         ledger = request.obligation_ledger

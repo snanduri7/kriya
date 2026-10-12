@@ -23,7 +23,7 @@ import kriya.workflow.workflow as workflow_module
 from kriya.config import AppConfig
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisService
-from kriya.workflow.edit_safety import content_revision
+from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -48,8 +48,8 @@ from kriya.workflow.verification_binding import bind_candidate
 REPO = Path(__file__).resolve().parent.parent
 # PRD-031A inserted static_analysis at position 4 (deterministic, before
 # the model-backed requirement gate).
-GATES = ["migration", "stack_contract", "preserved_references", "static_analysis", "terminal_obligations",
-         "original_requirements", "artifact_registry"]
+GATES = ["migration", "stack_contract", "preserved_references", "static_analysis", "semantic_safety",
+         "terminal_obligations", "original_requirements", "artifact_registry"]
 DISABLED_EVENT = ("static_analysis", "disabled", "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)")
 
 
@@ -77,7 +77,7 @@ def _validators(**overrides):
     return TerminalGateValidators(**fields)
 
 
-def _request(tmp_path, *, autonomy=None, migration=None, ledger=None, goal="Update app.py."):
+def _request(tmp_path, *, autonomy=None, migration=None, ledger=None, goal="Update app.py.", commit_batch=list):
     candidate = tmp_path / "candidate"
     workspace = tmp_path / "workspace"
     for root in (candidate, workspace):
@@ -88,7 +88,7 @@ def _request(tmp_path, *, autonomy=None, migration=None, ledger=None, goal="Upda
         candidate_root=str(candidate), workspace_path=str(workspace),
         migration_resolution=migration or MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE),
         obligation_ledger=ledger or ObligationLedger(), requirement_set=derive_requirements(goal),
-        autonomy=autonomy, spec_compliance=None, milestone_id="m1", commit_batch=list,
+        autonomy=autonomy, spec_compliance=None, milestone_id="m1", commit_batch=commit_batch,
         static_analysis_candidate=StaticAnalysisCandidate(
             materialize=list, workspace_path=str(workspace), run_id="run", unit_id="m1",
         ),
@@ -143,6 +143,7 @@ def _raise(message):
     ("stack_contract", "stack_contract_gap", "forced stack gap"),
     ("preserved_references", "preserved_reference_gap", "PRESERVED REFERENCE FINAL-STATE CHECK INDETERMINATE"),
     ("static_analysis", "static_analysis_gap", "STATIC ANALYSIS INDETERMINATE (global final-state check)"),
+    ("semantic_safety", "semantic_safety_gap", "SEMANTIC SAFETY FINAL-STATE CHECK INDETERMINATE"),
     ("terminal_obligations", "terminal_obligation_gap", "TERMINAL OBLIGATIONS UNSATISFIED"),
     ("original_requirements", "requirement_gap", "REQUIREMENTS_UNRESOLVED: REQ-1 (violated)"),
     ("artifact_registry", "artifact_error", "derivation exploded"),
@@ -161,6 +162,9 @@ def test_one_failing_gate_fails_only_itself_and_blocks_the_commit(tmp_path, monk
         overrides["enforce_preserved_reference_terminal_integrity"] = _raise("exploded")
     elif gate == "static_analysis":
         overrides["evaluate_static_analysis"] = _raise("scanner service exploded")
+    elif gate == "semantic_safety":
+        monkeypatch.setattr(
+            "kriya.workflow.exception_masking.find_unsafe_exception_masking", _raise("masking check exploded"))
     elif gate == "terminal_obligations":
         _violated_terminal_obligation(ledger)
     elif gate == "original_requirements":
@@ -168,7 +172,14 @@ def test_one_failing_gate_fails_only_itself_and_blocks_the_commit(tmp_path, monk
             (requirements.requirements[0], RequirementOutcome.VIOLATED)]
     else:
         monkeypatch.setattr(ArtifactRegistry, "derive_from_workspace", _raise("derivation exploded"))
-    report, events = _run(_request(tmp_path, migration=migration, ledger=ledger), _validators(**overrides))
+    request_overrides = {}
+    if gate == "semantic_safety":
+        target = str(tmp_path / "workspace" / "app.py")
+        request_overrides["commit_batch"] = lambda: [StagedFileWrite(
+            target_path=target, content="print('hi')\n", base_path=target,
+            expected_base_revision=content_revision("print('hi')\n"))]
+    report, events = _run(
+        _request(tmp_path, migration=migration, ledger=ledger, **request_overrides), _validators(**overrides))
 
     assert [event[0] for event in events] == GATES
     assert [event[0] for event in events if event[1] == "failed"] == [gate]

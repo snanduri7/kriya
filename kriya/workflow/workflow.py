@@ -145,6 +145,7 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.egress_authority import egress_authority_details
 from kriya.workflow.evidence import EvidenceRecord
+from kriya.workflow.exception_masking import find_masking_in_batch
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import (
     _build_error_source_context as _build_error_source_context,
@@ -2042,6 +2043,34 @@ def _run_static_analysis_gate(
             "reason_code": f"STATIC_ANALYSIS_{result.outcome.value}",
             "reason_codes": list(result.reason_codes), "evidence_digest": result.evidence_digest,
         },
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _run_semantic_safety_gate(state: GenerationState, *, worktree_path: str, workspace_path: str) -> None:
+    """BACKEND-READINESS-V2 at the direct/milestone pre-apply boundary: the exception-masking rule on the exact batch
+    the terminal apply commits (the enforce terminal's ``semantic_safety`` gate, same decision), against the bytes the
+    run first read. It judges the final state, so a masking result is refused whichever route left it in the candidate.
+    A finding is a deterministic stop of the same kind as the staging guard's: fix the cause, do not widen a catch."""
+    try:
+        writes = _direct_terminal_writes(worktree_path, workspace_path, state)
+    except CandidateMaterializationError:
+        return  # no bindable candidate: the terminal apply refuses it (VERIFIED_CANDIDATE_EVIDENCE_MISSING)
+
+    def run_start_text(write: Any) -> Optional[str]:
+        return state.all_original_contents.get(os.path.relpath(write.target_path, workspace_path))
+
+    findings = find_masking_in_batch(writes, run_start_text)
+    if not findings:
+        return
+    message = "SEMANTIC SAFETY VIOLATED (final candidate): " + "; ".join(
+        f"{os.path.relpath(target, workspace_path)}: {found}" for target, found in findings)
+    failure = Failure(
+        type="unsafe_exception_masking", message=message, raw_output=message,
+        file_locations=[FileLocation(filepath=os.path.relpath(target, workspace_path)) for target, _ in findings],
+        likely_files=[os.path.relpath(target, workspace_path) for target, _ in findings],
+        attempt=state.attempt_number, source="semantic_safety_gate", authority="deterministic",
     )
     state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
@@ -5497,6 +5526,9 @@ class WorkflowEngine:
                     run_id=run_id,
                     unit_id=f"{work_unit.work_unit_id if work_unit is not None else 'direct'}-attempt{state.attempt_number}",
                 )
+
+                # BACKEND-READINESS-V2: the exception-masking rule on the same final batch.
+                _run_semantic_safety_gate(state, worktree_path=worktree_path, workspace_path=workspace_path)
 
                 # Candidate-only checkpoint: generation and inner gates passed, but
                 # terminal regression and application have not. Its name and payload

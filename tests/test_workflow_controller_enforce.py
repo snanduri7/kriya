@@ -10242,6 +10242,8 @@ async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(t
         ("preserved_references", "global_preserved_reference_gap", "failed"),
         # PRD-031A: a static-analysis gate that raises is a failed gate.
         ("static_analysis", "global_static_analysis_gap", "failed"),
+        # BACKEND-READINESS-V2: the final-state exception-masking verdict.
+        ("semantic_safety", "global_semantic_safety_gap", "failed"),
         ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
         ("original_requirements", "global_requirement_gap", "failed"),
         ("artifact_registry", "artifact_error", "needs_review"),
@@ -10332,6 +10334,13 @@ async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
             stack.enter_context(patch(
                 "kriya.workflow.workflow_controller.StaticAnalysisService.evaluate_candidate",
                 side_effect=RuntimeError("static analysis service exploded"),
+            ))
+        elif failing_gate == "semantic_safety":
+            # The check is forced to report a finding for the candidate batch (the decision itself is pinned in
+            # test_backend_readiness_v2_terminal_masking_gate.py).
+            stack.enter_context(patch(
+                "kriya.workflow.exception_masking.find_unsafe_exception_masking",
+                return_value="UNSAFE_EXCEPTION_MASKING: forced",
             ))
         elif failing_gate == "terminal_obligations":
             stack.enter_context(patch.object(
@@ -10470,11 +10479,12 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
         "terminal_gate_outcome",
         "terminal_gate_outcome",
         "terminal_gate_outcome",
+        "terminal_gate_outcome",
         "commit_eligible",
         "workspace_commit_completed",
     ]
     assert [payload["gate"] for name, payload in events if name == "terminal_gate_outcome"] == [
-        "migration", "stack_contract", "preserved_references", "static_analysis",
+        "migration", "stack_contract", "preserved_references", "static_analysis", "semantic_safety",
         "terminal_obligations", "original_requirements", "artifact_registry",
     ]
     # PRD-031A: disabled (the packaged default) is reported, never "passed".
