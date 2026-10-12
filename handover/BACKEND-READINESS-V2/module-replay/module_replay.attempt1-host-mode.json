@@ -1,0 +1,839 @@
+[
+ {
+  "subject": "good",
+  "role": "correct",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.5,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "base",
+  "role": "wrong",
+  "run": 1,
+  "changed": [],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.5,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "base",
+  "role": "wrong",
+  "run": 2,
+  "changed": [],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.4,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "base",
+  "role": "wrong",
+  "run": 3,
+  "changed": [],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.3,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "good",
+  "role": "correct",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "good",
+  "role": "correct",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "unrelated",
+  "role": "correct",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEmptyString.java",
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "unrelated",
+  "role": "correct",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEmptyString.java",
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "unrelated",
+  "role": "correct",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEmptyString.java",
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "near_miss_unicode_only",
+  "role": "wrong",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "near_miss_unicode_only",
+  "role": "wrong",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "near_miss_unicode_only",
+  "role": "wrong",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example1, kriya.examples.KriyaGoalExamplesTest.example2"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "near_miss_trim_only",
+  "role": "wrong",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "near_miss_trim_only",
+  "role": "wrong",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "near_miss_trim_only",
+  "role": "wrong",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3, kriya.examples.KriyaGoalExamplesTest.example4"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v2-regex-GENUINE",
+  "role": "correct",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.1,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "recorded-v2-regex-GENUINE",
+  "role": "correct",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "recorded-v2-regex-GENUINE",
+  "role": "correct",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.1,
+  "verdict": "PASS"
+ },
+ {
+  "subject": "recorded-v2f-isWhitespace",
+  "role": "wrong",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v2f-isWhitespace",
+  "role": "wrong",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v2f-isWhitespace",
+  "role": "wrong",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v6f-isWhitespace",
+  "role": "wrong",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v6f-isWhitespace",
+  "role": "wrong",
+  "run": 2,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ },
+ {
+  "subject": "recorded-v6f-isWhitespace",
+  "role": "wrong",
+  "run": 3,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_PASSED",
+    "passed": true,
+    "violated": false,
+    "reason": ""
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_VIOLATED",
+    "passed": false,
+    "violated": true,
+    "reason": "acceptance case(s) observed the behaviour contradicted: kriya.examples.KriyaGoalExamplesTest.example3"
+   }
+  },
+  "runner_refusal": null,
+  "seconds": 2.2,
+  "verdict": "VIOLATED"
+ }
+]

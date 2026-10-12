@@ -22,6 +22,7 @@ POM = "pom.xml"
 class MavenBuildAdapter(BuildAdapter):
     build_system = "maven"
     language = "java"
+    supports_modules = True
     tools = frozenset({"mvn", "mvnw", "mvn.cmd"})
 
     def detects(self, workspace_root: str) -> bool:
@@ -193,8 +194,14 @@ class MavenBuildAdapter(BuildAdapter):
                 logger.warning(f"Failed to invoke mvn compile: {e}")
         return None
 
-    def run_tests(self, v: Any, test_class: Optional[str]) -> Dict[str, Any]:
+    def run_tests(self, v: Any, test_class: Optional[str], *, module: Optional[str] = None) -> Dict[str, Any]:
+        """``module`` (a declared reactor module directory) selects that module (``-pl``) with the modules it depends on
+        (``-am``, so a sibling is built from the reactor, not looked up in a local repository that may not hold it); the
+        class filter then matches nowhere else, which must not fail the upstream modules
+        (``-Dsurefire.failIfNoSpecifiedTests=false``; ``-DfailIfNoTests=false`` for older surefire)."""
         goals = ["test"]
+        if module:
+            goals.extend(["-pl", module, "-am", "-Dsurefire.failIfNoSpecifiedTests=false", "-DfailIfNoTests=false"])
         if test_class:
             goals.append(f"-Dtest={test_class}")
         res = v._run_maven_cmd(goals, cwd=v.workspace_path, timeout=300)

@@ -455,6 +455,7 @@ class AcceptanceRun:
     # candidate's main classes and per-case report detail.
     language: str = "python"
     runner: Optional[str] = None  # B2-c: the JVM runner detected for this run (maven / gradle)
+    module: Optional[str] = None  # JVM-MODULE-OWNERSHIP-001: the declared build module the class ran in (None: the root)
     trust_surface_digest: Optional[str] = None
     candidate_classes: Optional[List[str]] = None
     case_details: Optional[Dict[str, List[Dict[str, str]]]] = None

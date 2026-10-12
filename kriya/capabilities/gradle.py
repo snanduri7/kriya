@@ -32,6 +32,7 @@ _WRAPPER = "gradlew"
 class GradleBuildAdapter(BuildAdapter):
     build_system = "gradle"
     language = "java"
+    supports_modules = True
     tools = frozenset({"gradle", "gradlew", "gradle.bat"})
 
     def detects(self, workspace_root: str) -> bool:
@@ -83,8 +84,13 @@ class GradleBuildAdapter(BuildAdapter):
             logger.warning(f"Failed to invoke gradle compileJava: {e}")
         return None
 
-    def run_tests(self, v: Any, test_class: Optional[str]) -> Dict[str, Any]:
-        tasks = ["test"]
+    def run_tests(self, v: Any, test_class: Optional[str], *, module: Optional[str] = None) -> Dict[str, Any]:
+        """``module`` (a declared Gradle project directory such as ``core`` or ``a/b``) runs that project's ``test``
+        task only (``:core:test``); without it the selector names every project's ``test`` task, and a project with
+        no match for ``--tests`` fails the build."""
+        from kriya.workflow.jvm_module_ownership import gradle_project_path
+
+        tasks = [f"{gradle_project_path(module)}:test" if module else "test"]
         if test_class:
             tasks.extend(["--tests", test_class])
         res = v._run_gradle_cmd(self.command(v.workspace_path), tasks, cwd=v.workspace_path)

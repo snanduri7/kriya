@@ -334,7 +334,12 @@ def run_java_acceptance(
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "xb") as handle:
             handle.write(source)
-        run.result = validator.run_tests(target_test=injection) or {}
+        module = (artifact.java or {}).get("module") or None
+        # JVM-MODULE-OWNERSHIP-001: a class placed in a declared build module runs in that module only; a root-placed
+        # class (every operator-supplied one) runs exactly as it always did.
+        run.module = module
+        run.result = (validator.run_tests(target_test=injection, module=module) if module
+                      else validator.run_tests(target_test=injection)) or {}
         run.report = test_execution.report_from_result(run.result)
         if run.report is not None and run.report.complete:
             run.case_details = _case_details(export, run.report)
@@ -376,6 +381,8 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
     base = {**base, "runner": runner, "contract": JVM_ACCEPTANCE_CONTRACT_VERSION,
             "runner_contract_digest": runner_source_digest(runner), "trust_surface_digest": run.trust_surface_digest,
             "injection_path": artifact.java["injection_path"]}
+    if getattr(run, "module", None):
+        base["module"] = run.module
 
     def every(code: str, reason: str) -> Dict[str, Any]:
         return {rid: AcceptanceJudgment(code, reason, {**base, "cases": artifact.identities_for(rid)})

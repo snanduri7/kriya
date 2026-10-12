@@ -117,7 +117,8 @@ def _parse_gradle_declared_modules(settings_path: str) -> List[str]:
         return []
     modules: List[str] = []
     for line in content.splitlines():
-        if not line.strip().startswith("include"):
+        # `include` declares projects; `includeBuild` (a composite build) and `includeFlat` (sibling directories) do not.
+        if not re.match(r"include(?![A-Za-z0-9_])", line.strip()):
             continue
         for token in _GRADLE_QUOTED_TOKEN.findall(line):
             modules.append(token.lstrip(":").replace(":", "/"))
@@ -233,10 +234,11 @@ def _find_python_main_scripts(workspace_path: str) -> List[str]:
     return entrypoints
 
 
-def detect_repository_topology(workspace_path: str) -> RepositoryTopology:
+def declared_build_modules(workspace_path: str) -> Tuple[Optional[str], List[str]]:
+    """(build system, modules the root build file DECLARES): Maven ``<modules>``, Gradle ``include`` (the conventional
+    shapes ``_parse_gradle_declared_modules`` recognizes), npm literal workspaces. The declared set only - no discovery."""
     root_marker = _root_build_marker(workspace_path)
     build_system = root_marker[1] if root_marker else None
-
     declared_modules: List[str] = []
     if root_marker and root_marker[1] == "maven":
         declared_modules = _parse_maven_declared_modules(os.path.join(workspace_path, "pom.xml"))
@@ -248,6 +250,12 @@ def detect_repository_topology(workspace_path: str) -> RepositoryTopology:
                 break
     elif root_marker and root_marker[1] == "npm":
         declared_modules = _parse_npm_workspaces(os.path.join(workspace_path, "package.json"))
+    return build_system, declared_modules
+
+
+def detect_repository_topology(workspace_path: str) -> RepositoryTopology:
+    root_marker = _root_build_marker(workspace_path)
+    build_system, declared_modules = declared_build_modules(workspace_path)
 
     modules = tuple(sorted(set(declared_modules) | set(_discover_child_build_roots(workspace_path))))
     build_roots = ((".",) if root_marker else ()) + modules

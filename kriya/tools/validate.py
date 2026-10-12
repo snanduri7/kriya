@@ -1912,16 +1912,21 @@ class PolymorphicValidator:
         return result
 
     @_verification_gate("tests")
-    def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+    def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None, *,
+                  module: Optional[str] = None) -> Dict[str, Any]:
         """The test gate (``_run_tests``), bound to a fresh structured report
         destination before it runs; the result carries the
         TestExecutionReport of exactly this invocation as ``test_execution``
         (FS-1A, kriya/tools/test_execution.py): which test identities ran
-        and how, or INDETERMINATE - never inferred from console text."""
+        and how, or INDETERMINATE - never inferred from console text.
+
+        ``module`` (JVM only, JVM-MODULE-OWNERSHIP-001) runs the selected class in that declared build module of a
+        multi-module build (Gradle ``:module:test``, Maven ``-pl module``) instead of selecting it across the whole
+        build; None is every other caller, unchanged."""
         binding = self._bind_test_report()
         self.test_report_binding = binding
         try:
-            result = self._run_tests(target_test)
+            result = self._run_tests(target_test, module=module)
         except BaseException:
             test_execution.collect(binding)  # removes Kriya's own report destination
             raise
@@ -1973,7 +1978,8 @@ class PolymorphicValidator:
                 gate_id="", runner=runner, workspace=self.workspace_path,
                 unsupported=f"REPORT_DESTINATION_UNAVAILABLE:{type(error).__name__}")
 
-    def _run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+    def _run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None, *,
+                   module: Optional[str] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite.
 
         `target_test` accepts either a single string (unchanged, existing
@@ -2023,7 +2029,15 @@ class PolymorphicValidator:
                 )
                 for adapter in BUILD_ADAPTERS:
                     if adapter.language == "java" and adapter.detects(self.workspace_path):
+                        if module:
+                            if not getattr(adapter, "supports_modules", False):
+                                return {"success": False, "output": (
+                                    f"A module-qualified test run ({module}) is not supported by the "
+                                    f"{adapter.build_system} adapter; nothing was run.")}
+                            return adapter.run_tests(self, java_test_class, module=module)
                         return adapter.run_tests(self, java_test_class)
+                if module:
+                    return {"success": False, "output": f"A module-qualified test run ({module}) needs a Maven or Gradle build."}
                 return JAVAC.run_tests(self, java_test_class)
  
             elif self.stack == "ruby":

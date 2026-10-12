@@ -1,0 +1,37 @@
+[
+ {
+  "subject": "good",
+  "role": "correct",
+  "run": 1,
+  "changed": [
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java"
+  ],
+  "graduated": [
+   "assertThat(\"my foo bar\", equalToCompressingWhiteSpace(\"  my  foo bar \"))   -> fails, used to pass",
+   "assertThat(\"  my\\tfoo  bar \", equalToCompressingWhiteSpace(\"my foo bar\"))  -> fails, used to pass",
+   "assertThat(\"price\u00a010 EUR\", equalToCompressingWhiteSpace(\"price 10 EUR\"))   -> fails, used to pass",
+   "assertThat(\"a\u2003b\", equalToCompressingWhiteSpace(\"a b\"))                     -> fails, used to pass"
+  ],
+  "shadow_statuses": [],
+  "module": "hamcrest",
+  "artifact": true,
+  "injection_path": "hamcrest/src/test/java/kriya/examples/KriyaGoalExamplesTest.java",
+  "judgments": {
+   "REQ-5": {
+    "code": "ACCEPTANCE_CANDIDATE_COMPILE_FAILED",
+    "passed": false,
+    "violated": false,
+    "reason": "the candidate's own main code does not compile (an ordinary candidate failure, not acceptance evidence)"
+   },
+   "REQ-6": {
+    "code": "ACCEPTANCE_CANDIDATE_COMPILE_FAILED",
+    "passed": false,
+    "violated": false,
+    "reason": "the candidate's own main code does not compile (an ordinary candidate failure, not acceptance evidence)"
+   }
+  },
+  "runner_refusal": "ACCEPTANCE_CANDIDATE_COMPILE_FAILED",
+  "seconds": 1.7,
+  "verdict": "INDETERMINATE"
+ }
+]

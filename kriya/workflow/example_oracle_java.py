@@ -84,9 +84,12 @@ class JavaExampleCompilation:
     # license check (Apache RAT, measured on S3_A) rejects an injected source file without it, which would leave every example
     # unevaluated (ACCEPTANCE_EVIDENCE_INDETERMINATE). "" when the repository has none.
     license_header: str = ""
+    # JVM-MODULE-OWNERSHIP-001: the build module whose test source set holds - and whose test task runs - the sealed class:
+    # "" the root project (the placement before module ownership existed), else a declared module directory.
+    module: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"compiler_version": EXAMPLE_COMPILER_VERSION, "java_compiler_version": JAVA_EXAMPLE_COMPILER_VERSION,
+        return {"compiler_version": EXAMPLE_COMPILER_VERSION, "module": self.module, "java_compiler_version": JAVA_EXAMPLE_COMPILER_VERSION,
                 "examples": [e.to_dict() for e in self.examples], "rejected": list(self.rejected),
                 "graduated_examples": [e.to_dict() for e in self.graduated], "shadow_examples": list(self.shadow),
                 "modules": sorted({e.qualified_type for e in self.examples} | {e.qualified_type for e in self.graduated}),
@@ -227,6 +230,7 @@ def recognize_java_examples(goal: str, requirement_set: RequirementSet, candidat
         compilation.examples.append(JavaGoalExample(FORM_JAVA_LITERAL, rid, number, line.strip(), call.group("type"),
                                                     qualified, call.group("method"), ", ".join(arguments), expected=expected))
     _add_classified_forms(compilation, goal, requirement_set, candidate_root)
+    _scope_to_owning_module(compilation, candidate_root)
     compilation.license_header = repository_license_header(
         candidate_root, [e.qualified_type for e in (*compilation.examples, *compilation.graduated)])
     return compilation
@@ -263,6 +267,56 @@ def repository_license_header(candidate_root: str, qualified_types: Sequence[str
             if block and re.search(r"licen[sc]e", block.group(1), re.I):
                 return block.group(1) + "\n"
     return ""
+
+
+def _scope_to_owning_module(compilation: JavaExampleCompilation, candidate_root: str) -> None:
+    """JVM-MODULE-OWNERSHIP-001: one sealed class runs in ONE build module - the module that owns the types its examples
+    call (kriya/workflow/jvm_module_ownership.py). Every enforced example whose owning module is not that module (it is
+    unresolved, or another module's) is moved to the shadow list with the reason: observational evidence, never a verdict
+    and never a guess. An all-root example set is untouched - the placement before module ownership existed."""
+    from kriya.workflow.acceptance_jvm import detect_jvm_runner
+    from kriya.workflow.jvm_module_ownership import (
+        ModuleResolution,
+        class_module,
+        module_of_source_path,
+        resolve_module_ownership,
+    )
+    from kriya.workflow.repository_topology import declared_build_modules
+
+    items = [("static", e) for e in compilation.examples] + [("graduated", e) for e in compilation.graduated]
+    if not items:
+        return
+    declares_modules = bool(declared_build_modules(candidate_root)[1])
+    runner = detect_jvm_runner(candidate_root)
+    cache: Dict[Any, Any] = {}
+
+    def resolution_for(qualified_type: str) -> Any:
+        source = main_source_path(candidate_root, qualified_type)
+        if source is None and not declares_modules:
+            # No single declaring file (a type declared under several src/main/java roots) in a build that declares no
+            # module: the one project, where such an example was always enforced - never displaced by module ownership.
+            return ModuleResolution("")
+        key = module_of_source_path(source) if source else None
+        if key not in cache or key is None:
+            cache[key] = resolve_module_ownership(candidate_root, source, runner)
+        return cache[key]
+
+    resolutions = [(kind, e, resolution_for(e.qualified_type)) for kind, e in items]
+    chosen = class_module([r.module for _kind, _e, r in resolutions if r.resolved])
+    compilation.module = chosen or ""
+    if all(r.resolved and r.module == chosen for _kind, _e, r in resolutions):
+        return
+    keep_static: List[Any] = []
+    keep_graduated: List[Any] = []
+    for kind, example, resolution in resolutions:
+        if resolution.resolved and resolution.module == chosen:
+            (keep_static if kind == "static" else keep_graduated).append(example)
+            continue
+        reason = resolution.reason or (f"the owning module {resolution.module!r} differs from the module "
+                                       f"{chosen!r} the sealed class runs in" if chosen is not None
+                                       else "the examples belong to more than one non-root build module")
+        compilation.shadow.append({**example.to_dict(), "status": "MODULE_NOT_ENFORCEABLE", "reason": reason})
+    compilation.examples, compilation.graduated = keep_static, keep_graduated
 
 
 def _add_classified_forms(compilation: JavaExampleCompilation, goal: str, requirement_set: RequirementSet,
@@ -351,10 +405,16 @@ def derive_java_example_artifact(
         with open(temporary, "wb") as handle:
             handle.write(source)
         os.replace(temporary, stored)
+    if compilation.module:
+        from kriya.workflow.jvm_module_ownership import injection_path_for
+
+        java = {**java, "module": compilation.module,
+                "injection_path": injection_path_for(compilation.module, java["package"], java["class_name"])}
     artifact = AcceptanceArtifact(digest=digest, stored_path=stored, source_name=JAVA_EXAMPLE_SOURCE_NAME,
                                   requirement_set_digest=requirement_set.digest, cases=cases, imports=(),
                                   language="java", java=java)
     report["artifact"] = {"digest": digest, "stored_path": stored, "injection_path": java["injection_path"],
+                          "module": compilation.module,
                           "cases": {rid: artifact.identities_for(rid) for rid in artifact.requirement_ids}}
     return artifact, report
 

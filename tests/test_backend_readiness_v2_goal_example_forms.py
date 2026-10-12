@@ -142,7 +142,10 @@ def test_t2_style_prose_and_non_literal_constants_are_unsupported(tmp_path):
 
 
 def test_graduation_gate_is_per_form():
-    assert gf.ENFORCED_FORMS == {gf.FORM_INSTANCE_VALUE}  # only the individually replay-proven form
+    # only the individually replay-proven forms: instance_value (S3_A) and matcher_pass (T3, module-aware replay)
+    assert gf.ENFORCED_FORMS == {gf.FORM_INSTANCE_VALUE, gf.FORM_MATCHER_PASS}
+    for unproven in (gf.FORM_INSTANCE_RAISES, gf.FORM_INSTANCE_NO_THROW, gf.FORM_STATIC_NO_THROW):
+        assert unproven not in gf.ENFORCED_FORMS
 
 
 # --- integration with the enforced Java example compiler -----------------------------------------------------------------

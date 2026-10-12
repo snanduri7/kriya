@@ -77,12 +77,19 @@ ALL_FORMS = (FORM_STATIC_VALUE, FORM_STATIC_RAISES, FORM_STATIC_NO_THROW, FORM_I
              FORM_INSTANCE_NO_THROW, FORM_MATCHER_PASS)
 # Forms graduated to enforcement THROUGH THIS MODULE by shadow replay (doc 15), one by one. java_instance_value: S3_A replay,
 # 9/9 MATCH on the independent known-good and on the unrelated change over two runs, 5 wrong subjects rejected (including the
-# recorded Kriya candidate). java_matcher_pass is replay-clean too (T3: 4/4 on known-good, unrelated and the recorded GENUINE
-# candidate; wrong subjects incl. the recorded failing candidate rejected) but stays SHADOW for enforcement because the sealed
-# JVM acceptance runner injects at the project ROOT (src/test/java) and cannot place or run a class in a Gradle subproject
-# (hamcrest/). java_static_no_throw has no valid replay (the only project with the form uses JUnit 4). The two static
-# value/raises forms are enforced by example_oracle_java on its own (narrower) recognizer; they are classified here too.
-ENFORCED_FORMS: frozenset = frozenset({FORM_INSTANCE_VALUE})
+# recorded Kriya candidate). java_matcher_pass: replay-clean as a probe (T3: 4/4 on known-good, unrelated and the recorded GENUINE
+# candidate; wrong subjects incl. the recorded failing candidate rejected), and graduated (BACKEND-READINESS-V2 final cycle,
+# JVM-MODULE-OWNERSHIP-001) after the replay the module-aware runner required: the PRODUCTION derive -> run_java_acceptance ->
+# judge path, real Gradle under the production OCI containment with the sanitized git metadata, in the declaring build module
+# (module-replay/module_replay.json: 24 runs over 8 subjects - correct
+# subjects PASS 9/9 incl. the recorded GENUINE candidate, wrong subjects VIOLATED 15/15 incl. both recorded failing candidates,
+# identical verdict on every repeat). The replay evidence is ONE project (the sealed class is JUnit 5; a project whose test source
+# set lacks Jupiter or the matcher library yields HARNESS_COMPILE_FAILED / INDETERMINATE evidence - it blocks closure, it is
+# never a rejection). A matcher example whose declaring module cannot be resolved stays shadow
+# (MODULE_NOT_ENFORCEABLE, example_oracle_java._scope_to_owning_module). java_static_no_throw has no valid replay (the only
+# project with the form uses JUnit 4). The two static value/raises forms are enforced by example_oracle_java on its own
+# (narrower) recognizer; they are classified here too.
+ENFORCED_FORMS: frozenset = frozenset({FORM_INSTANCE_VALUE, FORM_MATCHER_PASS})
 
 _NO_THROW_PHRASES = frozenset({
     "compiles (no exception)", "no exception", "no exception thrown", "does not throw", "doesn't throw", "does not raise",
