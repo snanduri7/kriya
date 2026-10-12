@@ -109,7 +109,7 @@ candidate. FALSE_NEGATIVE 0. Model not re-run.
 ## 6. Classification verified against store + result + export + oracle
 T1 G, T2 SF, T3 SF, T4 G, T5 G, T6 G(no-op), S1_A G, S2_A G, S3_A SF, **S4_A FALSE_SUCCESS (inspection)**, S4_B SF, S6_A G(no-op).
 Formal: GENUINE 7/12, SAFE_FAILURE 4, FALSE_SUCCESS 1. Code-writing reliability: genuine code-writing successes T1, T4, T5, S1_A, S2_A = 5 of 10 code-writing tasks
-(T6, S6_A are zero-model-call no-ops; S4_A excluded as a false success). The other four genuine diffs (T1, T4, T5, S1_A, S2_A) were read and are real fixes/edits.
+(T6, S6_A are zero-model-call no-ops; S4_A excluded as a false success). The other five genuine diffs (T1, T4, T5, S1_A, S2_A) were read and are real fixes/edits.
 
 ## 7. Timing flake TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001
 10 serial isolated executions of the failing test: 10/10 passed (0.6 s each). Not reproducible in isolation; retained as disclosed timing-test debt; timeout semantics untouched; full suite not rerun.
