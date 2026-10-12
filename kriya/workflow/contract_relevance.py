@@ -102,7 +102,7 @@ class _Structures:
         return self._cache[path]
 
 
-def assess(example: Any, touched_paths: Sequence[str], candidate_root: Optional[str],
+def assess_relevance(example: Any, touched_paths: Sequence[str], candidate_root: Optional[str],
            structures: Optional[_Structures] = None) -> Relevance:
     """The relevance of one example (a ``contract_feedback.ContractExample``) to the unit's touched files."""
     target = f"{example.qualified_type}.{example.method}" if example.method else example.qualified_type
@@ -240,4 +240,4 @@ def _callee_touched(relationship: str, simple: str, method: Optional[str], arity
 
 def assess_all(examples: Sequence[Any], touched_paths: Sequence[str], candidate_root: Optional[str]) -> Tuple[Relevance, ...]:
     structures = _Structures(candidate_root) if candidate_root else None
-    return tuple(assess(example, touched_paths, candidate_root, structures) for example in examples)
+    return tuple(assess_relevance(example, touched_paths, candidate_root, structures) for example in examples)

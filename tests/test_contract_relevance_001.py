@@ -89,7 +89,7 @@ def _example(root, qualified="demo.Facade", method="a", number=1):
 
 
 def _assess(root, touched, **kw):
-    return cr.assess(_example(root, **kw), touched, str(root))
+    return cr.assess_relevance(_example(root, **kw), touched, str(root))
 
 
 def test_the_unit_touching_the_target_type_file_is_directly_relevant(repo):
@@ -195,10 +195,10 @@ def test_unknown_facts_are_reported_and_never_promoted(repo):
     ambiguous = _assess(repo, [MAIN + "AImpl.java"], method="twin")
     assert ambiguous.status == cr.UNKNOWN and "ambiguous" in ambiguous.reason and not ambiguous.relevant
     (repo / FACADE).write_text("package demo; public class Facade { public static String a( {{{ ")  # no complete parse
-    broken = cr.assess(_example(repo), [MAIN + "AImpl.java"], str(repo))
+    broken = cr.assess_relevance(_example(repo), [MAIN + "AImpl.java"], str(repo))
     assert broken.status == cr.UNKNOWN and not broken.relevant
     (repo / FACADE).unlink()
-    missing = cr.assess(_example(repo), [MAIN + "AImpl.java"], str(repo))
+    missing = cr.assess_relevance(_example(repo), [MAIN + "AImpl.java"], str(repo))
     assert missing.status == cr.UNKNOWN and "not exactly one file" in missing.reason
 
 
@@ -208,8 +208,8 @@ def test_a_callee_that_is_not_a_project_type_is_simply_not_related(repo):
 
 def test_without_a_candidate_root_only_the_direct_target_rule_applies(repo):
     example = _example(repo)
-    assert cr.assess(example, [MAIN + "AImpl.java"], None).status == cr.NOT_RELEVANT
-    assert cr.assess(example, [FACADE], None).status == cr.RELEVANT_DIRECT_TARGET
+    assert cr.assess_relevance(example, [MAIN + "AImpl.java"], None).status == cr.NOT_RELEVANT
+    assert cr.assess_relevance(example, [FACADE], None).status == cr.RELEVANT_DIRECT_TARGET
 
 
 def test_a_model_claim_cannot_create_a_relation(repo):
@@ -230,7 +230,7 @@ def test_module_ownership_is_independent_of_relevance(repo):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
     # simple type resolution is not unique across the two copies, so the pre-existing ambiguity rule applies: UNKNOWN
-    result = cr.assess(_example(repo, qualified="demo.Facade"), ["mod/" + MAIN + "AImpl.java"], str(repo))
+    result = cr.assess_relevance(_example(repo, qualified="demo.Facade"), ["mod/" + MAIN + "AImpl.java"], str(repo))
     assert not result.relevant
 
 
