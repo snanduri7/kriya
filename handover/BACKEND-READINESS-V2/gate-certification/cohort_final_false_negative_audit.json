@@ -1,0 +1,108 @@
+{
+ "T2": {
+  "run": "20261012T150206-e906c4fe",
+  "staged": {
+   "src/main/java/org/jsoup/internal/StringUtil.java": "15751cfa67c9695fcb845e3cba3b7d7cf92bf3976075d5d929b84b1b1f94f804"
+  },
+  "accept": {
+   "exit": 0,
+   "verdict": "PASS",
+   "key": [
+    "tests=\"1\" errors=\"0\" skipped=\"0\" failures=\"0\" tests=\"1\" errors=\"0\" skipped=\"0\" failures=\"0\"",
+    "HIDDEN_EXIT=0",
+    "UPSTREAM_SUITE_EXIT=0",
+    "UPSTREAM TOTALS tests=2392 failures=0 errors=0 skipped=0",
+    "TAMPERED=[]",
+    "ACCEPT_EXIT=0"
+   ]
+  },
+  "regress": {
+   "exit": 0,
+   "verdict": "PASS",
+   "key": [
+    "TOTALS tests=2390 failures=0 errors=0 skipped=0",
+    "REGRESS_EXIT=0"
+   ]
+  }
+ },
+ "T3": {
+  "run": "20261012T151146-d6a90f7c",
+  "staged": {
+   "hamcrest/src/main/java/org/hamcrest/text/IsEqualCompressingWhiteSpace.java": "9cc2a2f80b898f503401776a1444a8ff58ec6594dcab11621a3f14b41a6b97a8"
+  },
+  "accept": {
+   "exit": 1,
+   "verdict": "REJECT",
+   "key": [
+    "FORBIDDEN_CHANGES=[]",
+    "HIDDEN gradle_exit=1 tests=\"2\" skipped=\"0\" failures=\"1\" errors=\"0\"",
+    "COMPAT: PASS - public/protected signatures identical",
+    "ACCEPT_EXIT=1"
+   ]
+  },
+  "regress": {
+   "exit": 0,
+   "verdict": "PASS",
+   "key": [
+    "TOTALS tests=489 failures=0 errors=0 skipped=0",
+    "REGRESS_EXIT=0"
+   ]
+  }
+ },
+ "S4_A": {
+  "run": "20261012T164759-0761d4ab",
+  "staged": {
+   "json-path/src/main/java/com/jayway/jsonpath/Criteria.java": "7bfa8ec9929ab8e1ac4a112694115fd2804c1f3f9b19e8a507d7a1c97989c360",
+   "json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java": "9fce35318ba61b04b189d3ee5b7175241ee97457e860ff9d6e5fc5c411e4dad3",
+   "json-path/src/test/java/com/jayway/jsonpath/PathCompilerRegression2Test.java": "2974f8c42a00d1a0a7ca69fb39206524341b445d3bac61da6354464c067412b0",
+   "json-path/src/test/java/com/jayway/jsonpath/PathCompilerRegressionTest.java": "15d94d86e51b6b16b0ebf5e62ace71a6cbadff959ab31f1f1b58a80a4d3f0c05"
+  },
+  "accept": {
+   "exit": 1,
+   "verdict": "REJECT",
+   "key": [
+    "xml: tests=6 failures=4 errors=0 skipped=0",
+    "HIDDEN_EXIT=1",
+    "xml: tests=880 failures=8 errors=0 skipped=2",
+    "UPSTREAM_SUITE_EXIT=1",
+    "TAMPERED=[]",
+    "ACCEPT_EXIT=1"
+   ]
+  },
+  "regress": {
+   "exit": 1,
+   "verdict": "REJECT",
+   "key": [
+    "xml: tests=874 failures=4 errors=0 skipped=2",
+    "REGRESS_EXIT=1"
+   ]
+  }
+ },
+ "S4_B": {
+  "run": "20261012T172226-ff053116",
+  "staged": {
+   "json-path/src/main/java/com/jayway/jsonpath/internal/function/Parameter.java": "71a7b30c28675e6c3fc6f05310d45f3669efca9238b76a08bb8a5a6b3c7538a8",
+   "json-path/src/test/java/com/jayway/jsonpath/DeepScanRegressionTest.java": "4c61ab3022ece9dc80751fe6a27db800d60a128fd1ffcd4a0c2bfac42525cc0a"
+  },
+  "accept": {
+   "exit": 1,
+   "verdict": "REJECT",
+   "key": [
+    "xml: tests=1 failures=1 errors=0 skipped=0",
+    "HIDDEN_EXIT=1",
+    "xml: tests=931 failures=4 errors=0 skipped=2",
+    "UPSTREAM_SUITE_EXIT=1",
+    "TAMPERED=[]",
+    "ACCEPT_EXIT=1"
+   ]
+  },
+  "regress": {
+   "exit": 1,
+   "verdict": "REJECT",
+   "key": [
+    "xml: tests=930 failures=3 errors=0 skipped=2",
+    "REGRESS_EXIT=1"
+   ]
+  }
+ }
+}
