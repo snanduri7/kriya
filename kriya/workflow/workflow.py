@@ -211,6 +211,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.file_resolution import (
     normalize_written_filepath as normalize_written_filepath,
 )
+from kriya.workflow.goal_facts import developer_goal_facts
 from kriya.workflow.graph_retrieval import retrieve_graph_context
 from kriya.workflow.live_lookup import (
     _augment_error_with_live_lookup as _augment_error_with_live_lookup,
@@ -3350,6 +3351,12 @@ class WorkflowEngine:
         java_toolchain_fact = _java_toolchain_fact(goal, workspace_path)
         if java_toolchain_fact:
             convention_prompt += f"\n\n=== Environment Fact ===\n{java_toolchain_fact}\n"
+        # BACKEND-READINESS-V2 (T2): the deterministic facts about where the goal's names live, as the Planner had them.
+        memory_dir = getattr(getattr(self.kernel.config, "paths", None), "memory", None)
+        goal_facts_text = developer_goal_facts(
+            goal, workspace_path, os.path.join(memory_dir, "dependency_graph.db") if isinstance(memory_dir, str) else None)
+        if goal_facts_text:
+            convention_prompt += goal_facts_text
         if all_gap_report.has_gaps:
             convention_prompt += "\n\n=== KNOWLEDGE GUARD SAFETY CONSTRAINTS ===\n"
             for g in all_gap_report.gaps:

@@ -222,10 +222,6 @@ def member_facts(view: Any, goal: str) -> List[str]:
     return lines
 
 
-_RETURN_RE = re.compile(r"\breturn\s+([^;]+);")
-_STATIC_CALL_RE = re.compile(r"\b([A-Z]\w*)\.([a-z_]\w*)\s*\(")
-
-
 def delegate_facts(view: Any, goal: str) -> List[str]:
     """BACKEND-READINESS-V2 (T2): one line per goal-named ``Owner.member`` whose returned value is computed by another
     project method. Live: the goal named ``Element.absUrl``; its declaration (Node.absUrl) only ends in
@@ -236,7 +232,7 @@ def delegate_facts(view: Any, goal: str) -> List[str]:
     declares ``method`` (another file), for a goal-named member with exactly ONE declaration. Names where the value comes
     from; never says what to change. Java only."""
     from kriya.code_intel import locate as loc
-    from kriya.workflow.edit_safety import strip_java_comments_and_strings
+    from kriya.code_intel.delegation import delegate_targets
 
     lines: List[str] = []
     for name in loc.extract_signals(goal).qualified:
@@ -249,15 +245,10 @@ def delegate_facts(view: Any, goal: str) -> List[str]:
             continue  # an overloaded name (a setup call in an example) does not say which declaration the goal means
         for symbol in declared:
             source = view.get_member(symbol.symbol_id)
-            returns = _RETURN_RE.findall(strip_java_comments_and_strings(source.text)) if source else []
-            call = _STATIC_CALL_RE.search(returns[-1]) if returns else None
-            if call is None:
-                continue
-            callee_type, callee = call.groups()
-            targets = [t for t in view.find_symbol(f"{callee_type}.{callee}")
-                       if t.is_callable and t.path != symbol.path]
+            targets = delegate_targets(view, symbol, source.text) if source else []
             if not targets:
                 continue
+            callee_type, callee = targets[0].lookup_key.rsplit(".", 2)[-2:]
             where = ", ".join(f"{t.path}:{t.declaration.start_line}" for t in targets[:3])
             more = f" (+{len(targets) - 3} more)" if len(targets) > 3 else ""
             lines.append(f"{symbol.lookup_key} ({symbol.path}:{symbol.declaration.start_line}) returns the result of "
@@ -310,6 +301,32 @@ def goal_facts_block(dependency_graph_path: Optional[str], workspace_path: str, 
     finally:
         if service is not None:
             service.close()
+
+
+_DEVELOPER_FACTS_CACHE: Dict[Tuple[Any, ...], str] = {}
+
+
+def developer_goal_facts(goal_text: str, workspace_path: str, dependency_graph_path: Optional[str]) -> str:
+    """The same GOAL-NAMED FACTS block the Planner was given, for the Developer's request (BACKEND-READINESS-V2, T2: measured,
+    the Planner had it in 7 of 15 runs and the Developer in 0 of 52 requests). ``goal_text`` is a subtask goal that may
+    carry the Planner's own strategy: only the user's authoritative section is read, so the Planner's word choices never
+    become facts. Same function, same inputs, same output as the Planner's block; "" when no fact was found."""
+    from kriya.agents.contracts import AUTHORITATIVE_GOAL_SECTION_HEADER, PLANNED_IMPLEMENTATION_SECTION_HEADER
+
+    text = goal_text
+    if AUTHORITATIVE_GOAL_SECTION_HEADER in text:
+        text = text.split(AUTHORITATIVE_GOAL_SECTION_HEADER, 1)[1].split(PLANNED_IMPLEMENTATION_SECTION_HEADER, 1)[0]
+    # One block per (goal, workspace, index state): the Developer request is rebuilt for every attempt and file.
+    try:
+        stamp = os.stat(dependency_graph_path).st_mtime_ns if dependency_graph_path else None
+    except OSError:
+        stamp = None
+    key = (text, workspace_path, dependency_graph_path, stamp)
+    if key not in _DEVELOPER_FACTS_CACHE:
+        if len(_DEVELOPER_FACTS_CACHE) >= 16:
+            _DEVELOPER_FACTS_CACHE.clear()
+        _DEVELOPER_FACTS_CACHE[key] = goal_facts_block(dependency_graph_path, workspace_path, text)
+    return _DEVELOPER_FACTS_CACHE[key]
 
 
 def shim_plan_errors(plan_files: List[Tuple[str, str, str]], shims: Dict[str, str]) -> List[str]:

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.control.run_coordinator import begin_run_commit, settle_run_commit
 from kriya.control.run_record import (
@@ -57,6 +57,7 @@ from kriya.workflow.edit_safety import (
 from kriya.workflow.edit_safety import (
     CandidateMaterializationError as CandidateMaterializationError,
 )
+from kriya.workflow.exception_masking import find_masking_against_workspace
 from kriya.workflow.file_integrity import display_text, file_raw_digest, raw_digest
 from kriya.workflow.verification_binding import (
     CandidateVerificationBinding,
@@ -88,6 +89,29 @@ def committed_digest_mismatch(writes: Iterable[StagedFileWrite]) -> Optional[str
 
 class StaticAnalysisCommitRefused(RuntimeError):
     """PRD-031A: the commit guard refused the static-analysis evidence."""
+
+
+class SemanticSafetyRefused(RuntimeError):
+    """BACKEND-READINESS-V2: the batch about to be committed newly masks Error/Throwable."""
+
+
+SEMANTIC_SAFETY_REFUSED = "SEMANTIC_SAFETY_REFUSED"
+SEMANTIC_SAFETY_INDETERMINATE = "SEMANTIC_SAFETY_INDETERMINATE"
+
+
+def semantic_safety_refusal(writes: List[StagedFileWrite], workspace_path: str) -> Optional[Tuple[str, str]]:
+    """(reason code, detail) when the exact batch about to reach the workspace must not be committed; None when it may.
+    THE central invariant: both commit boundaries (the enforce terminal commit and the direct terminal apply) call
+    ``commit_terminal_candidate``, so no candidate, whatever route produced its bytes and whichever earlier gate saw it,
+    reaches the workspace without this check passing. Fail closed: an error while judging refuses."""
+    try:
+        findings = find_masking_against_workspace(writes)
+    except Exception as error:
+        return SEMANTIC_SAFETY_INDETERMINATE, f"{type(error).__name__}: {error}"
+    if findings:
+        return SEMANTIC_SAFETY_REFUSED, "; ".join(
+            f"{os.path.relpath(target, workspace_path)}: {found}" for target, found in findings)
+    return None
 
 
 @dataclass(frozen=True)
@@ -237,6 +261,13 @@ def commit_terminal_candidate(
         return TerminalCommitOutcome(
             committed=True, workspace_state="UNCHANGED", commit_result="NO_CHANGES",
             transaction_id=transaction_id,
+        )
+    unsafe = semantic_safety_refusal(writes, workspace_path)
+    if unsafe is not None:
+        reason_code, detail = unsafe
+        return TerminalCommitOutcome(
+            committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+            transaction_id=transaction_id, reason_code=reason_code, error=SemanticSafetyRefused(detail),
         )
     refusal = static_analysis.verify(writes, workspace_path)
     if refusal is not None:

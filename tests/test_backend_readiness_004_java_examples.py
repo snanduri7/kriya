@@ -47,7 +47,10 @@ def test_01_recognizes_the_constrained_forms_and_rejects_everything_else(tmp_pat
         (ej.FORM_JAVA_LITERAL, "demo.util.Text", "trim", '""', '""', None),  # a simple name resolving to one unit
     ]
     why = {r["text"]: r["why"] for r in compilation.rejected}
-    assert "not a static call" in why["new Calc().twice(2) -> 4"]
+    # Stage C: the instance form graduated through goal_example_forms (shadow replay on S3_A), so it is no longer rejected
+    assert "new Calc().twice(2) -> 4" not in why
+    assert [(e.form, e.qualified_type, e.method, e.expected) for e in compilation.graduated] == [
+        ("java_instance_value", "demo.Calc", "twice", "4")]
     assert "Java literal" in why["Calc.twice(x) -> 4"] and "not a Java literal" in why["Calc.list() -> [1, 2]"]
     assert "no main compilation unit" in why["Nope.go() -> 1"] and "neither qualified" in why["Calc.fail() -> raises Weird"]
     # an ambiguous simple name (two main units) is rejected, a qualified one is taken as written

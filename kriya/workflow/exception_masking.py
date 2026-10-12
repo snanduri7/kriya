@@ -160,3 +160,16 @@ def find_masking_in_batch(
         if found:
             findings.append((write.target_path, found))
     return findings
+
+
+def find_masking_against_workspace(writes: Iterable[StagedFileWrite], *, in_place: bool = False) -> List[Tuple[str, str]]:
+    """``find_masking_in_batch`` with the baseline the terminal boundaries share: the real workspace file a write replaces
+    (a new file has none). ``in_place``: the workspace file already IS the candidate, so there is no pre-run text and every
+    masking clause counts (fail closed)."""
+    def workspace_baseline(write: StagedFileWrite) -> Optional[str]:
+        if in_place or write.expected_base_exists is False or not os.path.isfile(write.base_path):
+            return None
+        with open(write.base_path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+
+    return find_masking_in_batch(writes, workspace_baseline)

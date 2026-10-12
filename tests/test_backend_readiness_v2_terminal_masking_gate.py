@@ -337,3 +337,60 @@ def test_in_place_enforce_has_no_pre_run_text_so_any_masking_clause_fails_closed
     (workspace / PATH).write_text(FIXED)
     clean, _events = _gate(tmp_path, workspace, workspace)
     assert clean.semantic_safety_gap is None
+
+
+# --- the central invariant: the one function that writes the batch refuses a masking batch -------------------------------
+
+def _commit(tmp_path, content, *, base=BASE):
+    """Drive the real commit_terminal_candidate with a hand-built eligible batch (no gate involved at all)."""
+    from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
+
+    from kriya.workflow.edit_safety import StagedFileWrite, content_revision
+    from kriya.workflow.terminal_commit import commit_terminal_candidate
+    from kriya.workflow.verification_binding import bind_candidate
+
+    workspace, _candidate = _trees(tmp_path, base=base)
+    target = str(workspace / PATH)
+    batch = [StagedFileWrite(target_path=target, content=content, base_path=target,
+                             expected_base_revision=content_revision(base), expected_base_exists=True)]
+    outcome = commit_terminal_candidate(batch, workspace_path=str(workspace), transaction_id="t1",
+                                        static_analysis=DISABLED_STATIC_ANALYSIS,
+                                        verified_candidate=bind_candidate(batch, str(workspace)))
+    return workspace, outcome
+
+
+def test_the_commit_function_itself_refuses_a_masking_batch_even_if_every_gate_were_bypassed(tmp_path):
+    workspace, outcome = _commit(tmp_path, MASKING)
+    assert not outcome.committed and outcome.workspace_state == "UNCHANGED"
+    assert outcome.reason_code == "SEMANTIC_SAFETY_REFUSED" and "UNSAFE_EXCEPTION_MASKING" in str(outcome.error)
+    assert (workspace / PATH).read_text() == BASE
+
+
+def test_the_commit_function_fails_closed_when_it_cannot_judge(tmp_path, monkeypatch):
+    from kriya.workflow import terminal_commit
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("cannot judge")
+
+    monkeypatch.setattr(terminal_commit, "find_masking_against_workspace", explode)
+    workspace, outcome = _commit(tmp_path, FIXED)
+    assert not outcome.committed and outcome.reason_code == "SEMANTIC_SAFETY_INDETERMINATE"
+    assert (workspace / PATH).read_text() == BASE
+
+
+def test_the_commit_function_still_commits_a_real_fix(tmp_path):
+    workspace, outcome = _commit(tmp_path, FIXED)
+    assert outcome.committed and (workspace / PATH).read_text() == FIXED
+
+
+def test_every_workspace_commit_goes_through_the_one_guarded_function():
+    """Structural: the only callers of the batch writer are commit_terminal_candidate's two callers, and that function runs
+    the semantic-safety refusal before any intent or write."""
+    import inspect
+
+    from kriya.workflow import terminal_commit
+    from kriya.workflow.commit_service import commit_verified_candidate
+
+    source = inspect.getsource(terminal_commit.commit_terminal_candidate)
+    assert source.index("semantic_safety_refusal(") < source.index("begin_run_commit(") < source.index("commit_revision_grounded_batch(")
+    assert "commit_terminal_candidate(" in inspect.getsource(commit_verified_candidate)

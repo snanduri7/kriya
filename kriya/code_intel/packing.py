@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
+from kriya.code_intel.delegation import blank_comments_and_strings, delegate_targets
 from kriya.code_intel.model import Symbol
 
 _PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z0-9_.\-\[\]]+)(?::[^}]*)?\}")
@@ -36,6 +37,8 @@ class ContextPackage:
     header: List[str] = field(default_factory=list)
     members: List[str] = field(default_factory=list)  # other members of the enclosing type (signatures)
     collaborators: List[Tuple[str, List[str]]] = field(default_factory=list)  # (type key, member signatures)
+    # (callee lookup key, provenance label, source lines): the minimal source of a method the target member delegates to
+    delegates: List[Tuple[str, str, List[str]]] = field(default_factory=list)
     tests: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, signature)
     config: List[Tuple[str, str]] = field(default_factory=list)  # (symbol id, "path:line  declaration")
     over_budget: bool = False
@@ -55,6 +58,8 @@ class ContextPackage:
                          + "\n".join(self.members))
         for key, signatures in self.collaborators:
             parts.append(f"#### Collaborator {key} (signatures, read-only)\n" + "\n".join(signatures))
+        for key, label, source in self.delegates:
+            parts.append(f"#### Delegate callee {key} (source, read-only, {label})\n" + "\n".join(source))
         if self.tests:
             parts.append("#### Linked tests (read-only)\n" + "\n".join(sig for _, sig in self.tests))
         if self.config:
@@ -72,6 +77,11 @@ class ContextPackage:
 _TYPE_REFERENCE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\b")
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _MAX_HEADER_MEMBERS = 40
+_MAX_COLLABORATOR_SIGNATURES = 12
+_MAX_DELEGATE_SOURCES = 3  # overloads of the one delegated method
+_MAX_DELEGATE_LINES = 40
+_MAX_DELEGATE_CHARS = 2400
+_DELEGATE_LABEL = "DERIVED_DETERMINISTIC: the target member returns the result of this method (its last return)"
 
 
 def _import_names(statement: str, language: str) -> set:
@@ -96,10 +106,13 @@ def _import_names(statement: str, language: str) -> set:
 def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
                   count_tokens: Callable[[str], int] = default_token_count,
                   max_collaborators: int = 4, max_tests: int = 6, max_config: int = 8,
-                  include_target: bool = True, member_signatures: bool = False) -> Optional[ContextPackage]:
+                  include_target: bool = True, member_signatures: bool = False,
+                  priority_names: Sequence[str] = ()) -> Optional[ContextPackage]:
     """``include_target`` decides whether budgets count the target body
     (False when a caller shows it separately); ``member_signatures`` adds
-    the enclosing type's other members as an optional tier."""
+    the enclosing type's other members as an optional tier. ``priority_names``: method names the goal itself named; a
+    collaborator's signatures are RANKED, never taken in file order: the method(s) the target delegates to, then goal-named
+    methods, then methods the member's text calls, then the rest (all bounded)."""
     member = service.get_member(symbol_id)
     if member is None:
         return None
@@ -150,14 +163,35 @@ def build_package(service, symbol_id: str, budget_tokens: Optional[int] = None,
     field_types = [_TYPE_REFERENCE_RE.findall(s.return_type or "")[:1] for s in symbols
                    if s.parent_id in owner_ids and s.kind in ("field", "attribute") and s.name in used]
     candidates = [name for found in field_types for name in found] + _TYPE_REFERENCE_RE.findall(member.text)
-    for type_name in dict.fromkeys(candidates):
+    delegate_targets_ = delegate_targets(service, target, member.text) if target.language == "java" else []
+    delegate_names = {t.name for t in delegate_targets_}
+    called = _called_names(member.text)
+    # A delegated callee's type is considered first so the collaborator cap can never displace it.
+    delegate_type_names = list(dict.fromkeys(t.lookup_key.rsplit(".", 2)[-2] for t in delegate_targets_))
+    # The delegate's source is the highest-value optional tier: admitted before the collaborator signatures so a tight budget
+    # drops the signatures first.
+    for callee in delegate_targets_[:_MAX_DELEGATE_SOURCES]:
+        source = service.get_member(callee.symbol_id)
+        if source is None:
+            continue
+        lines = source.text.splitlines()
+        clipped = lines[:_MAX_DELEGATE_LINES]
+        text = "\n".join(clipped)
+        if len(text) > _MAX_DELEGATE_CHARS:
+            text, clipped = text[:_MAX_DELEGATE_CHARS], text[:_MAX_DELEGATE_CHARS].splitlines()
+        shown = clipped + ([f"    // ... ({len(lines) - len(clipped)} more lines not shown)"] if len(lines) > len(clipped) else [])
+        label = f"{_DELEGATE_LABEL}; {callee.path}:{callee.declaration.start_line}-{callee.declaration.end_line}"
+        _add_within_budget(package, package.delegates, (callee.lookup_key, label, shown), budget_tokens, count_tokens,
+                           f"delegate:{callee.symbol_id}")
+    for type_name in dict.fromkeys(delegate_type_names + candidates):
         if len(package.collaborators) >= max_collaborators or type_name in owner_names:
             continue
         types = [s for s in service.find_symbol(type_name) if s.is_type and s.name == type_name]
         if len(types) != 1:
             continue  # unknown or ambiguous: never guess a collaborator
-        signatures = [s.signature_text for s in service.store.by_path(types[0].path)
-                      if s.parent_id == types[0].symbol_id and s.is_callable][:12]
+        callables = [s for s in service.store.by_path(types[0].path) if s.parent_id == types[0].symbol_id and s.is_callable]
+        signatures = [s.signature_text for s in _rank_signatures(callables, delegate_names, set(priority_names), called)
+                      ][:_MAX_COLLABORATOR_SIGNATURES]
         if signatures:
             _add_within_budget(package, package.collaborators, (types[0].lookup_key, signatures), budget_tokens,
                                count_tokens, f"collaborator:{types[0].lookup_key}")
@@ -196,6 +230,26 @@ def linked_configuration(service, owners: List[Symbol], namespace: str, referenc
     for prefix in dict.fromkeys(m for text in referencing for m in _CONFIG_PROPERTIES_PREFIX_RE.findall(text)):
         found.extend(service.store.by_lookup_prefix(prefix + ".", kind="config_key"))
     return list({s.symbol_id: s for s in found}.values())
+
+
+def _called_names(member_text: str) -> set:
+    """Method names the member's own text calls (``name(`` or ``.name(``), comments and strings blanked."""
+    return set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", blank_comments_and_strings(member_text)))
+
+
+def _rank_signatures(callables: List[Symbol], delegates: set, goal_names: set, called: set) -> List[Symbol]:
+    """Stable ranking of a collaborator's callables: the delegated method (every overload), goal-named, called by the
+    target member, then the rest in declaration order."""
+    def rank(symbol: Symbol) -> int:
+        if symbol.name in delegates:
+            return 0
+        if symbol.name in goal_names:
+            return 1
+        if symbol.name in called:
+            return 2
+        return 3
+
+    return sorted(callables, key=lambda s: (rank(s), s.declaration.start_line))
 
 
 def _add_within_budget(package: ContextPackage, tier: list, item, budget: Optional[int], count_tokens,

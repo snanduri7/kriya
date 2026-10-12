@@ -76,11 +76,16 @@ class JavaGoalExample:
 class JavaExampleCompilation:
     examples: List[JavaGoalExample] = field(default_factory=list)
     rejected: List[Dict[str, Any]] = field(default_factory=list)
+    # BACKEND-READINESS-V2 Stage C: forms graduated by shadow replay (goal_example_forms.ENFORCED_FORMS), enforced like the
+    # two forms above, and everything the broader classifier saw but does NOT enforce (observational, never a verdict).
+    graduated: List[Any] = field(default_factory=list)
+    shadow: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"compiler_version": EXAMPLE_COMPILER_VERSION, "java_compiler_version": JAVA_EXAMPLE_COMPILER_VERSION,
                 "examples": [e.to_dict() for e in self.examples], "rejected": list(self.rejected),
-                "modules": sorted({e.qualified_type for e in self.examples})}
+                "graduated_examples": [e.to_dict() for e in self.graduated], "shadow_examples": list(self.shadow),
+                "modules": sorted({e.qualified_type for e in self.examples} | {e.qualified_type for e in self.graduated})}
 
 
 def _split_arguments(text: str) -> Optional[List[str]]:
@@ -198,22 +203,48 @@ def recognize_java_examples(goal: str, requirement_set: RequirementSet, candidat
             continue
         compilation.examples.append(JavaGoalExample(FORM_JAVA_LITERAL, rid, number, line.strip(), call.group("type"),
                                                     qualified, call.group("method"), ", ".join(arguments), expected=expected))
+    _add_classified_forms(compilation, goal, requirement_set, candidate_root)
     return compilation
+
+
+def _add_classified_forms(compilation: JavaExampleCompilation, goal: str, requirement_set: RequirementSet,
+                          candidate_root: str) -> None:
+    """The broader classifier's view of the same lines: a COMPILED example of a graduated form that is bound to a derived
+    statement is enforced; every other classified line is recorded as shadow evidence (it never rejects a candidate)."""
+    from kriya.workflow.goal_example_forms import Status, classify_goal_examples
+
+    handled = {e.line for e in compilation.examples}
+    for example in classify_goal_examples(goal, candidate_root, requirement_set).examples:
+        if example.line in handled:
+            continue
+        if example.enforced and example.requirement_id is not None:
+            compilation.graduated.append(example)
+            compilation.rejected = [r for r in compilation.rejected if r["line"] != example.line]
+        else:
+            compilation.shadow.append(example.to_dict())
+            if example.status is Status.COMPILED:  # recognized but not enforced: it is not "rejected" either
+                compilation.rejected = [r for r in compilation.rejected if r["line"] != example.line]
 
 
 def compile_java_example_class(compilation: JavaExampleCompilation) -> Optional[str]:
     """The JUnit 5 class for the recognized examples (None when there is none)."""
-    if not compilation.examples:
+    if not compilation.examples and not compilation.graduated:
         return None
+    graduated = list(compilation.graduated)
     imports = sorted({e.qualified_type for e in compilation.examples if "." in e.qualified_type}
-                     | {e.exception for e in compilation.examples if e.exception and not e.exception.startswith("java.lang.")})
+                     | {e.exception for e in compilation.examples if e.exception and not e.exception.startswith("java.lang.")}
+                     | {e.qualified_type for e in graduated if e.qualified_type and "." in e.qualified_type}
+                     | {e.assertion_type for e in graduated if e.assertion_type and "." in e.assertion_type}
+                     | {e.exception for e in graduated if e.exception and not e.exception.startswith("java.lang.")})
     out = [f"package {JAVA_EXAMPLE_PACKAGE};", "",
            "// Kriya-derived acceptance class (VERIFICATION-CONTRACT-003 / JAVA-EXAMPLE-COMPILER-001, compiler version",
            f"// {EXAMPLE_COMPILER_VERSION}.{JAVA_EXAMPLE_COMPILER_VERSION}): the goal's own example lines, compiled deterministically; never prose.",
            "import static org.junit.jupiter.api.Assertions.assertEquals;",
            "import static org.junit.jupiter.api.Assertions.assertNull;",
-           "import static org.junit.jupiter.api.Assertions.assertThrows;", "",
-           "import org.junit.jupiter.api.Test;"]
+           "import static org.junit.jupiter.api.Assertions.assertThrows;"]
+    if any(e.expect is not None and e.expect.value == "NO_THROW" for e in graduated):
+        out.append("import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;")
+    out += ["", "import org.junit.jupiter.api.Test;"]
     out += [f"import {name};" for name in imports]
     out += ["", f"class {JAVA_EXAMPLE_CLASS} {{"]
     for number, example in enumerate(compilation.examples, start=1):
@@ -226,6 +257,10 @@ def compile_java_example_class(compilation: JavaExampleCompilation) -> Optional[
         else:
             out.append(f"        assertEquals({example.expected}, {call});")
         out.append("    }")
+    from kriya.workflow.goal_example_forms import render_test_method
+
+    for offset, example in enumerate(graduated, start=len(compilation.examples) + 1):
+        out += render_test_method(example, offset)
     out += ["}", ""]
     return "\n".join(out)
 

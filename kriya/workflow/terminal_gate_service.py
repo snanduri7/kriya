@@ -58,7 +58,7 @@ from kriya.workflow.edit_safety import (
     content_revision,
     read_file_revision,
 )
-from kriya.workflow.exception_masking import find_masking_in_batch
+from kriya.workflow.exception_masking import find_masking_against_workspace
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -452,18 +452,11 @@ class TerminalGateService:
 
         in_place = os.path.realpath(request.candidate_root) == os.path.realpath(request.workspace_path)
 
-        def workspace_baseline(write: StagedFileWrite) -> Optional[str]:
-            # In-place run (no sandbox): the workspace file IS the candidate, so there is no pre-run text to diff
-            # against. Fail closed: every masking clause counts as new.
-            if in_place or write.expected_base_exists is False or not os.path.isfile(write.base_path):
-                return None
-            with open(write.base_path, "r", encoding="utf-8", errors="replace") as handle:
-                return handle.read()
-
+        in_place = os.path.realpath(request.candidate_root) == os.path.realpath(request.workspace_path)
         try:
             findings = [
                 f"{os.path.relpath(target, request.workspace_path)}: {found}"
-                for target, found in find_masking_in_batch(writes, workspace_baseline)
+                for target, found in find_masking_against_workspace(writes, in_place=in_place)
             ]
         except Exception as error:
             return f"SEMANTIC SAFETY FINAL-STATE CHECK INDETERMINATE: {type(error).__name__}: {error}"
