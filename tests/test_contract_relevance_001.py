@@ -20,6 +20,7 @@ MAIN = "src/main/java/demo/"
 FACADE = MAIN + "Facade.java"
 FILES = {
     FACADE: """package demo;
+import java.util.Objects;
 public class Facade {
     /** a */
     public static String a(String s) { return AImpl.a(s); }
@@ -33,6 +34,17 @@ public class Facade {
     public static String external(String s) { return String.valueOf(s); }
     public static String ghost(String s) { return NoSuchType.go(s); }
     public static String twin(String s) { return Twin.go(s); }
+    public static String nested(String s) { return wrap(WImpl.w(s)); }
+    public static String arity(String s) { return OverImpl.f(s, 1); }
+    public static String arityOk(String s) { return OverImpl.f(s); }
+    public static Object built(String s) { return new Built(s, 2); }
+    public static Object builtDefault(String s) { return new Plain(); }
+    public static String shadowed(String s) { return Objects.requireNonNull(s); }
+    public static String chained(String s) { return AImpl.a(s).trim(); }
+    public static String appended(String s) { return AImpl.a(s) + "x"; }
+    public static String wrongName(String s) { return NameImpl.missing(s); }
+    public static String spread(String s) { return VarImpl.all(s, s, s); }
+    public static String viaTernary(boolean c) { return c ? Choice.a() : Choice.b(); }
 }
 """,
     MAIN + "AImpl.java": "package demo;\npublic class AImpl {\n    public static String a(String s) { return s; }\n}\n",
@@ -48,6 +60,14 @@ public class Facade {
     MAIN + "Impostor.java": "package demo;\nimport other.Shape;\npublic class Impostor implements Shape {\n    public double area() { return 3; }\n}\n",
     "src/main/java/other/Shape.java": "package other;\npublic interface Shape { double area(); }\n",
     "other/src/main/java/demo/Alien.java": "package demo;\npublic class Alien {\n    public static String a(String s) { return s; }\n}\n",
+    MAIN + "WImpl.java": "package demo;\npublic class WImpl {\n    public static String w(String s) { return s; }\n}\n",
+    MAIN + "OverImpl.java": "package demo;\npublic class OverImpl {\n    public static String f(String s) { return s; }\n}\n",
+    MAIN + "Built.java": "package demo;\npublic class Built {\n    public Built(String s) { }\n}\n",
+    MAIN + "Plain.java": "package demo;\npublic class Plain {\n}\n",
+    MAIN + "Objects.java": "package demo;\npublic class Objects {\n    public static String requireNonNull(String s) { return s; }\n}\n",
+    MAIN + "Choice.java": "package demo;\npublic class Choice {\n    public static String a() { return \"a\"; }\n    public static String b() { return \"b\"; }\n}\n",
+    MAIN + "NameImpl.java": "package demo;\npublic class NameImpl {\n    public static String other(String s) { return s; }\n}\n",
+    MAIN + "VarImpl.java": "package demo;\npublic class VarImpl {\n    public static String all(String first, String... rest) { return first; }\n}\n",
     MAIN + "Twin.java": "package demo;\npublic class Twin {\n    public static String go(String s) { return s; }\n}\n",
     "second/src/main/java/demo/Twin.java": "package demo;\npublic class Twin {\n    public static String go(String s) { return s; }\n}\n",
 }
@@ -91,20 +111,44 @@ def test_a_factory_that_constructs_the_touched_implementation_is_a_relevant_depe
     assert result.related_type == "demo.CImpl" and result.touched_path == MAIN + "CImpl.java"
 
 
-def test_a_touched_type_that_directly_implements_the_target_and_declares_the_method_overrides_it(repo):
-    result = _assess(repo, [MAIN + "Square.java"], qualified="demo.Shape", method="area")
-    assert result.status == cr.RELEVANT_DIRECT_DEPENDENCY and result.relationship == cr.OVERRIDES
-    assert result.related_type == "demo.Square" and result.touched_path == MAIN + "Square.java"
-    assert result.provenance and result.declaring_path == MAIN + "Shape.java"
+def test_a_subtype_is_not_a_relation_because_no_compiled_form_dispatches_to_it(repo):
+    """Every compiled example form calls the named type itself, so a touched implementor/subclass of the target (even one that
+    declares the same method) is never invoked by the example: NOT_RELEVANT (owner matrix row 4 is deliberately not represented)."""
+    for touched in ("Square", "Named", "Sibling", "Impostor"):
+        result = _assess(repo, [MAIN + touched + ".java"], qualified="demo.Shape", method="area")
+        assert result.status in (cr.NOT_RELEVANT, cr.UNKNOWN) and not result.relevant, touched
 
 
-def test_an_implementor_that_does_not_declare_the_called_method_is_not_relevant(repo):
-    assert _assess(repo, [MAIN + "Sibling.java"], qualified="demo.Shape", method="area").status == cr.NOT_RELEVANT
-    assert _assess(repo, [MAIN + "Named.java"], qualified="demo.Shape", method="area").relevant  # control: declares area
+def test_only_a_whole_returned_call_is_a_delegate_not_an_argument_of_another_call(repo):
+    assert _assess(repo, [MAIN + "WImpl.java"], method="nested").status == cr.NOT_RELEVANT  # return wrap(WImpl.w(s))
+    assert _assess(repo, [MAIN + "AImpl.java"], method="a").relevant  # control: the call IS the returned expression
 
 
-def test_a_same_named_supertype_from_another_package_is_not_the_target(repo):
-    assert _assess(repo, [MAIN + "Impostor.java"], qualified="demo.Shape", method="area").status == cr.NOT_RELEVANT
+def test_a_call_that_is_only_the_head_of_the_returned_expression_is_not_a_delegate(repo):
+    assert _assess(repo, [MAIN + "AImpl.java"], method="chained").status == cr.NOT_RELEVANT  # AImpl.a(s).trim()
+    assert _assess(repo, [MAIN + "AImpl.java"], method="appended").status == cr.NOT_RELEVANT  # AImpl.a(s) + "x"
+
+
+def test_the_callee_type_must_declare_the_called_method_and_varargs_are_accepted(repo):
+    assert _assess(repo, [MAIN + "NameImpl.java"], method="wrongName").status == cr.NOT_RELEVANT
+    assert _assess(repo, [MAIN + "VarImpl.java"], method="spread").relevant
+
+
+def test_the_callee_must_accept_the_call_arity(repo):
+    assert _assess(repo, [MAIN + "OverImpl.java"], method="arity").status == cr.NOT_RELEVANT  # f(s, 1) vs declared f(String)
+    assert _assess(repo, [MAIN + "OverImpl.java"], method="arityOk").relevant
+    assert _assess(repo, [MAIN + "Built.java"], method="built").status == cr.NOT_RELEVANT  # new Built(s, 2) vs Built(String)
+    assert _assess(repo, [MAIN + "Plain.java"], method="builtDefault").relevant  # the implicit no-argument constructor
+
+
+def test_a_library_type_named_like_a_project_type_is_not_the_callee(repo):
+    """Facade imports java.util.Objects; the project also has demo.Objects. The import wins: touching the project class is
+    not a relation."""
+    assert _assess(repo, [MAIN + "Objects.java"], method="shadowed").status == cr.NOT_RELEVANT
+
+
+def test_a_conditional_returned_expression_is_not_followed(repo):
+    assert _assess(repo, [MAIN + "Choice.java"], method="viaTernary").status == cr.NOT_RELEVANT
 
 
 def test_co_location_alone_is_never_relevance(repo):
@@ -152,7 +196,7 @@ def test_unknown_facts_are_reported_and_never_promoted(repo):
     assert ambiguous.status == cr.UNKNOWN and "ambiguous" in ambiguous.reason and not ambiguous.relevant
     (repo / FACADE).write_text("package demo; public class Facade { public static String a( {{{ ")  # no complete parse
     broken = cr.assess(_example(repo), [MAIN + "AImpl.java"], str(repo))
-    assert broken.status in (cr.UNKNOWN, cr.NOT_RELEVANT) and not broken.relevant
+    assert broken.status == cr.UNKNOWN and not broken.relevant
     (repo / FACADE).unlink()
     missing = cr.assess(_example(repo), [MAIN + "AImpl.java"], str(repo))
     assert missing.status == cr.UNKNOWN and "not exactly one file" in missing.reason

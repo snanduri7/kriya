@@ -13,7 +13,6 @@ from typing import Any, List, Optional, Tuple
 
 _RETURN_RE = re.compile(r"\breturn\s+([^;]+);")
 _STATIC_CALL_RE = re.compile(r"\b([A-Z]\w*)\.([a-z_]\w*)\s*\(")
-_NEW_RE = re.compile(r"^\s*new\s+([A-Z]\w*)\s*[(<]")
 
 
 def blank_comments_and_strings(code: str) -> str:
@@ -47,20 +46,17 @@ def blank_comments_and_strings(code: str) -> str:
     return "".join(out)
 
 
+def last_return_expression(member_text: str) -> Optional[str]:
+    """The expression of the member's LAST ``return`` (comments and literals blanked, equal length), or None."""
+    returns = _RETURN_RE.findall(blank_comments_and_strings(member_text))
+    return returns[-1] if returns else None
+
+
 def delegate_call(member_text: str) -> Optional[Tuple[str, str]]:
     """(callee type, callee method) of the member's last ``return`` expression, or None."""
     returns = _RETURN_RE.findall(blank_comments_and_strings(member_text))
     call = _STATIC_CALL_RE.search(returns[-1]) if returns else None
     return (call.group(1), call.group(2)) if call else None
-
-
-def constructed_type(member_text: str) -> Optional[str]:
-    """Simple name of the type the member's LAST ``return`` directly constructs (``return new Type(...)``), or None. The same
-    reading as ``delegate_call`` (comments and literals blanked, last return only); a returned expression that merely contains
-    a ``new`` somewhere inside it is not a direct construction."""
-    returns = _RETURN_RE.findall(blank_comments_and_strings(member_text))
-    match = _NEW_RE.match(returns[-1]) if returns else None
-    return match.group(1) if match else None
 
 
 def delegate_targets(view: Any, symbol: Any, member_text: str) -> List[Any]:

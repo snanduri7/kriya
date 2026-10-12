@@ -126,3 +126,23 @@ class of another module leaves an example on `Facade.a` NOT_RELEVANT.
   -> judge; `module-replay/module_replay_relevance.json`, earlier 24-run evidence kept): recorded GENUINE candidate (v2 regex):
   all 4 examples RELEVANT_DIRECT_DEPENDENCY/DELEGATES_TO and PASS; recorded v2f and v6f `Character.isWhitespace` candidates:
   all 4 RELEVANT and VIOLATED; near-miss subjects VIOLATED; the unchanged base has no relevant example (NOT_RELEVANT x4).
+
+## Independent review of the relevance completion (fresh subagent, before the live run) and fixes
+
+No BLOCKER; verdict "OK to run one focused live T3 attempt". Two MAJORs and four MINORs, all MEASURED by the reviewer on scratch trees:
+- MAJOR-1 OVERRIDES was not behavioral: every compiled example form calls the named type itself (`Type.m(..)` / `new Type(..).m(..)`),
+  so a subtype is never invoked. FIXED by REMOVING the relation (owner matrix row 4 is deliberately NOT represented: a touched
+  implementor/subclass is NOT_RELEVANT; test pins it). This narrows, not widens, the owner's allowed set.
+- MAJOR-2 DELEGATES_TO/CONSTRUCTS were too loose (`return wrap(Util.f())`, `Util.f(a).g()`, callee overloads, a library type
+  shadowed by a same-named project type). FIXED: the call must be the WHOLE returned expression (balanced, nothing after it), the
+  callee must declare the called name with a compatible arity (varargs; implicit no-argument constructor), and an explicit import
+  of a different type of that simple name in the target's file wins. `constructed_type` (added earlier) was replaced by a
+  whole-expression reader built on the new `delegation.last_return_expression`.
+- MINOR-2 tree walks cached per assessment (`_Structures.resolve`). MINOR-4 the broken-parse test now pins UNKNOWN; tests added for
+  every MAJOR scenario. MINOR-3 (ternary/early-return bodies, deleted callee) stays NOT_RELEVANT: a false negative that only
+  defers the example to the terminal gate; documented, not widened. MINOR-1 (`TARGET:` shows the touched path) is mitigated by the
+  `RELATION:` line; the facade path stays in `relevance.declaring_path`.
+Post-review: 27 tests; mutation `mutate_d.py` 22 mutants ALL KILLED (3 initial survivors, D2 D8 D9, killed by added tests for a
+call that is only the head of the returned expression, a callee type lacking the named method, and varargs); ruff 0, pylint 0;
+real-Gradle replay re-run on the final code: identical verdicts (good + recorded GENUINE PASS and relevant; v2f/v6f
+isWhitespace VIOLATED and relevant; near misses VIOLATED; unchanged base NOT_RELEVANT).

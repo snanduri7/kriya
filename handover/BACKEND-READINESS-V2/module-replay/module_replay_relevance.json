@@ -51,7 +51,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 23.2,
+  "seconds": 24.8,
   "verdict": "VIOLATED"
  },
  {
@@ -128,7 +128,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 21.5,
+  "seconds": 21.4,
   "verdict": "PASS"
  },
  {
@@ -206,7 +206,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 21.5,
+  "seconds": 21.0,
   "verdict": "PASS"
  },
  {
@@ -283,7 +283,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 22.0,
+  "seconds": 20.6,
   "verdict": "VIOLATED"
  },
  {
@@ -360,7 +360,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 21.9,
+  "seconds": 21.1,
   "verdict": "VIOLATED"
  },
  {
@@ -437,7 +437,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 22.2,
+  "seconds": 21.1,
   "verdict": "PASS"
  },
  {
@@ -514,7 +514,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 30.4,
+  "seconds": 21.1,
   "verdict": "VIOLATED"
  },
  {
@@ -591,7 +591,7 @@
    }
   },
   "runner_refusal": null,
-  "seconds": 23.8,
+  "seconds": 21.1,
   "verdict": "VIOLATED"
  }
 ]
