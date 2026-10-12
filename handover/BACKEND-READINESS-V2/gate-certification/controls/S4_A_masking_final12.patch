@@ -1,0 +1,22 @@
+diff --git a/json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java b/json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java
+index efb5913..f467141 100644
+--- a/json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java
++++ b/json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java
+@@ -73,14 +73,11 @@ public class PathCompiler {
+             }
+             LinkedList<Predicate> filterStack = new LinkedList<Predicate>(asList(filters));
+             return new PathCompiler(ci, filterStack).compile();
+-        } catch (Exception e) {
+-            InvalidPathException ipe;
++        } catch (Throwable e) {
+             if (e instanceof InvalidPathException) {
+-                ipe = (InvalidPathException) e;
+-            } else {
+-                ipe = new InvalidPathException(e);
++                throw (InvalidPathException) e;
+             }
+-            throw ipe;
++            throw new InvalidPathException(e);
+         }
+     }
+ 

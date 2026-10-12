@@ -1,0 +1,22 @@
+--- a/jmespath/functions.py
++++ b/jmespath/functions.py
+@@ -225,7 +225,19 @@
+     @signature({'types': ['string']}, {'types': ['string']})
+     def _func_starts_with(self, search, suffix):
+         return search.startswith(suffix)
++
++    @signature({'types': ['string']})
++    def _func_lower(self, arg):
++        return arg.lower()
++
++    @signature({'types': ['string']})
++    def _func_upper(self, arg):
++        return arg.upper()
+ 
++    @signature({'types': ['string']})
++    def _func_trim(self, arg):
++        return arg.strip()
++
+     @signature({'types': ['array', 'string']})
+     def _func_reverse(self, arg):
+         if isinstance(arg, STRING_TYPE):
