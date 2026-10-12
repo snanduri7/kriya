@@ -369,7 +369,6 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
         ACCEPTANCE_IDENTITY_NOT_EXECUTED,
         ACCEPTANCE_PASSED,
         ACCEPTANCE_VIOLATED,
-        AcceptanceError,
         AcceptanceJudgment,
     )
 
@@ -410,12 +409,7 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
            for identity, found in statuses.items()):
         return every(ACCEPTANCE_EVIDENCE_INDETERMINATE, "report and per-case detail disagree")
     candidate_classes = set(run.candidate_classes or ())
-    simple = {name.rsplit(".", 1)[-1] for name in candidate_classes}
-    try:
-        source = artifact_source_text(artifact)
-    except AcceptanceError:
-        source = ""
-    references = bool(simple & set(re.findall(r"\b[A-Z]\w*\b", source)))
+    references = _references_candidate(artifact, candidate_classes)
     judgments: Dict[str, Any] = {}
     for rid in artifact.requirement_ids:
         identities = artifact.identities_for(rid)
@@ -439,6 +433,47 @@ def judge_java_acceptance(artifact: Any, run: Any, base: Dict[str, Any]) -> Dict
         else:
             judgments[rid] = AcceptanceJudgment(ACCEPTANCE_PASSED, "", evidence)
     return judgments
+
+
+def _references_candidate(artifact: Any, candidate_classes: Set[str]) -> bool:
+    from kriya.workflow.acceptance_oracle import AcceptanceError
+
+    simple = {name.rsplit(".", 1)[-1] for name in candidate_classes}
+    try:
+        source = artifact_source_text(artifact)
+    except AcceptanceError:
+        source = ""
+    return bool(simple & set(re.findall(r"\b[A-Z]\w*\b", source)))
+
+
+def contradicted_case_details(artifact: Any, run: Any) -> Optional[Dict[str, Dict[str, str]]]:
+    """identity -> {"status", "type", "trace"} of every case of ``artifact`` that observed the candidate's behaviour
+    contradicted - the same definition ``judge_java_acceptance`` applies per requirement - or None when the run carries no
+    complete, digest-verified evidence (a refusal, an integrity problem, no report, report/detail disagreement): then nothing
+    was observed about the candidate and no case may be called contradicted. Shared by the judge and by intermediate
+    contract feedback so the two can never disagree about what a violation is."""
+    runner = getattr(run, "runner", None) or JVM_RUNNER
+    report = run.report
+    if run.refusal is not None or run.integrity_problem is not None:
+        return None
+    if report is None or not report.complete or report.runner != runner:
+        return None
+    details = run.case_details
+    if details is None:
+        return None
+    statuses = report.statuses()
+    if any(sorted(e["status"] for e in details.get(identity, ())) != sorted(found) for identity, found in statuses.items()):
+        return None
+    candidate_classes = set(run.candidate_classes or ())
+    references = _references_candidate(artifact, candidate_classes)
+    out: Dict[str, Dict[str, str]] = {}
+    for rid in artifact.requirement_ids:
+        for identity in artifact.identities_for(rid):
+            entries = details.get(identity, ())
+            offending = next((e for e in entries if _contradiction([e], candidate_classes, references)), None)
+            if offending is not None:
+                out[identity] = dict(offending)
+    return out
 
 
 def artifact_source_text(artifact: Any) -> str:

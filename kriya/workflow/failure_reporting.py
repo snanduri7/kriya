@@ -104,6 +104,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "goal_spec_compliance": FailureCategory.VERIFICATION,
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
+    # BACKEND-READINESS-V2 slot 3: a candidate that contradicts one of the user's own executable goal examples (retriable).
+    "deterministic_contract_violation": FailureCategory.VERIFICATION,
     # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: refused before any model call - a
     # requirement with no deterministic closer could never be verified.
     "goal_insufficient_for_verification": FailureCategory.VERIFICATION,

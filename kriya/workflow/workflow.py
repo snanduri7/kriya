@@ -1189,6 +1189,41 @@ def close_requirements_with_derived_examples(
     )
 
 
+def _run_contract_acceptance(
+    artifact: Any, touched: Sequence[str], *, candidate_root: str, workspace_path: str, autonomy_cfg: Any,
+) -> Any:
+    """BACKEND-READINESS-V2 slot 3: ONE run of the sealed goal-example class on the unit's candidate, through the same JVM
+    acceptance runner and trust-surface rules as the terminal closer (a Kriya-owned copy of the candidate; the unit worktree is
+    never touched). Module-level so tests can substitute the runner."""
+    from kriya.workflow.acceptance_jvm import run_java_acceptance
+
+    def export_validator(root: str) -> PolymorphicValidator:
+        return PolymorphicValidator(root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg)
+
+    return run_java_acceptance(
+        artifact, candidate_root, candidate_paths=list(touched),
+        base_revision=_oracle_base_revision(candidate_root, workspace_path), validator_factory=export_validator)
+
+
+def build_contract_feedback(engine: Any, candidate_root: str, workspace_path: str, autonomy_cfg: Any) -> Any:
+    """The run's sealed goal-example class as intermediate repair feedback for the current unit (None when the run binds no
+    Java example class). Bound once per unit from the engine's contract compilation; never recompiled here."""
+    from kriya.workflow.contract_feedback import ContractFeedback, contract_examples
+    from kriya.workflow.example_oracle import bound_derived_examples
+
+    artifact = bound_derived_examples(engine)
+    report = getattr(engine, "derived_examples_report", None)
+    if artifact is None or artifact.language != "java" or not isinstance(report, dict):
+        return None
+    examples = contract_examples(artifact, report, candidate_root)
+    if not examples:
+        return None
+    return ContractFeedback(
+        artifact=artifact, examples=examples,
+        execute=lambda art, touched: _run_contract_acceptance(
+            art, touched, candidate_root=candidate_root, workspace_path=workspace_path, autonomy_cfg=autonomy_cfg))
+
+
 def _requirement_policy_blocks(autonomy: Any) -> bool:
     """Whether a requirement without accepted evidence blocks success under this
     configuration (the production preset seals both policies to ``block``). Only
@@ -5236,6 +5271,8 @@ class WorkflowEngine:
             allowed_write_relpaths=list(allowed_write_relpaths or []),
             authorized_semantic_regions=list(authorized_semantic_regions or []),
             required_verification=list(required_verification or []),
+            contract_feedback=build_contract_feedback(
+                self, worktree_path, workspace_path, self.kernel.config.autonomy),
             # CANDIDATE-GATE-BASELINE-POLICY-001: the baseline's own
             # verification call, for the candidate gates' attribution.
             baseline_suite_replay=baseline_suite_run,

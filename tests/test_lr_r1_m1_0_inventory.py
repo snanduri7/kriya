@@ -157,6 +157,7 @@ def test_inventory_counts_the_design_relies_on():
     # (second repair cycle) added two typed stops: the direct goal's NO_CHANGE_UNVERIFIED (workflow.py, after the gates)
     # and the reopened owner's VERIFICATION_RETRY_NO_CHANGE_POSSIBLE refusal (workflow.py no-change settlement);
     # BACKEND-READINESS-V2 added one (attempt._reject_exception_masking: the typed unsafe_exception_masking stop) and one
-    # (workflow._run_semantic_safety_gate: the same typed stop on the final direct batch).
-    assert records == 91, records
+    # (workflow._run_semantic_safety_gate: the same typed stop on the final direct batch); slot 3 added one
+    # (attempt._run_contract_feedback_gate: the typed, retriable deterministic_contract_violation).
+    assert records == 92, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

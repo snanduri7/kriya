@@ -192,7 +192,7 @@ def record_workspace_progress(
     same_workspace = workspace_hash == state.last_failed_workspace_hash
     stage_order = {
         "operation_contract": 0, "anchored_edit": 0,
-        "structural_corruption": 1, "compile": 2,
+        "structural_corruption": 1, "compile": 2, "deterministic_contract_violation": 2.5,
         "test": 3, "run_verification": 4, "run_verification_hung": 4,
         "goal_spec_compliance": 5, "regression_test": 6,
     }

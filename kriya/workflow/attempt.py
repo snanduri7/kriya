@@ -58,6 +58,7 @@ from kriya.tools.service_runtime import (
     run_managed_service_verification,
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
+from kriya.workflow import contract_feedback
 from kriya.workflow.acceptance import (
     CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
     classify_runtime_entrypoint,
@@ -1753,6 +1754,42 @@ def _reject_explanatory_prose(
     raise QualityGateFailure(failure)
 
 
+def _run_contract_feedback_gate(state: GenerationState, ctx: "AttemptContext") -> None:
+    """BACKEND-READINESS-V2 slot 3: after the compile gate, run the sealed goal-example cases that target a file this unit
+    touched, once, on the coherent candidate. An observed contradiction is a typed RETRIABLE failure carrying the exact failed
+    example, expected and observed; anything that observed nothing (runner unavailable) is recorded and never a violation.
+    Feedback only: terminal acceptance re-evaluates every example on the final tree and nothing here is ledger evidence."""
+    feedback = getattr(ctx, "contract_feedback", None)
+    if feedback is None:
+        return
+    outcome = contract_feedback.evaluate(feedback, sorted(state.all_files_written))
+    state.record_event(RunEvent(
+        kind="contract_feedback.evaluated", attempt=state.attempt_number, source="attempt._run_contract_feedback_gate",
+        authority=EventAuthority.AUXILIARY,
+        message=f"intermediate contract check: {outcome.status} ({len(outcome.relevant)} of {outcome.compiled_examples} examples relevant)",
+        details=outcome.summary(),
+    ))
+    if outcome.status != "VIOLATED":
+        return
+    digest = getattr(feedback.artifact, "digest", "")
+    message = contract_feedback.violation_message(outcome, digest)
+    files = sorted({v.example.source_path for v in outcome.violations if v.example.source_path})
+    failure = Failure(
+        type=contract_feedback.FAILURE_TYPE, message=message, raw_output=message,
+        file_locations=[FileLocation(filepath=path) for path in files], likely_files=files,
+        failed_content=_capture_failed_content(ctx.worktree_path, files), attempt=state.attempt_number,
+        source="orchestrator", authority="deterministic",
+        diagnostics=contract_feedback.violation_diagnostics(outcome, digest),
+    )
+    state.record_event(RunEvent(
+        kind="contract_feedback.violation", attempt=state.attempt_number, source="attempt._run_contract_feedback_gate",
+        authority=EventAuthority.ADVISORY, message=f"{contract_feedback.DETERMINISTIC_CONTRACT_VIOLATION}: "
+        f"{len(outcome.violations)} goal example(s) contradicted", details=failure.diagnostics,
+    ))
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _reject_exception_masking(
     state: GenerationState, filepath: str, content: str, baseline: Optional[str],
 ) -> None:
@@ -3336,6 +3373,9 @@ class AttemptContext:
     # means nothing downstream judges "changed nothing", so an attempt whose
     # every written file equals the baseline is a typed stop here.
     no_change_verifier_downstream: bool = False
+    # BACKEND-READINESS-V2 slot 3: the run's sealed goal-example class and how to run its RELEVANT cases on this unit's
+    # candidate (kriya/workflow/contract_feedback.py); None = no deterministic contract is bound to this run/unit.
+    contract_feedback: Optional[Any] = None
     # The enforce controller's owner reopen (verification_owner_recovery): read by
     # workflow.py's no-change settlement (an identical regeneration is a stop).
     reopened_owner: bool = False
@@ -9650,6 +9690,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             filepath: read_file_revision(os.path.join(ctx.worktree_path, filepath))
             for filepath in state.all_files_written
         }
+
+        # BACKEND-READINESS-V2 slot 3: deterministic user contracts that target what this unit touched, before any
+        # model verifier or test gate (see _run_contract_feedback_gate).
+        _run_contract_feedback_gate(state, ctx)
 
         accepted_test_output: Optional[str] = None
         accepted_test_result: Optional[Dict[str, Any]] = None

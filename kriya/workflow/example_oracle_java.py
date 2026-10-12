@@ -151,6 +151,24 @@ def resolve_java_type(candidate_root: str, name: str) -> Tuple[Optional[str], st
     return None, f"type {simple} is ambiguous: " + ", ".join(sorted(matches))
 
 
+def main_source_path(candidate_root: str, qualified_type: str) -> Optional[str]:
+    """The workspace-relative path of the main compilation unit declaring ``qualified_type`` (``pkg.Type``), or None when
+    there is not exactly one under a ``src/main/java`` root. Pure function of the tree; the file a unit must touch for an
+    example about this type to be relevant to it."""
+    package, _, simple = qualified_type.rpartition(".")
+    wanted = "/".join([*package.split("."), f"{simple}.java"]) if package else f"{simple}.java"
+    found: List[str] = []
+    for current, dirs, files in os.walk(candidate_root):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", ".kriya", "target", "build", "node_modules"))
+        if f"{simple}.java" not in files:
+            continue
+        rel = os.path.relpath(os.path.join(current, f"{simple}.java"), candidate_root).replace(os.sep, "/")
+        marker = "src/main/java/"
+        if marker in f"/{rel}" and (f"/{rel}").split(marker, 1)[1] == wanted:
+            found.append(rel)
+    return found[0] if len(found) == 1 else None
+
+
 def _resolve_exception(name: str, goal: str) -> Optional[str]:
     if "." in name:
         return name
