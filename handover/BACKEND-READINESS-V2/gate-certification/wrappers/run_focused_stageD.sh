@@ -5,7 +5,7 @@
 # REJECTS stops the driver (exit 99); an oracle that could not judge is reported INVALID, never classified.
 set -u
 V2=$HOME/kriya-m1-live/backend-readiness-v2; R=$HOME/kriya-m1-live/backend-readiness-001; R4=$HOME/kriya-m1-live/backend-readiness-004/cohort-002
-INVALID=0; K=$HOME/WorkingDirectory/AI/ClaudeCode/Kriya-main-demo; LABEL=-v4a; TAG=ws-v4a; COOL=${COOL:-120}; W=$(cd "$(dirname "$0")" && pwd)
+INVALID=0; K=$HOME/WorkingDirectory/AI/ClaudeCode/Kriya-main-demo; LABEL=${LABEL:--v4a}; TAG=${TAG:-ws-v4a}; COOL=${COOL:-120}; W=$(cd "$(dirname "$0")" && pwd)
 echo "######## stage D focused live start $(date +%F' '%T) kriya $(git -C $K branch --show-current) $(git -C $K rev-parse HEAD)"
 for T in "$@"; do case $T in T*) O=$V2/primary/P5-$T$LABEL;; *) O=$V2/cohort-002/C2-$T$LABEL;; esac; [ -e $O ] && { echo "ABORT: $O exists"; exit 1; }; done
 guard() { local OUT=$1 STATUS ACC REG
