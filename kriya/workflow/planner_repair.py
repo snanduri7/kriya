@@ -134,6 +134,7 @@ PLANNER_POLICY_REJECTION_CODES = frozenset({
     "PLAN_TARGETS_DELEGATING_SHIM",  # PLAN-TARGET-GROUNDING-001 (BACKEND-READINESS-V2)
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH", "PLAN_TARGET_UNKNOWN",
+    "PLANNED_EDIT_INFEASIBLE",  # PLAN-EDIT-FEASIBILITY-001 (BACKEND-READINESS-V2)
     # Milestone plans (kriya/workflow/milestone_validation.py): judged
     # against the repository's topology.
     "UNJUSTIFIED_ENTRYPOINT", "UNJUSTIFIED_BUILD_BOUNDARY",
@@ -490,6 +491,14 @@ def build_structured_plan_repair_prompt(
             "require changing it, do not invent an owner for it at all - instead add its exact "
             "existing path to the referencing test file's own planned_files[].preserved_references "
             "list, to declare that this reference is intentional and the file stays unchanged.\n"
+        )
+    if "PLANNED_EDIT_INFEASIBLE" in reason_codes:
+        targeted_correction += (
+            "- For each planned edit the errors name: Kriya has deterministically established that this "
+            "exact edit cannot be executed under the currently authorized edit protocol and the model "
+            "context available to that subtask (the errors give the figures). Do not keep the same planned "
+            "edit unchanged. Revise the plan so that every planned edit is executable and the authoritative "
+            "goal is still fully satisfied; the choice of how to revise it is yours.\n"
         )
     if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
         targeted_correction += (

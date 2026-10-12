@@ -7802,6 +7802,7 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "PLAN_VERIFICATION_SCOPE_UNJUSTIFIED",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
     "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
+    "PLANNED_EDIT_INFEASIBLE",  # PLAN-EDIT-FEASIBILITY-001
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
     "VERIFICATION_PREREQUISITE_MANIFEST_MISSING",
     "UNKNOWN_GLOBAL_INVARIANT",
@@ -10411,16 +10412,13 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
     we.kernel = SimpleNamespace(
         registry=MagicMock(),
         events=SimpleNamespace(emit=AsyncMock(side_effect=capture_event)),
-        config=SimpleNamespace(
-            knowledge=SimpleNamespace(
-                training_cutoff="2023-12-01", offline_mode=True,
-                release_cache_ttl_days=30,
-            ),
-            llm=SimpleNamespace(knowledge_cutoff="2023-12-01"),
-            skills=SimpleNamespace(load_global=False, load_cwd=False),
-            paths=SimpleNamespace(
-                skills=str(tmp_path / "skills"), memory=str(tmp_path / "memory"),
-            ),
+        # A real config: the plan edit-feasibility preflight reads the Developer
+        # bindings (llm, llm_chain) of an existing planned file's unit.
+        config=strict_config(
+            knowledge={"training_cutoff": "2023-12-01", "offline_mode": True, "release_cache_ttl_days": 30},
+            llm={"knowledge_cutoff": "2023-12-01"},
+            skills={"load_global": False, "load_cwd": False},
+            paths={"skills": str(tmp_path / "skills"), "memory": str(tmp_path / "memory")},
         ),
     )
     we.kernel.registry.list_components.return_value = []

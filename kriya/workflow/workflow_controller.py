@@ -164,6 +164,15 @@ from kriya.workflow.context_projection import project_implementation_source, ren
 from kriya.workflow.contract_baseline import NoMutationRequired, VerificationAuthorityUnavailable
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_feasibility import (
+    EditFeasibility,
+    Feasibility,
+    assess_planned_edit,
+    collect_unit_grounding,
+    infeasible_results,
+    model_capacities,
+    repair_error_text,
+)
 from kriya.workflow.edit_safety import (
     read_file_revision,
     strip_java_comments_and_strings,
@@ -507,6 +516,77 @@ def build_subtask_goal_text(
         "authoritative goal or with real constraints discovered while implementing it.\n"
         f"{planned_strategy}"
     )
+
+
+async def evaluate_plan_edit_feasibility(
+    config: Optional[Any], plan: EngineeringPlan, goal: str, workspace_path: str,
+) -> List[EditFeasibility]:
+    """PLAN-EDIT-FEASIBILITY-001: the feasibility of every planned edit of an
+    existing file in a MODEL implementation unit, from the same unit goal text
+    and the same helpers the executor decides with (kriya/workflow/
+    edit_feasibility.py). The unit's own retrieval runs only for a file whose
+    whole source cannot fit and no other source has grounded yet. Anything that
+    cannot be decided is UNKNOWN, never a rejection: a file an earlier unit of
+    the plan also edits (the unit will see other bytes), an unreadable file, or
+    a failure while deciding."""
+    if config is None:  # no kernel config (a bare engine): no model capacity to decide with
+        return []
+    try:
+        capacities = model_capacities(config)
+    except Exception as error:  # the verdict is UNKNOWN for every file; the plan loop must not abort on it
+        logger.warning("Edit feasibility: model capacity unavailable (%s: %s)", type(error).__name__, error)
+        capacities = []
+    order = topological_subtask_order(plan)
+    by_id = {subtask.id: subtask for subtask in plan.subtasks}
+    results: List[EditFeasibility] = []
+    edited_by_earlier_units: set = set()
+    for position, subtask_id in enumerate(order, start=1):
+        subtask = by_id[subtask_id]
+        planned_paths = [planned.path for planned in subtask.planned_files]
+        if subtask.execution_method != ExecutionMethod.MODEL or subtask.execution_role == ExecutionRole.VERIFICATION:
+            edited_by_earlier_units.update(planned_paths)
+            continue
+        existing = []
+        for planned in subtask.planned_files:
+            full = os.path.join(workspace_path, planned.path)
+            if planned.action != FileAction.MODIFY or not os.path.isfile(full):
+                continue
+            if planned.path in edited_by_earlier_units:
+                results.append(EditFeasibility(
+                    subtask.id, planned.path, Feasibility.UNKNOWN,
+                    "an earlier unit of the plan also edits this file, so the unit will see different bytes"))
+                continue
+            try:
+                with open(full, encoding="utf-8") as handle:
+                    existing.append((planned.path, handle.read()))
+            except (OSError, UnicodeDecodeError):
+                results.append(EditFeasibility(
+                    subtask.id, planned.path, Feasibility.UNKNOWN, "the current source cannot be read as text"))
+        edited_by_earlier_units.update(planned_paths)
+        if not existing:
+            continue
+        unit_goal = build_subtask_goal_text(subtask, position, len(order), plan=plan, grounding_goal=goal)
+        grounding = None
+        grounding_collected = False
+        for path, content in existing:
+            try:
+                assessment = assess_planned_edit(
+                    subtask_id=subtask.id, path=path, content=content, unit_goal=unit_goal, grounding_goal=goal,
+                    capacities=capacities, grounding=grounding, unit_file_count=len(subtask.planned_files))
+                if assessment.evidence.get("needs_grounding") and not grounding_collected:
+                    grounding = await collect_unit_grounding(config, workspace_path, unit_goal)
+                    grounding_collected = True
+                    assessment = assess_planned_edit(
+                        subtask_id=subtask.id, path=path, content=content, unit_goal=unit_goal,
+                        grounding_goal=goal, capacities=capacities, grounding=grounding,
+                        unit_file_count=len(subtask.planned_files))
+            except Exception as error:  # UNKNOWN, never a rejection; the runtime decision stands
+                logger.warning("Edit feasibility: %s of %s not decided (%s: %s)", subtask.id, path,
+                               type(error).__name__, error)
+                assessment = EditFeasibility(
+                    subtask.id, path, Feasibility.UNKNOWN, f"not decided: {type(error).__name__}")
+            results.append(assessment)
+    return results
 
 
 # GRAPHIFY-OVERSIZE-REQUEST-001: the reason _build_context labels a planned
@@ -4984,6 +5064,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             )
                         )
                         reason_codes.append("GROUNDED_SEMANTIC_PROVIDER_MISMATCH")
+
+                    # PLAN-EDIT-FEASIBILITY-001: an edit the executor's own
+                    # edit protocol can be shown unable to run is a typed
+                    # contradiction for the existing bounded plan repair (the
+                    # Planner decides the revision; nothing is dropped or
+                    # rewritten here, no budget is added).
+                    edit_feasibility = await evaluate_plan_edit_feasibility(
+                        getattr(getattr(self.workflow_engine, "kernel", None), "config", None),
+                        plan, goal, workspace_path,
+                    )
+                    ledger.record_and_persist(
+                        workspace_path, "structured_plan_edit_feasibility", run_id=run_id,
+                        repair_attempt=repair_attempts, results=[item.to_dict() for item in edit_feasibility],
+                    )
+                    for infeasible in infeasible_results(edit_feasibility):
+                        errors.append(repair_error_text(infeasible))
+                        invalid_subtask_ids.append(infeasible.subtask_id)
+                        validation_evidence.append(infeasible.to_dict())
+                        reason_codes.append("PLANNED_EDIT_INFEASIBLE")
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
