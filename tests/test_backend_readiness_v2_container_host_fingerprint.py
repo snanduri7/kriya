@@ -83,10 +83,10 @@ def test_a_result_recorded_under_the_old_comparison_rules_is_not_the_same_enviro
     run: the comparison version is part of the verification-policy identity."""
     from unittest.mock import patch
 
+    from _strict_doubles import strict_config
+
     from kriya.workflow import baseline_policy, validation_baseline
     from kriya.workflow.validation_baseline import BASELINE_COMPARISON_VERSION
-
-    from _strict_doubles import strict_config
 
     autonomy = strict_config().autonomy
     current = baseline_policy.verification_policy_identity(autonomy)
