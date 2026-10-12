@@ -1,0 +1,14 @@
+  error: subprocess-exited-with-error
+  
+  × installing build dependencies did not run successfully.
+  │ exit code: 1
+  ╰─> [3 lines of output]
+      Looking in indexes: http://127.0.0.1:9/simple
+      ERROR: Could not find a version that satisfies the requirement setuptools>=80 (from versions: none)
+      ERROR: No matching distribution found for setuptools>=80
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+ERROR: Failed to build 'file:///Users/sriramnanduri/kriya-m1-live/backend-readiness-v2/gate-cert/tmpkgctr7lr/scr' when installing build dependencies
+INSTALL_FAILED
+ACCEPT_EXIT=2

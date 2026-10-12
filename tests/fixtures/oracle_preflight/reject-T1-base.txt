@@ -1,0 +1,6 @@
+import_from=/Users/sriramnanduri/kriya-m1-live/backend-readiness-v2/gate-cert/gc-T1-base-2ns48utz/scr-accept/src/cachetools/__init__.py
+FAILED ../cachetools/tests/test_ttl.py::TTLCacheTest::test_ttl - AssertionErr...
+FAILED ../cachetools/tests/test_ttl.py::TTLCacheTest::test_ttl_expire - Asser...
+2 failed in 0.02s
+TAMPERED=[]
+ACCEPT_EXIT=1

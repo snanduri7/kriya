@@ -46,6 +46,8 @@ def run_case(task: str, label: str, spec: object) -> dict:
             code = subprocess.run([str(g.TASK_DIR[task] / "oracle" / "accept.sh"), str(tree), str(scr)], stdout=fh,
                                   stderr=subprocess.STDOUT, env=env, timeout=g.TIMEOUT_S, check=False).returncode
         text = log.read_text(errors="replace")
+        (g.OUT / "logs").mkdir(exist_ok=True)
+        (g.OUT / "logs" / f"env-{task}-{label}.txt").write_text(text)
     return {"task": task, "disturbance": label, "exit": code, "seconds": round(time.time() - started, 1),
             "markers": [m for m in MARKERS if m in text], "tail": text.strip().splitlines()[-4:]}
 

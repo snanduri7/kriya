@@ -1,0 +1,10 @@
+> Task :json-path:test FAILED
+Issue_786 > test() FAILED
+BUILD FAILED in 6s
+xml: tests=1 failures=1 errors=0 skipped=0
+HIDDEN_EXIT=1
+BUILD FAILED in 4s
+xml: tests=930 failures=3 errors=0 skipped=2
+UPSTREAM_SUITE_EXIT=1
+TAMPERED=[]
+ACCEPT_EXIT=1

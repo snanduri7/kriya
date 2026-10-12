@@ -74,4 +74,45 @@ Reviewer finding applied: an in-place enforce run (no sandbox, `candidate_root =
 
 Remaining limits (UNKNOWN, disclosed): the rule is Java-only and covers the Error/Throwable class only; `kriya fix`/other entry points were not separately traced; a write to a path the plan does not declare is never committed (so never judged) - by design.
 
-*(Sections for T3, S3_A, S4_A forensics, T4, S1_A, controls and the shared goal-example measurement follow in later slices.)*
+## 4. T3 Hamcrest (P5-T3-v2f `20261012T003315-e4b13153`)
+| Link | Finding | Status |
+|---|---|---|
+| Goal -> facts | the target `IsEqualCompressingWhiteSpace.stripSpaces` is a direct definition; nothing indirect | MEASURED |
+| Sent to Developer | the goal text including the literal U+00A0 and U+2003 characters and "any Unicode separator or control character" is in the Developer request (18,576 chars) | MEASURED (character scan) |
+| Candidate | `Character.isWhitespace(c)` loop; its stated analysis claims it "covers Unicode whitespace". `Character.isWhitespace(U+00A0)` is false (doc 07 JDK probe), so the goal's own NBSP example cannot pass | MEASURED + TRACED |
+| Validation | visible suite has no NBSP case; goal examples are `assertThat(lit, equalToCompressingWhiteSpace(lit))  -> fails, used to pass` (not compilable by the example compiler); the sealed operator authority is deliberately feedback-free | MEASURED |
+Classification: context was complete and correct; the implementation is wrong -> **model coding limit with a Kriya validation gap** (a goal-derived check would reject it deterministically and give the repair a concrete failing example). PITFALL for any compiler of these lines: "-> fails, used to pass" states the *regression*; the expected outcome is PASS. Reading it as expected-fail would falsely reject every correct candidate.
+
+## 5. S3_A commons-text (C2-S3_A-v3a `20261012T071018-527b5fc6`; v2f 7 attempts)
+Real v3a candidate replayed through the frozen ACCEPT oracle this session (MEASURED): hidden 4 tests / 2 failures, upstream 1891 / 2 failures, COMPAT pass (signatures identical). Cause (TRACED against the diff and the goal): TextStringBuilder was fixed (no-arg overload passes `size`, 2-arg overload special-cases the empty string); StrBuilder got only the one-line no-arg change (`size` instead of `size - 1`) and its 2-arg overload still clamps to `size - 1`, so goal example `new StrBuilder("abab").lastIndexOf("") -> 4` yields 3. The Developer's stated analysis ("the existing clamp logic ... will handle both cases") is the wrong step. Facts/plan/localization were correct (both files planned and edited, first-attempt diagnosis already named TextStringBuilder). Kriya's terminal `original_requirements` gate (model verifier) refused the commit and the run rolled back: SAFE_FAILURE, correctly. Classification: **model coding limit** (incomplete fix of a parallel class) + the same goal-example validation gap: 2 of the 9 goal examples fail on this candidate and an example check would have said so during attempt 1 of s2 instead of at the terminal gate. The earlier PRE_EXISTING fingerprint defect is fixed (doc 09) and not at issue here.
+
+## 6. S4_A, T4, S1_A and controls
+- S4_A (FALSE_SUCCESS in the frozen 12): cause is the oracle blind spot plus a missing semantic guard, both now handled (doc 11 section 2, section 3 above). Not re-forensed: no new evidence needed.
+- T4 (variable) and S1_A (variable), T1, T5, S2_A (controls), T6, S6_A: successes in the frozen run; success paths were not re-forensed this stage (no failure to explain). The variability record in doc 07 stands; repeatability remains NOT ESTABLISHED.
+
+## 7. Cross-case measurements (Phase 13 comparative findings merged here)
+- GOAL-NAMED FACTS block reach (MEASURED over all 15 sealed v2f/v3a runs): at least one Planner request carries it in 7 of 15 runs (S2_A, S4_A, S4_B x2, T2 x2, T4; the other runs derived no fact); **Developer requests carrying it: 0 of 52** (a 52-request count; an earlier tally said 53). By construction: `goal_facts_block` is appended only to the Planner request (`workflow_controller.py:4662`).
+- Collaborator signature selection is first-12-in-file-order (`packing.py:160`), so the callee a member actually calls is not guaranteed to appear (T2).
+- Goal-example forms (MEASURED by reading the 6 non-trivial goals):
+| Form | Goals | Lines | Compilable today | Notes |
+|---|---|---|---|---|
+| `new T(lit).m(lit[,int]) -> lit` (instance expression) | S3_A | 9 | no | simple, fully literal: SAFE to support |
+| `assertThat(lit, factory(lit)) -> fails, used to pass` | T3 | 4 | no | outcome inverted vs the arrow (expected PASS) |
+| `Type.read(CONSTANT, "lit") -> lit` with repeat markers | S4_B | 3 | no | constant lives in a test base class; repeated calls in one JVM |
+| `Type.compile("lit") -> compiles (no exception)` | S4_A | 1 | shape recognised, result not literal | |
+| prose `returns "x" but should be "y"` with multi-line `Jsoup.parse(...)` chain | T2 | 2 | no | UNSUPPORTED (must never reject) |
+Predicted value: support for forms 1-2 would have rejected the real T3 candidate (NBSP) and the real S3_A candidate (StrBuilder example) during repair; S4_B and T2 would not change (their cause is upstream of validation).
+
+## 8. Model-limitation stop rule (Phase 14) - verdict per failing case
+| Case | Chain proven sound up to | First failing link | Label |
+|---|---|---|---|
+| T2 | goal, facts derived | facts not SENT to the Developer; callee absent; Planner ignored locations | **Kriya context defect** (not a model limit) + model errors |
+| T3 | everything through candidate application | Developer implementation | model limit, gated by a missing goal-derived check |
+| S3_A | everything through candidate application | Developer completeness of the parallel class | model limit, gated by the same missing check |
+| S4_B | goal, facts, plan, application | Developer diagnosis (never reached the wildcard-token cause) | model limit; contributing wasted attempts from missing symbol context |
+| S4_A | n/a (false success) | oracle blind spot | closed by the guard |
+Only T3, S3_A and S4_B may carry the model-limit label, and T3/S3_A only together with the validation gap.
+
+## 9. Ranking input for Stage C (not yet decided)
+1. Goal-example verification, SHADOW first (graduation needs zero false rejections on all recorded GENUINE candidates and independent known-good controls): predicted flips T3, S3_A (outcome-bearing). 2. Developer receives the derived goal-named facts and the source of the callee a member delegates to, ranked by what the member calls (T2; outcome effect UNKNOWN, plan scope still binds). 3. Compile-failure symbol context (S4_B; efficiency, not outcome). Also noted: a test-writing subtask over a file with no authoritative source discards a finished gate-passing s1 (T2 v3a). Cap: at most three of these.
+

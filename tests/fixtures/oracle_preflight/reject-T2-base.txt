@@ -1,0 +1,92 @@
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.066 s <<< FAILURE! -- in org.jsoup.nodes.NodeTest
+[ERROR] org.jsoup.nodes.NodeTest.absHandlesRelativeQuery -- Time elapsed: 0.052 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <https://jsoup.org/path/file?foo> but was: <https://jsoup.org/path/?foo>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:177)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)
+	at org.jsoup.nodes.NodeTest.absHandlesRelativeQuery(NodeTest.java:126)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.003 s <<< FAILURE! -- in org.jsoup.internal.StringUtilTest
+[ERROR] org.jsoup.internal.StringUtilTest.resolvesRelativeUrls -- Time elapsed: 0.001 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <http://example.com/one/two?three#four> but was: <http://example.com/one/two?three>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:177)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)
+	at org.jsoup.internal.StringUtilTest.resolvesRelativeUrls(StringUtilTest.java:125)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[ERROR] Failures: 
+[ERROR]   StringUtilTest.resolvesRelativeUrls:125 expected: <http://example.com/one/two?three#four> but was: <http://example.com/one/two?three>
+[ERROR]   NodeTest.absHandlesRelativeQuery:126 expected: <https://jsoup.org/path/file?foo> but was: <https://jsoup.org/path/?foo>
+[ERROR] Tests run: 2, Failures: 2, Errors: 0, Skipped: 0
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.6.0:test (default-test) on project jsoup: There are test failures.
+[ERROR] 
+[ERROR] See /Users/sriramnanduri/kriya-m1-live/backend-readiness-v2/gate-cert/gc-T2-base-fzaor8ae/scr-accept/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+tests="1" errors="0" skipped="0" failures="1" tests="1" errors="0" skipped="0" failures="1"
+HIDDEN_EXIT=1
+[ERROR] Tests run: 45, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.018 s <<< FAILURE! -- in org.jsoup.nodes.NodeTest
+[ERROR] org.jsoup.nodes.NodeTest.absHandlesRelativeQuery -- Time elapsed: 0.002 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <https://jsoup.org/path/file?foo> but was: <https://jsoup.org/path/?foo>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:177)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)
+	at org.jsoup.nodes.NodeTest.absHandlesRelativeQuery(NodeTest.java:126)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[ERROR] Tests run: 18, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.003 s <<< FAILURE! -- in org.jsoup.internal.StringUtilTest
+[ERROR] org.jsoup.internal.StringUtilTest.resolvesRelativeUrls -- Time elapsed: 0 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <http://example.com/one/two?three#four> but was: <http://example.com/one/two?three>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:177)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:1145)
+	at org.jsoup.internal.StringUtilTest.resolvesRelativeUrls(StringUtilTest.java:125)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1511)
+
+[ERROR] Failures: 
+[ERROR]   StringUtilTest.resolvesRelativeUrls:125 expected: <http://example.com/one/two?three#four> but was: <http://example.com/one/two?three>
+[ERROR]   NodeTest.absHandlesRelativeQuery:126 expected: <https://jsoup.org/path/file?foo> but was: <https://jsoup.org/path/?foo>
+[ERROR] Tests run: 2392, Failures: 2, Errors: 0, Skipped: 0
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.6.0:test (default-test) on project jsoup: There are test failures.
+[ERROR] 
+[ERROR] See /Users/sriramnanduri/kriya-m1-live/backend-readiness-v2/gate-cert/gc-T2-base-fzaor8ae/scr-accept/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+UPSTREAM_SUITE_EXIT=1
+UPSTREAM TOTALS tests=2392 failures=2 errors=0 skipped=0
+TAMPERED=[]
+ACCEPT_EXIT=1
