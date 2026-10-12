@@ -869,7 +869,10 @@ def test_19_polymorphic_validator_signature_unmodified():
 
     from kriya.tools.validate import PolymorphicValidator
     run_tests_sig = inspect.signature(PolymorphicValidator.run_tests)
-    assert list(run_tests_sig.parameters.keys()) == ["self", "target_test"]
+    # JVM-MODULE-OWNERSHIP-001 added one KEYWORD-ONLY, defaulted parameter: every existing caller still works unchanged.
+    assert list(run_tests_sig.parameters.keys()) == ["self", "target_test", "module"]
+    module = run_tests_sig.parameters["module"]
+    assert module.kind is inspect.Parameter.KEYWORD_ONLY and module.default is None
     run_compile_sig = inspect.signature(PolymorphicValidator.run_compile_check)
     assert "self" in run_compile_sig.parameters
 

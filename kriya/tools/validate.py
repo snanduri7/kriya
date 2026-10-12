@@ -1926,7 +1926,7 @@ class PolymorphicValidator:
         binding = self._bind_test_report()
         self.test_report_binding = binding
         try:
-            result = self._run_tests(target_test, module=module)
+            result = self._run_tests(target_test, module=module) if module else self._run_tests(target_test)
         except BaseException:
             test_execution.collect(binding)  # removes Kriya's own report destination
             raise
