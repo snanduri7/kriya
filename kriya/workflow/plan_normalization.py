@@ -26,12 +26,14 @@ Pure: no I/O, no model. The returned records name what was merged and why.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+import posixpath
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
     ExecutionRole,
+    FileAction,
     PlannedFile,
     Subtask,
     VerificationMethodType,
@@ -40,6 +42,7 @@ from kriya.workflow.plan_schema import (
 COALESCED_FILE_OWNERS = "PLAN_FILE_OWNERS_COALESCED"
 VERIFICATION_CONTRACT_DERIVED = "PLAN_VERIFICATION_CONTRACT_DERIVED"
 VERIFICATION_SCOPE_NORMALIZED = "PLAN_VERIFICATION_SCOPE_NORMALIZED"
+IMMUTABLE_TEST_EDIT_REDIRECTED = "PLAN_IMMUTABLE_TEST_EDIT_REDIRECTED"
 
 
 def _mutates(subtask: Subtask) -> bool:
@@ -271,3 +274,84 @@ def scope_verification_to_requirements(
         "subtasks": subtasks,
         "acceptance_criteria": [ac for ac in plan.acceptance_criteria if ac.id not in removed_criteria],
     }).model_dump(mode="json")), records
+
+
+_REDIRECT_MARKER = "REGRESSION"
+_JVM_EXTENSIONS = (".java", ".kt", ".groovy", ".scala")
+
+
+def _sibling_test_name(path: str, attempt: int) -> Optional[str]:
+    """A new test file name beside ``path`` that keeps the test-file naming convention the runner collects by, or None
+    for a convention this function does not know (the plan is then left to the validator and bounded repair)."""
+    directory, name = posixpath.split(path)
+    stem, extension = posixpath.splitext(name)
+    mark = _REDIRECT_MARKER.capitalize() + (str(attempt) if attempt > 1 else "")
+    if extension in _JVM_EXTENSIONS:
+        for suffix in ("Tests", "Test", "IT"):
+            if stem.endswith(suffix) and len(stem) > len(suffix):
+                return posixpath.join(directory, f"{stem[:-len(suffix)]}{mark}{suffix}{extension}")
+        return None
+    if extension == ".py":
+        if stem.startswith("test_") and len(stem) > 5:
+            return posixpath.join(directory, f"{stem}_{mark.lower()}{extension}")
+        if stem.endswith("_test") and len(stem) > 5:
+            return posixpath.join(directory, f"{stem[:-5]}_{mark.lower()}_test{extension}")
+        return None
+    if extension in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+        for infix in (".test", ".spec"):
+            if stem.endswith(infix) and len(stem) > len(infix):
+                return posixpath.join(directory, f"{stem[:-len(infix)]}.{mark.lower()}{infix}{extension}")
+    return None
+
+
+def redirect_immutable_test_edits(
+    plan: EngineeringPlan, immutable_tests: Iterable[str], path_exists: Callable[[str], bool],
+) -> Tuple[EngineeringPlan, List[Dict[str, Any]]]:
+    """BACKEND-READINESS-V2 (S4_B; also hit by S4_A): a plan that MODIFIES an existing test file the goal froze
+    (TEST_IMMUTABILITY) is rewritten to CREATE a new sibling test file instead, which is the one thing the goal allows.
+
+    Live: the Planner scheduled ``DeepScanTest.java`` (modify) for a regression test; the validator's
+    PLAN_EDITS_IMMUTABLE_TEST repair named that exact path and said "add new tests in a new test file", twice - the
+    Planner re-described the subtask as "create a new test file" and kept the same existing path, then regressed another
+    unit (identical violation across all three drafts; nothing was written). The remedy is deterministic, so it is not
+    left to the model: the entry keeps its subtask, ordering, ``preserved_references`` and capabilities, takes
+    ``action=create`` at a path that exists nowhere (in the workspace or in the plan), and records why in ``reason``.
+
+    Narrow by construction: only MODIFY of a path in ``immutable_tests`` (a DELETE stays a typed validator violation,
+    nothing is invented for it); only for a test-naming convention it knows; the rewritten plan is re-validated in full by
+    ``validate_plan`` like any other. Pure; one record per redirected entry; an unchanged plan returns ``(plan, [])``."""
+    frozen = set(immutable_tests or ())
+    if not frozen:
+        return plan, []
+    taken: Set[str] = {pf.path for st in plan.subtasks for pf in st.planned_files}
+    chosen: Dict[str, str] = {}
+    records: List[Dict[str, Any]] = []
+    subtasks = []
+    for st in plan.subtasks:
+        files = []
+        for pf in st.planned_files:
+            if pf.path in frozen and pf.action == FileAction.MODIFY:
+                target = chosen.get(pf.path)
+                if target is None:
+                    for attempt in range(1, 20):
+                        candidate = _sibling_test_name(pf.path, attempt)
+                        if candidate is None:
+                            break
+                        if candidate not in taken and not path_exists(candidate):
+                            target = candidate
+                            break
+                if target is not None:
+                    original = pf.path
+                    chosen[original] = target
+                    taken.add(target)
+                    note = (f"Kriya: {pf.path} is an existing test the goal requires to stay unchanged; the new test "
+                            f"goes in this new file instead.")
+                    pf = pf.model_copy(update={"path": target, "action": FileAction.CREATE,
+                                               "reason": f"{pf.reason} {note}".strip()})
+                    records.append({"reason_code": IMMUTABLE_TEST_EDIT_REDIRECTED, "subtask": st.id,
+                                    "from": original, "to": target})
+            files.append(pf)
+        subtasks.append(st.model_copy(update={"planned_files": files}))
+    if not records:
+        return plan, []
+    return EngineeringPlan.model_validate(plan.model_copy(update={"subtasks": subtasks}).model_dump(mode="json")), records

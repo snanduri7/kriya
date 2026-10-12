@@ -1,0 +1,136 @@
+{
+ "acceptance_criteria": [
+  {
+   "description": "REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7: A test exists that calls JsonPath.read(BaseTest.JSON_DOCUMENT, \"$..book.length()\") multiple times and asserts the result is 4 every time.",
+   "id": "ac1",
+   "method": "judgment",
+   "tool_name": null
+  },
+  {
+   "description": "REQ-1, REQ-7: The reproduction test from ac1 passes after the fix in s2.",
+   "id": "ac2",
+   "method": "judgment",
+   "tool_name": null
+  }
+ ],
+ "extension_points": [],
+ "global_invariants": [
+  {
+   "id": "gi1",
+   "statement": "Compiled path caching must not mutate the state of PathFunction instances or their internal parameters during evaluation, ensuring repeatable results for identical inputs."
+  },
+  {
+   "id": "gi2",
+   "statement": "All existing tests in json-path/src/test/java/com/jayway/jsonpath/internal/function/ must continue to pass without modification."
+  }
+ ],
+ "integration_relationships": [],
+ "kind": "task",
+ "plan_id": "20261012T022352-1f5ffa09",
+ "refactor_baseline": null,
+ "subtasks": [
+  {
+   "acceptance_criteria_ids": [
+    "ac1"
+   ],
+   "depends_on": [],
+   "description": "Add a test case to DeepScanTest that reproduces the issue by calling $..book.length() multiple times on BaseTest.JSON_DOCUMENT and asserting the result is consistently 4.",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s1",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "java",
+      "junit5"
+     ],
+     "path": "json-path/src/test/java/com/jayway/jsonpath/DeepScanTest.java",
+     "preserved_references": [
+      "json-path/src/test/java/com/jayway/jsonpath/BaseTest.java"
+     ],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "test_reproduction_for_deep_scan_function_repeatable_result"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi2"
+   ],
+   "requirement_ids": [],
+   "requires": [],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Compile the project to ensure the new test file is syntactically correct and compiles.",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  },
+  {
+   "acceptance_criteria_ids": [
+    "ac2"
+   ],
+   "depends_on": [
+    "s1"
+   ],
+   "description": "Fix the non-repeatable evaluation of $..book.length() by ensuring that PathFunction instances used in deep scan (ScanPathToken) do not retain state from previous evaluations, likely by cloning parameters or resetting state before each evaluation.",
+   "execution_method": "model",
+   "execution_role": "implementation",
+   "id": "s2",
+   "ownership_justification": {},
+   "planned_files": [
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "java"
+     ],
+     "path": "json-path/src/main/java/com/jayway/jsonpath/internal/path/ScanPathToken.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    },
+    {
+     "action": "modify",
+     "environment_requirements": [
+      "java"
+     ],
+     "path": "json-path/src/main/java/com/jayway/jsonpath/internal/function/Parameter.java",
+     "preserved_references": [],
+     "reason": "",
+     "requires_capabilities": []
+    }
+   ],
+   "provides": [
+    "fixed_deep_scan_function_state_isolation"
+   ],
+   "relevant_global_invariant_ids": [
+    "gi1",
+    "gi2"
+   ],
+   "requirement_ids": [],
+   "requires": [
+    "test_reproduction_for_deep_scan_function_repeatable_result"
+   ],
+   "tool_arguments": {},
+   "tool_name": null,
+   "verification": [
+    {
+     "description": "Compile the project to ensure the fix is syntactically correct.",
+     "requires_runtime_execution": false,
+     "tool_name": "compile",
+     "type": "tool",
+     "verifier_kind": "compile"
+    }
+   ]
+  }
+ ]
+}
