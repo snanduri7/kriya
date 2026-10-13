@@ -1,0 +1,27 @@
+import json,os,gzip,shutil,subprocess,sys
+H=os.path.expanduser('~/kriya-m1-live'); V=H+'/backend-readiness-v2'; A=H+'/backend-readiness-001/state/attempt-evidence'
+cases={'T2':('primary',H+'/backend-readiness-001/tasks/T2','20261013T065837-b027e4f3'),
+ 'T5':('primary',H+'/backend-readiness-001/tasks/T5','20261013T074704-96fff793'),
+ 'S1_A':('c2',H+'/backend-readiness-004/cohort-002/tasks/S1_A','20261013T081136-44aebe10'),
+ 'S4_A':('c2',H+'/backend-readiness-004/cohort-002/tasks/S4_A','20261013T085101-6b3a9443'),
+ 'S4_B':('c2',H+'/backend-readiness-004/cohort-002/tasks/S4_B','20261013T090436-797a7a6f')}
+out={}
+for c,(kind,d,run) in cases.items():
+    staged={}
+    for l in open(f'{A}/{run}/records.jsonl'):
+        x=json.loads(l)
+        if x['kind']=='candidate.change' and x['payload'].get('decision')=='STAGED' and not x['payload'].get('unchanged'):
+            staged[x['payload']['path']]=x['payload']['after_digest']
+    # last STAGED per path; later REFUSED proposals never replace a staged one
+    tree=f'{V}/fn-audit-v7f/{c}-tree'
+    if os.path.exists(tree): shutil.rmtree(tree)
+    subprocess.run(['rsync','-a','--exclude','.kriya',d+'/ws/',tree+'/'],check=True)
+    ok={}
+    for p,dg in staged.items():
+        b=f'{A}/{run}/blobs/{dg[:2]}/{dg}.gz'
+        data=gzip.open(b).read(); ok[p]=dg
+        t=os.path.join(tree,p); os.makedirs(os.path.dirname(t),exist_ok=True); open(t,'wb').write(data)
+        assert __import__('hashlib').sha256(data).hexdigest()==dg
+    out[c]={'run':run,'staged':ok}
+    print(c,run,ok)
+json.dump(out,open(V+'/fn-audit-v7f/staged.json','w'),indent=1)

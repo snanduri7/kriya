@@ -1,0 +1,34 @@
+{
+ "T2": {
+  "run": "20261013T065837-b027e4f3",
+  "staged": {
+   "src/main/java/org/jsoup/internal/StringUtil.java": "88027d2c45a2ed6a66ddfa5fde499192523ac0d7c5447d52ecb728080a311030"
+  }
+ },
+ "T5": {
+  "run": "20261013T074704-96fff793",
+  "staged": {
+   "jmespath/functions.py": "e48f3bfa66dc24fb0eb88c36fda24d84879cb1a460da00d6d29bba2959db6277",
+   "README.rst": "384e3c0e3bee755443b915cbb3da2b32515767aedfc9c1238128ac2f1db5308b"
+  }
+ },
+ "S1_A": {
+  "run": "20261013T081136-44aebe10",
+  "staged": {
+   "xmltodict.py": "630f3c5885b637cd0c0b20e7a5acb306a8e7e1c11f485b9c4db7623d5da45579"
+  }
+ },
+ "S4_A": {
+  "run": "20261013T085101-6b3a9443",
+  "staged": {
+   "json-path/src/main/java/com/jayway/jsonpath/internal/path/PathCompiler.java": "61a61c35da9d9608f97682b0b9e5bf64949d72b6745529119f33ad6b8572e903"
+  }
+ },
+ "S4_B": {
+  "run": "20261013T090436-797a7a6f",
+  "staged": {
+   "json-path/src/main/java/com/jayway/jsonpath/internal/function/Parameter.java": "a368e06a762b5bf491a257751a88fe5c57f6bb0a6184712d5c1144d868e73339",
+   "json-path/src/main/java/com/jayway/jsonpath/internal/path/CompiledPath.java": "b0a8a24b4f1e028865b0a82b480f44b836cab42d453e1d9717d89060b4520346"
+  }
+ }
+}

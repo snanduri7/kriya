@@ -1,0 +1,449 @@
+{
+ "frozen_at": "2026-10-13 06:50:12",
+ "branch": "backend/readiness-v2",
+ "head": "3dd6d870c7add937a787689dd1d2c53582195eb1",
+ "origin_head": "3dd6d870c7add937a787689dd1d2c53582195eb1",
+ "tree_clean": true,
+ "full_suite_revision": "9de5404",
+ "full_suite_result": "run2 on 9de5404: 10676 passed, 1 failed (registered TEST-LAUNCH-APPROVAL-EXPIRY-TIMING-001, isolated 2/2 green)",
+ "product_paths_changed_since_full_suite": [],
+ "ollama": "ollama version is 0.40.0",
+ "retry_limits": {
+  "max_retries_full_set": 4,
+  "targeted_max_retries": 3,
+  "no_progress_limit": 3
+ },
+ "time_budget": "internal generation budget 3600 s with 120 s reserved for gates/review (generate.log line, unchanged)",
+ "acceptance_threshold": ">=8/12 GENUINE with FALSE_SUCCESS=0, FALSE_NEGATIVE=0, authority=0, corruption=0, leaks=0",
+ "qualification_policy_version": "kriya-qualification/8",
+ "versions": {
+  "goal_example_compiler": {
+   "EXAMPLE_COMPILER_VERSION": 1,
+   "JAVA_EXAMPLE_COMPILER_VERSION": 1,
+   "GOAL_EXAMPLE_FORMS_VERSION": 1,
+   "enforced_forms": "java_instance_value (+ legacy static value/raises)",
+   "source_sha256": {
+    "example_oracle_java": "2bbde587fc8d598437f7cd3d268e49e7c09b7f482a10014bfa0167337a41b303",
+    "goal_example_forms": "bc20ec4ab112ab903830ab183adcf7b1a3d2f9df2bfeedfbba18eded5452e0b0"
+   }
+  },
+  "contract_gate": {
+   "contract_feedback_sha256": "6752e781ba53aec61ec534be852400dc2f99cd6a6e05aa6a024b970063d649b7",
+   "failure_type": "deterministic_contract_violation"
+  },
+  "semantic_safety": {
+   "exception_masking_sha256": "59254fe11fd86c5480dc06161399692b442f491d9988fa0e92b44807ba2bf27a",
+   "terminal_gate_service_sha256": "68b9ec222f031d37d91d4e18f1144ad36c073fc9a2543825489024cb3dc036ad",
+   "terminal_commit_sha256": "57d71ac4c6b8229bfdc18f70fb92cbb316519ec1ecbe708a0c86da92fdc6e138"
+  },
+  "environment_preflight": {
+   "oracle_preflight_sha256": "7095ebc306657ead122c057870e157f1a4e95c84ca1f049497a1f01619082055",
+   "evaluate_v3_sha256": "0f688c1b1cc6258cf36f124917c272ca5faa77ad6b038f766e0be821fbd4057a"
+  },
+  "leak_rule": "kriya evidence leak-check (format kriya.hidden_oracle_leak_check/1), unchanged; verdict + hits recorded per case",
+  "plan_feasibility": {
+   "edit_feasibility_sha256": "9ba17bb4b95e3cd019f9aa1f772b7f2defc4d630e7969f416a4f1440ac93543b",
+   "change": "A (aafe352)"
+  },
+  "goal_contract_module_ownership": {
+   "jvm_module_ownership_sha256": "f58c4cfd145311934ff9ad657c164963299abc7a79addd9d8d1c0c7cf9a23e59",
+   "change": "B (248154b)"
+  },
+  "contract_relevance": {
+   "contract_relevance_sha256": "6fa5d1e5d1f6af76a17f59fd99e46bd20960c529c173639760435271d7a5621a",
+   "statuses": "RELEVANT_DIRECT_TARGET / RELEVANT_DIRECT_DEPENDENCY / NOT_RELEVANT / UNKNOWN",
+   "product_commit": "9de5404"
+  },
+  "baseline_comparison": "suite_attribution / validation_baseline (unchanged since 051e982; source in the tested product revision)"
+ },
+ "oracles_note": "frozen oracle scripts hashed per task below; cohort manifests: COHORT_MANIFEST.json=d311bd984553",
+ "task_order": [
+  "T1",
+  "T2",
+  "T3",
+  "T4",
+  "T5",
+  "T6",
+  "S1_A",
+  "S2_A",
+  "S3_A",
+  "S4_A",
+  "S4_B",
+  "S6_A"
+ ],
+ "protocol": "serial, one run per case, 120 s cool-down, no reruns, oracle exits classified by oracle_preflight before use; Kriya success + oracle REJECT is recorded as FALSE_SUCCESS (the cohort continues: all 12 are measured)",
+ "tasks": {
+  "T1": {
+   "goal_sha256": "57592376bc60efbfed6a3faea59cefad8d8a9a44a6710b48dc7999013b0a1721",
+   "config_sha256": "7939f56a82f7ce0842af2f0ac09bff21530ac98391b93e888f1837a0f7fd48a3",
+   "meta_sha256": "3958e17650b3c0de7e0d194ba2a2adbfc240ad2b76ba566c985fbe9f5d502f74",
+   "accept_oracle_sha256": "09c9ce4da59438ec40432be491074c5377504f9eef55c844cc50c6aec954a1a9",
+   "regress_oracle_sha256": "500a2d3116a6f1a63ae47768f8b337eb29cc18ed5b0861e5be216a19e1f46219",
+   "base_sha": "3fb66ed0d51386b18a30317fb164c2e5994cbd57",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "T2": {
+   "goal_sha256": "263ef51228a4ab7d0a84d157ca3f013cc583c1583b6eec62ade865d3b1b3b95a",
+   "config_sha256": "a5a83cc90b51677b0cd94383a6f777750b56a4cd6d6a280194e452424c7294ab",
+   "meta_sha256": "80bfec502a8a001d5143963852961fdcc0232014d90a4341801393db3c226b9e",
+   "accept_oracle_sha256": "9c17e9b62a90bb43204f0a906f5329ff33cb814a6fa13c446d5e43d2d038de6a",
+   "regress_oracle_sha256": "8f833541182f4e892e86fd1347ad0e62aa37f397480e872df4b1850887951ff0",
+   "base_sha": "2fd9bb9d1956ff20d041810ae10f8d63573d8817",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "T3": {
+   "goal_sha256": "63284ab25213042381c0c4280aeededb727532583faf09d932f3e3b9954c68e7",
+   "config_sha256": "25c38a1ab6ff18a781314eac2cbb5f1ad62b63e81d967fe09a99af9aff2a5b0a",
+   "meta_sha256": "cd8bdc8adc510bc6924c6afde54aee67dc058614caae1db69c6caac7212cd7aa",
+   "accept_oracle_sha256": "d8bfca34f0c85f7641dd2ef7577faa0a24f1b3d0943f500f64b7afd1b858bed1",
+   "regress_oracle_sha256": "b9cb0d3f51c24cf0640675a8ba9509aec9734fb199d39d0bca1a02d921e4eb94",
+   "base_sha": "5384e762a5801f2615650de812fce9af5b1893e9",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "T4": {
+   "goal_sha256": "f50465648a0706d09ac7c0aba5bb4b0b83d83081c0eb6b8454dd679efaafe587",
+   "config_sha256": "d5535316d3720a6c8bf195c5eff18ca71b51ff8ced2a91ad6c150e5028b34daf",
+   "meta_sha256": "6820916e28b5348d47c50442a7da8169cbabc35426994a16cb0229a96edb10f2",
+   "accept_oracle_sha256": "f24e22a0c00a2fca5a6a9da24d5b74962ffd7ea82d6af4bc1e545e3ad109cceb",
+   "regress_oracle_sha256": "87d7f4cd05472ed88bdb3a5ab0487a7182ec6e0f5d6c485cfc31d49bd94b0470",
+   "base_sha": "43eaf7071141ce9e852fe84600569055c84af8eb",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "T5": {
+   "goal_sha256": "a4aaaa0fe5d3ed5fac81dcfd6a4ec3b6dbf70c5e47f4b5cfe786c7c4e37ede36",
+   "config_sha256": "9d5440ed263afba65bbf95b308a7825cb7a51d6e45634112001787085a3ed2b4",
+   "meta_sha256": "75c6a56f6dce626b63d71c07903114b4f8af5051ba0856c4ffd67071bfe17103",
+   "accept_oracle_sha256": "6d0570e6e47904c9f48f8e61ddcf5e02dcdfcda6aba1813ad44bc29a41169a34",
+   "regress_oracle_sha256": "500a2d3116a6f1a63ae47768f8b337eb29cc18ed5b0861e5be216a19e1f46219",
+   "base_sha": "c7039ce5e1815f021b902b3e2e16a24e054c3456",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "T6": {
+   "goal_sha256": "b9130c9223e3fb04b429601625019f6a47f3a19f23c57361e38813cd5fc33e72",
+   "config_sha256": "c656eda5e1f4c993fbbacc29da3d4587e849e3dcb15f7f92048d93c886bba49c",
+   "meta_sha256": "a11dfb07198f3b9aa8786b3f874804a326e882148dd9899954e6494eb0850663",
+   "accept_oracle_sha256": "aab253d5ff9e49faf474e8d48a85eab415e16402e7808205fe026fba25471128",
+   "regress_oracle_sha256": "358a7ba75e9a481402477afd3ba769d56671c213f552c43cf7a1d216a78cbd9a",
+   "base_sha": "1268172e6fb2d71d0c366cd8a7243eb421e019f3",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S1_A": {
+   "goal_sha256": "adfaa9f4158bab215e59c2b0f387b11f49c01d3e469490719b3fa6b765e32728",
+   "config_sha256": "511e6972d9447ed81c98206fbb0b4211b605923befbbe3fef3462d6530542ba5",
+   "meta_sha256": "20c97ee5ae4d3375b82919bd7af4172128f612ca9c77f75297dd2ca2882483f3",
+   "accept_oracle_sha256": "f69090ea1e42edf538c073e08173db0f85521a0904cb960ee94c219b41e78cad",
+   "regress_oracle_sha256": "22d9b457edefef00afcfb1ccae7af7cfae028fb8f764513f902e85e04960477e",
+   "base_sha": "f77e1400c578622c1a5efee84ddc8e0e5a9aa638",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S2_A": {
+   "goal_sha256": "00acb137f3af39d31c8565bb4aaf6580001daac9873dad01b8d931f08163bf13",
+   "config_sha256": "e59a0722ff56a9ff0628a45a4ec9b3b0a92300a807d50e8e2ba4c701315a323c",
+   "meta_sha256": "0836d3375915133f2ea5db883f4b91add4455239109e8e8060f96d4734c6624d",
+   "accept_oracle_sha256": "f3f57b7b42dbdceb7a6defaeb75db54d949641bf7386715b3e45c99796559b29",
+   "regress_oracle_sha256": "5a9ca03f1823778b649b8b2c2c3f940bb9ac60641bc2df6fe507ef130841edbd",
+   "base_sha": "3f3c506908432eb8054b8818d1e77d04f126dbf6",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S3_A": {
+   "goal_sha256": "f58733c818212fe913f17362d3964aea456791ce53d42706d0a4a5a2264a090f",
+   "config_sha256": "b02139db120053f80898d022eec377cba0eca5debb54ccb3d0f5beafe26a5afd",
+   "meta_sha256": "715e265f119d4c7af44f32f0a0f60a731d9c9e406ddcd202698a55144920f8f7",
+   "accept_oracle_sha256": "bb26c12cb13300a79dc673ef489ce938294ef671cafe52913e498823013e7a01",
+   "regress_oracle_sha256": "5c18e2852c089fa985f59e8bb82896434f81d9929355e1833b966775e49da257",
+   "base_sha": "02346108abfa7772d568b9b0f98d7cce882b8a3a",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S4_A": {
+   "goal_sha256": "56ecfaceeac84c23b0d85f70eae062b69249a1d66763ae3e9f7a8f6f59993a04",
+   "config_sha256": "7010d83a6346af20068927be6e7a5b5d9f08cf5d4cc6a68bbb30e5ab65eddd8c",
+   "meta_sha256": "683cf37d7f624c070f1a43538a762303659e4f9e662095470c97df08505f5f9c",
+   "accept_oracle_sha256": "7c7f6d317c1ce3580feb0ef114ae95fc296221cd424b0c3f3f46c01bdc0db75b",
+   "regress_oracle_sha256": "3f6cdbcc7e6f4d62d8dea8676cc6fa1d32fddc7e2725d1d400771a390e439d8f",
+   "base_sha": "b39727bcc696aadb1ae39bdddec4e9578e2fd439",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S4_B": {
+   "goal_sha256": "ce94026a8819c2b9c1b160983df75b897c4a85394692c871e9957911e8d7da7f",
+   "config_sha256": "39db3b9bc10c35f12bb9f263655c179b809e389fed9f657a1ae2015258dff51a",
+   "meta_sha256": "b142324ca75547bd67401f171a03060e5509db04459fb531d941d771589acd07",
+   "accept_oracle_sha256": "68cc10f0b73ab25eee11d54a476511d9eb2080942a6966345962a200d2a70e46",
+   "regress_oracle_sha256": "cb818cc6a2006792260a73d5598e5cd8a03109344071b44a1043f46373e2d958",
+   "base_sha": "e7eaf18cbc47c7ce2fce605bf6c5aacb7149ed2d",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  },
+  "S6_A": {
+   "goal_sha256": "73cbe0ef77cdf18861e0232793fd9aa51e2ff0c45aaceda708deeb4e0c94974c",
+   "config_sha256": "8a4a445ed2ae9cad116cbc287eb51b7b39cf9e4c4e587e8133bfa796ecf51943",
+   "meta_sha256": "e933a7620ea4164ec4d6c0b45359b846b66deafb0d4e4656c348ce0045568b2c",
+   "accept_oracle_sha256": "43fd062149e743b0800450b7679886eb3db9a1760783de443356f858aaddb94f",
+   "regress_oracle_sha256": "f55ca64ac4816f0befbf9b77f4dbf618d1bc794be1c59c73a75eaf30a9d3d5db",
+   "base_sha": "36dd2e96865ba5b4e66bc5576d0034f6fc3f4e9a",
+   "developer_model": "qwen3.8:27b",
+   "temperature": 0.7,
+   "max_tokens": 16384,
+   "options": {
+    "num_ctx": 32768,
+    "top_p": 0.8,
+    "top_k": 20,
+    "repeat_penalty": 1.05
+   },
+   "fallback_chain": [
+    "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+   ],
+   "agent_llms": {
+    "planner": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a",
+    "architect": "qwen3-coder:30b-kriya-e52213655394",
+    "reviewer": "qwen3-coder:30b-kriya-e52213655394",
+    "run_verifier": "qwen3-coder:30b-kriya-e52213655394",
+    "skill_gap": "qwen3-coder:30b-kriya-e52213655394",
+    "spec_compliance": "qwen3-coder:30b-kriya-e52213655394"
+   },
+   "endpoint": "http://localhost:11434/v1",
+   "inference_runtime": "ollama_native",
+   "self_correction_loop_enabled": false
+  }
+ }
+}
