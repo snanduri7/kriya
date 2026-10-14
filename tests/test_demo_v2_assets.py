@@ -66,14 +66,14 @@ def test_manifest_matches_the_files_and_the_scenario_status_text() -> None:
     assert "BACKEND SOLVER READINESS: FAIL" in manifest["solver_readiness_statement"]
     assert "SOLVER REPEATABILITY: NOT ESTABLISHED" in manifest["solver_readiness_statement"]
     ids = [s["id"] for s in manifest["scenarios"]]
-    assert ids == ["01-normal-coding", "02-knowledge-skill", "03-controlled-repair"]
+    assert ids == ["00-greenfield-hello-world", "01-normal-coding", "02-knowledge-skill", "03-controlled-repair"]
     for scenario in manifest["scenarios"]:
         directory = DEMO_V2 / scenario["dir"]
         assert directory.is_dir() and directory.name == scenario["id"]
         status = _sections((directory / "SCENARIO.md").read_text(encoding="utf-8"))["STATUS"]
         # The manifest's status and the scenario's own words must not disagree about what has been measured.
         keyword = {"REHEARSED_ONCE_PASS": "REHEARSED ONCE, PASS", "REHEARSED_ONCE_PASS_WITH_CAVEATS": "REHEARSED ONCE FROM EMPTY STATE, ISOLATED-TASK REHEARSAL PASS, WITH CAVEATS",
-                   "REHEARSED_PASS_REPRODUCIBLE_CONTROLLED": "REHEARSED, PASS, REPRODUCIBLE"}[scenario["status"]]
+                   "REHEARSED_PASS_REPRODUCIBLE_CONTROLLED": "REHEARSED, PASS, REPRODUCIBLE", "NOT_YET_REHEARSED": "NOT YET REHEARSED"}[scenario["status"]]
         assert keyword in status, scenario["id"]
         if scenario["expected"]:
             assert (DEMO_V2 / scenario["expected"]).is_file()

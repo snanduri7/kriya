@@ -26,7 +26,7 @@ load_env_file() {
 scenario_dir() {
   local id="$1" match
   match="$(ls -d "$DEMO_V2_DIR"/scenarios/"$id"-* 2>/dev/null | head -1 || true)"
-  [ -n "$match" ] || die "unknown scenario '$id' (expected 01, 02 or 03)"
+  [ -n "$match" ] || die "unknown scenario '$id' (expected 00, 01, 02 or 03)"
   echo "$match"
 }
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Materialise a scenario's fixture into the work area and render its configuration. Starts no model and makes no network call (scenario 03 starts its LOCAL scripted stub).
-# Usage: prepare_demo.sh --scenario 01|02|03|all [--check-build] [--no-services]
+# Usage: prepare_demo.sh --scenario 00|01|02|03|all [--check-build] [--no-services]
+#   00              the GREENFIELD start: resets to a brand-new EMPTY folder and places NOTHING in it (no kriya.yaml: Project Setup creates it in the app). --check-build: checks Java 17+ and Maven only
 #   --check-build   01: also run the fixture's own offline Maven compile + tests (deterministic, no model) and require the baseline count
 #                   02: also run the fixture's own pytest and require the measured baseline (7 failed, 1 passed)
 #                   03: also run the fixture's own pytest and require the measured baseline (2 failed, 1 passed)
 #   --no-services   03: do not start the scripted stub (start it yourself with scripts/stub_ctl.sh start when you begin scenario 03)
-#   all             01, 02 and 03 prepared one after the other with --no-services: the owner start state, nothing running
+#   all             00, 01, 02 and 03 prepared one after the other with --no-services: the owner start state, nothing running
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -26,14 +27,23 @@ ensure_work_area
 if [ "$SCENARIO" = "all" ]; then
   stop_demo_listeners; stop_searxng   # nothing from an earlier session may be running while the owner start state is built
   EXTRA=(--no-services); [ "$CHECK_BUILD" = 1 ] && EXTRA+=(--check-build)
-  for s in 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" "${EXTRA[@]}"; done   # each one resets its scenario first (workspace, state, approval)
+  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" "${EXTRA[@]}"; done   # each one resets its scenario first (workspace, state, approval)
   echo "=== prepare complete (all scenarios): workspaces and configurations are in place, NOTHING is running, no operator approval is granted ==="
   exit 0
 fi
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in 01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 "$DEMO_V2_DIR/scripts/reset_demo.sh" --scenario "$SCENARIO"
+
+if [ "$SCENARIO" = "00" ]; then
+  # Greenfield: the start state IS the empty folder. Nothing is rendered or placed: Project Setup (in the app) creates the configuration, then the owner approves it.
+  if [ "$CHECK_BUILD" = 1 ]; then
+    "$DEMO_V2_DIR/scripts/greenfield_prereqs.sh" || die "greenfield prerequisites are not met (see above)"
+  fi
+  echo "=== prepare complete (scenario 00): an EMPTY project folder at $(scenario_work 00)/workspace; no configuration, no approval, nothing running ==="
+  exit 0
+fi
 
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"

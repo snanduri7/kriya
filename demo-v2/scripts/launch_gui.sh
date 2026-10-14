@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch the Kriya desktop app (the PRODUCT package, not the evidence build) for one scenario, with that scenario's own state directory and a demo-only user-data directory.
-# Usage: launch_gui.sh --scenario 01|02|03 [--app PATH/Kriya.app]
+# Usage: launch_gui.sh --scenario 00|01|02|03 [--app PATH/Kriya.app]
 # The app runs in the background; quit it with Cmd+Q. Then in the app: Open Folder and choose the workspace this script prints (its path is also copied to the clipboard:
 # in the folder dialog press Cmd+Shift+G and paste). Nothing here starts a model or changes the workspace.
 set -euo pipefail
@@ -15,11 +15,11 @@ while [ $# -gt 0 ]; do
     *) die "unknown argument: $1" ;;
   esac
 done
-case "$SCENARIO" in 01|02|03) ;; *) die "--scenario must be 01, 02 or 03" ;; esac
+case "$SCENARIO" in 00|01|02|03) ;; *) die "--scenario must be 00, 01, 02 or 03" ;; esac
 assert_work_outside_repo
 WORK="$(scenario_work "$SCENARIO")"; WS="$WORK/workspace"
 KRIYA_BIN="${KRIYA_BIN:-$REPO_ROOT/.venv/bin/kriya}"
-[ -d "$WS/.git" ] || die "$WS does not exist: run demo-v2/scripts/prepare_demo.sh --scenario $SCENARIO first"
+{ [ -d "$WS/.git" ] || { [ "$SCENARIO" = "00" ] && [ -d "$WS" ]; }; } || die "$WS does not exist: run demo-v2/scripts/prepare_demo.sh --scenario $SCENARIO first"
 [ -x "$KRIYA_BIN" ] || die "$KRIYA_BIN not found (python3 -m venv .venv && .venv/bin/pip install -e .)"
 [ -x "$APP/Contents/MacOS/Kriya" ] || die "$APP is not built: cd ui/standalone && npm run package:mac"
 # A product package older than the newest UI change would silently lack pages (the Skills and Tools pages in particular): refuse it.

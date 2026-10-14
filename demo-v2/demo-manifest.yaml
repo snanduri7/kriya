@@ -10,6 +10,15 @@ work_area:
   default: ~/kriya-demo-v2-work
   note: "Clones, build output, state, memory and evidence are materialised here, never inside the repository."
 scenarios:
+  - id: 00-greenfield-hello-world
+    title: Greenfield Hello World - New Project, setup, goal, build, tests, result in the GUI
+    dir: scenarios/00-greenfield-hello-world
+    status: NOT_YET_REHEARSED
+    model: live_local
+    network: none
+    fixtures: []
+    expected: expected/scenario-00.md
+    controlled: false
   - id: 01-normal-coding
     title: Normal GUI coding flow (brownfield bug fix)
     dir: scenarios/01-normal-coding

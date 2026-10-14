@@ -2,7 +2,8 @@
 # Verify DETERMINISTIC facts about a scenario: the hand-off state (idle), prerequisites before a run (pre) and outcomes after one (post).
 # It never starts a model, never retries, and never turns model variance into an assertion: a post check reports what
 # the run produced; it does not make a run succeed.
-# Usage: verify_demo.sh --scenario 01|02|03|all --phase idle|pre|post
+# Usage: verify_demo.sh --scenario 00|01|02|03|all --phase idle|pre|post
+#   00 (greenfield): idle = a brand-new EMPTY folder (no files, no git, no kriya.yaml), no Kriya state, Kriya reports it runnable on the defaults, no approval; pre = + model server and Java/Maven; post = the project the run created, re-checked independently
 #   idle : the OWNER START STATE after `prepare_demo.sh all`: workspaces pristine, NO operator approval, nothing running (no stub, no proxy, no search container), the 02 snapshot intact.
 #   pre  : ready to run NOW (operator approval granted; scenario 03: the stub running at script position 0).
 #   post : what a finished run left behind.
@@ -26,7 +27,7 @@ assert_work_outside_repo
 
 if [ "$SCENARIO" = "all" ]; then
   RC=0
-  for s in 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" --phase "$PHASE" || RC=1; done
+  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s" --phase "$PHASE" || RC=1; done
   echo "=== demo-v2 verify: global services, phase $PHASE ==="
   GFAILS=0
   gcheck() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then echo "PASS  $label"; else echo "FAIL  $label"; GFAILS=$((GFAILS+1)); fi; }
@@ -63,7 +64,45 @@ else
 fi
 check "product tracked tree is clean (evidence binds to an exact revision)" test -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
 
-case "$SCENARIO" in 01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+
+# ---- scenario 00: GREENFIELD HELLO WORLD (an empty folder; everything else is created by the run) ----
+if [ "$SCENARIO" = "00" ]; then
+  W00="$(scenario_work 00)"; S00="$W00/workspace"
+  K_PY="${KRIYA_PY:-$REPO_ROOT/.venv/bin/python}"; K_BIN="${KRIYA_BIN:-$REPO_ROOT/.venv/bin/kriya}"
+  check "goal file present and non-empty" test -s "$SC_DIR/goal.md"
+  check "the goal names the Hello from Kriya program and a unit test" bash -c "grep -q 'Hello from Kriya' '$SC_DIR/goal.md' && grep -qi 'unit test' '$SC_DIR/goal.md'"
+  check "workspace folder exists" test -d "$S00"
+  if [ "$PHASE" = idle ]; then
+    [ "$(find "$S00" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')" = 0 ] && pass "the project folder is EMPTY (no file, no git repository, no kriya.yaml, no .kriya)" || fail "the project folder is not empty: $(ls -A "$S00" | tr '\n' ' ')"
+    [ -z "$(ls -A "$W00/state" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $W00/state"
+    BL="$(PYTHONDONTWRITEBYTECODE=1 "$K_BIN" traces --json --execution-preflight "$S00" 2>/dev/null | "$K_PY" -I -c 'import sys,json; e=json.load(sys.stdin); d=e.get("data"); print("NO_PREFLIGHT_DATA" if not d else ",".join(b["code"] for b in d.get("blockers",[]) if b["code"]!="STATE_DIRECTORY_NOT_OBSERVABLE"))' 2>/dev/null || echo PREFLIGHT_UNREADABLE)"
+    [ -z "$BL" ] && pass "Kriya reports the new folder runnable on its defaults (no blockers); Project Setup is a recommendation, not a prerequisite" || fail "Kriya's preflight reports blockers for the empty folder: $BL"
+    OUT="$( cd "$S00" && PYTHONDONTWRITEBYTECODE=1 "$K_BIN" authority inspect 2>&1 || true )"
+    case "$OUT" in *"is CURRENT"*) fail "an operator approval is in place for the new folder" ;; *) pass "no operator approval is in place (nothing to approve until Project Setup creates a configuration)" ;; esac
+  fi
+  if [ "$PHASE" = pre ]; then
+    "$DEMO_V2_DIR/scripts/greenfield_prereqs.sh" >/dev/null 2>&1 && pass "Java 17+ and Maven are on the app's fixed PATH" || fail "Java 17+ / Maven are not available to the desktop app (scripts/greenfield_prereqs.sh)"
+    TAGS="$(curl -s -m 5 http://localhost:11434/api/tags 2>/dev/null || true)"
+    case "$TAGS" in *'"qwen3-coder:30b"'*) pass "the local model server lists qwen3-coder:30b (no model is called)" ;; *) fail "the local model server does not list qwen3-coder:30b" ;; esac
+  fi
+  if [ "$PHASE" = post ]; then
+    [ -s "$S00/pom.xml" ] && pass "pom.xml was created" || fail "no pom.xml in the project"
+    MAINS="$(grep -rl 'public static void main' "$S00/src/main/java" 2>/dev/null | head -1 || true)"
+    [ -n "$MAINS" ] && pass "an application class with main() was created: ${MAINS#$S00/}" || fail "no class with public static void main under src/main/java"
+    TESTS="$(find "$S00/src/test/java" -name '*.java' 2>/dev/null | wc -l | tr -d ' ')"
+    [ "$TESTS" -ge 1 ] && pass "$TESTS unit test file(s) were created" || fail "no unit test under src/test/java"
+    # Independent re-check, OUTSIDE Kriya's own gates: an offline Maven test run, then run the compiled application and read what it prints.
+    if ( cd "$S00" && PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin" mvn -o -q clean test >"$W00/evidence/post-test.log" 2>&1 ); then pass "independent offline 'mvn test' passes"; else fail "independent offline 'mvn test' failed (see $W00/evidence/post-test.log)"; fi
+    if [ -n "$MAINS" ]; then
+      PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"
+      RUNOUT="$( cd "$S00" && java -cp target/classes "$FQN" 2>&1 || true )"
+      case "$RUNOUT" in *"Hello from Kriya"*) pass "the built application prints 'Hello from Kriya' (java -cp target/classes $FQN)" ;; *) fail "the built application does not print 'Hello from Kriya': $RUNOUT" ;; esac
+    fi
+    check "Kriya recorded state for the run" test -n "$(ls -A "$W00/state" 2>/dev/null)"
+  fi
+  finish
+fi
 
 case "$SCENARIO" in 01) load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env" ;; 02) load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env" ;; 03) load_env_file "$DEMO_V2_DIR/fixtures/controlled-repair/fixture.env" ;; esac
 WORK="$(scenario_work "$SCENARIO")"

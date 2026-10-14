@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Return ONE scenario (or all of them) to its pristine starting point inside the work area. Never writes to a fixture source or to the repository. Idempotent: running it twice leaves the same state.
-# Usage: reset_demo.sh --scenario 01|02|03|all     (or: reset_demo.sh all)
-#   all : resets 01, 02 and 03 through their own implementations below, then stops every demo service (scripted stub, recording proxy, the optional search container)
+# Usage: reset_demo.sh --scenario 00|01|02|03|all     (or: reset_demo.sh all)
+# 00 : the GREENFIELD start: a brand-new EMPTY project folder, exactly what New Project creates - no git repository, no file, no kriya.yaml (Project Setup creates it in the app),
+#      no Kriya state, no approval.
+#   all : resets 00, 01, 02 and 03 through their own implementations below, then stops every demo service (scripted stub, recording proxy, the optional search container)
 #         and revokes the operator approvals. Nothing is left running; nothing is started.
 # 02 : a fresh workspace from the fixture and a fresh copy of the PRESERVED GOVERNED ACQUISITION SNAPSHOT as the skills directory (its digest is checked). The per-run directories of
 #      scripts/scenario02_run.sh (c1-*, c2-*, final-*) are scratch evidence copies and are left alone: they do not affect the next run.
@@ -25,7 +27,7 @@ if [ "$SCENARIO" = "all" ]; then
   # Fail before changing anything if scenario 01's fixture source is missing (it is the only fixture not vendored in the repository).
   load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
   [ -d "${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}/.git" ] || die "scenario 01's fixture source ${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT} is not a git repository (set DEMO_V2_BASELINE_SRC)"
-  for s in 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s"; done
+  for s in 00 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s"; done
   echo "=== services ==="
   stop_demo_listeners
   stop_searxng
@@ -34,7 +36,7 @@ if [ "$SCENARIO" = "all" ]; then
 fi
 
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in 01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
+case "$SCENARIO" in 00|01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"
@@ -43,7 +45,9 @@ echo "=== demo-v2 reset: scenario $SCENARIO ==="
 rm -rf "$WS"
 mkdir -p "$WORK"
 
-if [ "$SCENARIO" = "01" ]; then
+if [ "$SCENARIO" = "00" ]; then
+  mkdir -p "$WS"   # a brand-new EMPTY folder: nothing in it, not even a git repository (a plain empty folder is a supported greenfield workspace)
+elif [ "$SCENARIO" = "01" ]; then
   load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
   SRC="${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}"
   [ -d "$SRC/.git" ] || die "fixture source $SRC is not a git repository (set DEMO_V2_BASELINE_SRC)"
@@ -62,12 +66,14 @@ else
   git -C "$WS" -c user.email=demo@kriya.local -c user.name="Kriya demo" commit -q -m "fixture: $FIXTURE_ID"
   WS_SHA="$(git -C "$WS" rev-parse HEAD)"
 fi
-[ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after creation"
-TARGET_HASH="$(sha256_of "$WS/$FIXTURE_TARGET_FILE")"
-[ "$TARGET_HASH" = "$FIXTURE_TARGET_SHA256" ] || die "target file hash $TARGET_HASH != expected $FIXTURE_TARGET_SHA256"
+if [ "$SCENARIO" != "00" ]; then
+  [ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after creation"
+  TARGET_HASH="$(sha256_of "$WS/$FIXTURE_TARGET_FILE")"
+  [ "$TARGET_HASH" = "$FIXTURE_TARGET_SHA256" ] || die "target file hash $TARGET_HASH != expected $FIXTURE_TARGET_SHA256"
 
-# The scenario's kriya.yaml and Kriya's .kriya/ are not part of the project's source: keep them out of `git status` (so "exactly one file changed" stays meaningful).
-printf 'kriya.yaml\n.kriya/\n' >> "$WS/.git/info/exclude"
+  # The scenario's kriya.yaml and Kriya's .kriya/ are not part of the project's source: keep them out of `git status` (so "exactly one file changed" stays meaningful).
+  printf 'kriya.yaml\n.kriya/\n' >> "$WS/.git/info/exclude"
+fi
 
 # A previous operator approval (kriya authority approve) is bound to this workspace's identity and lives in the operator's HOME, outside the workspace. Revoke it so a
 # reset really starts from "not approved". Best effort: reports, never hides, what happened.
@@ -97,7 +103,11 @@ if [ "$SCENARIO" = "02" ]; then
 fi
 
 echo "workspace:   $WS"
-echo "commit:      $WS_SHA"
-echo "target sha:  $TARGET_HASH"
-echo "git status:  clean"
+if [ "$SCENARIO" = "00" ]; then
+  echo "contents:    empty (a new project folder: no git repository, no kriya.yaml)"
+else
+  echo "commit:      $WS_SHA"
+  echo "target sha:  $TARGET_HASH"
+  echo "git status:  clean"
+fi
 echo "=== reset complete ==="
