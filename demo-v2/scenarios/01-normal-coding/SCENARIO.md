@@ -30,7 +30,7 @@ A second, independent run from a clean reset on the final Demo V2 HEAD (`20dde1d
   workspace-supplied configuration as untrusted: **10 security-authority fields** (`autonomy.mode`, `embedding.base_url`, `llm.base_url`, `llm_chain`, `paths.memory`, `paths.skills`,
   `paths.state`, `search.base_url`, `workflow_controller.enabled`, `workflow_controller.mode`) are refused until an operator approves them. Approval is a deliberate human
   step (RESET step 2), stored outside the workspace under the operator's HOME (`~/.kriya/authority/<workspace id>.json`), and revoked by the next reset.
-- **Confirmed by the rehearsal:** the desktop run used this configuration (Run Setup reported "Operator-only fields are present and covered by a durable approval · kriya.yaml in this folder"), and the run's records landed in the scenario's state directory.
+- **Confirmed by the rehearsal:** the desktop run used this configuration (the readiness details reported "Operator-only fields are present and covered by a durable approval · kriya.yaml in this folder"), and the run's records landed in the scenario's state directory.
 - The GUI child's fixed environment has no `JAVA_HOME`, so the macOS `java` shim selects JDK 21 on this machine; measured with no model, the fixture builds and passes 53/53 under that environment.
 
 ## PRODUCT HEAD/TAG COMPATIBILITY
@@ -58,10 +58,10 @@ demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report
 Automated rehearsal of steps 1-5 (LIVE, real model): `demo-v2/scripts/rehearse_gui.sh --scenario 01` (needs `cd ui/standalone && npm run package:mac:evidence`). By hand:
 
 1. Start the desktop app; Open Folder: `$DEMO_V2_WORK/scenario-01/workspace`.
-2. Confirm in Run Setup that the model routing is the one in the rendered configuration and the models are reported available.
-3. Enter the contents of `goal.md` as the goal and Start Run.
-4. Watch the run (timeline, plan, units, attempts). When the change review appears, read what it shows (the file, `+1 -0`, the reviewer text and the validation; the diff TEXT is hidden by Kriya's default content-visibility policy, `evidence.attempt_recorder.content_visibility`, measured in both rehearsals) and approve or reject it in the GUI.
-5. After the run: open Evidence; then `demo-v2/scripts/verify_demo.sh --scenario 01 --phase post`.
+2. The Project page opens by itself. Its line under the goal box names the model and says Ready; open Project details > Model routing to confirm the routing is the one in the rendered configuration and the models are reported available.
+3. Enter the contents of `goal.md` as the goal and press Start Run.
+4. The page becomes the run: it names the phase (Planning, Editing, Validating) from Kriya's records. When ACTION REQUIRED appears, read what it shows (the file, `+1 -0`, the reviewer text and the validation; the diff TEXT is hidden by Kriya's default content-visibility policy, `evidence.attempt_recorder.content_visibility`, measured in both rehearsals) and press Approve & Continue (or Reject) in the GUI.
+5. After the run the page says Run completed with the changed file and the recorded validation; View Evidence opens the evidence; then `demo-v2/scripts/verify_demo.sh --scenario 01 --phase post`.
 
 ## EXPECTED EVENTS
 Repository analysis (Maven, Spring Boot); a plan whose unit targets `DefaultDriverService`; at least one attempt with a source change;
@@ -78,7 +78,7 @@ and Kriya recorded state for the run. The change must have been approved by a hu
 
 ## FAILURE DIAGNOSIS
 - Pre-flight FAIL on config validation: the template drifted from `AppConfig`; fix the template, do not loosen the check.
-- Models unavailable in Run Setup: start the model server; do not edit the configuration to point elsewhere to make it green.
+- Models unavailable in Project details: start the model server; do not edit the configuration to point elsewhere to make it green.
 - Run ends without success: classify before re-running (Kriya defect, model behaviour, provider/runtime, prompt/context, environment, harness, unknown).
   Keep the failed run's evidence. Do not re-run an unchanged failed candidate hoping for variance.
 - Post FAIL "Kriya recorded state": the change was not produced by a Kriya run (for example it was applied by hand).

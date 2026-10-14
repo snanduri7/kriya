@@ -128,3 +128,37 @@ describe('Availability', () => {
     expect(screen.getByText('store unsealed')).toBeInTheDocument();
   });
 });
+
+describe('the outcome carries the RunRecord\'s own commit result, verbatim', () => {
+  const ended = (commit: string | null) => ({
+    launch: { phase: 'ENDED', run: { run_id: 'r' }, ended: { at: 't', exit_code: 0, workflow_status: null, quality_gates_passed: true, failure_category: null, trace_run_id: 'x', error: null, note: 'n' }, history: [], declined_decisions: [] },
+    run_record: { found: true, unreadable: null, lifecycle_state: 'SUCCESS', terminal_status: 'SUCCESS', commit_result: commit, revision: 2 },
+  }) as unknown as import('../../model/kup').LaunchStatus;
+  it('COMMITTED and any other recorded value pass through unchanged; an unreadable record gives null, never a guess', async () => {
+    const { deriveOutcome } = await import('./execution');
+    expect(deriveOutcome(ended('COMMITTED'), false, null)).toMatchObject({ kind: 'success', commitResult: 'COMMITTED' });
+    expect(deriveOutcome(ended('NO_COMMIT'), false, null)).toMatchObject({ kind: 'success', commitResult: 'NO_COMMIT' });
+    expect(deriveOutcome(ended(null), false, null)).toMatchObject({ kind: 'success', commitResult: null });
+  });
+});
+
+describe('elapsed time stops at the recorded end', () => {
+  it('is the recorded duration between the launch and its end, m:ss, and null when either is missing or unreadable', async () => {
+    const { elapsedBetween } = await import('./elapsed');
+    expect(elapsedBetween('2026-10-14T12:43:40Z', '2026-10-14T12:43:50Z')).toBe('0:10');
+    expect(elapsedBetween('2026-10-14T12:43:40Z', '2026-10-14T12:45:41Z')).toBe('2:01');
+    expect(elapsedBetween(null, '2026-10-14T12:43:50Z')).toBeNull();
+    expect(elapsedBetween('2026-10-14T12:43:40Z', null)).toBeNull();
+    expect(elapsedBetween('nonsense', '2026-10-14T12:43:50Z')).toBeNull();
+  });
+});
+
+describe('useElapsed on a finished run', () => {
+  it('shows the recorded duration, not a clock that keeps running after the end (a run that ended in 2026 reads 0:10 today)', async () => {
+    const { renderHook } = await import('@testing-library/react');
+    const { useElapsed } = await import('./elapsed');
+    expect(renderHook(() => useElapsed('2026-10-14T12:43:40Z', false, '2026-10-14T12:43:50Z')).result.current).toBe('0:10');
+    // while it runs there is no end: the local clock difference is used (presentation only)
+    expect(renderHook(() => useElapsed('2026-10-14T12:43:40Z', true, null)).result.current).toMatch(/^\d+:\d\d$/);
+  });
+});

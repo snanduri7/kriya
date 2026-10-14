@@ -46,9 +46,13 @@ function Outcome({ phase }: { phase: RunPhase }) {
           {phase.lastStage ? <p className="muted">Last stage the records show: <strong>{phase.lastStage}</strong>.</p> : <p className="muted">The records show no stage reached.</p>}
         </>
       )}
-      {phase.state === 'COMPLETED' ? <p className="muted small">{outcome.detail}</p> : null}
+      {phase.state === 'COMPLETED' ? (
+        <p className="ck-applied">
+          {outcome.commitResult === 'COMMITTED' ? <strong>✓ The change is applied to your folder.</strong> : <span>Kriya&apos;s record of applying the change says: <span className="mono">{outcome.commitResult ?? 'nothing recorded'}</span>. Check your folder.</span>}
+          {run.status?.launch.pending_approval?.status === 'APPROVED' ? ' You approved it.' : ''}
+        </p>
+      ) : null}
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
-      <p className="muted small">Source: {outcome.source}.</p>
       {phase.state !== 'COMPLETED' ? <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p> : null}
     </div>
   );
@@ -60,10 +64,11 @@ export function CurrentRun() {
   const dispatch = useDispatch();
   const go = useNavigate();
   const run = ex.run;
-  const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished');
+  const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
   const finished = phase.terminal;
+  const outcome0 = run.outcome;
   const goalChars = run.status?.launch.goal.chars ?? null;
   const viewDetails = (tab?: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => {
     if (finished && run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
@@ -103,6 +108,7 @@ export function CurrentRun() {
             {' · '}liveness {run.status.liveness} <span title={run.status.liveness_note}>(DERIVED)</span>
           </div>
         ) : null}
+        {finished ? <div className="muted small">{phase.state === 'COMPLETED' ? `Recorded outcome: ${outcome0!.detail} ` : ''}Source: {outcome0!.source}.</div> : null}
         {run.host && run.host.phase === 'exited' && !finished ? <div className="muted small">The execution process has ended; reading Kriya&apos;s final records…</div> : null}
       </details>
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}

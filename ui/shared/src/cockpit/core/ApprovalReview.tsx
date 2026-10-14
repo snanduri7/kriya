@@ -79,6 +79,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
           <span className="muted small">This run recorded digests of the change, not its content. The file list, line counts and digests above are Kriya&apos;s own metadata.</span>
         </div>
       )}
+      <p className="muted small" data-testid="decision-help"><strong>Approve &amp; Continue</strong>: Kriya finishes its checks and, if they pass, applies the change to your folder. <strong>Reject</strong>: nothing is applied and this run ends.</p>
       <div className="ck-runbar-head">
         <button type="button" onClick={() => open(OPEN_TARGETS.changes)}>Review changes</button>
         <button type="button" onClick={() => open(OPEN_TARGETS.validation)}>Review validation</button>

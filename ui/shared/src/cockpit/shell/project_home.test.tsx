@@ -175,7 +175,18 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     const validation = await within(run).findByLabelText('Validation', undefined, { timeout: 4000 });
     expect(validation.textContent).toMatch(/passed/);
     for (const name of ['View Changes', 'View Evidence', 'View Details', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
-    expect(within(run).getByText(/Source: Kriya RunRecord/)).toBeInTheDocument(); // where the outcome was read from, in Kriya's words
+    expect(within(run).getByText('✓ The change is applied to your folder.')).toBeInTheDocument(); // said in plain words, from the RunRecord's COMMITTED
+    expect(run.querySelector('.ck-outcome')!.textContent).not.toMatch(/NO_COMMIT|commit COMMITTED|RunRecord/); // no raw code or internal source name on the outcome card itself (they are under Technical status)
+    expect(within(run).getByText(/Kriya RunRecord/).closest('details')).toBe(within(run).getByText('Technical status').closest('details')); // where the outcome was read from is one disclosure away
+  });
+
+  it('a success whose commit result is NOT COMMITTED never claims the change was applied; it quotes Kriya\'s record and says to check the folder', async () => {
+    const { host, run } = await startRun({ outcome: 'success', commitResult: 'NO_COMMIT' });
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
+    expect(within(run).queryByText('✓ The change is applied to your folder.')).toBeNull();
+    expect(within(run).getByText('NO_COMMIT')).toBeInTheDocument();
+    expect(run.querySelector('.ck-applied')!.textContent).toMatch(/Check your folder/);
   });
 
   it('a failure says "Run failed" with Kriya\'s recorded reason and the last stage reached - no raw events needed', async () => {

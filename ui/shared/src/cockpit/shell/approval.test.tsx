@@ -48,6 +48,13 @@ describe('the review of a change', () => {
     expect(host.exec!.decisions).toEqual([]);
   });
 
+  it('says what each decision does BEFORE it is pressed: Approve & Continue applies the change if the checks pass, Reject applies nothing and ends the run', async () => {
+    const { bar } = await reachReview();
+    const help = within(within(bar).getByRole('region', { name: 'Change review' })).getByTestId('decision-help');
+    expect(help).toHaveTextContent(/Approve & Continue: Kriya finishes its checks and, if they pass, applies the change to your folder/);
+    expect(help).toHaveTextContent(/Reject: nothing is applied and this run ends/);
+  });
+
   it('Approve asks for confirmation, then sends ONE typed decision carrying exactly the identities Kriya gave the review; the run then continues and ends from Kriya\'s records', async () => {
     const { host, bar } = await reachReview();
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));

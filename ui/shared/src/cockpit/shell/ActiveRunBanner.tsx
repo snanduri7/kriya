@@ -31,7 +31,7 @@ export function ActiveRunBanner() {
   }, [run, dispatch, go]);
   // A notification click arrives as the fixed command `showRun` (no payload): the current run is the only run there is.
   useEffect(() => (desktop ? desktop.onMenuCommand((command) => { if (command === 'showRun') showRun(); }) : undefined), [desktop, showRun]);
-  const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished');
+  const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
   const goal = ex.goal.trim() ? short(ex.goal) : null;

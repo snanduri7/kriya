@@ -20,5 +20,5 @@ What `verify_demo.sh --scenario 01 --phase post` checks, and what it deliberatel
 - that the run succeeds. A failed run is a result to classify and keep, not something the script can turn green.
 
 ## Expected in the GUI (observed by the presenter; not scripted)
-Run Setup shows the routing; the run shows plan, unit and attempt records; the change review shows the diff and is decided by a person; Evidence shows
+the Project page shows the model and readiness (full routing under Project details); the run shows plan, unit and attempt records; the change review shows the diff and is decided by a person; Evidence shows
 per-attempt records and verifies.

@@ -14,6 +14,8 @@ export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never
 export interface FixtureExecutionOptions {
   /** How the next launch ends (default 'success'). */
   outcome?: FixtureOutcome;
+  /** The RunRecord's commit result of a successful run (default COMMITTED; the real controlled body records NO_COMMIT). */
+  commitResult?: string;
   /** Folders whose preflight carries a blocker (code -> message), besides the built-in /fixture/blocked. */
   blockers?: Readonly<Record<string, { code: string; message: string }>>;
   /** Scripted readiness facts for every folder (DEV/TEST ONLY): what Kriya's preflight reports about configuration, state, tools and approvals. */
@@ -191,7 +193,7 @@ export class FixtureExecution {
         declined_decisions: outcome === 'success_with_declined' ? [{ kind: 'skill_gap_decision', reason: 'no verified skill for lib-x', details: { skills: ['lib-x'] }, noted_at: '2026-10-10T10:11:00+00:00' }] : [],
         pending_approval: pending, approval_history: [],
       },
-      run_record: run ? { found: true, unreadable: null, lifecycle_state: terminal ?? 'RUNNING', terminal_status: terminal, commit_result: terminal === 'SUCCESS' ? 'COMMITTED' : null, revision: 2 } : { found: false, unreadable: null },
+      run_record: run ? { found: true, unreadable: null, lifecycle_state: terminal ?? 'RUNNING', terminal_status: terminal, commit_result: terminal === 'SUCCESS' ? this.options.commitResult ?? 'COMMITTED' : null, revision: 2 } : { found: false, unreadable: null },
       evidence: run ? { state: sealed ? 'sealed' : 'open', line_count: lines, sealed } : { state: 'absent', line_count: null, sealed: false },
       workspace_lock: { held: f >= 2 && !sealed && !died && !refused, held_by_this_launch: f >= 2 && !sealed && !died && !refused },
       liveness: phase === 'ENDED' ? 'ended' : died ? 'interrupted' : f === 1 ? 'starting' : 'live',

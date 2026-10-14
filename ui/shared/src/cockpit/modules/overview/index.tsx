@@ -1,4 +1,6 @@
-import { AvailabilityView, CopyText, KeyValue, Panel, payloadOf, ofKind, useRunContext, useRunEvidence, type ModuleDefinition } from '../../core';
+import { AvailabilityView, Badge, CopyText, KeyValue, Panel, changeFacts, describeGate, hasData, payloadOf, ofKind, useRunContext, useRunEvidence, validationFacts, type ModuleDefinition } from '../../core';
+
+const OUTCOME_WORDS: Record<string, string> = { success: 'Succeeded', failure: 'Failed', in_progress: 'Run not finished' };
 
 function Overview() {
   const run = useRunContext();
@@ -7,6 +9,29 @@ function Overview() {
     <AvailabilityView value={run}>
       {(ctx) => (
         <div style={{ display: 'grid', gap: 8 }}>
+          <Panel title="What happened">
+            {(() => {
+              const records = hasData(evidence) ? evidence.data.records : null;
+              const changes = records ? changeFacts(records) : null;
+              const gates = records ? validationFacts(records) : null;
+              return (
+                <>
+                  <p style={{ margin: '0 0 6px' }}><strong>{ctx.status ? OUTCOME_WORDS[ctx.status] ?? ctx.status : 'Outcome not recorded'}</strong>{ctx.goal ? <span className="muted"> · {ctx.goal}</span> : null}</p>
+                  {changes === null || gates === null ? <p className="muted" style={{ margin: 0 }}>The changed files and the validation come from this run&apos;s evidence, which is not readable here (see below).</p> : (
+                    <>
+                      <div className="muted small">Changed</div>
+                      {changes.length === 0 ? <p className="muted" style={{ margin: '0 0 6px' }}>No staged change is recorded for this run.</p>
+                        : <ul aria-label="Changed files" style={{ margin: '2px 0 6px', paddingLeft: 18 }}>{changes.map((c) => <li key={c.path}><span className="mono">{c.path}</span> <span className="muted small">{c.linesAdded !== null && c.linesRemoved !== null ? `+${c.linesAdded} −${c.linesRemoved}` : 'line counts not recorded'}</span></li>)}</ul>}
+                      <div className="muted small">Validation</div>
+                      {gates.length === 0 ? <p className="muted" style={{ margin: 0 }}>No gate result is recorded for this run.</p>
+                        : <div className="ck-badges">{gates.map((g) => <Badge key={g.type} tone={g.passed === true ? 'ok' : g.passed === false ? 'bad' : 'neutral'}>{g.passed === true ? '✓ ' : g.passed === false ? '✕ ' : ''}{describeGate(g)}</Badge>)}</div>}
+                    </>
+                  )}
+                  <p className="muted small" style={{ margin: '6px 0 0' }}>The identifiers below are the recorded detail behind this summary.</p>
+                </>
+              );
+            })()}
+          </Panel>
           <Panel title="Run">
             <KeyValue items={[
               ['Run ID', <span key="rid"><span className="mono">{ctx.runId}</span> <CopyText text={ctx.runId} what="run ID" /></span>],
