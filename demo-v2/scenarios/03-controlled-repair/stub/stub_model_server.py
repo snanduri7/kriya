@@ -2,8 +2,8 @@
 """A localhost OpenAI-compatible model server for the controlled-repair scenario. CONTROLLED / SCRIPTED: it is not a model.
 
   record  --upstream URL  : forward every request unchanged to a real model server and log each chat exchange (used once, to capture the formats Kriya's roles expect);
-                            with --override-first-developer FILE the FIRST Developer answer is the file's content instead (logged as overridden), so the recording
-                            includes the real answers of every role on the retry path
+                            with --override ROLE_PREFIX:INDEX=FILE|LABEL the INDEXth answer of a role (matched by role prefix) is the file's content instead, logged as
+                            overridden with its label, so the recording holds the real answers of every other role on the path the overridden answers cause
   replay  --script FILE   : answer chat requests from a fixed script, by role and by the order of that role's calls; never contacts a model
 
 Standard library only. It listens on 127.0.0.1 and nothing else. In replay mode it makes no outbound connection of any kind.
@@ -93,7 +93,7 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, address, mode, upstream, script, log_path, override=None):
         super().__init__(address, Handler)
-        self.mode, self.upstream, self.script, self.log_path, self.override = mode, upstream, script, log_path, override
+        self.mode, self.upstream, self.script, self.log_path, self.overrides = mode, upstream, script, log_path, override or []
         self.lock = threading.Lock()
         self.counts: dict = {}
         self.seq = 0
@@ -184,15 +184,17 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.lock:
                 position = self.server.counts.get(role, 0)
                 self.server.counts[role] = position + 1
-            if role == "developer" and position == 0 and self.server.override is not None:
-                content = self.server.override
+            hit = next((o for o in self.server.overrides if role.startswith(o["role_prefix"]) and o["index"] == position), None)
+            if hit is not None:
+                content = hit["content"]
                 payload = sse(content, prompt_tokens=prompt_tokens_of(request)) if request.get("stream") else json.dumps(completion(content, prompt_tokens=prompt_tokens_of(request))).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream" if request.get("stream") else "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
-                self.server.log({"kind": "chat", "role": role, "overridden": True, "request": request, "response": {"content": content, "tool_calls": None, "finish_reason": "stop"}})
+                self.server.log({"kind": "chat", "role": role, "overridden": True, "override_label": hit["label"], "request": request,
+                                 "response": {"content": content, "tool_calls": None, "finish_reason": "stop"}})
                 return
             data = self._forward(body)
             self.server.log({"kind": "chat", "role": role, "request": request, "response": accumulate(data)})
@@ -222,7 +224,8 @@ def main() -> int:
     parser.add_argument("--log", required=True, help="JSON-lines log of every chat exchange")
     parser.add_argument("--upstream", help="record mode: the real model server's base URL (no /v1 suffix), e.g. http://localhost:11434")
     parser.add_argument("--script", help="replay mode: the script file")
-    parser.add_argument("--override-first-developer", help="record mode: a file whose content replaces the FIRST Developer answer (the scripted wrong candidate)")
+    parser.add_argument("--override", action="append", default=[], metavar="ROLE_PREFIX:INDEX=FILE|LABEL",
+                        help="record mode: serve FILE's content as the INDEXth answer of the role whose key starts with ROLE_PREFIX (repeatable)")
     args = parser.parse_args()
     script = None
     if args.mode == "record":
@@ -233,8 +236,14 @@ def main() -> int:
             parser.error("replay mode needs --script")
         with open(args.script, encoding="utf-8") as handle:
             script = json.load(handle)
-    override = open(args.override_first_developer, encoding="utf-8").read() if args.override_first_developer else None
-    server = Server(("127.0.0.1", args.port), args.mode, args.upstream, script, args.log, override)
+    overrides = []
+    for spec in args.override:
+        left, _, label = spec.partition("|")
+        target, _, path = left.partition("=")
+        prefix, _, index = target.rpartition(":")
+        with open(path, encoding="utf-8") as handle:
+            overrides.append({"role_prefix": prefix, "index": int(index), "content": handle.read(), "label": label or "SCRIPTED"})
+    server = Server(("127.0.0.1", args.port), args.mode, args.upstream, script, args.log, overrides)
     print(f"stub_model_server {args.mode} on 127.0.0.1:{args.port} (CONTROLLED / SCRIPTED: not a model)", file=sys.stderr, flush=True)
     try:
         server.serve_forever()

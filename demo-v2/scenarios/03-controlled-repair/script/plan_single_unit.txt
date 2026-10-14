@@ -1,0 +1,48 @@
+{
+  "global_invariants": [
+    {
+      "id": "gi1",
+      "statement": "The function apply_discount must calculate the discounted price correctly by reducing the original price by the given percentage, not by subtracting the percentage value from the price."
+    }
+  ],
+  "subtasks": [
+    {
+      "id": "s1",
+      "description": "Modify the apply_discount function in pricing.py to correctly compute the discounted price by reducing the original price by the specified percentage.",
+      "execution_method": "model",
+      "execution_role": "implementation",
+      "depends_on": [],
+      "planned_files": [
+        {
+          "path": "pricing.py",
+          "action": "modify",
+          "environment_requirements": ["python"],
+          "requires_capabilities": [],
+          "preserved_references": []
+        }
+      ],
+      "provides": ["pricing_module"],
+      "requires": [],
+      "relevant_global_invariant_ids": ["gi1"],
+      "verification": [
+        {
+          "type": "tool",
+          "description": "Verify that the modified apply_discount function correctly computes discounted prices by running tests.",
+          "tool_name": "test",
+          "verifier_kind": "test",
+          "requires_runtime_execution": false
+        }
+      ],
+      "acceptance_criteria_ids": ["ac1"]
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "ac1",
+      "description": "The apply_discount function returns the price reduced by the given percentage, such that 25% off 200 returns 150.",
+      "method": "judgment"
+    }
+  ],
+  "extension_points": [],
+  "refactor_baseline": null
+}
