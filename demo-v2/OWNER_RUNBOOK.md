@@ -27,7 +27,7 @@ One launch per scenario (quit the app with Cmd+Q before the next one):
 ```bash
 demo-v2/scripts/launch_gui.sh --scenario 01     # or 02, or 03
 ```
-In the app: **Open Folder**, press Cmd+Shift+G in the dialog and paste (the workspace path is already on your clipboard), Enter.
+In the app: **Open Folder**, press Cmd+Shift+G in the dialog and paste (the workspace path is already on your clipboard), Enter. The **Project** page opens by itself: type the goal, press **Start Run** (or ⌘ Enter), and the page becomes the run. The left list is Project, Runs, Skills, Tools, Settings (keys 1 to 5); while a run is active every other page shows a strip at the top with **Return to Run**, or **ACTION REQUIRED** with **Review** when Kriya needs you.
 
 ## D. Scenario A - normal live coding run (Spring Boot bug fix)
 ```bash
@@ -36,7 +36,7 @@ demo-v2/scripts/verify_demo.sh --scenario 01 --phase pre          # must say 0 f
 demo-v2/scripts/launch_gui.sh --scenario 01
 pbcopy < demo-v2/scenarios/01-normal-coding/goal.md               # the goal
 ```
-In the app: Open Folder -> check **Run Setup** (model routing, models available) -> paste the goal -> **Start Run** -> watch the timeline, plan, unit and attempt -> when the **change review** appears, review it and **Approve** (the review shows the file, `+1 -0`, the reviewer text and validation; the diff text itself is hidden by Kriya's default content-visibility policy) -> open **Evidence**.
+In the app: Open Folder -> the **Project** page shows the model and "Ready" under the goal box (**Project details** has the full readiness and the model routing) -> paste the goal -> **Start Run** -> the page names what Kriya is doing (Planning, Editing, Validating) -> when **ACTION REQUIRED** appears, read the file, `+1 -0`, the validation and the reviewer text (the diff text itself is hidden by Kriya's default content-visibility policy), then **Approve & Continue** (a confirmation follows) -> the page says **Run completed** with the changed file and the recorded validation; **View Evidence** opens the evidence.
 ```bash
 demo-v2/scripts/verify_demo.sh --scenario 01 --phase post         # independent check, no model
 ```
@@ -48,7 +48,7 @@ demo-v2/scripts/verify_demo.sh --scenario 01 --phase post         # independent 
 demo-v2/scripts/verify_demo.sh --scenario 02 --phase pre          # snapshot digest, public lookup OFF, no search container, model listed: 0 failed
 demo-v2/scripts/launch_gui.sh --scenario 02
 ```
-1. In the app: Open Folder -> click **Skills** (third icon in the rail). You see both skills, `unverified`, rules 8 and 4, and for each skill its provenance: source `live_lookup:https://...` on every rule, with the date. The GUI is read-only and does not show rule text.
+1. In the app: Open Folder -> click **Skills** (third item in the left list, or key 3). You see both skills, `unverified`, rules 8 and 4, and for each skill its provenance: source `live_lookup:https://...` on every rule, with the date. The GUI is read-only and does not show rule text.
 2. Show the goal and that it contains no API answer: `cat demo-v2/scenarios/02-knowledge-skill/goal.md` (it names the task, the library and its pinned versions, nothing about how to call it). Show that public lookup is off: `grep -E -A1 "web_lookup_enabled|^search:" $W/scenario-02/workspace/kriya.yaml` (`false`, and an empty search URL).
 3. Run the offline task **in the terminal** (the desktop cannot acknowledge KnowledgeGuard's post-cutoff knowledge risk, so a desktop-started run of this goal stops there by design):
 ```bash
@@ -76,7 +76,7 @@ demo-v2/scripts/verify_demo.sh --scenario 03 --phase pre          # must say 0 f
 demo-v2/scripts/launch_gui.sh --scenario 03
 pbcopy < demo-v2/scenarios/03-controlled-repair/goal.md
 ```
-In the app: Open Folder -> paste the goal -> **Start Run**. **Attempt 1** produces a plausible but wrong candidate and Kriya's validation rejects it (a test that passed before now fails). Open **Attempts** and the **Why** panel: first failed gate `tests`, the recorded diagnosis, "what Kriya did next". **Attempt 2** is a repair; validation passes; **Approve** the change.
+In the app: Open Folder -> paste the goal -> **Start Run**. **Attempt 1** produces a plausible but wrong candidate and Kriya's validation rejects it (a test that passed before now fails); the page then shows **Repairing**. Open **View Details** -> **Details** -> **Attempts**, and the **WHY** panel in the side panel: first failed gate `tests`, the recorded diagnosis, "what Kriya did next". **Attempt 2** is a repair; validation passes; **ACTION REQUIRED** appears: **Approve & Continue**.
 ```bash
 demo-v2/scripts/verify_demo.sh --scenario 03 --phase post
 demo-v2/scripts/stub_ctl.sh stop

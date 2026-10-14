@@ -1,5 +1,5 @@
 {
- "open_folder_ms": 201,
+ "open_folder_ms": 245,
  "landing": {
   "page": "project",
   "current": "Project",
@@ -171,7 +171,7 @@
   "VALIDATING"
  ],
  "approval_panel": {
-  "text": "ACTION REQUIRED\nKriya wants to change your project\nKriya paused this run for your decision. Nothing is applied to your folder until you approve.\nKRIYA WANTS TO MODIFY\nsrc/clamp.py +1 −1\n1 file, +1 −1 · candidate 0ac24e20c6 · review ra-b5e26d5c3e5e422caa68639c\nVALIDATION\n✓ Tests passed\nReason (the reviewer's text, as Kriya recorded it)\nHuman-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.\nDiff hidden by Kriya content-visibility policy. The file list, line counts and digests above are Kriya's own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.\nReview changes\nReview validation\nReject\nApprove & Continue",
+  "text": "ACTION REQUIRED\nKriya wants to change your project\nKriya paused this run for your decision. Nothing is applied to your folder until you approve.\nKRIYA WANTS TO MODIFY\nsrc/clamp.py +1 −1\n1 file, +1 −1 · candidate 0ac24e20c6 · review ra-589528ea94eb3682c5808f19\nVALIDATION\n✓ Tests passed\nReason (the reviewer's text, as Kriya recorded it)\nHuman-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.\nDiff hidden by Kriya content-visibility policy. The file list, line counts and digests above are Kriya's own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.\n\nApprove & Continue: Kriya finishes its checks and, if they pass, applies the change to your folder. Reject: nothing is applied and this run ends.\n\nReview changes\nReview validation\nReject\nApprove & Continue",
   "focusable": -1,
   "actionRequiredFlag": true,
   "buttons": [
@@ -209,7 +209,7 @@
   ],
   "outcome": "success"
  },
- "completed": "✓\nRun completed\nRun succeeded\nelapsed 0:10\nGoal\nAdd a clamp(value, low, high) function with tests.\n✓ Planning\n(done)\n✓ Editing\n(done)\n✓ Validating\n(done)\n✓ Finished\n(done)\nCHANGED\nsrc/clamp.py +3 −0\nVALIDATION\n✓ Tests passed\n\nthe change was approved by you · commit NO_COMMIT\n\nSource: Kriya RunRecord (the run's own lifecycle authority).\n\nTechnical status\nView Changes\nView Evidence\nView Details\nNew Goal",
+ "completed": "✓\nRun completed\nRun succeeded\nelapsed 0:10\nGoal\nAdd a clamp(value, low, high) function with tests.\n✓ Planning\n(done)\n✓ Editing\n(done)\n✓ Validating\n(done)\n✓ Finished\n(done)\nCHANGED\nsrc/clamp.py +3 −0\nVALIDATION\n✓ Tests passed\n\nKriya's record of applying the change says: NO_COMMIT. Check your folder. You approved it.\n\nTechnical status\nView Changes\nView Evidence\nView Details\nNew Goal",
  "completed_buttons": [
   "Copy",
   "View Changes",

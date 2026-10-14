@@ -75,4 +75,40 @@ Stop Run: not offered. There is no stop operation in the host port; adding one w
 
 ## 5. Implementation record
 
-(Filled in as the work lands: files changed, tests, screenshots, review.)
+Commits on `demo/v2` after `ea08255` (not tagged): `029a5f5` Project Home and run flow, `f9a9459` UX smoke + evidence + button specificity, then the review-findings commit and the docs commit (see `git log`).
+
+What exists now (TRACED in the code, MEASURED in the smoke `handover/DEMO-V2/evidence/ux-correction/results.json`):
+
+- **Landing.** `Shell` derives the chosen page per open folder (no effect): a new folder always shows page 1, Project. MEASURED: landing page `project`, current rail item Project, the goal box present, compact `Ready`, details closed, folder name as the heading.
+- **Start Run placement.** Goal box, then one line (`Ready · model · N skills · N tools · View readiness details`), the shortcut hint and the button; Recent runs and `Project details` follow. MEASURED at content sizes 1280x800, 1400x900 (the app's default window), 1536x960, 1280x720 and 1100x700: Start Run's bottom edge is at 263 px in every case, fully visible, no page or main scroll. The owner's display is 3456x2234 native (a 1728x1117 point desktop), so the default 1400x900 window fits.
+- **Shortcut.** Cmd/Ctrl+Enter in the goal box starts the run (disabled when empty or blocked; plain Enter only adds a line; a second press cannot start a second run). Shown beside the button. Cmd/Ctrl+1..5 select Project, Runs, Skills, Tools, Settings; they follow the rail order.
+- **Current run.** The page becomes the run (goal composer gone). The state word, one sentence and a four-step list are all derived by `core/runPhase.ts` from Kriya's records; Technical status (run id, record tallies, DERIVED liveness, source) is one disclosure down.
+- **ACTION REQUIRED.** The change review (moved to `core/ApprovalReview.tsx` so the Project page can host it; exactly one "Change review" section exists) is a boxed panel: the files, `+n -m`, the recorded validation, the reviewer text, what each button does, **Reject** and **Approve & Continue**. The confirmation step (Cancel focused, "Approve without viewing diff" when the diff text is hidden) is unchanged: approval semantics did not change.
+- **Strip on every other page.** `ActiveRunBanner` is now one line: `Run active · phase · Return to Run`, or `ACTION REQUIRED · Change approval waiting · Review`; after the run `Run completed/failed/stopped · View Result · Dismiss`. It is absent on the Project page, where the run is the page.
+- **Runs is history.** `Run history` list, `New Run` (goes to Project), `No runs yet.` + `Go to Project` when empty, `Select a run` + `Go to Project` with nothing selected. The side panel and bottom drawer appear only once a run is selected. Run documents: Overview (now opens with *What happened*), Changes, Validation, Details (Context, Plan, Attempts, Evidence). Timeline and WHY stay in the side panel (they drive the selection the other documents follow, so they were not moved into a tab); Build, Tests, Git and Raw Events stay as the drawer's placeholders.
+- **Removed.** The toolbar's `Drawer` button (wired to nothing: `toggles.drawer` was the constant `false`); `Runs pane` / `Inspector` were renamed `Run list` / `Side panel` and now appear only on the Runs page.
+
+### Run phase mapping (final)
+
+As in section 4, with these results: UNDERSTANDING is not a state; STOPPED covers only the recorded `rejected`, `review_expired` and `approval_required` outcomes; there is no Stop Run control because the host port has no stop operation. The sampled states of the smoke run: `STARTING, PLANNING, EDITING, VALIDATING`, then `WAITING_FOR_APPROVAL`, then `VALIDATING` (after the person's approval) and `COMPLETED`.
+
+### Independent UX review (fresh reviewer, screenshots only)
+
+Verdict: FAIL, narrowly, with no BLOCKING finding. Open folder, start, progress and the approval prompt were judged clear. IMPORTANT findings and what was done:
+
+| Finding | Disposition |
+|---|---|
+| Reject fires at once and says nothing about its effect | FIXED: the panel states what each decision does before it is pressed. No confirmation was added to Reject (that would be a new approval semantic). |
+| "+1 -1" at approval, "+3 -0" at the end | NOT A PRODUCT DEFECT (MEASURED/TRACED): the controlled workflow body used by the smoke feeds a synthetic one-line diff to the real approval path while its evidence records 3/0 (`ui/standalone/test/fixtures/controlled_kriya.py`). In the real scenario A run both read `+1 -0`. |
+| Completed card never says the change reached the folder; raw `NO_COMMIT`, `Source: Kriya RunRecord` | FIXED: "The change is applied to your folder" only when the RunRecord says `COMMITTED`; any other value is quoted with "Check your folder" (the controlled body records `NO_COMMIT`, and the screenshot shows exactly that); raw code and source moved under Technical status. |
+| No way to stop a run | DEFERRED (stop condition: needs a new host operation). Tracked in the report. |
+| Runs Overview is a wall of identifiers | FIXED: *What happened* (outcome, changed files, recorded validation) first; the identifiers stay below. |
+| Hidden-diff notice exposes a config key and no action | DEFERRED: it is Kriya's own honest policy wording and part of the approval semantics; reworded later with the owner. |
+
+COSMETIC, recorded for later: elapsed time after completion (FIXED anyway); "Waiting for Kriya to record the launch." is internal phrasing; the Skills page lists Java skills for a Python goal (fixture content, and Skills are chosen per run); "Ready" appears twice on the Project page; `0/16000`; no Approval step in the checklist; `Run list`/`Side panel` labels; "No runs yet." under Recent runs while the first run is active.
+
+### Verification
+
+`ui/shared` vitest 568 pass (baseline 520); `ui/standalone` vitest 348 pass, 1 skipped (baseline identical); `npm run typecheck` and `npm run lint` exit 0; mutants for the phase mapping, facts, landing, strip, details tab, shortcut, blocker, diff-viewed logic, applied-statement, decision help, overview summary and elapsed: all killed (one surviving mutant, M2, was a real test gap and was fixed by asserting the planning sentences). Tests changed rather than weakened: the old assertions were moved to where the feature now lives (the banner tests became strip tests; the Workspace page tests became Project tests), and the structural tripwire for evidence interpretation now also covers the files that moved out of `shell/`.
+
+Not done by design: no Demo V2 scenario was run, no final validation, no tag. The `ui/standalone/make-capture-*.mjs` generators were renamed mechanically and not re-run (the live ones need a model). The owner's vim session holds `demo-v2/OWNER_RUNBOOK.md` open (`demo-v2/.OWNER_RUNBOOK.md.swp`, untracked, not touched); `tests/test_demo_v2_assets.py::test_nothing_machine_specific_or_heavy_is_committed` fails only while that binary swap file exists (all tracked files pass it).
