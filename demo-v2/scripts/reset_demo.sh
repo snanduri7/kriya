@@ -45,6 +45,18 @@ WS_SHA="$(git -C "$WS" rev-parse HEAD)"
 TARGET_HASH="$(sha256_of "$WS/$FIXTURE_TARGET_FILE")"
 [ "$TARGET_HASH" = "$FIXTURE_TARGET_SHA256" ] || die "target file hash $TARGET_HASH != expected $FIXTURE_TARGET_SHA256"
 
+# The scenario's kriya.yaml and Kriya's .kriya/ are not part of the project's source: keep them out of `git status` (so "exactly one file changed" stays meaningful).
+printf 'kriya.yaml\n.kriya/\n' >> "$WS/.git/info/exclude"
+
+# A previous operator approval (kriya authority approve) is bound to this workspace's identity and lives in the operator's HOME, outside the workspace. Revoke it so a
+# reset really starts from "not approved". Best effort: reports, never hides, what happened.
+KRIYA_BIN="${KRIYA_BIN:-$REPO_ROOT/.venv/bin/kriya}"
+if [ -x "$KRIYA_BIN" ]; then
+  ( cd "$WS" && PYTHONDONTWRITEBYTECODE=1 "$KRIYA_BIN" authority revoke 2>&1 | sed 's/^/authority:   /' ) || echo "authority:   revoke reported a problem (see above)"
+else
+  echo "authority:   $KRIYA_BIN not found; any earlier approval was NOT revoked"
+fi
+
 # Kriya's own state and memory for this scenario (never inside the target repository).
 rm -rf "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WS/.kriya"
 mkdir -p "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WORK/skills-empty"

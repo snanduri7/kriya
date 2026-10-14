@@ -21,9 +21,13 @@ pass in about 13 s. Everything that needs the GUI or a model (the RUN section) h
 - The fixture source repository is available locally (`fixtures/brownfield-spring/fixture.env`, override with `DEMO_V2_BASELINE_SRC`).
 - Java 17 and an offline-populated Maven repository for the fixture (`./mvnw -o` must work; proven by `prepare_demo.sh --check-build`).
 - Ollama (or another OpenAI-compatible server) reachable at the URL in the rendered configuration, serving the models it names.
-- The desktop app built from this checkout. **Open precondition:** how the desktop host selects the rendered configuration
-  (host setting `configDirectory`, operator-configuration layering, SEC-009 authority) is NOT yet confirmed; the rehearsal must
-  record which configuration the launched run actually used (visible in the GUI trust strip and Run Setup) before this scenario can be validated.
+- The desktop app built from this checkout (`cd ui/standalone && npm run package:mac`), including the Skills and Tools pages.
+- **Configuration route (measured, 2026-10-14).** A GUI-launched run's working directory is the workspace, and Kriya discovers `kriya.yaml` there; the host passes no config path.
+  `prepare_demo.sh` therefore places the rendered configuration at `<workspace>/kriya.yaml` (excluded from `git status` through `.git/info/exclude`). Kriya treats a
+  workspace-supplied configuration as untrusted: **10 security-authority fields** (`autonomy.mode`, `embedding.base_url`, `llm.base_url`, `llm_chain`, `paths.memory`, `paths.skills`,
+  `paths.state`, `search.base_url`, `workflow_controller.enabled`, `workflow_controller.mode`) are refused until an operator approves them. Approval is a deliberate human
+  step (RESET step 2), stored outside the workspace under the operator's HOME (`~/.kriya/authority/<workspace id>.json`), and revoked by the next reset.
+- **Not yet confirmed by a GUI-driven run:** that the desktop run picks up this configuration and shows it in Run Setup. `verify_demo.sh --phase pre` proves Kriya's own preflight accepts it; the rehearsal must confirm the GUI shows the same routing.
 
 ## PRODUCT HEAD/TAG COMPATIBILITY
 Written against `kriya-v1.2.0-pre-modularization` (`1064b9e`, product code `9de5404`). `verify_demo.sh` requires that tag to be an ancestor of HEAD.
@@ -39,10 +43,12 @@ None at run time (`web_lookup_enabled: false`, empty search URL). Local model se
 
 ## RESET
 ```bash
-demo-v2/scripts/prepare_demo.sh --scenario 01 [--check-build]   # materialise workspace at the pinned commit, render config
-demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # must report 0 failed
+demo-v2/scripts/prepare_demo.sh --scenario 01 [--check-build]   # 1. materialise the workspace at the pinned commit, revoke any earlier approval, render and place the configuration
+( cd "$DEMO_V2_WORK/scenario-01/workspace" && kriya authority approve )   # 2. OPERATOR STEP: read the 10 listed fields, answer y (stored outside the workspace)
+demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report 0 failed
 ```
-Reset is `scripts/reset_demo.sh --scenario 01` (rebuilds the workspace from the fixture; clears Kriya state, memory and evidence for the scenario).
+`scripts/reset_demo.sh --scenario 01` rebuilds the workspace from the fixture, revokes the operator approval for it, and clears Kriya state, memory and evidence for the scenario.
+`--check-build` additionally runs the fixture's own offline compile and tests (no model): measured on `1064b9e`, 53 passed in about 13 s.
 
 ## RUN
 1. Start the desktop app; Open Folder: `$DEMO_V2_WORK/scenario-01/workspace`.

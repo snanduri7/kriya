@@ -65,6 +65,19 @@ PY
     else fail "rendered configuration does NOT validate against this product's AppConfig"; fi
   fi
   check "workspace exists and is a git repository" test -d "$WS/.git"
+  check "scenario kriya.yaml is in the workspace and excluded from git status" bash -c "test -s '$WS/kriya.yaml' && git -C '$WS' check-ignore -q kriya.yaml"
+  # The operator approval is a deliberate human step; the preflight is Kriya's own answer to "would a run here be allowed?". No data = refused/unapproved.
+  if [ -x "$REPO_ROOT/.venv/bin/kriya" ] && [ -d "$WS" ]; then
+    PREFLIGHT="$(PYTHONDONTWRITEBYTECODE=1 "$REPO_ROOT/.venv/bin/kriya" traces --json --execution-preflight "$WS" 2>/dev/null || true)"
+    BLOCKERS="$(printf '%s' "$PREFLIGHT" | "$KRIYA_PY" -I -c 'import sys,json; e=json.load(sys.stdin); d=e.get("data"); print("NO_PREFLIGHT_DATA" if not d else ",".join(b["code"] for b in d.get("blockers",[])))' 2>/dev/null || echo "PREFLIGHT_UNREADABLE")"
+    # STATE_DIRECTORY_NOT_OBSERVABLE is what the one-shot CLI always reports (only the desktop host knows its state directory); it says nothing about the run.
+    BLOCKERS="$(printf '%s' "$BLOCKERS" | tr ',' '\n' | grep -v '^STATE_DIRECTORY_NOT_OBSERVABLE$' | paste -sd, - || true)"
+    case ",$BLOCKERS," in
+      *,CONFIG_AUTHORITY_REFUSED,*) fail "the scenario configuration is NOT approved (cd the workspace && kriya authority approve); Kriya refuses it as it stands" ;;
+      ,,) pass "Kriya's preflight reports no blockers (the configuration is approved and loads)" ;;
+      *) fail "preflight reports blockers: $BLOCKERS" ;;
+    esac
+  fi
   if [ -d "$WS/.git" ]; then
     [ "$(git -C "$WS" rev-parse HEAD)" = "$FIXTURE_COMMIT" ] && pass "workspace HEAD is the fixture commit" || fail "workspace HEAD is not $FIXTURE_COMMIT"
     [ -z "$(git -C "$WS" status --short)" ] && pass "workspace is clean (nothing changed yet)" || fail "workspace is not clean (run reset_demo.sh)"
