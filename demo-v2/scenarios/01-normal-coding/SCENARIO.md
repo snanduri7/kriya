@@ -48,8 +48,9 @@ None at run time (`web_lookup_enabled: false`, empty search URL). Local model se
 ## RESET
 ```bash
 demo-v2/scripts/prepare_demo.sh --scenario 01 [--check-build]   # 1. materialise the workspace at the pinned commit, revoke any earlier approval, render and place the configuration
-( cd "$DEMO_V2_WORK/scenario-01/workspace" && kriya authority approve )   # 2. OPERATOR STEP: read the 10 listed fields, answer y (stored outside the workspace)
-demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report 0 failed
+# 2. OPERATOR STEP, in the app: Open Folder -> Review & Approve -> read the listed settings (names only) -> Approve Configuration. Or in a terminal:
+#    ( cd "$DEMO_V2_WORK/scenario-01/workspace" && kriya authority approve )   (stored outside the workspace; the same approval either way)
+demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report 0 failed once the configuration is approved
 ```
 `scripts/reset_demo.sh --scenario 01` rebuilds the workspace from the fixture, revokes the operator approval for it, and clears Kriya state, memory and evidence for the scenario.
 `--check-build` additionally runs the fixture's own offline compile and tests (no model): measured on `1064b9e`, 53 passed in about 13 s.

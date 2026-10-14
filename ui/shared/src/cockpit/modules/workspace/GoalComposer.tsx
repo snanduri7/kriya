@@ -75,7 +75,7 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
         <kbd className="ck-kbd" aria-hidden="true">{START_SHORTCUT}</kbd>
         <button type="button" className="ck-primary ck-cta ck-start" disabled={!canStart || ex.starting} aria-describedby="ck-start-why" onClick={submit}>{ex.starting ? 'Starting…' : 'Start Run'}</button>
       </div>
-      <div id="ck-start-why" className="muted small" role="status">{approvalOnly ? 'Approve the configuration above to start.' : reason && !blocked ? reason : ''}</div>
+      <div id="ck-start-why" className="muted small" role="status">{approvalOnly && !(approvedNote && ex.preflightStale) ? 'Approve the configuration above to start.' : reason && !blocked ? reason : ''}</div>
     </section>
   );
 }

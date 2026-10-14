@@ -77,6 +77,6 @@ fi
 # A GUI-launched run's working directory is the workspace, and Kriya discovers kriya.yaml there. It is excluded from git status (reset_demo.sh) and its
 # security-authority fields stay UNAPPROVED until an operator approves them: see SCENARIO.md, RESET step 2.
 cp "$WORK/config/kriya.yaml" "$WS/kriya.yaml"
-echo "placed config:   $WS/kriya.yaml (needs operator approval: cd the workspace && kriya authority approve)"
+echo "placed config:   $WS/kriya.yaml (needs operator approval: approve it in the app with Review & Approve, or cd the workspace && kriya authority approve)"
 if [ "$SCENARIO" = "03" ] && [ "$NO_SERVICES" = 0 ]; then "$DEMO_V2_DIR/scripts/stub_ctl.sh" start; fi
 echo "=== prepare complete (scenario $SCENARIO) ==="

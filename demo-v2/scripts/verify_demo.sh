@@ -78,7 +78,7 @@ preflight_check() {
   # STATE_DIRECTORY_NOT_OBSERVABLE is what the one-shot CLI always reports (only the desktop host knows its state directory); it says nothing about the run.
   blockers="$(printf '%s' "$blockers" | tr ',' '\n' | grep -v '^STATE_DIRECTORY_NOT_OBSERVABLE$' | paste -sd, - || true)"
   case ",$blockers," in
-    *,CONFIG_AUTHORITY_REFUSED,*) fail "the scenario configuration is NOT approved (cd the workspace && kriya authority approve); Kriya refuses it as it stands" ;;
+    *,CONFIG_AUTHORITY_REFUSED,*) fail "the scenario configuration is NOT approved (approve it in the app with Review & Approve, or cd the workspace && kriya authority approve); Kriya refuses it as it stands" ;;
     ,,) pass "Kriya's preflight reports no blockers (the configuration is approved and loads)" ;;
     *) fail "preflight reports blockers: $blockers" ;;
   esac
