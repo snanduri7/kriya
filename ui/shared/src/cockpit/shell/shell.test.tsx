@@ -25,6 +25,19 @@ describe('AppShell layout and navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Runs' })).toBeInTheDocument();
   });
 
+  it('numbers destinations by their position in the rail (owner decision 2026-10-14): 1 Runs, 2 Workspace, 3 Skills, 4 Tools, 5 Settings; a number past the last does nothing', async () => {
+    renderShell();
+    const rail = await screen.findByRole('navigation', { name: 'Destinations' });
+    await waitFor(() => expect(within(rail).getAllByRole('button')).toHaveLength(5));
+    for (const [key, heading] of [['2', 'Workspace'], ['3', 'Skills'], ['4', 'Tools'], ['5', 'Settings'], ['1', 'Runs']] as const) {
+      fireEvent.keyDown(rail, { key, ctrlKey: true });
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      expect(within(rail).getByRole('button', { name: heading })).toHaveAttribute('aria-current', 'page');
+    }
+    fireEvent.keyDown(rail, { key: '6', ctrlKey: true });
+    expect(within(rail).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
+  });
+
   it('hides destinations whose capabilities are absent: no rail slot, no "coming soon"', async () => {
     renderShell({ registry: createCockpitRegistry({ disabled: ['workspace'] }) });
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });

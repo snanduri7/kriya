@@ -44,3 +44,9 @@ tries to supply one gets `available: false` with `CONFIG_AUTHORITY_REFUSED`, and
 
 `tests/test_skill_service.py`, `tests/test_tool_service.py`, `tests/test_kup_catalog.py` (Python); `ui/standalone/test/catalog_ipc.test.ts` (request grammar), `catalog_real.test.ts` (real `kriya kup-stdio`);
 `ui/shared/src/cockpit/modules/{skills,tools}/*.test.tsx` (pages) and `providers/fixture/catalog.contract.test.ts` (fixture shapes against the generated validators).
+
+## Navigation shortcuts
+
+The rail numbers destinations by position, and Ctrl/Cmd+1..9 selects the destination at that position: 1 Runs, 2 Workspace, 3 Skills, 4 Tools, 5 Settings. Inserting Skills and Tools before Settings moved Settings from 3 to 5.
+This is the owner's decision (2026-10-14): navigation is not reordered to preserve an old number. A destination whose capability is absent has no rail slot, so numbering follows what is shown.
+The earlier design documents under `handover/GUI-RUN-COCKPIT-V1_1/` still say "1-3"; they are historical design records. Pinned by `ui/shared/src/cockpit/shell/shell.test.tsx`.

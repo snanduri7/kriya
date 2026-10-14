@@ -14,7 +14,8 @@ provenance-backed skill, make that skill visible in the GUI, and then use it for
 **STOPPED AND RETURNED TO THE OWNER (architectural stop rule 4), 2026-10-14. Nothing here is validated.** Four live attempts with py-tree-sitter 0.25 as the candidate technology established steps 1 and part of 2 only:
 the skill is absent, the knowledge guard flags both libraries (HIGH, post-cutoff) once the workspace has a `requirements.txt` and the goal pins them as `name==version`, and the operator's acknowledgement is recorded in the governance log.
 Every run that got that far then stopped in planning (`PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED`, identical across all repair rounds), so no lookup, reference review or skill was ever produced; steps 3-10 are NOT measured.
-Full evidence, the classification and the options: `handover/DEMO-V2/FINDINGS.md` (F1, F2) and registry row `PLAN-EXTERNAL-PACKAGE-CAPABILITY-001`.
+Classification (2026-10-14, deterministic reproducer, no new model run): the planner blocker is a `PLANNER_MODEL_DEFECT`: the Planner put an installed package into a planned file's `requires_capabilities` against its own stated contract, in 6 of 6 recorded answers. Per the owner's rule no validator or prompt change was made and no technology was switched; the scenario waits for the owner.
+Full evidence, the traced path and the options: `handover/DEMO-V2/FINDINGS.md` (F1, F2), test `tests/test_plan_external_package_capability_001.py`, registry row `PLAN-EXTERNAL-PACKAGE-CAPABILITY-001`.
 Earlier evidence does not establish this scenario either: Artemis (demo-02) acquired documents that did not cover its task; Ignite (demo-01) used a pre-authored skill. The groundwork (goal, configuration templates, `prompt_rules.json`, `scripts/answer_prompts.py`) is kept and UNVALIDATED.
 
 ## PRECONDITIONS

@@ -119,6 +119,10 @@ filterwarnings = [
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# Exactly ONE directory is excluded, and not by a per-file ignore: handover/MODEL-ROUTING-V1/tools/ holds the Model Routing V1 experiment tooling. It is frozen and its digests are
+# recorded in the task-bank manifest (BANK_MANIFEST_HASH), so retroactive lint or formatting fixes would change experiment evidence. It is not an active Kriya product module. All other
+# handover material, and every product, plugin and test file, stays linted.
+extend-exclude = ["handover/MODEL-ROUTING-V1/tools"]
 
 [tool.ruff.lint]
 select = [
