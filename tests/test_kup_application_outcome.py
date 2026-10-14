@@ -4,7 +4,13 @@ from __future__ import annotations
 import pytest
 
 from kriya.core.trace import TraceLogger
-from kriya.kup.application_outcome import OUTPUT_MAX_CHARS, STATUS_EXECUTED, STATUS_NOT_APPLICABLE, STATUS_UNKNOWN, application_outcome
+from kriya.kup.application_outcome import (
+    OUTPUT_MAX_CHARS,
+    STATUS_EXECUTED,
+    STATUS_NOT_APPLICABLE,
+    STATUS_UNKNOWN,
+    application_outcome,
+)
 from kriya.kup.inspect import history_detail
 from kriya.kup.store import Snapshot
 
