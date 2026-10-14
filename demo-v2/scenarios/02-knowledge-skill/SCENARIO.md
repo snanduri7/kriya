@@ -11,15 +11,14 @@ Show that Kriya can acquire missing technology knowledge through a governed, app
 provenance-backed skill, make that skill visible in the GUI, and then use it for a concrete task with public lookup unavailable.
 
 ## STATUS
-**PROVISIONAL. No technology is selected and nothing here is validated.** Historical evidence does not establish this scenario:
-- Demo-02 (Artemis, `~/kriya-live-demo/demo-02-knowledge-acquisition/evidence/v4/LEARN-CLASSIFICATION.md`): acquisition mechanics
-  succeeded (35 rules with provenance), but the offline-reuse generation FAILED because the acquired material described running a
-  standalone broker, not the embedded API the goal needed. It is not a success narrative.
-- Demo-01 (Ignite): a pre-authored skill made the run succeed (a skill-versus-no-skill comparison), which is not acquisition.
-Neither is reused as proof. A technology must be selected and the ten-step sequence below measured end to end.
+**STOPPED AND RETURNED TO THE OWNER (architectural stop rule 4), 2026-10-14. Nothing here is validated.** Four live attempts with py-tree-sitter 0.25 as the candidate technology established steps 1 and part of 2 only:
+the skill is absent, the knowledge guard flags both libraries (HIGH, post-cutoff) once the workspace has a `requirements.txt` and the goal pins them as `name==version`, and the operator's acknowledgement is recorded in the governance log.
+Every run that got that far then stopped in planning (`PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED`, identical across all repair rounds), so no lookup, reference review or skill was ever produced; steps 3-10 are NOT measured.
+Full evidence, the classification and the options: `handover/DEMO-V2/FINDINGS.md` (F1, F2) and registry row `PLAN-EXTERNAL-PACKAGE-CAPABILITY-001`.
+Earlier evidence does not establish this scenario either: Artemis (demo-02) acquired documents that did not cover its task; Ignite (demo-01) used a pre-authored skill. The groundwork (goal, configuration templates, `prompt_rules.json`, `scripts/answer_prompts.py`) is kept and UNVALIDATED.
 
 ## PRECONDITIONS
-- A technology chosen and qualified: a public, current documentation set whose lookup yields rules that cover what the chosen task needs.
+- A technology chosen and qualified (NONE is, see STATUS): a public, current documentation set whose lookup yields rules that cover what the chosen task needs.
   Selection criterion: a rehearsal of steps 1-10 below passes; "the page is reachable" is not enough.
 - Local SearXNG (or the configured search endpoint) reachable for the acquisition step only; model server reachable.
 - The GUI does NOT approve lookups or knowledge-gap acknowledgements (a desktop launch declines them by design, `kriya/control/launch.py`).

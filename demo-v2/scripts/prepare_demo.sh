@@ -18,7 +18,7 @@ done
 [ -n "$SCENARIO" ] || die "--scenario is required"
 assert_work_outside_repo
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in 01|03) ;; *) die "only scenarios 01 and 03 can be prepared (02 is PROVISIONAL); see its SCENARIO.md" ;; esac
+case "$SCENARIO" in 01|03) ;; *) die "only scenarios 01 and 03 can be prepared (02 is STOPPED); see its SCENARIO.md" ;; esac
 
 "$DEMO_V2_DIR/scripts/reset_demo.sh" --scenario "$SCENARIO"
 

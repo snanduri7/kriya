@@ -22,10 +22,10 @@ scenarios:
   - id: 02-knowledge-skill
     title: Terminal acquisition, GUI skill view, offline GUI run
     dir: scenarios/02-knowledge-skill
-    status: PROVISIONAL_NO_TECHNOLOGY_SELECTED
+    status: STOPPED_RETURNED_TO_OWNER
     model: live_local
     network: acquisition_step_only
-    fixtures: []
+    fixtures: [knowledge-skill]
     expected: null
     controlled: false
   - id: 03-controlled-repair
@@ -46,6 +46,10 @@ fixtures:
     dir: fixtures/controlled-repair
     identity_file: fixtures/controlled-repair/fixture.env
     in_git: true       # self-authored for Demo V2
+  - id: knowledge-skill
+    dir: fixtures/knowledge-skill
+    identity_file: fixtures/knowledge-skill/fixture.env
+    in_git: true       # self-authored; UNVALIDATED (scenario 02 is stopped)
 scripts:
   prepare: scripts/prepare_demo.sh
   reset: scripts/reset_demo.sh

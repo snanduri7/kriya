@@ -43,7 +43,7 @@ check "product tracked tree is clean (evidence binds to an exact revision)" test
 
 case "$SCENARIO" in
   01|03) ;;
-  02) skip "scenario 02 is not specified far enough to verify (see its SCENARIO.md STATUS)"; finish ;;
+  02) skip "scenario 02 is stopped and not validated (see its SCENARIO.md STATUS)"; finish ;;
   *) die "unknown scenario $SCENARIO" ;;
 esac
 

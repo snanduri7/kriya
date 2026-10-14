@@ -72,7 +72,7 @@ def test_manifest_matches_the_files_and_the_scenario_status_text() -> None:
         assert directory.is_dir() and directory.name == scenario["id"]
         status = _sections((directory / "SCENARIO.md").read_text(encoding="utf-8"))["STATUS"]
         # The manifest's status and the scenario's own words must not disagree about what has been measured.
-        keyword = {"REHEARSED_ONCE_PASS": "REHEARSED ONCE, PASS", "PROVISIONAL_NO_TECHNOLOGY_SELECTED": "PROVISIONAL",
+        keyword = {"REHEARSED_ONCE_PASS": "REHEARSED ONCE, PASS", "STOPPED_RETURNED_TO_OWNER": "STOPPED AND RETURNED TO THE OWNER",
                    "REHEARSED_PASS_REPRODUCIBLE_CONTROLLED": "REHEARSED, PASS, REPRODUCIBLE"}[scenario["status"]]
         assert keyword in status, scenario["id"]
         if scenario["expected"]:
@@ -140,4 +140,4 @@ def test_the_unspecified_scenario_refuses_to_prepare_or_reset() -> None:
             result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", scenario, *extra],
                                     capture_output=True, text=True, check=False, timeout=60)
             assert result.returncode != 0, (script, scenario)
-            assert "PROVISIONAL" in result.stderr
+            assert "STOPPED" in result.stderr

@@ -1,0 +1,9 @@
+{
+  "notice": "The ONLY prompts the acquisition driver answers. Each is a decision a person would make at the terminal; the driver answers it as the scenario's operator and records the prompt, the answer and the rule in the governance log. Any other prompt stops the run.",
+  "rules": [
+    {"id": "knowledge-risk", "match": "proceed anyway despite the knowledge risk", "answer": "y", "why": "the operator accepts the stated knowledge risk so that Kriya can try the governed acquisition"},
+    {"id": "send-search", "match": "Send this search\\?", "answer": "y", "why": "the operator approves this exact outbound lookup (only bare technology-name terms are sent; Kriya shows them first)"},
+    {"id": "use-references", "match": "Use these references for this run\\?", "answer": "y", "why": "the operator reviewed the found references and accepts them for this run"},
+    {"id": "apply-changes", "match": "approve applying these changes to the codebase", "answer": "y", "why": "the operator reviewed the proposed change"}
+  ]
+}
