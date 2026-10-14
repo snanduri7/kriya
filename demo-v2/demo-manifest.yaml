@@ -1,0 +1,48 @@
+# Machine-readable index of Demo V2. Checked against the files on disk by tests/test_demo_v2_assets.py.
+schema_version: 1
+product_baseline:
+  tag: kriya-v1.2.0-pre-modularization
+  commit: 1064b9e9f5cdee215b82ebdef7c4a177e37dce8a
+  product_code_commit: 9de5404
+solver_readiness_statement: "BACKEND SOLVER READINESS: FAIL. SOLVER REPEATABILITY: NOT ESTABLISHED. Demo V2 does not qualify the solver."
+work_area:
+  env: DEMO_V2_WORK
+  default: ~/kriya-demo-v2-work
+  note: "Clones, build output, state, memory and evidence are materialised here, never inside the repository."
+scenarios:
+  - id: 01-normal-coding
+    title: Normal GUI coding flow (brownfield bug fix)
+    dir: scenarios/01-normal-coding
+    status: SPECIFIED_UNREHEARSED
+    model: live_local
+    network: none
+    fixtures: [brownfield-spring]
+    expected: expected/scenario-01.md
+    controlled: false
+  - id: 02-knowledge-skill
+    title: Terminal acquisition, GUI skill view, offline GUI run
+    dir: scenarios/02-knowledge-skill
+    status: PROVISIONAL_NO_TECHNOLOGY_SELECTED
+    model: live_local
+    network: acquisition_step_only
+    fixtures: []
+    expected: null
+    controlled: false
+  - id: 03-controlled-repair
+    title: Controlled repair of a wrong model candidate
+    dir: scenarios/03-controlled-repair
+    status: DESIGN_FEASIBILITY_PROBE_PENDING
+    model: scripted_stub
+    network: none
+    fixtures: []
+    expected: null
+    controlled: true   # CONTROLLED / SCRIPTED: must be labelled as such wherever it is shown
+fixtures:
+  - id: brownfield-spring
+    dir: fixtures/brownfield-spring
+    identity_file: fixtures/brownfield-spring/fixture.env
+    in_git: false      # third-party snapshot, license unverified: materialised at prep time and checked against the identity file
+scripts:
+  prepare: scripts/prepare_demo.sh
+  reset: scripts/reset_demo.sh
+  verify: scripts/verify_demo.sh
