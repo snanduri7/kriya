@@ -11,7 +11,7 @@ claim production readiness.
 
 | ID | Title | Model | Network | Status |
 |---|---|---|---|---|
-| `01-normal-coding` | Normal GUI coding flow (brownfield bug fix) | live local model | none | SPECIFIED, **UNREHEARSED** on this baseline |
+| `01-normal-coding` | Normal GUI coding flow (brownfield bug fix) | live local model | none | **REHEARSED ONCE, PASS** (live, 2026-10-14) |
 | `02-knowledge-skill` | Terminal acquisition, GUI skill view, offline GUI run | live local model | acquisition step only | **PROVISIONAL** - no technology selected yet |
 | `03-controlled-repair` | Controlled repair of a wrong model candidate | **scripted stub (CONTROLLED)** | none | **DESIGN** - feasibility probe pending |
 

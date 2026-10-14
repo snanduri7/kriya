@@ -72,7 +72,7 @@ def test_manifest_matches_the_files_and_the_scenario_status_text() -> None:
         assert directory.is_dir() and directory.name == scenario["id"]
         status = _sections((directory / "SCENARIO.md").read_text(encoding="utf-8"))["STATUS"]
         # The manifest's status and the scenario's own words must not disagree about what has been measured.
-        keyword = {"SPECIFIED_UNREHEARSED": "UNREHEARSED", "PROVISIONAL_NO_TECHNOLOGY_SELECTED": "PROVISIONAL",
+        keyword = {"REHEARSED_ONCE_PASS": "REHEARSED ONCE, PASS", "PROVISIONAL_NO_TECHNOLOGY_SELECTED": "PROVISIONAL",
                    "DESIGN_FEASIBILITY_PROBE_PENDING": "DESIGN"}[scenario["status"]]
         assert keyword in status, scenario["id"]
         if scenario["expected"]:

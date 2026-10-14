@@ -12,9 +12,12 @@ the repository already exists (22 classes, 53 passing tests) and Kriya must touc
 The bug: `DefaultDriverService.delete(Long)` sets `deleted = true` on the entity but never persists it through the repository.
 
 ## STATUS
-**SPECIFIED. UNREHEARSED on this product baseline.** What has been measured on `1064b9e` (no model involved): the fixture
-materialises from its pinned commit with the expected target hash, the offline Maven build compiles, and the 53 baseline tests
-pass in about 13 s. Everything that needs the GUI or a model (the RUN section) has not been run in Demo V2 and is not claimed.
+**REHEARSED ONCE, PASS (2026-10-14, product `e82bb11` on `demo/v2`, tag baseline `kriya-v1.2.0-pre-modularization`).** One live run through the packaged desktop app with the real
+`qwen3-coder:30b`: Open Folder 152 ms, Start Run acknowledged 102 ms, the run reached the human change review, the review was approved in the GUI (51 ms), Kriya resumed and
+the run ended `success`, elapsed 2:06 (1 unit, 1 attempt, 6 model requests, 11 gate results, 80 evidence records, commit COMMITTED). `verify_demo.sh --phase post`: 0 failed (exactly one
+file changed, one line added, independent offline tests 53/0, Kriya state recorded). Evidence: `handover/DEMO-V2/evidence/scenario-01-rehearsal-1/` (results.json, screenshots).
+**This is one run of a stochastic model, not a reliability claim** (`BACKEND SOLVER READINESS: FAIL`, `SOLVER REPEATABILITY: NOT ESTABLISHED`). The clean-reset rehearsal at the end of Demo V2 is a second, independent run.
+Also measured with no model: the fixture materialises from its pinned commit with the expected target hash, and the offline build passes 53 tests in about 13 s.
 
 ## PRECONDITIONS
 - Product checkout contains tag `kriya-v1.2.0-pre-modularization` with a clean tracked tree; `.venv` built (`kriya` on `.venv/bin`).
@@ -27,7 +30,8 @@ pass in about 13 s. Everything that needs the GUI or a model (the RUN section) h
   workspace-supplied configuration as untrusted: **10 security-authority fields** (`autonomy.mode`, `embedding.base_url`, `llm.base_url`, `llm_chain`, `paths.memory`, `paths.skills`,
   `paths.state`, `search.base_url`, `workflow_controller.enabled`, `workflow_controller.mode`) are refused until an operator approves them. Approval is a deliberate human
   step (RESET step 2), stored outside the workspace under the operator's HOME (`~/.kriya/authority/<workspace id>.json`), and revoked by the next reset.
-- **Not yet confirmed by a GUI-driven run:** that the desktop run picks up this configuration and shows it in Run Setup. `verify_demo.sh --phase pre` proves Kriya's own preflight accepts it; the rehearsal must confirm the GUI shows the same routing.
+- **Confirmed by the rehearsal:** the desktop run used this configuration (Run Setup reported "Operator-only fields are present and covered by a durable approval · kriya.yaml in this folder"), and the run's records landed in the scenario's state directory.
+- The GUI child's fixed environment has no `JAVA_HOME`, so the macOS `java` shim selects JDK 21 on this machine; measured with no model, the fixture builds and passes 53/53 under that environment.
 
 ## PRODUCT HEAD/TAG COMPATIBILITY
 Written against `kriya-v1.2.0-pre-modularization` (`1064b9e`, product code `9de5404`). `verify_demo.sh` requires that tag to be an ancestor of HEAD.

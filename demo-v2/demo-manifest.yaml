@@ -13,7 +13,7 @@ scenarios:
   - id: 01-normal-coding
     title: Normal GUI coding flow (brownfield bug fix)
     dir: scenarios/01-normal-coding
-    status: SPECIFIED_UNREHEARSED
+    status: REHEARSED_ONCE_PASS
     model: live_local
     network: none
     fixtures: [brownfield-spring]
