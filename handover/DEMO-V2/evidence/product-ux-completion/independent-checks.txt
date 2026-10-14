@@ -1,0 +1,8 @@
+== greenfield journey (app exit 0) ==
+project folder created by New Project: yes
+kriya.yaml created by Project Setup (not by the renderer): yes
+kriya.yaml first lines: # Kriya project configuration - created by Project Setup.|# Recommended profile for local models: the governed (enforced) workflow, changes held for your approval, no live web lookup.|# Settings Kriya treats as operator-controlled (model server addresses, the workflow mode) need your approval before a run; change this file and it will ask again.|
+kriya authority inspect (real CLI, after the app exited): Local approval at /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-ux-greenfield.FSwNPm/home/.kriya/authority/42c89c1bf67f629a1c255938e508537e692cd9934235055aea652794b5453e25.json is CURRENT and covers all pending fields.
+files written into the project besides kriya.yaml and Kriya's .kriya: 0
+== brownfield journey (app exit 0) ==
+files changed in the brownfield project by the app: 0 (the controlled body applies nothing; the review shows a scripted diff)
