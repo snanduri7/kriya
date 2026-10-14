@@ -60,6 +60,7 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     case 'workspace.create':
     case 'configuration.approval_status':
     case 'configuration.approve':
+    case 'change_approval.review':
     case 'execution.context':
     case 'execution.model_probe':
     case 'skills.list':

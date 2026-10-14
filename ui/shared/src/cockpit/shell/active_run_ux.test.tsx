@@ -110,7 +110,7 @@ describe('the compact run strip: findable from every page, Return to Run, and th
   it('while a run is active, "Return to Run" selects the live run and returns to the Project page from any page or historical selection', async () => {
     const { host, store } = await start({ outcome: 'success' });
     goTo('Runs');
-    const history = await screen.findAllByRole('button', { name: /success|failure/ });
+    const history = await screen.findAllByRole('button', { name: /Succeeded|Failed/ });
     fireEvent.click(history[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     expect(store.getState().liveLaunchId).toBeNull();

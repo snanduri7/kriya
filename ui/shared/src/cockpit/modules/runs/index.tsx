@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, PROJECT_PAGE, RUN_DOCUMENTS_PAGE, ofKind, useDispatch, useExecution, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { AvailabilityView, PROJECT_PAGE, RunCardView, RUN_DOCUMENTS_PAGE, useDispatch, useExecution, useNavigate, useModuleSelection, useProvider, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
 import { NO_FILTER, filterRuns, isFiltering, type RangeFilter, type RunFilter, type StatusFilter } from './filter';
 import type { HistoryList, RunSummary } from '../../../model/kup';
 
@@ -13,7 +13,6 @@ function scopeNote(scope: Scope): string {
   return `${parts.join('; ')}.${scope.truncated ? ' The scan stopped before the end of history; load more to continue.' : ''}`;
 }
 
-const statusLabel = (status: string | null | undefined) => (status === 'in_progress' ? 'Unfinished' : status ?? 'status not recorded');
 
 type Scope = NonNullable<HistoryList['workspace_scope']>;
 interface Loaded { key: string; runs: RunSummary[]; next: string | null; error: string | null; busy: boolean; scope: Scope | null }
@@ -22,9 +21,6 @@ function RunsList() {
   const provider = useProvider();
   const session = useSession();
   const selected = useModuleSelection('runId');
-  const evidence = useRunEvidence();
-  // The attempt count of the SELECTED run, derived from its loaded evidence (the trace row's own `attempts` is a retry counter, so it is never shown as the count; other rows load no evidence just to count).
-  const observedAttempts = evidence.state === 'ready' || evidence.state === 'degraded' ? ofKind(evidence.data.records, 'attempt.opened').length : null;
   const dispatch = useDispatch();
   const snapshotId = session.snapshotId;
   const go = useNavigate();
@@ -89,7 +85,7 @@ function RunsList() {
       ) : null}
       {(current?.runs.length ?? 0) > 0 ? (
         <div className="ck-filters" role="search" aria-label="Filter runs">
-          <input type="search" aria-label="Filter runs" placeholder="Search goal, status or id" value={filter.query} onChange={(e) => setFilter({ ...filter, query: e.target.value })} className="ck-filter" />
+          <input type="search" aria-label="Filter runs" placeholder="Search by what you asked" value={filter.query} onChange={(e) => setFilter({ ...filter, query: e.target.value })} className="ck-filter" />
           <select aria-label="Status" value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value as StatusFilter })}>
             <option value="all">Any status</option><option value="success">Success</option><option value="failure">Failure</option><option value="unfinished">Unfinished</option><option value="not_recorded">Status not recorded</option>
           </select>
@@ -101,7 +97,7 @@ function RunsList() {
       ) : null}
       {snapshotId === null && session.status.state === 'unavailable' && session.status.reason === 'store_absent' ? (
         <div className="ck-state" data-testid="no-history">
-          <strong>No runs yet.</strong>
+          <strong>{active ? 'No completed runs yet.' : 'No runs yet.'}</strong>
           Nothing has been recorded for this project. Work starts on the Project page.
           <div><button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button>{' '}<button type="button" className="ck-quiet" title="Ask Kriya for a new consistent snapshot of its history" onClick={() => void session.acquire()}>Check for history again</button></div>
         </div>
@@ -117,8 +113,7 @@ function RunsList() {
             {runs.map((run) => (
               <li key={run.run_id}>
                 <button type="button" aria-selected={run.run_id === selected} onClick={() => dispatch({ type: 'selectRun', runId: run.run_id })}>
-                  <div>{run.goal ?? run.run_id}</div>
-                  <div className="muted small">{statusLabel(run.status)}{run.run_id === selected && observedAttempts !== null ? ` · ${observedAttempts} observed attempt(s)` : ''}{run.duration_sec != null ? ` · ${Math.round(run.duration_sec * 10) / 10}s` : ''}</div>
+                  <RunCardView run={run} />
                 </button>
               </li>
             ))}
@@ -133,7 +128,7 @@ function RunsList() {
         </div>
       ) : null}
       {current && filtering && filtered.runs.length === 0 && current.runs.length > 0 ? <div className="ck-state"><strong>No loaded run matches these filters</strong><button type="button" onClick={() => setFilter(NO_FILTER)}>Clear filters</button></div> : null}
-      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No runs yet.</strong>Kriya found no run whose evidence names this project. <button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button></div> : null}
+      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>{active ? 'No completed runs yet.' : 'No runs yet.'}</strong>Kriya found no run whose evidence names this project. <button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button></div> : null}
       {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
     </div>

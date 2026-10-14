@@ -166,7 +166,7 @@ function RunContextProvider({ children }: { children: ReactNode }) {
       const revision = text(manifest.base_revision);
       const treeHash = text(manifest.base_tree_hash);
       const ctx: RunContext = {
-        runId, snapshotId, provider: provider.kind, goal: null, status: null, failureCategory: null, storedAttempts: null, milestone: { groupId: null, index: null, total: null },
+        runId, snapshotId, provider: provider.kind, goal: null, displayGoal: null, status: null, failureCategory: null, storedAttempts: null, milestone: { groupId: null, index: null, total: null },
         workspace: { identity: text(manifest.workspace_identity), path: text(manifest.workspace_path) }, baseline: { revision, treeHash, source: revision || treeHash ? 'recorded' : 'not_recorded' }, changeType: null, capabilities: caps,
         evidence: { store: 'present', captureMode: text(manifest.capture), sealed: evidence.data.verify?.sealed ?? null, verification: evidence.data.verify?.status ?? null, consistency: evidence.data.provenance.records?.consistency?.kind ?? null },
       };
@@ -181,7 +181,7 @@ function RunContextProvider({ children }: { children: ReactNode }) {
     const revision = text(manifest.base_revision);
     const treeHash = text(manifest.base_tree_hash);
     const ctx: RunContext = {
-      runId, snapshotId, provider: provider.kind, goal: run.goal ?? null, status: run.status ?? null, failureCategory: run.failure_category ?? null, storedAttempts: typeof run.attempts === 'number' ? run.attempts : null,
+      runId, snapshotId, provider: provider.kind, goal: run.goal ?? null, displayGoal: run.display_goal ?? null, status: run.status ?? null, failureCategory: run.failure_category ?? null, storedAttempts: typeof run.attempts === 'number' ? run.attempts : null,
       milestone: { groupId: run.milestone_group_id ?? null, index: run.milestone_index ?? null, total: run.milestone_total ?? null },
       workspace: { identity: text(manifest.workspace_identity), path: text(manifest.workspace_path) },
       baseline: { revision, treeHash, source: revision || treeHash ? 'recorded' : 'not_recorded' },

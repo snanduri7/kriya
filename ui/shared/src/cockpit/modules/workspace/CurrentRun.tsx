@@ -1,64 +1,114 @@
-import { ApprovalReview, Badge, CopyText, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, describeGate, progressCounts, runPhase, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, type RunPhase } from '../../core';
+import { ApprovalReview, Badge, CopyText, FileDiff, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
+const GROUP_MARK = { passed: '✓', failed: '✕', unknown: '•' } as const;
 const APPROVAL_KIND: Record<string, string> = {
   change_approval: 'a proposed change needs approval', knowledge_gap_acknowledgement: 'a knowledge gap needs acknowledgement', skill_gap_decision: 'a skill gap needs a decision',
   skill_conflict_decision: 'two skills may conflict', web_lookup_review: 'live-lookup references need review', web_lookup_query: 'a live-lookup search needs approval',
 };
 const detailLines = (d: Record<string, unknown>): string[] => Object.entries(d).flatMap(([k, v]) => (Array.isArray(v) && v.length ? [`${k}: ${v.map(String).join(', ')}`] : []));
 
-/** The run's outcome in plain words, from the recorded gates and staged changes of THIS run's evidence. Nothing is shown that the records do not say. */
-function Outcome({ phase }: { phase: RunPhase }) {
+/** The run that finished SUCCESSFULLY, as a result: what changed, why, whether it works, and (when Kriya recorded executing it) what the application printed. */
+function Completed({ phase }: { phase: RunPhase }) {
   const ex = useExecution();
   const run = ex.run!;
   const outcome = run.outcome!;
-  // Independent read of THIS finished run's row (after the refreshed snapshot is pinned); it never changes which run is selected elsewhere.
-  const facts = useRunRowFacts(phase.state === 'COMPLETED' ? outcome.traceRunId : null, run.timing.refreshedAt !== null);
-  const changes = facts && facts.state === 'ready' ? facts.changes : null;
+  const snapshotReady = run.timing.refreshedAt !== null;
+  // Independent reads of THIS finished run (after the refreshed snapshot is pinned); none changes which run is selected elsewhere.
+  const facts = useRunRowFacts(outcome.traceRunId, snapshotReady);
+  const application = useApplicationOutcome(outcome.traceRunId, snapshotReady);
+  const approvedReview = run.status?.launch.pending_approval?.status === 'APPROVED' ? run.status.launch.pending_approval : null;
+  const reviewed = useChangeReview(run.launchId, approvedReview?.review_id ?? null);
+  const review = reviewed.state === 'ready' || reviewed.state === 'degraded' ? reviewed.data : null;
   const gates = facts && facts.state === 'ready' ? facts.gates : null;
-  const why = facts && facts.state === 'unavailable' ? `The recorded facts could not be read here (${facts.detail}). Use View Details.` : null;
-  const reading = (what: string) => (why ?? (outcome.traceRunId === null ? `No trace row was recorded, so ${what} are not available here.` : `Reading the recorded ${what}…`));
+  const files: ChangedFile[] | null = review
+    ? review.files.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions, changeType: f.change_type }))
+    : facts && facts.state === 'ready' ? facts.changes.map((c) => ({ path: c.path, additions: c.linesAdded, deletions: c.linesRemoved, changeType: c.kind === 'ADDED' || c.kind === 'CREATED' ? 'added' as const : null })) : null;
+  const why = review?.review_summary ?? review?.policy_note ?? null;
+  const unreadable = facts && facts.state === 'unavailable' ? `The recorded results could not be read here (${facts.detail}). Use View Details.` : null;
+  const reading = (what: string) => (unreadable ?? (outcome.traceRunId === null ? `No trace row was recorded, so ${what} are not available here.` : `Reading the recorded ${what}…`));
+  const groups = gates ? verificationGroups(gates) : null;
+  const app = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
+  const applied = outcome.commitResult === 'COMMITTED';
   return (
     <div className="ck-outcome">
-      {phase.state === 'COMPLETED' ? (
-        <>
-          <h3>Changed</h3>
-          {changes === null ? <p className="muted" role="status">{reading('changes')}</p>
-            : changes.length === 0 ? <p className="muted">No staged change is recorded for this run.</p>
-            : <ul aria-label="Changed files">{changes.map((c) => <li key={c.path}><span className="mono">{c.path}</span> <span className="muted small">{c.linesAdded !== null && c.linesRemoved !== null ? `+${c.linesAdded} −${c.linesRemoved}` : 'line counts not recorded'}</span></li>)}</ul>}
-          <h3>Validation</h3>
-          {gates === null ? <p className="muted" role="status">{reading('gates')}</p>
-            : gates.length === 0 ? <p className="muted">No gate result is recorded for this run.</p>
-            : <div className="ck-badges" aria-label="Validation">{gates.map((g) => <Badge key={g.type} tone={g.passed === true ? 'ok' : g.passed === false ? 'bad' : 'neutral'}>{g.passed === true ? '✓ ' : g.passed === false ? '✕ ' : ''}{describeGate(g)}</Badge>)}</div>}
-        </>
-      ) : (
-        <>
-          <h3>Reason</h3>
-          {outcome.approval ? (
-            <div>
-              <div><strong>{APPROVAL_KIND[outcome.approval.kind] ?? outcome.approval.kind}.</strong> {outcome.approval.reason}</div>
-              {detailLines(outcome.approval.details).map((l) => <div key={l} className="muted small mono">{l}</div>)}
-              <p className="muted small">{outcome.approval.kind === 'change_approval' ? 'Kriya could not hold this review open for you, so it stopped instead of deciding: nothing was approved on your behalf. Start a new run to review the change.' : 'Kriya stopped here instead of deciding for you. This version of the app cannot take this kind of decision: it must be performed outside the Kriya GUI (nothing was approved on your behalf).'}</p>
-            </div>
-          ) : <p>{outcome.detail}</p>}
-          {outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <p className="muted small"><strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></p> : null}
-          {phase.lastStage ? <p className="muted">Last stage the records show: <strong>{phase.lastStage}</strong>.</p> : <p className="muted">The records show no stage reached.</p>}
-        </>
-      )}
-      {phase.state === 'COMPLETED' ? (
-        <p className="ck-applied">
-          {outcome.commitResult === 'COMMITTED' ? <strong>✓ The change is applied to your folder.</strong> : <span>Kriya&apos;s record of applying the change says: <span className="mono">{outcome.commitResult ?? 'nothing recorded'}</span>. Check your folder.</span>}
-          {run.status?.launch.pending_approval?.status === 'APPROVED' ? ' You approved it.' : ''}
-        </p>
+      <p className="ck-applied" data-testid="applied-statement">
+        {applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya&apos;s record of applying the change says: <span className="mono">{outcome.commitResult ?? 'nothing recorded'}</span>. Check your folder.</span>}
+        {approvedReview ? ' You approved the change.' : ''}
+      </p>
+
+      <h3>What changed</h3>
+      {files === null ? <p className="muted" role="status">{reading('changes')}</p>
+        : files.length === 0 ? <p className="muted">No file change is recorded for this run.</p>
+        : (
+          <>
+            <p className="muted small" data-testid="change-summary">{changeSummary(files)}</p>
+            <ul aria-label="Changed files">{files.map((c) => <li key={c.path}><span className="mono">{c.path}</span> <span className="muted small">{c.additions !== null && c.deletions !== null ? `+${c.additions} −${c.deletions}` : ''}</span></li>)}</ul>
+          </>
+        )}
+
+      {why !== null ? <><h3>Why</h3><p data-testid="outcome-why">{why}</p></> : null}
+
+      <h3>Verification</h3>
+      {groups === null ? <p className="muted" role="status">{reading('results')}</p>
+        : groups.groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p>
+        : <ul className="ck-verify" aria-label="Verification">{groups.groups.flatMap((g) => g.lines).map((l) => <li key={l.text} data-status={l.status}><span aria-hidden="true">{GROUP_MARK[l.status]}</span> {l.text}</li>)}</ul>}
+
+      {app && app.status === 'EXECUTED' ? (
+        <section aria-label="Application" data-testid="application-outcome">
+          <h3>Application</h3>
+          <p data-status={app.succeeded ? 'passed' : 'failed'}>{app.succeeded ? '✓ Ran successfully' : `✕ The application did not run successfully${app.timed_out ? ' (it did not finish in time)' : app.exit_code !== null && app.exit_code !== undefined ? ` (exit code ${app.exit_code})` : ''}`}</p>
+          {app.command ? <div className="muted small">Command <span className="mono">{app.command}</span></div> : null}
+          <pre className="mono ck-output" aria-label="Application output">{app.stdout?.text || app.stderr?.text || '(no output)'}</pre>
+          {app.stdout?.truncated || app.stderr?.truncated ? <p className="muted small">The output is longer than can be shown here.</p> : null}
+        </section>
+      ) : null}
+
+      {groups && groups.technical.length ? (
+        <details className="ck-tech">
+          <summary>Technical verification</summary>
+          <ul aria-label="Technical verification">{groups.technical.map((g, i) => <li key={`${g.type}${i}`} className="mono small">{g.passed === true ? '✓' : g.passed === false ? '✕' : '•'} {g.type}</li>)}</ul>
+        </details>
       ) : null}
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
-      {phase.state !== 'COMPLETED' ? <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p> : null}
+      {phase.state === 'COMPLETED' && review && review.files.length ? (
+        <details className="ck-tech"><summary>The approved change</summary>{review.files.map((f) => <FileDiff key={f.path} file={f} />)}</details>
+      ) : null}
     </div>
   );
 }
 
-/** The run this window started, as the whole page: what Kriya is doing now, whether it needs the person, and the outcome. Everything comes from Kriya's records through runPhase. */
+/** A run that did not complete: what happened, how far it got, and what the person can do; reason codes and raw detail stay under Details. */
+function Stopped({ phase }: { phase: RunPhase }) {
+  const ex = useExecution();
+  const run = ex.run!;
+  const outcome = run.outcome!;
+  return (
+    <div className="ck-outcome">
+      <p data-testid="what-happened"><span className="muted">What happened</span><br />
+        {outcome.approval ? (
+          <span><strong>{APPROVAL_KIND[outcome.approval.kind] ?? outcome.approval.kind}.</strong> {outcome.approval.reason}</span>
+        ) : <span>{outcome.detail}</span>}
+      </p>
+      {outcome.approval ? (
+        <div>
+          {detailLines(outcome.approval.details).map((l) => <div key={l} className="muted small mono">{l}</div>)}
+          <p className="muted small">{outcome.approval.kind === 'change_approval' ? 'Kriya could not hold this review open for you, so it stopped instead of deciding: nothing was approved on your behalf. Start a new run to review the change again.' : 'Nothing was approved on your behalf. A desktop run stops at a decision it cannot take for you.'}</p>
+        </div>
+      ) : null}
+      <p data-testid="last-stage"><span className="muted">How far it got</span><br />{phase.lastStage ? <span>{phase.lastStage}</span> : <span>It stopped before any work was recorded.</span>}</p>
+      {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
+      <details className="ck-tech">
+        <summary>Technical reason</summary>
+        <div className="muted small">{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span><strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : <span>Outcome kind <span className="mono">{outcome.kind}</span></span>}</div>
+        <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p>
+      </details>
+    </div>
+  );
+}
+
+/** The run this window started, as the whole page: what Kriya is doing now, whether it needs the person, and the result. Everything comes from Kriya's records through runPhase and the presentation layer. */
 export function CurrentRun() {
   const ex = useExecution();
   const dispatch = useDispatch();
@@ -69,35 +119,37 @@ export function CurrentRun() {
   const phase = runPhase(run);
   const finished = phase.terminal;
   const outcome0 = run.outcome;
-  const goalChars = run.status?.launch.goal.chars ?? null;
+  const decided = run.status?.launch.pending_approval?.status;
+  const finishing = !finished && !run.review && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED';
   const viewDetails = (tab?: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => {
     if (finished && run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     else dispatch({ type: 'selectLiveRun', launchId: run.launchId });
     if (tab) dispatch({ type: 'centralTab', tab });
     go(RUN_DOCUMENTS_PAGE);
   };
+  const heading = finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : finishing ? 'Finishing your change' : phase.label;
   return (
     <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
       <div className="ck-current-head">
         <div role="status" aria-live="polite" className="ck-current-status">
           <span className={`ck-dot ${phase.tone}`} aria-hidden="true">{finished ? (phase.state === 'COMPLETED' ? '✓' : phase.state === 'STOPPED' ? '■' : '✕') : '●'}</span>
-          <h2>{finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : phase.label}</h2>
+          <h2>{heading}</h2>
           <Badge tone={TONE[phase.tone]}>{finished ? run.outcome!.label : phase.state === 'WAITING_FOR_APPROVAL' ? 'needs you' : 'in progress'}</Badge>
         </div>
         {elapsed ? <span className="muted small" title="Local clock since the launch was recorded - presentation only">elapsed {elapsed}</span> : null}
       </div>
-      <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal.trim() ? ex.goal : `(the goal text is not kept by Kriya; ${goalChars ?? '?'} characters)`}</div></div>
-      {!finished ? <p className="ck-detail">{phase.detail}</p> : null}
-      {phase.steps ? (
+      {ex.goal.trim() ? <div className="ck-goalline"><span className="muted">Goal</span><div>{ex.goal}</div></div> : null}
+      {finishing ? <p className="ck-detail" data-testid="finishing-note">{phase.detail}</p> : null}
+      {phase.steps && !finished ? (
         <ol className="ck-steps" aria-label="Progress">
           {phase.steps.map((s) => <li key={s.id} data-status={s.status} aria-current={s.status === 'current' ? 'step' : undefined}><span aria-hidden="true">{MARK[s.status]}</span> {s.label}<span className="sr-only"> ({s.status === 'done' ? 'done' : s.status === 'current' ? 'in progress' : 'not started'})</span></li>)}
         </ol>
       ) : null}
+      {!finished && !run.review ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
       {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
-      {!finished && !run.review && run.status?.launch.phase === 'RUNNING' && (run.status.launch.pending_approval?.status === 'APPROVED' || run.status.launch.pending_approval?.status === 'REJECTED') ? (
-        <div role="note"><strong>Your {run.status.launch.pending_approval.status === 'APPROVED' ? 'approval' : 'rejection'} is recorded by Kriya</strong>; the run is continuing from it. Its outcome will come from Kriya&apos;s records.</div>
-      ) : null}
-      {finished ? <Outcome phase={phase} /> : null}
+      {!finished && !run.review && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; nothing will be applied.</div> : null}
+      {finished && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
+      {finished && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
       <details className="ck-tech">
         <summary>Technical status</summary>
         <div><span className="muted">Run ID</span> <span className="mono small">{run.launchId}</span> <CopyText text={run.launchId} what="run ID" /></div>
@@ -108,7 +160,7 @@ export function CurrentRun() {
             {' · '}liveness {run.status.liveness} <span title={run.status.liveness_note}>(DERIVED)</span>
           </div>
         ) : null}
-        {finished ? <div className="muted small">{phase.state === 'COMPLETED' ? `Recorded outcome: ${outcome0!.detail} ` : ''}Source: {outcome0!.source}.</div> : null}
+        {finished ? <div className="muted small">{phase.state === 'COMPLETED' ? `Recorded outcome: ${outcome0!.detail} ` : ''}Source: {outcome0!.source}{outcome0!.commitResult ? ` · commit result ${outcome0!.commitResult}` : ''}.</div> : null}
         {run.host && run.host.phase === 'exited' && !finished ? <div className="muted small">The execution process has ended; reading Kriya&apos;s final records…</div> : null}
       </details>
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}
@@ -117,8 +169,8 @@ export function CurrentRun() {
         {finished ? (
           <>
             {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
-            <button type="button" onClick={() => viewDetails(OPEN_TARGETS.evidence)}>View Evidence</button>
-            <button type="button" onClick={() => viewDetails()}>View Details</button>
+            {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.validation)}>View Verification</button> : <button type="button" onClick={() => viewDetails()}>View Failure Details</button>}
+            {phase.state !== 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
             <span className="grow" />
             <button type="button" className="ck-primary" onClick={ex.dismiss}>New Goal</button>
           </>

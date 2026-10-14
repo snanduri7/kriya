@@ -27,7 +27,7 @@ describe('Copy', () => {
   it('copies a run\'s ID from Overview', async () => {
     const { host } = renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    fireEvent.click((await screen.findAllByRole('button', { name: /success/ }))[0]!);
+    fireEvent.click((await screen.findAllByRole('button', { name: /Succeeded/ }))[0]!);
     fireEvent.click(await screen.findByRole('button', { name: 'Copy run ID' }));
     await waitFor(() => expect(host.copied).toHaveLength(1));
     expect(host.copied[0]).toMatch(/^fx-/);

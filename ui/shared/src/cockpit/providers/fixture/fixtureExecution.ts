@@ -43,6 +43,8 @@ export interface FixtureExecutionOptions {
     /** The host offers no way to record an approval (a browser test host): the page falls back to saying so. */
     noApprovalPort?: boolean;
   };
+  /** How the scripted change review behaves (DEV/TEST ONLY): Kriya cannot serve the exact change (`unavailable`: no stored diff / `unverified`: the stored diff does not match its digests), or the change is larger than one response (`truncated`). */
+  review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean };
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
 }
@@ -81,6 +83,8 @@ export class FixtureExecution {
   readonly port: ExecutionHostPort;
   /** Every configuration approval request the host received, and every status read (for assertions). */
   readonly approvals: ApproveConfigurationRequest[] = [];
+  /** Every `change_approval.review` read the fixture answered (a request that never reaches Kriya is not here). */
+  readonly reviewReads: Array<{ launch_id: string; review_id: string }> = [];
   /** The scripted answers of the host's NATIVE confirmation, consumed in order (true = Approve Configuration, false = Cancel); once empty the fixture host approves. Test hook. */
   readonly nativeAnswers: boolean[] = [];
   /** How many times the (scripted) native confirmation was shown. A request that never reaches it never reaches Kriya either. */
@@ -183,6 +187,28 @@ export class FixtureExecution {
   /** Kriya raises a NEW review for the same launch (another candidate): new review id and digest, the previous identities now stale. */
   replaceReview(): void { this.reviewSequence += 1; this.reviewSuperseded = false; }
   private reviewId(): string { return this.reviewSequence === 1 ? REVIEW_ID : 'ra-' + String(this.reviewSequence).padStart(2, '0').repeat(12); }
+  /** `change_approval.review`, scripted: the same refusals Kriya makes, otherwise the exact change of the review that was asked for (the current one, or an earlier one marked EXPIRED). */
+  changeReview(request: { workspace: string; launch_id: string; review_id: string }): { data: Json } | { code: string; message: string; extra: Json } {
+    this.reviewReads.push({ launch_id: request.launch_id, review_id: request.review_id });
+    if (this.frame < 0 || request.launch_id !== LAUNCH_ID) return { code: 'LAUNCH_NOT_FOUND', message: `no launch ${request.launch_id} is recorded for this folder`, extra: { reason: 'not_recorded' } };
+    let sequence = 0;
+    for (let n = 1; n <= this.reviewSequence; n += 1) if (this.idFor(n) === request.review_id) sequence = n;
+    if (sequence === 0 || this.outcome !== 'review') return { code: 'REVIEW_NOT_FOUND', message: `launch ${request.launch_id} has no review ${request.review_id}`, extra: { reason: 'not_recorded' } };
+    const fault = this.options.review?.fault;
+    if (fault === 'unavailable') return { code: 'REVIEW_DIFF_UNAVAILABLE', message: 'the proposed change was not stored for inspection, or its record cannot be trusted', extra: { reason: 'not_stored' } };
+    if (fault === 'unverified') return { code: 'REVIEW_DIFF_UNVERIFIED', message: 'the stored proposed change does not match the review it belongs to; it is not shown', extra: { reason: 'file_digest_mismatch' } };
+    const current = sequence === this.reviewSequence;
+    const body = sequence === 1 ? ['def clamp(value, low, high):', '    return max(low, min(value, high))', ''] : ['def clamp(value, low, high):', '    return min(max(value, low), high)', ''];
+    const truncated = this.options.review?.truncated === true;
+    return { data: {
+      launch_id: LAUNCH_ID, review_id: request.review_id, status: current ? (this.reviewSuperseded ? 'EXPIRED' : this.reviewStatus) : 'EXPIRED', candidate_digest: this.digestFor(sequence), verified: true,
+      reason: REVIEW_REASON, policy_note: 'Human-in-the-loop review policy', review_summary: 'The change implements the goal and keeps the public signature.', reason_truncated: false, truncated,
+      files: [{ path: 'src/clamp.py', diff_sha256: 'sha256:' + 'c3'.repeat(32), change_type: 'added', additions: body.length, deletions: 0, truncated,
+        hunks: [{ header: `@@ -0,0 +1,${body.length} @@`, old_start: 0, old_lines: 0, new_start: 1, new_lines: body.length, lines: (truncated ? body.slice(0, 1) : body).map((text, i) => ({ kind: 'add', text, old_line: null, new_line: i + 1 })) }] }],
+    } };
+  }
+  private idFor(n: number): string { return n === 1 ? REVIEW_ID : 'ra-' + String(n).padStart(2, '0').repeat(12); }
+  private digestFor(n: number): string { return n === 1 ? REVIEW_DIGEST : 'sha256:' + String(n).padStart(2, '0').repeat(32); }
   private reviewDigest(): string { return this.reviewSequence === 1 ? REVIEW_DIGEST : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
 
   /** The process is alive (the real host's `active()`): not yet at the final frame. */

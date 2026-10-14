@@ -69,10 +69,10 @@ export function runPhase(run: RunView): RunPhase {
   }
   const approved = run.status?.launch.pending_approval?.status === 'APPROVED' && run.status.launch.phase === 'RUNNING';
   if (approved) {
-    return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your approval is recorded; Kriya is continuing its verification before it applies the change.', tone: 'info', steps: steps(3) };
+    return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your change was approved. Kriya is running final checks.', tone: 'info', steps: steps(3) };
   }
   if (run.stage === 'starting' || p.lastSeq === 0) {
-    return { ...base, state: 'STARTING', label: 'Starting', detail: run.status ? 'Kriya has recorded the launch and is opening the run.' : 'Waiting for Kriya to record the launch.', tone: 'info', steps: steps(0) };
+    return { ...base, state: 'STARTING', label: 'Starting', detail: 'Starting the run…', tone: 'info', steps: steps(0) };
   }
   if (count(p, 'unit.opened') === 0) {
     return { ...base, state: 'PLANNING', label: 'Planning', detail: 'Kriya is planning the change before any file is edited.', tone: 'info', steps: steps(1) };

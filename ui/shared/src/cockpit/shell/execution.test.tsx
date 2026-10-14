@@ -128,7 +128,7 @@ describe('Start Run', () => {
     fireEvent.click(startButton());
     const bar = await banner();
     expect(bar).toHaveAttribute('data-stage', 'starting');
-    expect(within(bar).getByText(/Waiting for Kriya to record the launch/)).toBeInTheDocument();
+    expect(within(bar).getByText(/Starting the run…/)).toBeInTheDocument();
     // the goal composer is replaced by the run itself: no goal box, no second Start Run, and no control Kriya has no host operation for
     expect(screen.queryByRole('textbox', { name: 'Engineering goal' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^(Start Run|Starting…)$/ })).toBeNull();

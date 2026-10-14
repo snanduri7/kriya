@@ -89,7 +89,7 @@ function Validation() {
 
 export const validationModule: ModuleDefinition = {
   id: 'validation',
-  placement: { page: 'runs', surface: 'center-tab', label: 'Validation', order: 50 },
+  placement: { page: 'runs', surface: 'center-tab', label: 'Verification', order: 50 },
   requiredCapabilities: ['evidence'], optionalCapabilities: [], selectionDependencies: ['runId', 'attempt', 'gateId'],
   whenUnavailable: 'explain',
   render: Validation,

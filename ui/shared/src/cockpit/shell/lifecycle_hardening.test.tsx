@@ -79,7 +79,7 @@ describe('looking at another run never moves the active run or its decision', ()
   it('selecting a historical run while a review waits leaves the banner, the review and the decision target untouched; the live run can be returned to', async () => {
     const { host, store } = await toReview();
     goTo('Runs');
-    const history = await screen.findAllByRole('button', { name: /success|failure|Unfinished/ });
+    const history = await screen.findAllByRole('button', { name: /Succeeded|Failed|Unfinished/ });
     fireEvent.click(history[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     expect(store.getState().liveLaunchId).toBeNull();
@@ -91,13 +91,13 @@ describe('looking at another run never moves the active run or its decision', ()
     expect(host.exec!.decisions[0]!.review_id).not.toBe(store.getState().runId);
   });
 
-  it('"Review changes" returns to the live run from any selection, and finishing the run selects the finished (trace) run, ending the live selection', async () => {
+  it('"View Details" returns to the live run from any selection, and finishing the run selects the finished (trace) run, ending the live selection', async () => {
     const { host, store } = await toReview();
     goTo('Runs');
-    fireEvent.click((await screen.findAllByRole('button', { name: /success|failure|Unfinished/ }))[0]!);
+    fireEvent.click((await screen.findAllByRole('button', { name: /Succeeded|Failed|Unfinished/ }))[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBe(LAUNCH_ID));
     const bar = await backToRun();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'View Details' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     fireEvent.click(within(await backToRun()).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
@@ -154,7 +154,7 @@ describe('stale responses never overwrite a newer selection', () => {
     await screen.findByText(/No runs yet\./, undefined, { timeout: 4000 }); // B is open while A's list is still held
     act(() => gate.release());
     await new Promise((r) => setTimeout(r, 120));
-    expect(screen.queryAllByRole('button', { name: /success|failure/ })).toHaveLength(0); // A's runs never appear under B
+    expect(screen.queryAllByRole('button', { name: /Succeeded|Failed/ })).toHaveLength(0); // A's runs never appear under B
     expect(screen.getByText(/No runs yet\./)).toBeInTheDocument();
   });
 
@@ -170,7 +170,7 @@ describe('stale responses never overwrite a newer selection', () => {
     expect(await screen.findByText(/Runs could not be read/)).toBeInTheDocument();
     expect(screen.getByText(/HOST_ERROR: kriya service died/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh runs' }));
-    expect((await screen.findAllByRole('button', { name: /success|failure/ })).length).toBeGreaterThan(2);
+    expect((await screen.findAllByRole('button', { name: /Succeeded|Failed/ })).length).toBeGreaterThan(2);
     expect(screen.queryByText(/Runs could not be read/)).toBeNull();
   });
 });
@@ -179,13 +179,13 @@ describe('rapid input', () => {
   it('rapid tab switching and repeated refresh leave one consistent selection and mutate no evidence', async () => {
     const host = new GatedHost({ workspace: '/fixture/workspace' });
     const store = mountOver(host);
-    fireEvent.click((await screen.findAllByRole('button', { name: /success/ }))[0]!);
+    fireEvent.click((await screen.findAllByRole('button', { name: /Succeeded/ }))[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     const run = store.getState().runId;
     await waitFor(() => expect(host.calls.some((c) => c.operation === 'evidence.verify')).toBe(true));
     await new Promise((r) => setTimeout(r, 200)); // the run's evidence has been read once; from here a tab switch must read NOTHING more
     const evidenceBefore = host.calls.filter((c) => c.operation.startsWith('evidence.')).length;
-    const tabs = ['Validation', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
+    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
     for (let round = 0; round < 3; round += 1) for (const name of tabs) { const tab = screen.queryByRole('tab', { name }); if (tab) fireEvent.click(tab); }
     for (let i = 0; i < 4; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Refresh runs' }));
     await new Promise((r) => setTimeout(r, 150));
@@ -201,7 +201,7 @@ describe('the other order of arrival: a LATE OLD answer never overwrites a NEWER
     const host = new GatedHost({ workspace: '/fixture/workspace' });
     const store = mountOver(host);
     await screen.findByRole('navigation', { name: 'Destinations' });
-    const runs = await screen.findAllByRole('button', { name: /success|failure/ });
+    const runs = await screen.findAllByRole('button', { name: /Succeeded|Failed/ });
     let firstRun = '';
     const holdX = host.hold((r) => { const id = (r as { run_id?: string }).run_id; if (r.operation === 'history.detail' && id && (!firstRun || id === firstRun)) { firstRun = id; return true; } return false; });
     fireEvent.click(runs[0]!);
@@ -232,7 +232,7 @@ describe('the other order of arrival: a LATE OLD answer never overwrites a NEWER
       return { ...envelope, data: { ...(envelope.data as object), runs: rows.slice(start, start + limit), next_cursor: start + limit < rows.length ? String(start + limit) : null } } as typeof envelope;
     };
     mountOver(host);
-    await screen.findAllByRole('button', { name: /success|failure/ }, { timeout: 8000 });
+    await screen.findAllByRole('button', { name: /Succeeded|Failed/ }, { timeout: 8000 });
     const page2 = host.hold((r) => r.operation === 'history.list' && Boolean((r as { cursor?: string }).cursor));
     fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
     host.menu('openFolder'); // switch to the empty folder while A's second page is outstanding

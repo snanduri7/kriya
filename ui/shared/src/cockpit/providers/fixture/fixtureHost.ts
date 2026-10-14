@@ -239,7 +239,7 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'configuration.approval_status', 'configuration.approve'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'configuration.approval_status', 'configuration.approve', 'change_approval.review'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
@@ -256,7 +256,8 @@ export class FixtureHost implements HostAdapter {
   }
 
   private summary(s: Scenario): Json {
-    return { run_id: s.id, timestamp: s.timestamp, goal: s.goal, duration_sec: s.durationSec, attempts: s.attempts, status: s.status, failure_category: s.failureCategory, files_modified: null,
+    const display = s.displayGoal === undefined ? s.goal : s.displayGoal;
+    return { run_id: s.id, timestamp: s.timestamp, goal: s.goal, display_goal: display, display_goal_source: display === null ? 'unavailable' : s.displayGoal === undefined ? 'own' : 'enforce_row', duration_sec: s.durationSec, attempts: s.attempts, status: s.status, failure_category: s.failureCategory, files_modified: null,
       milestone_group_id: s.milestone.groupId, milestone_index: s.milestone.index, milestone_total: s.milestone.total };
   }
 
@@ -394,6 +395,11 @@ export class FixtureHost implements HostAdapter {
       case 'configuration.approval_status': {
         if (!this.folder(request.workspace) || !this.exec) return this.err('configuration.approval_status', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
         return this.env('configuration.approval_status', this.exec.approvalStatus(request.workspace), this.live, null);
+      }
+      case 'change_approval.review': {
+        if (!this.folder(request.workspace) || !this.exec) return this.err('change_approval.review', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const answer = this.exec.changeReview(request);
+        return 'data' in answer ? this.env('change_approval.review', answer.data, this.live, null) : this.err('change_approval.review', answer.code, answer.message, answer.extra);
       }
       case 'configuration.approve': return this.err('configuration.approve', 'INVALID_REQUEST', 'configuration.approve is not available through the query channel');
       case 'execution.context': {

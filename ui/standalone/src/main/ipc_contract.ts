@@ -89,6 +89,7 @@ export type KupRequest =
   | { operation: 'workspace.create'; parent: string; name: string }
   | { operation: 'configuration.approval_status'; workspace: string }
   | { operation: 'configuration.approve'; workspace: string; fingerprint: string }
+  | { operation: 'change_approval.review'; workspace: string; launch_id: string; review_id: string }
   | { operation: 'execution.context'; workspace: string }
   | { operation: 'execution.model_probe'; workspace: string }
   | { operation: 'skills.list'; workspace: string }
@@ -229,6 +230,14 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
       const id = validateCatalogId(v[idKey], idKey); if (!id.ok) return id;
       return { ok: true, value: (v.operation === 'skills.describe' ? { operation: v.operation, workspace: w.value, skill_id: id.value } : { operation: v.operation, workspace: w.value, tool_id: id.value }) as KupRequest };
+    }
+    case 'change_approval.review': {
+      // A READ of the exact proposed change of one review Kriya gave for the open folder (Kriya re-proves it against the review's digests); it approves nothing.
+      if (keys.join() !== 'launch_id,operation,review_id,workspace') return { ok: false, message: 'change_approval.review takes exactly workspace, launch_id and review_id' };
+      const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+      if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+      if (typeof v.review_id !== 'string' || !/^ra-[0-9a-f]{24}$/.test(v.review_id)) return { ok: false, message: 'review_id must be a review identity Kriya gave (ra-<24 hex>)' };
+      return { ok: true, value: { operation: 'change_approval.review', workspace: w.value, launch_id: v.launch_id, review_id: v.review_id } };
     }
     case 'launch.status': {
       if (keys.join() !== 'launch_id,operation,workspace') return { ok: false, message: 'launch.status takes exactly workspace and launch_id' };

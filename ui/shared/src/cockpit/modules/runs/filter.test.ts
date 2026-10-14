@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { RunSummary } from '../../../model/kup';
 import { NO_FILTER, filterRuns, isFiltering, statusOf, timeOf } from './filter';
 
-const run = (over: Partial<RunSummary>): RunSummary => ({ run_id: 'r', timestamp: '2026-10-10 09:00:00', goal: 'g', status: 'success', ...over }) as RunSummary;
+// display_goal mirrors goal unless a test says otherwise: the list searches what the person ASKED (the original request), never the stored compiled prompt
+const run = (over: Partial<RunSummary>): RunSummary => ({ run_id: 'r', timestamp: '2026-10-10 09:00:00', goal: 'g', display_goal: over.goal ?? 'g', status: 'success', ...over }) as RunSummary;
 const NOW = Date.parse('2026-10-11T12:00:00');
 
 describe('statusOf / timeOf', () => {
@@ -24,7 +25,8 @@ describe('filterRuns', () => {
     expect(filterRuns(rows, NO_FILTER, NOW)).toEqual({ runs: rows, untimed: 0 });
     expect(isFiltering(NO_FILTER)).toBe(false);
   });
-  it('text matches goal, status and id, case-insensitively, and trims', () => {
+  it('text matches what was asked (display goal), status and id, case-insensitively, and trims; the stored compiled prompt is never searched', () => {
+    expect(filterRuns([run({ run_id: 'u', goal: '=== Authoritative Goal ===\nsecret planner words', display_goal: 'Fix the parser' })], { ...NO_FILTER, query: 'planner words' }, NOW).runs).toEqual([]);
     expect(ids({ query: ' parser ' })).toEqual(['b']);
     expect(ids({ query: 'FAILURE' })).toEqual(['b']);
     expect(ids({ query: 'e' }).sort()).toEqual(['a', 'b', 'c', 'd', 'e']); // ids a..e and words contain e

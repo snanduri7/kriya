@@ -145,7 +145,8 @@ describe('E/F. Start Run turns the page into the run, with only supported states
     act(() => host.exec!.advance());
     await waitFor(() => expect(run).toHaveAttribute('data-state', 'EDITING'));
     expect(within(run).getByRole('heading', { name: 'Editing' })).toBeInTheDocument();
-    expect(within(run).getByText(/Attempt 1: Kriya is producing a candidate change/)).toBeInTheDocument();
+    expect(within(run).getByTestId('current-activity')).toHaveTextContent('Creating or changing files…');
+    expect(run.textContent).not.toMatch(/candidate|Attempt \d/); // no mechanism words on the primary surface
     expect(within(progress()).getByText(/Editing/).closest('li')).toHaveAttribute('aria-current', 'step');
     expect(within(progress()).getByText(/Planning/).closest('li')).toHaveAttribute('data-status', 'done');
     act(() => host.exec!.advance());
@@ -164,7 +165,7 @@ describe('E/F. Start Run turns the page into the run, with only supported states
 });
 
 describe('K. The outcome is understood without opening diagnostics', () => {
-  it('a success says "Run completed", lists what changed and the recorded validation, and offers View Changes / View Evidence / New Goal', async () => {
+  it('a success says "Run completed", lists what changed and the recorded verification, and offers View Changes / View Verification / New Goal', async () => {
     const { host, run } = await startRun({ outcome: 'success' });
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
@@ -172,10 +173,10 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     const changed = await within(run).findByRole('list', { name: 'Changed files' }, { timeout: 4000 });
     expect(within(changed).getAllByRole('listitem').length).toBeGreaterThan(0);
     expect(changed.textContent).toMatch(/\+\d+ −\d+/);
-    const validation = await within(run).findByLabelText('Validation', undefined, { timeout: 4000 });
-    expect(validation.textContent).toMatch(/passed/);
-    for (const name of ['View Changes', 'View Evidence', 'View Details', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
-    expect(within(run).getByText('✓ The change is applied to your folder.')).toBeInTheDocument(); // said in plain words, from the RunRecord's COMMITTED
+    const verification = await within(run).findByLabelText('Verification', undefined, { timeout: 4000 });
+    expect(verification.textContent).toMatch(/passed/);
+    for (const name of ['View Changes', 'View Verification', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(run).getByText('✓ Your change was applied successfully.')).toBeInTheDocument(); // said in plain words, from the RunRecord's COMMITTED
     expect(run.querySelector('.ck-outcome')!.textContent).not.toMatch(/NO_COMMIT|commit COMMITTED|RunRecord/); // no raw code or internal source name on the outcome card itself (they are under Technical status)
     expect(within(run).getByText(/Kriya RunRecord/).closest('details')).toBe(within(run).getByText('Technical status').closest('details')); // where the outcome was read from is one disclosure away
   });
@@ -184,7 +185,7 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     const { host, run } = await startRun({ outcome: 'success', commitResult: 'NO_COMMIT' });
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
-    expect(within(run).queryByText('✓ The change is applied to your folder.')).toBeNull();
+    expect(within(run).queryByText('✓ Your change was applied successfully.')).toBeNull();
     expect(within(run).getByText('NO_COMMIT')).toBeInTheDocument();
     expect(run.querySelector('.ck-applied')!.textContent).toMatch(/Check your folder/);
   });
@@ -195,9 +196,10 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'failure'));
     expect(within(run).getByRole('heading', { name: 'Run failed' })).toBeInTheDocument();
-    expect(within(run).getByText('Reason')).toBeInTheDocument();
-    expect(within(run).getByText(/Failed to create an isolated generation sandbox \(fixture\)/)).toBeInTheDocument();
-    expect(within(run).getByText(/Last stage the records show/)).toBeInTheDocument();
+    expect(within(run).getByText('What happened')).toBeInTheDocument();
+    expect(within(run).getByText(/Failed to create an isolated generation sandbox \(fixture\)/)).toBeInTheDocument(); // Kriya's recorded reason (its raw text sits under Technical reason)
+    expect(within(run).getByText('How far it got')).toBeInTheDocument();
+    expect(within(run).getByRole('button', { name: 'View Failure Details' })).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'Copy failure details' })).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'New Goal' })).toBeInTheDocument();
     expect(within(run).queryByRole('list', { name: 'Changed files' })).toBeNull(); // nothing is claimed as changed for a failed run
@@ -233,14 +235,14 @@ describe('L/O. Runs is history; the existing diagnostics are one level deeper, n
     expect(screen.getByRole('button', { name: 'Go to Project' })).toBeInTheDocument();
   });
 
-  it('View Details from a finished run opens its documents: Overview / Changes / Validation first, Plan, Attempts, Context and Evidence under Details, Timeline and WHY beside', async () => {
+  it('View Changes from a finished run opens its documents: Overview / Changes / Verification first, Plan, Attempts, Context and Evidence under Details, Timeline and WHY beside', async () => {
     const { host, run } = await startRun({ outcome: 'success' });
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
-    fireEvent.click(within(run).getByRole('button', { name: 'View Details' }));
+    fireEvent.click(within(run).getByRole('button', { name: 'View Changes' }));
     await waitFor(() => expect(page()).toBe('runs'));
     const tabs = await screen.findByRole('tablist', { name: 'Run documents' });
-    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Validation', 'Details']);
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Verification', 'Details']);
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Details' }));
     const deeper = await screen.findByRole('tablist', { name: 'Details' });
     for (const name of ['Plan', 'Attempts', 'Context', 'Evidence']) expect(within(deeper).getByRole('tab', { name })).toBeInTheDocument();
@@ -281,7 +283,9 @@ describe('M/N and accessible names', () => {
     for (let i = 0; i < 3; i += 1) act(() => host.exec!.advance());
     const review = await within(run).findByRole('region', { name: 'Change review' });
     expect(within(review).getByText('ACTION REQUIRED')).toBeInTheDocument();
-    for (const name of ['Approve & Continue', 'Reject']) expect(within(review).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(review).getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+    await within(review).findByTestId('proposed-change'); // Approve & Continue exists only once the exact change is on screen
+    expect(within(review).getByRole('button', { name: 'Approve & Continue' })).toBeInTheDocument();
     goTo('Skills');
     const s = await strip();
     expect(s).toHaveTextContent('ACTION REQUIRED');

@@ -30,7 +30,7 @@ describe('Runs', () => {
     expect(screen.getByText('2026-10-10')).toBeInTheDocument();
     expect(screen.getAllByText(/Unfinished/).filter((el) => el.closest('li'))).toHaveLength(1); // the row (the status filter's option is not a row)
     expect(screen.queryByText(/\bActive\b|Running/)).toBeNull();
-    expect(screen.getByText(/success · 98\.1s/)).toBeInTheDocument();
+    expect(screen.getByText(/Succeeded · 1m 38s/)).toBeInTheDocument(); // what happened and how long, in words
     expect(screen.queryByText(/\d+ attempt\(s\)/)).toBeNull(); // the trace row's retry counter is never presented as an attempt count
   });
   it('selecting a run writes only runId (and resets what is below it)', async () => {
@@ -41,12 +41,12 @@ describe('Runs', () => {
 });
 
 describe('attempt count presentation (GUI final)', () => {
-  it('the SELECTED run shows the attempts its evidence proves; no other row loads evidence to count, and the trace row\'s retry counter is never shown as the count', async () => {
+  it('a history card never shows attempts (neither the trace row\'s retry counter nor an observed count): attempts are technical detail, one level down', async () => {
     renderModule(runsModule, { runId: 'fx-greenfield-success' });
-    expect(await screen.findByText(/success · 1 observed attempt\(s\) · 71\.2s/)).toBeInTheDocument();
-    expect(screen.queryByText(/(?<!observed )attempt\(s\)/)).toBeNull();
-    const others = screen.getAllByRole('button').filter((b) => b.getAttribute('aria-selected') === 'false');
-    for (const row of others) expect(row.querySelector('.muted')?.textContent ?? '').not.toMatch(/attempt/);
+    expect(await screen.findByText(/Succeeded · 1m 11s/)).toBeInTheDocument();
+    const meta = Array.from(document.querySelectorAll('.ck-runmeta'));
+    expect(meta.length).toBeGreaterThan(3);
+    for (const m of meta) expect(m.textContent ?? '').not.toMatch(/attempt/i); // the card's facts: status, duration, files, time - never attempts
   });
 });
 
@@ -81,7 +81,7 @@ describe('filters (end-user experience)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(rows()).toHaveLength(all);
     fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'failure' } });
-    expect(rows().every((li) => /failure/.test(li.textContent ?? ''))).toBe(true);
+    expect(rows().every((li) => /Failed/.test(li.textContent ?? ''))).toBe(true);
     expect(rows().length).toBeGreaterThan(0);
     fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), { target: { value: 'unfinished' } });
     expect(rows()).toHaveLength(1);

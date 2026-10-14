@@ -4,7 +4,8 @@
  * independent reads of one live run (while it waits for review) or one finished trace row (its outcome).
  */
 import { useCallback } from 'react';
-import { useAsync } from './async';
+import { toAvailability, useAsync } from './async';
+import type { ApplicationOutcome } from '../../model/kup';
 import type { Availability } from './availability';
 import { useProvider, useSession } from './context';
 import { loadLiveRunEvidence, loadRunEvidence, type RunEvidence } from './evidenceClient';
@@ -40,4 +41,21 @@ export function useRunRowFacts(runId: string | null, ready: boolean): FactsState
   const load = useCallback(async (signal: AbortSignal) => loadRunEvidence(provider, runId!, snapshotId, signal), [provider, runId, snapshotId]);
   const a = useAsync<RunEvidence>(runId === null || !ready || snapshotId === null ? null : `facts:row:${runId}:${snapshotId}`, load, { state: 'loading' });
   return runId === null ? null : toFacts(a);
+}
+
+/**
+ * What Kriya recorded about EXECUTING the application a finished run built (a read-only projection of the runtime-gate record, from the pinned snapshot). Null while the
+ * snapshot is not yet available or the run has no trace row; an older Kriya with no projection yields NOT_APPLICABLE-like absence (the data is simply missing).
+ */
+export function useApplicationOutcome(runId: string | null, ready: boolean): Availability<ApplicationOutcome | null> | null {
+  const provider = useProvider();
+  const snapshotId = useSession().snapshotId;
+  const a = useAsync<ApplicationOutcome | null>(runId === null || !ready || snapshotId === null ? null : `app-outcome:${runId}:${snapshotId}`,
+    async (signal) => {
+      const detail = toAvailability(await provider.runDetail(snapshotId!, runId!, signal));
+      if (detail.state !== 'ready' && detail.state !== 'degraded') return detail as Availability<ApplicationOutcome | null>;
+      const section = detail.data.application_outcome;
+      return { ...detail, data: section && section.availability === 'recorded' ? (section.data ?? null) : null };
+    }, { state: 'loading' });
+  return runId === null ? null : a;
 }

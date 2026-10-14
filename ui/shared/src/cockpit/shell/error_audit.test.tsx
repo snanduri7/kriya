@@ -39,7 +39,7 @@ describe('technical detail never reaches the message', () => {
     const original = host.query.bind(host);
     host.query = async (r: KupRequest) => (r.operation === 'history.detail' ? hostError('history.detail', 'HOST_ERROR', 'kriya service died (exit 1)', TRACEBACK) : original(r));
     mount(host);
-    fireEvent.click((await screen.findAllByRole('button', { name: /success/ }))[0]!);
+    fireEvent.click((await screen.findAllByRole('button', { name: /Succeeded/ }))[0]!);
     const alert = (await screen.findAllByRole('alert')).find((a) => a.textContent?.includes('kriya service died'))!;
     expect(alert).toHaveTextContent('Error HOST_ERROR');
     expect(within(alert).getByText('Technical detail')).toBeInTheDocument();

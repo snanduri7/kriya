@@ -34,12 +34,12 @@ describe('a long history', () => {
       return { ...envelope, data: { ...(envelope.data as object), runs: rows.slice(start, start + limit), next_cursor: start + limit < rows.length ? String(start + limit) : null } } as typeof envelope;
     };
     const store = mount(host);
-    const first = await screen.findAllByRole('button', { name: /success|failure/ }, { timeout: 8000 });
+    const first = await screen.findAllByRole('button', { name: /Succeeded|Failed/ }, { timeout: 8000 });
     expect(first.length).toBeLessThanOrEqual(260); // one page, not 3000 rows
     expect(first.length).toBeGreaterThan(100);
     fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /success|failure/ }).length).toBeGreaterThan(first.length));
-    const rows = screen.getAllByRole('button', { name: /success|failure/ });
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Succeeded|Failed/ }).length).toBeGreaterThan(first.length));
+    const rows = screen.getAllByRole('button', { name: /Succeeded|Failed/ });
     const target = rows[rows.length - 1]!; // a row that only exists because Load more appended it
     const label = (target.textContent ?? '').slice(0, 24);
     fireEvent.click(target);
@@ -48,13 +48,13 @@ describe('a long history', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter runs' }), { target: { value: 'historic goal 2999' } });
     await waitFor(() => expect(screen.getAllByRole('button', { name: /Historic goal 2999/ }).length).toBe(1));
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter runs' }), { target: { value: 'zz-no-such-run' } });
-    await waitFor(() => expect(screen.queryAllByRole('button', { name: /success|failure/ })).toHaveLength(0));
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: /Succeeded|Failed/ })).toHaveLength(0));
   });
 
   it('a very long goal and a goal with shell metacharacters are shown as plain text, bounded in layout', async () => {
     const host = new FixtureHost({ workspace: '/fixture/workspace', scenarios: manyRuns(120) });
     mount(host);
-    const long = (await screen.findAllByRole('button', { name: /success|failure/ })).find((b) => (b.textContent ?? '').includes('gggggggggg'))!;
+    const long = (await screen.findAllByRole('button', { name: /Succeeded|Failed/ })).find((b) => (b.textContent ?? '').includes('gggggggggg'))!;
     expect(long).toBeDefined();
     expect(long.querySelectorAll('img, script, iframe, a[href]').length).toBe(0);
     const meta = screen.getAllByRole('button').find((b) => (b.textContent ?? '').includes('$(rm -rf)'))!;
@@ -106,7 +106,7 @@ describe('one very large run', () => {
     const host = new FixtureHost({ workspace: '/fixture/workspace', scenarios: [big, ...manyRuns(8)] });
     const store = mount(host, { runId: 'big-1' });
     await screen.findByRole('tabpanel', undefined, { timeout: 20000 });
-    const tabs = ['Validation', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
+    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
     const before = host.calls.filter((c) => c.operation.startsWith('evidence.')).length;
     for (let cycle = 0; cycle < 40; cycle += 1) for (const name of tabs) { const tab = screen.queryByRole('tab', { name }); if (tab) fireEvent.click(tab); }
     await new Promise((r) => setTimeout(r, 200));

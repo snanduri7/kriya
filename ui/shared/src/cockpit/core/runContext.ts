@@ -11,7 +11,10 @@ export interface RunContext {
   runId: string;
   snapshotId: string | null;
   provider: ProviderKind;
+  /** The stored `goal` column, verbatim. For a unit row this is the COMPILED prompt: never a title. */
   goal: string | null;
+  /** The ORIGINAL user request (the backend's display_goal, resolved from structured fields); null when none is recorded. This - never `goal` - is what a person is shown. */
+  displayGoal: string | null;
   status: string | null;
   /** The trace row's stored failure_category, verbatim; null when none was stored. */
   failureCategory: string | null;

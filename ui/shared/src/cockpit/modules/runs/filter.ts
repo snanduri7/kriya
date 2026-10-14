@@ -42,7 +42,7 @@ export function filterRuns(runs: readonly RunSummary[], f: RunFilter, now: numbe
   let untimed = 0;
   const out: RunSummary[] = [];
   for (const run of runs) {
-    if (needle && !`${run.goal ?? ''} ${run.status ?? ''} ${run.run_id}`.toLowerCase().includes(needle)) continue;
+    if (needle && !`${run.display_goal ?? ''} ${run.status ?? ''} ${run.run_id}`.toLowerCase().includes(needle)) continue;
     if (f.status !== 'all' && statusOf(run) !== f.status) continue;
     if (from !== null) {
       const t = timeOf(run);

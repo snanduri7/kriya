@@ -100,14 +100,14 @@ describe('AppShell mounts modules through the registry and the shared selection'
     fireEvent.click(await screen.findByRole('button', { name: /Create a utility library/ }));
     await waitFor(() => expect(store.getState().runId).toBe(GF));
     const tabs = await screen.findByRole('tablist', { name: 'Run documents' });
-    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Validation', 'Details']); // first level: what happened and whether it is valid; the rest is one level down
-    fireEvent.click(within(tabs).getByRole('tab', { name: 'Validation' }));
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Verification', 'Details']); // first level: what happened and whether it is valid; the rest is one level down
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Verification' }));
     expect(store.getState().centralTab).toBe('validation');
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Details' }));
     const deeper = await screen.findByRole('tablist', { name: 'Details' });
     expect(within(deeper).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Context', 'Plan', 'Attempts', 'Evidence']);
     expect(store.getState().centralTab).toBe('context');
-    fireEvent.click(within(tabs).getByRole('tab', { name: 'Validation' }));
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Verification' }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     expect(store.getState().drawerOpen).toBe(true);
     fireEvent.click(screen.getByRole('tab', { name: 'Raw Events' }));
@@ -123,7 +123,7 @@ describe('AppShell mounts modules through the registry and the shared selection'
     const why = await screen.findByLabelText('Why');
     expect(await within(why).findByText(/What happened · attempt 1/)).toBeInTheDocument();
     expect(within(why).getByText('Recorded diagnosis')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'Validation' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Verification' }));
     expect(await screen.findByText(/Validation summary · attempt 1/)).toBeInTheDocument();
     expect(within(screen.getByRole('list', { name: 'Gates' })).getByText('failed', { selector: '.ck-badge' })).toBeInTheDocument();
     // attempt 2 (everything passed): all three follow, without any module calling another
@@ -161,7 +161,7 @@ describe('AppShell mounts modules through the registry and the shared selection'
   it('a module can be removed or added without touching AppShell: only the registry input changes', async () => {
     renderShell({ runId: GF, registry: createCockpitRegistry({ disabled: ['validation', 'timeline'] }) });
     const tabs = await screen.findByRole('tablist', { name: 'Run documents' });
-    expect(within(tabs).queryByRole('tab', { name: 'Validation' })).toBeNull();
+    expect(within(tabs).queryByRole('tab', { name: 'Verification' })).toBeNull();
     expect(within(tabs).getByRole('tab', { name: 'Changes' })).toBeInTheDocument();
     expect(screen.queryByRole('tree', { name: 'Execution timeline' })).toBeNull();
   });

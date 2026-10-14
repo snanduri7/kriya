@@ -22,6 +22,8 @@ export interface Scenario {
   evidenceId: string | null;
   title: string;
   goal: string;
+  /** The original user request when it differs from the stored `goal` (a compiled unit prompt); undefined = the stored goal IS the request. */
+  displayGoal?: string | null;
   status: string;
   failureCategory: string | null;
   timestamp: string;
