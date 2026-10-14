@@ -31,6 +31,7 @@
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
 //     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
+//     ChangeApprovalReview data = Converter.ChangeApprovalReviewFromJsonString(jsonString);
 //     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
 //     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
 //     SkillsList data = Converter.SkillsListFromJsonString(jsonString);
@@ -270,6 +271,14 @@ public class Converter {
 
     public static String ConfigurationApproveToJsonString(ConfigurationApprove obj) throws JsonProcessingException {
         return getConfigurationApproveObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ChangeApprovalReview ChangeApprovalReviewFromJsonString(String json) throws IOException {
+        return getChangeApprovalReviewObjectReader().readValue(json);
+    }
+
+    public static String ChangeApprovalReviewToJsonString(ChangeApprovalReview obj) throws JsonProcessingException {
+        return getChangeApprovalReviewObjectWriter().writeValueAsString(obj);
     }
 
     public static ExecutionContext ExecutionContextFromJsonString(String json) throws IOException {
@@ -1107,6 +1116,37 @@ public class Converter {
     private static ObjectWriter getConfigurationApproveObjectWriter() {
         if (ConfigurationApproveWriter == null) instantiateConfigurationApproveMapper();
         return ConfigurationApproveWriter;
+    }
+
+    private static ObjectReader ChangeApprovalReviewReader;
+    private static ObjectWriter ChangeApprovalReviewWriter;
+
+    private static void instantiateChangeApprovalReviewMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ChangeApprovalReviewReader = mapper.readerFor(ChangeApprovalReview.class);
+        ChangeApprovalReviewWriter = mapper.writerFor(ChangeApprovalReview.class);
+    }
+
+    private static ObjectReader getChangeApprovalReviewObjectReader() {
+        if (ChangeApprovalReviewReader == null) instantiateChangeApprovalReviewMapper();
+        return ChangeApprovalReviewReader;
+    }
+
+    private static ObjectWriter getChangeApprovalReviewObjectWriter() {
+        if (ChangeApprovalReviewWriter == null) instantiateChangeApprovalReviewMapper();
+        return ChangeApprovalReviewWriter;
     }
 
     private static ObjectReader ExecutionContextReader;

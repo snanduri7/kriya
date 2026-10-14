@@ -200,6 +200,58 @@
       },
       "additionalProperties": true
     },
+    "ChangeApprovalReview": {
+      "description": "data of `change_approval.review`: the EXACT proposed change a review asks the person to approve, served only after Kriya re-proved it against the review's digests (per-file diff digests, candidate digest, identity). Approval-scoped: it is not the evidence store and does not depend on content_visibility. `truncated` true means the change is larger than one response can carry: the host must NOT offer approval.",
+      "type": "object",
+      "required": ["launch_id", "review_id", "status", "candidate_digest", "verified", "reason", "policy_note", "review_summary", "reason_truncated", "files", "truncated"],
+      "properties": {
+        "launch_id": { "type": "string" }, "review_id": { "type": "string" },
+        "status": { "type": "string", "description": "The review's own status: PENDING, APPROVED, REJECTED or EXPIRED." },
+        "candidate_digest": { "type": "string", "description": "The digest the decision must carry; the diff below is proved to be what it binds." },
+        "verified": { "const": true },
+        "reason": { "type": "string", "description": "The gate's reason text, verbatim (as Kriya recorded it)." },
+        "policy_note": { "type": "string", "description": "The part of the reason before the automated reviewer's section (why the change was held for a human)." },
+        "review_summary": { "type": ["string", "null"], "description": "The automated reviewer's report: the text after the reviewer-section delimiter, unaltered; null when the reason has no such section." },
+        "reason_truncated": { "type": "boolean" },
+        "truncated": { "type": "boolean" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "diff_sha256", "change_type", "additions", "deletions", "hunks", "truncated"],
+            "properties": {
+              "path": { "type": "string" }, "diff_sha256": { "type": "string" },
+              "change_type": { "enum": ["added", "deleted", "modified"] },
+              "additions": { "type": "integer", "minimum": 0 }, "deletions": { "type": "integer", "minimum": 0 },
+              "truncated": { "type": "boolean" },
+              "hunks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["header", "old_start", "old_lines", "new_start", "new_lines", "lines"],
+                  "properties": {
+                    "header": { "type": "string" },
+                    "old_start": { "type": "integer" }, "old_lines": { "type": "integer" }, "new_start": { "type": "integer" }, "new_lines": { "type": "integer" },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["kind", "text", "old_line", "new_line"],
+                        "properties": { "kind": { "enum": ["context", "add", "remove", "note"] }, "text": { "type": "string" }, "old_line": { "type": ["integer", "null"] }, "new_line": { "type": ["integer", "null"] } },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ExecutionContext": {
       "description": "data of `execution.context`: the Skills, tools and per-role model routing a run in this folder would have, from the resolved configuration and files; starts no process and touches no network. Rule text, commands, arguments, environment and credentials are never included.",
       "type": "object",

@@ -55,6 +55,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# The most diff text one review can hold (UTF-8 bytes). A larger change is not offered for approval: an unreviewable change is never approved.
+REVIEW_DIFF_MAX_BYTES = 2_000_000
+
+
 def goal_digest(goal: str) -> Dict[str, Any]:
     return {"sha256": hashlib.sha256(goal.encode("utf-8")).hexdigest(), "chars": len(goal)}
 
@@ -162,6 +166,11 @@ class LaunchSession:
             return None
         self._review_sequence += 1
         pending = build_pending(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, files, reason)
+        # The exact diff text the person will be asked to approve is stored (approval-scoped, digest-bound) BEFORE the review becomes pending. If it cannot be stored
+        # the review cannot be inspected, so it is not offered: no review means the caller declines (never an approval of an unreviewable change).
+        if not self._store_review_diff(pending, files):
+            self._review_sequence -= 1
+            return None
         previous = self._record.get("pending_approval")
         history = list(self._record.get("approval_history") or [])
         if isinstance(previous, dict):
@@ -175,6 +184,22 @@ class LaunchSession:
             self._record["pending_approval"], self._record["approval_history"] = previous, history[:-1] if isinstance(previous, dict) else history
             return None
         return await_decision(self, pending["review_id"], pending["candidate_digest"])
+
+    def _store_review_diff(self, pending: Dict[str, Any], files: List[Dict[str, str]]) -> bool:
+        from kriya.control.persistence import save_launch_review_diff
+
+        documents = [{"filepath": str(f.get("filepath", "")), "diff": str(f.get("content", ""))} for f in files]
+        if sum(len(d["diff"].encode("utf-8", errors="replace")) for d in documents) > REVIEW_DIFF_MAX_BYTES:
+            logger.error("Launch %s: the change is larger than the %d bytes a review can hold; it is not offered for approval", self.launch_id, REVIEW_DIFF_MAX_BYTES)
+            return False
+        payload = {"schema": 1, "launch_id": self.launch_id, "review_id": pending["review_id"], "workspace_identity": self._record["workspace"]["identity"],
+                   "candidate_digest": pending["candidate_digest"], "files": documents}
+        try:
+            save_launch_review_diff(self.workspace, self.launch_id, pending["review_id"], payload)
+        except Exception as error:
+            logger.error("Launch %s: review diff not stored (%s: %s)", self.launch_id, type(error).__name__, error)
+            return False
+        return True
 
     def resolve_review(self, review_id: str, status: str, decision: Dict[str, Any]) -> bool:
         """Record how the pending review ended BEFORE the workflow is told. False (nothing recorded, so the caller must not approve) when the review is

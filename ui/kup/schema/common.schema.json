@@ -84,6 +84,9 @@
         "LAUNCH_NOT_FOUND",
         "APPROVAL_STALE",
         "APPROVAL_UNAVAILABLE",
+        "REVIEW_NOT_FOUND",
+        "REVIEW_DIFF_UNAVAILABLE",
+        "REVIEW_DIFF_UNVERIFIED",
         "HOST_ERROR"
       ]
     },
@@ -261,6 +264,7 @@
             "tools.approval_state",
             "configuration.approval_status",
             "configuration.approve",
+            "change_approval.review",
             "snapshot.acquire",
             "snapshot.list",
             "snapshot.prune",

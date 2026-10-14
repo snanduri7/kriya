@@ -25,6 +25,7 @@ from kriya.agents.agent import (
 from kriya.agents.contracts import parse_planner_structured_output, partition_file_list_escapes
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.code_intel.model import CALLABLE_KINDS
+from kriya.control.launch_approval import REVIEW_SECTION_HEADER
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
@@ -5780,7 +5781,7 @@ class WorkflowEngine:
                             state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
                             review_parts.append(label + review_text)
                         state.pre_approval_review = "\n".join(review_parts)
-                        escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
+                        escalation_reason += f"\n\n{REVIEW_SECTION_HEADER}\n{state.pre_approval_review}"
                     except Exception as ex:
                         logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
                         # PRE-APPROVAL-REVIEW-REFUSAL-001 (PRD-033): the approver
@@ -5793,7 +5794,7 @@ class WorkflowEngine:
                             details={"reason_code": unattached_reason},
                         ))
                         escalation_reason += (
-                            f"\n\n=== Automated Code Review ===\nNOT ATTACHED: the review request failed "
+                            f"\n\n{REVIEW_SECTION_HEADER}\nNOT ATTACHED: the review request failed "
                             f"({unattached_reason}). Review the diff without it."
                         )
                 if need_human_approval and approval_callback:

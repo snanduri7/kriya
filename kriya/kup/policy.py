@@ -47,6 +47,7 @@ OPERATIONS = (
     "tools.approval_state",  # what the durable invocation-approval store can say about one tool without starting it (never APPROVED)
     "configuration.approval_status",  # which operator-controlled settings of a folder need approval, and whether a current approval covers them; names only, never values
     "configuration.approve",  # record the approval for exactly the configuration the person reviewed (a typed {workspace, fingerprint}); the same write the CLI makes
+    "change_approval.review",  # the EXACT proposed change a pending (or decided) review asks the person to approve, verified against the review's digests; approval-scoped
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",
@@ -84,6 +85,9 @@ EVIDENCE_CONTENT_UNAVAILABLE = "EVIDENCE_CONTENT_UNAVAILABLE"  # authorized, but
 WORKSPACE_UNAVAILABLE = "WORKSPACE_UNAVAILABLE"              # a folder to open is missing, not a directory or unreadable (extra: reason)
 LAUNCH_NOT_FOUND = "LAUNCH_NOT_FOUND"                        # no launch record with that id for the folder (extra: reason)
 EVIDENCE_BLOB_TOO_LARGE = "EVIDENCE_BLOB_TOO_LARGE"          # the part is over the response cap (extra: bytes_total)
+REVIEW_NOT_FOUND = "REVIEW_NOT_FOUND"                        # the launch has no review with that id (extra: reason)
+REVIEW_DIFF_UNAVAILABLE = "REVIEW_DIFF_UNAVAILABLE"          # the review exists but its diff text was not stored, or the document is missing/foreign/corrupt: it cannot be inspected
+REVIEW_DIFF_UNVERIFIED = "REVIEW_DIFF_UNVERIFIED"            # the stored diff text does not match the digests the review is bound to: it is never served (extra: reason)
 APPROVAL_STALE = "APPROVAL_STALE"                            # the configuration is not the one the person reviewed; nothing was approved (extra: reason)
 APPROVAL_UNAVAILABLE = "APPROVAL_UNAVAILABLE"                # an approval cannot be recorded here: trust file in effect, store inside the folder, store unwritable (extra: reason)
 ERROR_CODES = (
@@ -92,7 +96,7 @@ ERROR_CODES = (
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
     EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
     EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, WORKSPACE_UNAVAILABLE, LAUNCH_NOT_FOUND,
-    APPROVAL_STALE, APPROVAL_UNAVAILABLE,
+    APPROVAL_STALE, APPROVAL_UNAVAILABLE, REVIEW_NOT_FOUND, REVIEW_DIFF_UNAVAILABLE, REVIEW_DIFF_UNVERIFIED,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.

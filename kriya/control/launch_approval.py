@@ -67,6 +67,20 @@ def _stamp(moment: datetime) -> str:
     return moment.isoformat(timespec="milliseconds")
 
 
+# The delimiter between the approval policy note and the automated reviewer's report inside the reason text the change gate composes (kriya/workflow/workflow.py). One owner:
+# the gate writes it with this constant and `split_reason` reads it with the same one, so a display never has to guess where the reviewer's words start.
+REVIEW_SECTION_HEADER = "=== Automated Code Review ==="
+
+
+def split_reason(reason: str) -> tuple:
+    """(policy_note, review_summary) of a gate reason. review_summary is None when the reason carries no reviewer section; the text is never altered or summarised."""
+    marker = f"\n\n{REVIEW_SECTION_HEADER}\n"
+    if marker in reason:
+        note, summary = reason.split(marker, 1)
+        return note.strip(), summary.strip()
+    return reason.strip(), None
+
+
 def _sha(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 

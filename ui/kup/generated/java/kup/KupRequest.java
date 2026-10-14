@@ -22,10 +22,11 @@ public class KupRequest {
     private String runid;
     private String name;
     private String parent;
+    private String launchid;
+    private String reviewid;
     private String fingerprint;
     private String skillid;
     private String toolid;
-    private String launchid;
     private Boolean fromTrace;
     private Long attempt;
     private Long fromSeq;
@@ -100,6 +101,22 @@ public class KupRequest {
     public void setParent(String value) { this.parent = value; }
 
     /**
+     * The shape of a Kriya run id; the launch id IS the run id.
+     */
+    @JsonProperty("launch_id")
+    public String getLaunchid() { return launchid; }
+    @JsonProperty("launch_id")
+    public void setLaunchid(String value) { this.launchid = value; }
+
+    /**
+     * The review identity Kriya gave in launch.status (pending_approval.review_id).
+     */
+    @JsonProperty("review_id")
+    public String getReviewid() { return reviewid; }
+    @JsonProperty("review_id")
+    public void setReviewid(String value) { this.reviewid = value; }
+
+    /**
      * The review fingerprint Kriya gave with the status this person reviewed; Kriya approves
      * only if the configuration it now resolves has the same fingerprint.
      */
@@ -123,14 +140,6 @@ public class KupRequest {
     public String getToolid() { return toolid; }
     @JsonProperty("tool_id")
     public void setToolid(String value) { this.toolid = value; }
-
-    /**
-     * The shape of a Kriya run id; the launch id IS the run id.
-     */
-    @JsonProperty("launch_id")
-    public String getLaunchid() { return launchid; }
-    @JsonProperty("launch_id")
-    public void setLaunchid(String value) { this.launchid = value; }
 
     /**
      * run_id is a trace row id; needs snapshot_id.

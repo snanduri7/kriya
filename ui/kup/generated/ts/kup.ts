@@ -33,6 +33,9 @@ export type ErrorCode =
   | 'LAUNCH_NOT_FOUND'
   | 'APPROVAL_STALE'
   | 'APPROVAL_UNAVAILABLE'
+  | 'REVIEW_NOT_FOUND'
+  | 'REVIEW_DIFF_UNAVAILABLE'
+  | 'REVIEW_DIFF_UNVERIFIED'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -64,6 +67,7 @@ export interface Envelope {
     | 'tools.approval_state'
     | 'configuration.approval_status'
     | 'configuration.approve'
+    | 'change_approval.review'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -835,6 +839,59 @@ export interface ConfigurationApprove {
   [k: string]: unknown;
 }
 
+// ---- ChangeApprovalReview (workspace.schema.json#/$defs/ChangeApprovalReview) ----
+/**
+ * data of `change_approval.review`: the EXACT proposed change a review asks the person to approve, served only after Kriya re-proved it against the review's digests (per-file diff digests, candidate digest, identity). Approval-scoped: it is not the evidence store and does not depend on content_visibility. `truncated` true means the change is larger than one response can carry: the host must NOT offer approval.
+ */
+export interface ChangeApprovalReview {
+  launch_id: string;
+  review_id: string;
+  /**
+   * The review's own status: PENDING, APPROVED, REJECTED or EXPIRED.
+   */
+  status: string;
+  /**
+   * The digest the decision must carry; the diff below is proved to be what it binds.
+   */
+  candidate_digest: string;
+  verified: true;
+  /**
+   * The gate's reason text, verbatim (as Kriya recorded it).
+   */
+  reason: string;
+  /**
+   * The part of the reason before the automated reviewer's section (why the change was held for a human).
+   */
+  policy_note: string;
+  /**
+   * The automated reviewer's report: the text after the reviewer-section delimiter, unaltered; null when the reason has no such section.
+   */
+  review_summary: string | null;
+  reason_truncated: boolean;
+  truncated: boolean;
+  files: {
+    path: string;
+    diff_sha256: string;
+    change_type: 'added' | 'deleted' | 'modified';
+    additions: number;
+    deletions: number;
+    truncated: boolean;
+    hunks: {
+      header: string;
+      old_start: number;
+      old_lines: number;
+      new_start: number;
+      new_lines: number;
+      lines: {
+        kind: 'context' | 'add' | 'remove' | 'note';
+        text: string;
+        old_line: number | null;
+        new_line: number | null;
+      }[];
+    }[];
+  }[];
+}
+
 // ---- ExecutionContext (workspace.schema.json#/$defs/ExecutionContext) ----
 /**
  * data of `execution.context`: the Skills, tools and per-role model routing a run in this folder would have, from the resolved configuration and files; starts no process and touches no network. Rule text, commands, arguments, environment and credentials are never included.
@@ -1469,6 +1526,18 @@ export type KupRequest =
        * Absolute path without control characters.
        */
       workspace: string;
+    }
+  | {
+      operation: 'change_approval.review';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      launch_id: string;
+      /**
+       * The review identity Kriya gave in launch.status (pending_approval.review_id).
+       */
+      review_id: string;
     }
   | {
       operation: 'configuration.approve';

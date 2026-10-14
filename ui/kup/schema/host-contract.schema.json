@@ -255,6 +255,12 @@
         },
         {
           "type": "object",
+          "required": ["operation", "workspace", "launch_id", "review_id"],
+          "properties": { "operation": { "const": "change_approval.review" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "launch_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$" }, "review_id": { "type": "string", "pattern": "^ra-[0-9a-f]{24}$", "description": "The review identity Kriya gave in launch.status (pending_approval.review_id)." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "required": ["operation", "workspace", "fingerprint"],
           "properties": { "operation": { "const": "configuration.approve" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint." } },
           "additionalProperties": false

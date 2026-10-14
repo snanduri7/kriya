@@ -53,6 +53,7 @@ ARGUMENTS: Dict[str, frozenset] = {
     "workspace.create": frozenset({"parent", "name"}),
     "configuration.approval_status": frozenset({"workspace"}),
     "configuration.approve": frozenset({"workspace", "fingerprint"}),
+    "change_approval.review": frozenset({"workspace", "launch_id", "review_id"}),
     "execution.context": frozenset({"workspace"}),
     "execution.model_probe": frozenset({"workspace"}),
     "skills.list": frozenset({"workspace"}),

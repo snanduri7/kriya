@@ -149,6 +149,37 @@ def load_launch_review_decision(workspace_path: str, launch_id: str, review_id: 
     return payload
 
 
+def launch_review_diff_path(workspace_path: str, launch_id: str, review_id: str) -> str:
+    """PRODUCT-UX-COMPLETION: the EXACT diff text of ONE change review, beside the launch record. Approval-scoped: it holds only what the person is asked to approve
+    (the unified diffs the gate presented), is bound by digest to the pending review, and is served only by `change_approval.review` after re-verification. It is
+    not part of the evidence store and does not widen ``evidence.attempt_recorder.content_visibility``."""
+    if not _valid_run_id(launch_id) or not _valid_run_id(review_id):
+        raise ValueError("launch_id and review_id must contain only letters, digits, '-' or '_'")
+    return os.path.join(_control_dir(workspace_path), _LAUNCHES_DIRNAME, f"{launch_id}.review-diff-{review_id}.json")
+
+
+def save_launch_review_diff(workspace_path: str, launch_id: str, review_id: str, payload: Dict[str, Any]) -> None:
+    """Atomically writes the ownership-stamped diff document of one review (the same control writer as every control document)."""
+    _save_json_document(workspace_path, launch_review_diff_path(workspace_path, launch_id, review_id), payload, derived_from_active_run=False)
+
+
+def load_launch_review_diff(workspace_path: str, launch_id: str, review_id: str) -> Optional[Dict[str, Any]]:
+    """None when no complete, ownership-stamped diff document exists for the review (missing, partial, corrupt or foreign): never partial content."""
+    path = launch_review_diff_path(workspace_path, launch_id, review_id)
+    try:
+        with open(path, "rb") as handle:
+            payload = json.loads(handle.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or "_workspace" not in payload:
+        return None
+    try:
+        validate_ownership(workspace_path, payload, path)
+    except WorkspaceOwnershipError:
+        return None
+    return payload
+
+
 def load_launch_record(workspace_path: str, launch_id: str) -> Optional[Dict[str, Any]]:
     """None when no record exists; raises UnreadableRunRecordError when one exists but is not trustworthy (corrupt or owned by another workspace)."""
     path = launch_record_path(workspace_path, launch_id)

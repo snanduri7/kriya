@@ -249,6 +249,30 @@ def test_every_error_code_is_producible():
         with patch.dict(os.environ, {"KRIYA_TRUST_FILE": os.path.join(scratch, "trust.json")}):
             reviewed = run_kup_operation(AppConfig(), {"operation": "configuration.approval_status", "workspace": folder})["data"]["fingerprint"]
             produced.add(run_kup_operation(AppConfig(), {"operation": "configuration.approve", "workspace": folder, "fingerprint": reviewed})["error"]["code"])  # APPROVAL_UNAVAILABLE
+    # change_approval.review: a review that is not there, one whose diff was never stored, and one whose stored diff does not match its digests
+    with tempfile.TemporaryDirectory() as scratch:
+        from kriya.control.launch import LaunchSession
+        from kriya.control.launch_approval import build_pending
+        from kriya.control.persistence import load_launch_record, save_launch_record, save_launch_review_diff
+        from kriya.control.workspace_identity import canonical_workspace, workspace_identity
+        folder = os.path.join(scratch, "proj")
+        os.mkdir(folder)
+        canonical = canonical_workspace(folder)
+        lid = "20261010T101010-abcdef01"
+        session = LaunchSession(canonical, workspace_identity(canonical), lid, "goal", {}, {})
+        session.open()
+        files = [{"filepath": "a.py", "content": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"}]
+        pending = build_pending(lid, workspace_identity(canonical), 1, files, "why")
+        record = load_launch_record(canonical, lid)
+        record["pending_approval"] = pending
+        save_launch_record(canonical, lid, record)
+        ask = lambda rid: run_kup_operation(AppConfig(), {"operation": "change_approval.review", "workspace": folder, "launch_id": lid, "review_id": rid})["error"]["code"]  # noqa: E731
+        produced.add(ask("ra-" + "0" * 24))  # REVIEW_NOT_FOUND
+        produced.add(ask(pending["review_id"]))  # REVIEW_DIFF_UNAVAILABLE (nothing stored)
+        save_launch_review_diff(canonical, lid, pending["review_id"], {"schema": 1, "launch_id": lid, "review_id": pending["review_id"], "workspace_identity": workspace_identity(canonical),
+                                                                   "candidate_digest": pending["candidate_digest"], "files": [{"filepath": "a.py", "diff": "tampered"}]})
+        produced.add(ask(pending["review_id"]))  # REVIEW_DIFF_UNVERIFIED
+        session.finish(0, None, None)
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced
