@@ -15,7 +15,7 @@ while [ $# -gt 0 ]; do
     *) die "unknown argument: $1" ;;
   esac
 done
-case "$SCENARIO" in 01|03) ;; *) die "only scenarios 01 and 03 have a GUI rehearsal driver (02 is STOPPED)" ;; esac
+case "$SCENARIO" in 01|03) ;; *) die "only scenarios 01 and 03 have a GUI rehearsal driver; scenario 02 uses scripts/scenario02_run.sh and scripts/capture_skills_page.sh" ;; esac
 assert_work_outside_repo
 SC_DIR="$(scenario_dir "$SCENARIO")"
 WORK="$(scenario_work "$SCENARIO")"

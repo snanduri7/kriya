@@ -1,0 +1,2 @@
+mode=acquire run_id=final-acquire started=2026-10-14T10:35:16Z kriya=Kriya 0.1.0 (commit UNKNOWN, tree UNKNOWN; build provenance unavailable) product_head=cfcc2cd00d560e573cb17f64d156737ae0b8cd91
+generate/driver exit code: 1 (3 = an unrecognised prompt stopped the run)

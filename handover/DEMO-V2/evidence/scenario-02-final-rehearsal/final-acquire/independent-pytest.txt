@@ -1,0 +1,59 @@
+.FFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+______________________________ test_no_functions _______________________________
+test_outline.py:16: in test_no_functions
+    assert outline.function_start_offsets(encode("x = 1\nprint(x)\n")) == []
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+______________________________ test_empty_source _______________________________
+test_outline.py:20: in test_empty_source
+    assert outline.function_start_offsets(b"") == []
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+_________________________ test_two_top_level_functions _________________________
+test_outline.py:25: in test_two_top_level_functions
+    assert outline.function_start_offsets(encode(source)) == [0, 2 * source.index("def b")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+_______________ test_async_function_starts_at_its_async_keyword ________________
+test_outline.py:30: in test_async_function_starts_at_its_async_keyword
+    assert outline.function_start_offsets(encode(source)) == [2 * source.index("async")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+_ test_non_ascii_text_before_a_function_shifts_the_offset_by_two_bytes_per_character _
+test_outline.py:35: in test_non_ascii_text_before_a_function_shifts_the_offset_by_two_bytes_per_character
+    assert outline.function_start_offsets(encode(source)) == [2 * source.index("def g")] == [18]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+______________ test_nested_functions_and_methods_are_not_included ______________
+test_outline.py:40: in test_nested_functions_and_methods_are_not_included
+    assert outline.function_start_offsets(encode(source)) == [0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+______________ test_the_parser_library_named_in_the_goal_is_used _______________
+test_outline.py:44: in test_the_parser_library_named_in_the_goal_is_used
+    outline.function_start_offsets(encode("x = 1\n"))
+outline.py:5: in function_start_offsets
+    raise NotImplementedError
+E   NotImplementedError
+=========================== short test summary info ============================
+FAILED test_outline.py::test_no_functions - NotImplementedError
+FAILED test_outline.py::test_empty_source - NotImplementedError
+FAILED test_outline.py::test_two_top_level_functions - NotImplementedError
+FAILED test_outline.py::test_async_function_starts_at_its_async_keyword - Not...
+FAILED test_outline.py::test_non_ascii_text_before_a_function_shifts_the_offset_by_two_bytes_per_character
+FAILED test_outline.py::test_nested_functions_and_methods_are_not_included - ...
+FAILED test_outline.py::test_the_parser_library_named_in_the_goal_is_used - N...
+7 failed, 1 passed in 0.03s

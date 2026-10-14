@@ -1,0 +1,5 @@
+# Add architectural rules here (one per line)
+
+To install the tree-sitter-python language binding, use `pip install tree-sitter-python`.
+After installing tree-sitter-python, import it as `tree_sitter_python` and load the language using `tree_sitter_python.language()`.
+Use `Language(tree_sitter_python.language())` to create a Python Language object for use with Tree-sitter parsers.

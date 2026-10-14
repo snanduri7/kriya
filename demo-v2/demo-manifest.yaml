@@ -20,9 +20,9 @@ scenarios:
     expected: expected/scenario-01.md
     controlled: false
   - id: 02-knowledge-skill
-    title: Terminal acquisition, GUI skill view, offline GUI run
+    title: Terminal acquisition, GUI skill view, offline task run (terminal)
     dir: scenarios/02-knowledge-skill
-    status: STOPPED_RETURNED_TO_OWNER
+    status: REHEARSED_ONCE_PASS_WITH_CAVEATS
     model: live_local
     network: acquisition_step_only
     fixtures: [knowledge-skill]

@@ -1,0 +1,35 @@
+[
+ {
+  "wait": 800,
+  "file": "01-welcome.png",
+  "width": 1536,
+  "height": 960
+ },
+ {
+  "name": "open",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();return await W(()=>document.querySelector('nav[aria-label=Destinations]'))})()",
+  "wait": 600
+ },
+ {
+  "js": "(()=>{document.querySelector('nav[aria-label=Destinations] button[aria-label=Skills]').click();})()",
+  "wait": 500
+ },
+ {
+  "name": "skills_list",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});await W(()=>document.querySelector('table[aria-label=Skills]'));return document.querySelector('main').innerText})()",
+  "wait": 600,
+  "file": "02-skills-list.png"
+ },
+ {
+  "name": "detail_python",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('button[aria-label=\"Show tree-sitter-python\"]').click();await W(()=>document.querySelector('section[aria-label=\"Skill tree-sitter-python\"]'));return document.querySelector('section[aria-label=\"Skill tree-sitter-python\"]').innerText})()",
+  "wait": 800,
+  "file": "03-skill-tree-sitter-python.png"
+ },
+ {
+  "name": "detail_generic",
+  "js": "(async()=>{const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});document.querySelector('button[aria-label=\"Show tree-sitter\"]').click();await W(()=>document.querySelector('section[aria-label=\"Skill tree-sitter\"]'));return document.querySelector('section[aria-label=\"Skill tree-sitter\"]').innerText})()",
+  "wait": 800,
+  "file": "04-skill-tree-sitter.png"
+ }
+]

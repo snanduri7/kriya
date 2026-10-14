@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Return ONE scenario to its pristine starting point inside the work area. Never writes to a fixture source or to the repository.
-# Usage: reset_demo.sh --scenario 01|03      (02 is STOPPED: nothing to reset)
+# Usage: reset_demo.sh --scenario 01|03      (02: no reset, see scenario02_run.sh)
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -18,7 +18,7 @@ ensure_work_area
 SC_DIR="$(scenario_dir "$SCENARIO")"
 case "$SCENARIO" in
   01|03) ;;
-  02) die "scenario 02 is STOPPED and returned to the owner (see scenarios/02-knowledge-skill/SCENARIO.md and handover/DEMO-V2/FINDINGS.md); there is no reset to run" ;;
+  02) die "scenario 02 has no reset: every scripts/scenario02_run.sh run is a fresh work area (see scenarios/02-knowledge-skill/SCENARIO.md)" ;;
   *) die "unknown scenario $SCENARIO" ;;
 esac
 

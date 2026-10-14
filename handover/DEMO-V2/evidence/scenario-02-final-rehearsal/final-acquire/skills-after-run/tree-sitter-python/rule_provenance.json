@@ -1,0 +1,20 @@
+[
+  {
+    "text": "To install the tree-sitter-python language binding, use `pip install tree-sitter-python`.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  },
+  {
+    "text": "After installing tree-sitter-python, import it as `tree_sitter_python` and load the language using `tree_sitter_python.language()`.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  },
+  {
+    "text": "Use `Language(tree_sitter_python.language())` to create a Python Language object for use with Tree-sitter parsers.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  }
+]
