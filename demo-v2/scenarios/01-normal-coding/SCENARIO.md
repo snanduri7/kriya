@@ -48,7 +48,7 @@ None at run time (`web_lookup_enabled: false`, empty search URL). Local model se
 ## RESET
 ```bash
 demo-v2/scripts/prepare_demo.sh --scenario 01 [--check-build]   # 1. materialise the workspace at the pinned commit, revoke any earlier approval, render and place the configuration
-# 2. OPERATOR STEP, in the app: Open Folder -> Review & Approve -> read the listed settings (names only) -> Approve Configuration. Or in a terminal:
+# 2. OPERATOR STEP, in the app: Open Folder -> Review & Approve -> read the listed settings (names only) -> Continue to Approval -> the native confirmation -> Approve Configuration. Or in a terminal:
 #    ( cd "$DEMO_V2_WORK/scenario-01/workspace" && kriya authority approve )   (stored outside the workspace; the same approval either way)
 demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report 0 failed once the configuration is approved
 ```

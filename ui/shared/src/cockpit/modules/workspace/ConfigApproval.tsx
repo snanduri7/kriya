@@ -5,6 +5,7 @@ import type { ConfigurationApprovalStatus } from '../../../model/kup';
 /** The blocker code Kriya's preflight raises while operator-controlled configuration has no current approval. */
 export const CONFIG_APPROVAL_BLOCKER = 'CONFIG_AUTHORITY_REFUSED';
 export const STALE_MESSAGE = 'Configuration changed while you were reviewing it. Review the updated configuration before approving.';
+export const DECLINED_MESSAGE = 'Nothing was approved. You can review again and continue when you are ready.';
 
 const REASON_HELP: Record<string, string> = {
   trust_file_in_effect: 'A trust file is in effect for Kriya, so an approval given here would not be consulted. An operator must manage it outside this application.',
@@ -34,8 +35,10 @@ const short = (fingerprint: string | null) => (fingerprint === null ? '' : finge
 
 /**
  * The review surface for configuration approval. It shows what Kriya reports - the NAMES of the operator-controlled settings and a fingerprint of that exact
- * configuration, never a value - and one explicit button. It holds no authority: Approve Configuration sends only the fingerprint it displayed; Kriya re-resolves
+ * configuration, never a value - and one explicit button. It holds no authority: Continue to Approval sends only the fingerprint it displayed; Kriya re-resolves
  * the configuration and refuses (APPROVAL_STALE) if it differs. Nothing here approves on open, on typing, on Enter or on Start Run: focus opens on Cancel.
+ * This surface only EXPLAINS what is being approved. Its button, Continue to Approval, asks the host; the host's own native confirmation (main process) is the
+ * commitment, and only after it does Kriya record anything. A Cancel there is a normal answer (`declined`), not an error.
  */
 function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): void }) {
   const ex = useExecution();
@@ -44,6 +47,7 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
   const [nonce, setNonce] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [declined, setDeclined] = useState(false);
   const [failure, setFailure] = useState<{ code: string; message: string; reason: string | null } | null>(null);
   const cancel = useRef<HTMLButtonElement | null>(null);
   useEffect(() => { cancel.current?.focus(); }, []);
@@ -55,9 +59,11 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
     setBusy(true);
     setFailure(null);
     setNotice(null);
+    setDeclined(false);
     const result = await ex.approveConfiguration(status.fingerprint);
     setBusy(false);
     if (result.approved) { onApproved(); return; }
+    if (result.outcome === 'declined') { setDeclined(true); return; } // the person pressed Cancel in the native confirmation: nothing written, the review stays as it was
     if (result.code === 'APPROVAL_STALE') { setNotice(STALE_MESSAGE); setNonce((n) => n + 1); return; } // reload what is now there; approving it needs another explicit click
     setFailure({ code: result.code ?? 'HOST_ERROR', message: result.message ?? 'Kriya did not approve the configuration.', reason: result.reason });
   };
@@ -75,6 +81,7 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
             <div><button type="button" onClick={() => setNonce((n) => n + 1)}>Try again</button></div></div>
         ) : null}
         {notice ? <div className="ck-state" role="alert"><strong>{notice}</strong></div> : null}
+        {declined ? <div className="ck-state" role="status" data-testid="approval-declined">{DECLINED_MESSAGE}</div> : null}
         {status ? (
           <>
             {status.status === 'approved' ? <div className="ck-state" role="status"><strong>This configuration is already approved.</strong> Close this window to continue.</div> : null}
@@ -108,8 +115,9 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
             {failure.reason && REASON_HELP[failure.reason] ? <div className="muted small">{REASON_HELP[failure.reason]}</div> : null}
           </div>
         ) : null}
+        {status?.status === 'required' && status.can_approve ? <p className="muted small" data-testid="approval-next-step">Continue to Approval opens a confirmation from the application itself. Nothing is approved until you confirm there.</p> : null}
         <div className="ck-modal-actions">
-          <button type="button" className="ck-primary" disabled={!canApprove} onClick={() => { void approve(); }}>{busy ? 'Approving…' : 'Approve Configuration'}</button>
+          <button type="button" className="ck-primary" disabled={!canApprove} onClick={() => { void approve(); }}>{busy ? 'Waiting for confirmation…' : 'Continue to Approval…'}</button>
           <button type="button" ref={cancel} disabled={busy} onClick={onClose}>Cancel</button>
         </div>
       </div>

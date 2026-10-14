@@ -1,0 +1,7 @@
+kriya authority inspect (real CLI, run in the project after the app exited), verdict line:
+Local approval at /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-cfg-smoke.1kFzJz/home/.kriya/authority/3a77cf7533c9a981bbf1914f62f96211fcbc0aa3749dfa20cf360c8b56518793.json is CURRENT and covers all pending fields.
+
+approval artifact present in the scratch HOME's store: yes
+artifact holds a secret or credential: no
+artifact fields: ['llm.base_url', 'mcp.hostile-mcp']
+files written into the project by the app (besides the run's own .kriya): 0

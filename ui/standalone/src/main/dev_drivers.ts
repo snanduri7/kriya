@@ -19,6 +19,8 @@ export interface DevDrivers {
   /** Scripted answers for the native folder chooser while the capture driver is active (null = the person cancelled); null when the driver is not active. */
   captureChoices: Array<string | null> | null;
   captureActive: boolean;
+  /** The scripted answer to the NATIVE configuration-approval confirmation while the capture driver is active: true = the person pressed `Approve Configuration`. Takes the next entry of the scripted queue; an exhausted or absent queue answers false (Cancel) - it never auto-approves. */
+  nextConfirmation(): boolean;
   trace(text: string): void;
   traceLine: ((line: string) => void) | undefined;
   windowArgs: string[];
@@ -40,6 +42,8 @@ export function createDevDrivers(env: NodeJS.ProcessEnv): DevDrivers {
   // The folders the scripted chooser returns in place of the native dialog, a JSON array where null means the person cancelled. Everything after the dialog - registry,
   // approval, Kriya's validation - is the production path.
   const captureChoices: Array<string | null> | null = CAPTURE_DIR && env.KRIYA_UI_CAPTURE_CHOOSE ? (JSON.parse(env.KRIYA_UI_CAPTURE_CHOOSE) as Array<string | null>) : null;
+  // The scripted answers for the native configuration-approval confirmation: a JSON array of 'approve' | 'cancel', consumed in order; anything else, or running out, is Cancel.
+  const captureConfirm: string[] = CAPTURE_DIR && env.KRIYA_UI_CAPTURE_CONFIRM ? (JSON.parse(env.KRIYA_UI_CAPTURE_CONFIRM) as string[]) : [];
   const fakeKriya = join(__dirname, '..', '..', 'fake-kriya', 'fake_kriya.mjs');
   /** Only the fixture knobs reach the stand-in; never the ambient environment (P-31). */
   const fakeEnv = (): Record<string, string> => {
@@ -52,7 +56,7 @@ export function createDevDrivers(env: NodeJS.ProcessEnv): DevDrivers {
   const trace = (text: string) => { if (TRACE) process.stderr.write(text); };
   return {
     allowReal: env.KRIYA_UI_ALLOW_REAL_KRIYA === '1',
-    captureChoices, captureActive: Boolean(CAPTURE_DIR), trace,
+    captureChoices, captureActive: Boolean(CAPTURE_DIR), nextConfirmation: () => captureConfirm.shift() === 'approve', trace,
     traceLine: TRACE ? (line: string) => process.stderr.write(`[kriya-ui] ${line}\n`) : undefined,
     windowArgs: MEASURE || SOAK ? ['--kriya-ui-measure'] : [],
     webPreferences: CAPTURE_DIR || MEASURE || SOAK ? { backgroundThrottling: false } : {},

@@ -23,7 +23,7 @@ node "$DEMO_V2_DIR/scripts/gui/config_approval_smoke.mjs" "$S/steps.json"
 WS="$(cd "$S/ws" && pwd -P)"
 [ -z "$(ls "$S/home/.kriya/authority" 2>/dev/null)" ] || die "the scratch HOME already holds an approval before the app ran"
 set +e
-HOME="$S/home" KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$S/state" KRIYA_UI_CAPTURE="$S/captures" KRIYA_UI_CAPTURE_STEPS="$S/steps.json" KRIYA_UI_CAPTURE_CHOOSE="[\"$WS\"]" \
+HOME="$S/home" KRIYA_UI_ALLOW_REAL_KRIYA=1 KRIYA_STATE_DIR="$S/state" KRIYA_UI_CAPTURE="$S/captures" KRIYA_UI_CAPTURE_STEPS="$S/steps.json" KRIYA_UI_CAPTURE_CHOOSE="[\"$WS\"]" KRIYA_UI_CAPTURE_CONFIRM='["cancel","approve"]' \
   "$APP/Contents/MacOS/Kriya" --user-data-dir="$S/userdata" >"$S/app.stdout.log" 2>"$S/app.stderr.log"
 STATUS=$?
 set -e

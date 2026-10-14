@@ -41,6 +41,8 @@ describe.skipIf(!available)('configuration approval against real Kriya', () => {
   let service: KriyaService;
   let openWorkspace: string | null = null;
   let hostCalls = 0;
+  let dialogs = 0; // how many times the (scripted) native confirmation was shown
+  let confirmation: (ws: string) => Promise<boolean> = async () => true; // the person presses Approve Configuration unless a test says otherwise
   let approvals: ConfigApprovalHost;
 
   const send = async (request: KupRequest): Promise<Json> => {
@@ -85,6 +87,7 @@ describe.skipIf(!available)('configuration approval against real Kriya', () => {
     service = new KriyaService({ executable: KRIYA, cwd: config, env });
     approvals = new ConfigApprovalHost({
       approve: (ws, fingerprint) => { hostCalls += 1; return send({ operation: 'configuration.approve', workspace: ws, fingerprint }); },
+      confirm: (ws) => { dialogs += 1; return confirmation(ws); },
       currentWorkspace: () => openWorkspace,
     });
     execFileSync(PYTHON, ['-c', 'import kriya.cli'], { env: { PATH: process.env.PATH ?? '', ...env }, cwd: config });
@@ -154,6 +157,39 @@ describe.skipIf(!available)('configuration approval against real Kriya', () => {
     const fresh = (await status(ws)).fingerprint as string;
     expect(fresh).not.toBe(reviewed);
     expect((await approvals.approve({ workspace: ws, fingerprint: fresh })).approved).toBe(true);
+  });
+
+  it('native Cancel against real Kriya: Kriya is never asked, nothing is written, the project stays unapproved for host, readiness and the CLI alike', async () => {
+    const ws = workspace('native-cancel'); openWorkspace = ws;
+    const fingerprint = (await status(ws)).fingerprint as string;
+    const storedBefore = stored().length; const asked = hostCalls; const shown = dialogs;
+    confirmation = async () => false;
+    try {
+      expect(await approvals.approve({ workspace: ws, fingerprint })).toEqual({ approved: false, outcome: 'declined', code: null, message: null, reason: null });
+    } finally { confirmation = async () => true; }
+    expect(dialogs).toBe(shown + 1);
+    expect(hostCalls).toBe(asked); // the backend never heard of it
+    expect(stored().length).toBe(storedBefore);
+    expect((await status(ws)).status).toBe('required');
+    expect(await preflightBlockers(ws)).toContain('CONFIG_AUTHORITY_REFUSED');
+    expect(cli(ws, 'inspect').stdout).toContain('No local approval on file');
+  });
+
+  it('F. the configuration changes WHILE the native confirmation is up: after the person approves, the backend re-resolves, refuses as stale and writes nothing; the new configuration needs its own confirmation', async () => {
+    const ws = workspace('stale-after-native'); openWorkspace = ws;
+    const reviewed = (await status(ws)).fingerprint as string;
+    const storedBefore = stored().length; const shown = dialogs;
+    confirmation = async () => { writeFileSync(join(ws, 'kriya.yaml'), YAML('http://127.0.0.1:9/v1')); return true; }; // edited behind the dialog, then Approve is pressed
+    try {
+      expect(await approvals.approve({ workspace: ws, fingerprint: reviewed })).toMatchObject({ approved: false, outcome: null, code: 'APPROVAL_STALE', reason: 'configuration_changed' });
+    } finally { confirmation = async () => true; }
+    expect(dialogs).toBe(shown + 1);
+    expect(stored().length).toBe(storedBefore); // nothing was written
+    expect(cli(ws, 'inspect').stdout).toContain('No local approval on file');
+    const fresh = (await status(ws)).fingerprint as string;
+    expect(fresh).not.toBe(reviewed);
+    expect((await approvals.approve({ workspace: ws, fingerprint: fresh })).approved).toBe(true);
+    expect(dialogs).toBe(shown + 2); // the updated configuration was confirmed on its own
   });
 
   it('an approval does not outlive the configuration it covers: change one protected setting and the project needs approval again (host, CLI and readiness agree)', async () => {

@@ -23,7 +23,7 @@ demo-v2/scripts/verify_demo.sh --scenario all --phase idle   # the start state: 
 Each scenario then needs one operator step: approving its workspace configuration (Kriya refuses an unapproved one). **Scenario A: you approve it inside the app** (the Project page shows **ACTION REQUIRED** with **Review & Approve**); no terminal command is needed. Scenarios B and C: approve it the same way in the app, or in a terminal as shown in their sections.
 
 ## C. Launch the Kriya GUI
-One launch per scenario (quit the app with Cmd+Q before the next one):
+One launch per scenario. **Quit every Kriya window first (Cmd+Q)** and start the app only with this script: an app opened any other way (Dock, Finder, the evidence build) reads `~/.kriya/state` and the run is refused with `STATE_DIRECTORY_NOT_OBSERVABLE`.
 ```bash
 demo-v2/scripts/launch_gui.sh --scenario 01     # or 02, or 03
 ```
@@ -35,8 +35,8 @@ demo-v2/scripts/verify_demo.sh --scenario 01 --phase idle         # the start st
 demo-v2/scripts/launch_gui.sh --scenario 01
 pbcopy < demo-v2/scenarios/01-normal-coding/goal.md               # the goal
 ```
-In the app: **Open Folder** -> the **Project** page shows **ACTION REQUIRED - Configuration approval required** (the goal box is already there) -> paste the goal -> **Review & Approve** -> read the protected settings (names only; values are never shown) -> **Approve Configuration** -> the page re-checks and turns **Ready**, your goal still in the box, **Start Run** now on -> **Start Run** -> the page names what Kriya is doing (Planning, Editing, Validating) -> when **ACTION REQUIRED** appears again, read the file, `+1 -0`, the validation and the reviewer text (the diff text itself is hidden by Kriya's default content-visibility policy), then **Approve & Continue** (a confirmation follows) -> the page says **Run completed** with the changed file and the recorded validation; **View Evidence** opens the evidence.
-The configuration approval is the same approval `kriya authority approve` records (stored outside the workspace, bound to exactly the settings you reviewed; changing any of them asks again). To start over, run `prepare_demo.sh --scenario 01` again: it revokes the approval.
+In the app: **Open Folder** -> the **Project** page shows **ACTION REQUIRED - Configuration approval required** (the goal box is already there) -> paste the goal -> **Review & Approve** -> read the protected settings (names only; values are never shown) -> **Continue to Approval…** -> a **native confirmation** from the application itself appears (Cancel is the default; press **Approve Configuration** only if you trust the settings; Cancel just returns you to the review, nothing is approved) -> the page re-checks and turns **Ready**, your goal still in the box, **Start Run** now on -> **Start Run** -> the page names what Kriya is doing (Planning, Editing, Validating) -> when **ACTION REQUIRED** appears again, read the file, `+1 -0`, the validation and the reviewer text (the diff text itself is hidden by Kriya's default content-visibility policy), then **Approve & Continue** (a confirmation follows) -> the page says **Run completed** with the changed file and the recorded validation; **View Evidence** opens the evidence.
+The review explains what is being approved; the native confirmation is the commitment. The configuration approval is the same approval `kriya authority approve` records (stored outside the workspace, bound to exactly the settings you reviewed; changing any of them asks again). To start over, run `prepare_demo.sh --scenario 01` again: it revokes the approval.
 ```bash
 demo-v2/scripts/verify_demo.sh --scenario 01 --phase pre          # optional, after approving in the app: 0 failed
 demo-v2/scripts/verify_demo.sh --scenario 01 --phase post         # after the run: independent check, no model

@@ -23,7 +23,7 @@ import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
-import { ConfigApprovalHost } from './config_approval_host';
+import { ConfigApprovalHost, confirmationDialog, isApproveResponse } from './config_approval_host';
 import { ProjectHost } from './project_host';
 import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
@@ -311,6 +311,19 @@ function createWindow() {
   return win;
 }
 
+/**
+ * The human commitment for a configuration approval: a native confirmation created HERE, in the main process, as a sheet on the application window. Its text is a
+ * function of the open folder's name alone (config_approval_host.ts). Cancel is the default and the Escape action; only the `Approve Configuration` button returns true.
+ * An evidence build driven by the capture driver answers from its scripted queue instead (dev_drivers.ts); an exhausted or absent queue means Cancel.
+ */
+async function confirmConfigurationApproval(workspace: string): Promise<boolean> {
+  if (dev?.captureActive) return dev.nextConfirmation();
+  const options = confirmationDialog(workspace);
+  const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return isApproveResponse(result.response);
+}
+
 app.whenReady().then(async () => {
   app.setAboutPanelOptions(aboutPanelOptions(app.getVersion()));
   settings = new SettingsStore(join(app.getPath('userData'), 'kriya-ui-settings.json'));
@@ -321,6 +334,7 @@ app.whenReady().then(async () => {
   });
   configApprovals = new ConfigApprovalHost({
     approve: (workspace, fingerprint) => kupQuery({ operation: 'configuration.approve', workspace, fingerprint }),
+    confirm: confirmConfigurationApproval,
     currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   approvals = new ApprovalHost({

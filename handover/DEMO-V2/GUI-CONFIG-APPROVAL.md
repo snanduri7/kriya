@@ -89,3 +89,26 @@ Verdicts as reported: **Security PASS (conditional)**, **UX FAIL (not yet)**; no
 | 6 | COSMETIC | For an `unavailable` status the card still says Review & Approve / "Needs your approval". | Recorded, not changed (the dialog explains why it cannot be done here). |
 | 7 | COSMETIC | A mid-review restart of the Kriya service shows "Configuration changed...". | Recorded; safe direction, wording follows the spec. |
 | 8 | COSMETIC | Doc uncommitted at review time. | Committed with this update. |
+
+## 8. Main-process native confirmation (owner decision after review finding 1; HEAD after 89a6e17)
+
+Owner decision: add a native confirmation in the Electron main process as defence in depth against a compromised renderer, **without** two equivalent approvals. Roles: the renderer review EXPLAINS (project, protected names, sources, fingerprint, scope, "changing protected configuration requires approval again", no values) and its final button is **Continue to Approval…** (it says another confirmation follows); the main-process dialog is the COMMITMENT.
+
+Flow (TRACED in `config_approval_host.ts`, `main.ts`): renderer `approveConfiguration({workspace, fingerprint})` on the existing closed channel -> grammar check -> in-flight guard (taken BEFORE the dialog is awaited, so a second request while the sheet is up is refused) -> open-workspace check -> **native confirmation** (`dialog.showMessageBox` sheet on the application window, created in main) -> open-workspace check again -> unchanged `configuration.approve` (backend re-resolves, compares the fingerprint, `grant_local_approval()`) -> the renderer re-reads the preflight.
+
+* **No new authority and no Python change.** The host adds no approval logic: it asks the person, then forwards the same typed request. Stale protection, the digest and the write stay backend-owned (`APPROVAL_STALE` after a confirmation writes nothing; the updated configuration needs its own confirmation).
+* **Dialog text is a function of the open folder's name alone** (`confirmationDialog(workspace)`; control characters stripped, length bounded): title `Approve Configuration`, message `Approve this project's protected configuration?`, detail names the project and says a change requires approval again. Buttons `Cancel` (index 0: default and Escape action) and `Approve Configuration` (index 1, the only commit). No value, fingerprint, path or renderer-supplied string can enter it (tested).
+* **Cancel** returns `{approved:false, outcome:'declined', code:null}` (contract description updated, generated artifacts regenerated). Kriya is not asked, nothing is written, readiness stays approval-required, the review stays open with a neutral `status` note (no error styling) and the typed goal is untouched.
+* **Evidence-build seam.** The packaged product cannot be clicked headlessly, so the evidence build (only, `dev_drivers.ts`, absent from the product package; `KRIYA_UI_CAPTURE*` names are forbidden in the product by `package_check.mjs`) answers the dialog from `KRIYA_UI_CAPTURE_CONFIRM` (JSON array of `approve`/`cancel`, consumed in order). An absent or exhausted queue answers **Cancel**; it never auto-approves. **Honest limit: the Electron smoke exercises this scripted seam, not a real native sheet.** The real `dialog.showMessageBox` call is checked for its options and its response handling by unit/structure tests only; seeing the actual sheet is the owner's rehearsal.
+
+### Verification (this change)
+
+| Check | Result |
+|---|---|
+| Host unit + structure (`config_approval_host.test.ts`): A, B, C, G, H, ordering, in-flight during the dialog, folder switch while the dialog is up, dialog text/buttons | pass; 9 host mutants (confirm skipped/inverted, response index, in-flight order, no re-check, default/escape button, error-approves, detail leak) all killed |
+| Real Kriya (`config_approval_real.test.ts`): native Cancel writes nothing and the backend is never asked; F: configuration edited behind the dialog -> `APPROVAL_STALE`, nothing stored, second dialog for the new configuration; CLI <-> GUI equivalence unchanged | pass |
+| Renderer (`config_approval.test.tsx`, section N + J): Continue to Approval, no second Approve button, Cancel keeps the goal and the review with a neutral note, Cancel then Approve, stale needs a second confirmation | pass; 4 renderer + 3 seam mutants killed |
+| Electron smoke `evidence/gui-config-approval-native-confirm/` (scripted dialog: Cancel, then Approve) | Open Folder -> ACTION REQUIRED -> Review -> Continue -> **Cancel** (neutral note, review open, goal kept, no alert) -> Continue -> **Approve** -> Ready, Start Run enabled -> run COMPLETED; no secret in the page; the real `kriya authority inspect` after exit: CURRENT; artifact holds no secret; nothing written into the project |
+| typecheck, eslint, `check:generated`, `java:check`, `check:shared-deps`; full ui/shared 596, ui/standalone 384 (+1 skipped), ui/kup 66 | clean / pass |
+
+The earlier evidence `evidence/gui-config-approval/` (pre-confirmation journey) is preserved unchanged.

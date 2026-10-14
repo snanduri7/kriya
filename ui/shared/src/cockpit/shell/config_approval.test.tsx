@@ -41,7 +41,7 @@ const goalBox = () => screen.getByRole('textbox', { name: 'Engineering goal' }) 
 const startButton = () => screen.getByRole('button', { name: /^Start Run$|^Starting…$/ });
 const typeGoal = (text = GOAL) => fireEvent.change(goalBox(), { target: { value: text } });
 const reviewAndApprove = async () => { fireEvent.click(await screen.findByRole('button', { name: 'Review & Approve' })); return dialog(); };
-const approveButton = () => screen.getByRole('button', { name: 'Approve Configuration' });
+const approveButton = () => screen.getByRole('button', { name: 'Continue to Approval…' });
 const calls = (host: FixtureHost, operation: string) => vi.mocked(host.query).mock.calls.filter(([r]) => r.operation === operation).length;
 function spyOnQueries(host: FixtureHost) { vi.spyOn(host, 'query'); return host; }
 
@@ -137,16 +137,71 @@ describe('D/E. Cancel approves nothing; Approve sends one typed request carrying
     fireEvent.keyPress(d, { key: 'Enter', charCode: 13 });
     expect(host.exec!.approvals).toHaveLength(0);
   });
-  it('Approve Configuration is off until Kriya\'s status is read, then asks for exactly {workspace, fingerprint} - once', async () => {
+  it('Continue to Approval is off until Kriya\'s status is read, then asks for exactly {workspace, fingerprint} - once', async () => {
     const host = await open();
     const d = await reviewAndApprove();
     await within(d).findByText('autonomy.mode', { selector: 'li > span.mono' });
     const fingerprint = host.exec!.approvalStatus(WS).fingerprint;
     fireEvent.click(approveButton());
-    fireEvent.click(screen.queryByRole('button', { name: 'Approving…' }) ?? approveButton()); // a second click while in flight reaches nothing
+    fireEvent.click(screen.queryByRole('button', { name: 'Waiting for confirmation…' }) ?? approveButton()); // a second click while in flight reaches nothing
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(host.exec!.approvals).toEqual([{ workspace: WS, fingerprint }]);
     expect(Object.keys(host.exec!.approvals[0]!).sort()).toEqual(['fingerprint', 'workspace']);
+  });
+});
+
+describe('N. the renderer review explains; the host\'s native confirmation commits', () => {
+  it('the renderer offers Continue to Approval and says a confirmation follows; it has no second "Approve" button of its own', async () => {
+    await open();
+    const d = await reviewAndApprove();
+    await within(d).findByText('autonomy.mode', { selector: 'li > span.mono' });
+    expect(within(d).getByTestId('approval-next-step')).toHaveTextContent('Nothing is approved until you confirm there.');
+    expect(within(d).queryByRole('button', { name: /^Approve/ })).toBeNull();
+    expect(within(d).getAllByRole('button').map((b) => b.textContent)).toEqual(['Continue to Approval…', 'Cancel']);
+  });
+  it('Continue to Approval asks the host once; the native confirmation is shown once and Kriya then records exactly the reviewed fingerprint', async () => {
+    const host = await open();
+    await within(await reviewAndApprove()).findByText('autonomy.mode', { selector: 'li > span.mono' });
+    const fingerprint = host.exec!.approvalStatus(WS).fingerprint;
+    fireEvent.click(approveButton());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(host.exec!.confirmationsShown).toBe(1);
+    expect(host.exec!.approvals).toEqual([{ workspace: WS, fingerprint }]);
+  });
+  it('Cancel in the native confirmation is a normal answer: nothing recorded, still approval-required, the goal kept, the review stays open with a neutral note and no error styling', async () => {
+    const host = await open();
+    typeGoal();
+    host.exec!.nativeAnswers.push(false);
+    await within(await reviewAndApprove()).findByText('autonomy.mode', { selector: 'li > span.mono' });
+    fireEvent.click(approveButton());
+    const note = await screen.findByTestId('approval-declined');
+    expect(note).toHaveTextContent('Nothing was approved.');
+    expect(note).toHaveAttribute('role', 'status');
+    expect(within(await dialog()).queryByText(/was not approved/)).toBeNull(); // not the failure panel
+    expect(within(await dialog()).queryAllByRole('alert')).toHaveLength(0);
+    expect(host.exec!.confirmationsShown).toBe(1);
+    expect(host.exec!.approvals).toHaveLength(0); // Kriya was never asked
+    expect(host.exec!.approvalStatus(WS).status).toBe('required');
+    expect(approveButton()).toBeEnabled(); // the person can review again and continue when ready
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await card()).toHaveTextContent('Configuration approval required');
+    expect(goalBox().value).toBe(GOAL);
+    expect(startButton()).toBeDisabled();
+  });
+  it('after a Cancel, continuing again shows a second native confirmation, and approving it then records the approval with the goal intact', async () => {
+    const host = await open();
+    typeGoal();
+    host.exec!.nativeAnswers.push(false, true);
+    await within(await reviewAndApprove()).findByText('autonomy.mode', { selector: 'li > span.mono' });
+    fireEvent.click(approveButton());
+    await screen.findByTestId('approval-declined');
+    fireEvent.click(approveButton());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(host.exec!.confirmationsShown).toBe(2);
+    expect(host.exec!.approvals).toHaveLength(1);
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    expect(goalBox().value).toBe(GOAL);
   });
 });
 
@@ -254,8 +309,10 @@ describe('J. a configuration that changed while it was being reviewed is not app
     expect(await within(await dialog()).findByText('execution_policy.network', { selector: 'li > span.mono' })).toBeInTheDocument(); // the reload shows the updated configuration
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(host.exec!.approvals).toHaveLength(1); // nothing was approved on the person's behalf
+    expect(host.exec!.confirmationsShown).toBe(1);
     fireEvent.click(approveButton());
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(host.exec!.confirmationsShown).toBe(2); // the updated configuration needed its own native confirmation
     expect(host.exec!.approvals).toHaveLength(2);
     expect(host.exec!.approvals[1]!.fingerprint).not.toBe(reviewed);
     expect(goalBox().value).toBe(GOAL);

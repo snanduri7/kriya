@@ -1738,7 +1738,7 @@ export interface ApproveConfigurationRequest {
 
 // ---- ApproveConfigurationResult (host-contract.schema.json#/$defs/ApproveConfigurationResult) ----
 /**
- * Kriya's answer to an approval request, passed through. approved=true means Kriya wrote (or found already current) the approval for exactly the reviewed configuration. approved=false carries a closed code: APPROVAL_STALE (the configuration changed after it was reviewed; nothing was approved), APPROVAL_UNAVAILABLE, or a host refusal such as WORKSPACE_NOT_OPEN, INVALID_REQUEST, RUN_ACTIVE, APPROVAL_IN_FLIGHT.
+ * Kriya's answer to an approval request, passed through. approved=true means Kriya wrote (or found already current) the approval for exactly the reviewed configuration. approved=false with outcome 'declined' (and no code) means the person pressed Cancel in the host's native confirmation: a normal decision, Kriya was not asked and nothing was written. Otherwise approved=false carries a closed code: APPROVAL_STALE (the configuration changed after it was reviewed; nothing was approved), APPROVAL_UNAVAILABLE, or a host refusal such as WORKSPACE_NOT_OPEN, INVALID_REQUEST, RUN_ACTIVE, APPROVAL_IN_FLIGHT.
  */
 export interface ApproveConfigurationResult {
   approved: boolean;

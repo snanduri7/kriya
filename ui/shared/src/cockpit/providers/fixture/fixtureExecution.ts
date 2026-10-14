@@ -81,6 +81,10 @@ export class FixtureExecution {
   readonly port: ExecutionHostPort;
   /** Every configuration approval request the host received, and every status read (for assertions). */
   readonly approvals: ApproveConfigurationRequest[] = [];
+  /** The scripted answers of the host's NATIVE confirmation, consumed in order (true = Approve Configuration, false = Cancel); once empty the fixture host approves. Test hook. */
+  readonly nativeAnswers: boolean[] = [];
+  /** How many times the (scripted) native confirmation was shown. A request that never reaches it never reaches Kriya either. */
+  confirmationsShown = 0;
   statusReads = 0;
   private configFields: string[];
   private configRevision = 1;
@@ -104,7 +108,7 @@ export class FixtureExecution {
       },
       state: async (): Promise<ExecutionState> => this.hostState(),
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
-      ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.approveConfig(request) }),
+      ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.confirmThenApprove(request) }),
       notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
     };
   }
@@ -138,6 +142,12 @@ export class FixtureExecution {
       fingerprint: fp, scope: 'This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.',
       values_shown: false, note: 'Only the names of the settings are shown. Their values are not sent to the application.',
     } as ConfigurationApprovalStatus;
+  }
+  /** The real host asks the person (native confirmation) BEFORE Kriya is asked; Cancel is a normal decision (`declined`), Kriya never hears of it and nothing is written. */
+  private confirmThenApprove(request: ApproveConfigurationRequest): ApproveConfigurationResult {
+    this.confirmationsShown += 1;
+    if (this.nativeAnswers.length > 0 && this.nativeAnswers.shift() === false) return { approved: false, outcome: 'declined', code: null, message: null, reason: null };
+    return this.approveConfig(request);
   }
   /** Kriya's `configuration.approve`, scripted: the same refusals in the same order (grammar, stale, unavailable, fault), then the approval. */
   private approveConfig(request: ApproveConfigurationRequest): ApproveConfigurationResult {
