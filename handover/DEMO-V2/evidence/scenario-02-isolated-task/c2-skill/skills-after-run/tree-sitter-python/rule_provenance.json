@@ -1,0 +1,26 @@
+[
+  {
+    "text": "To install the tree-sitter-python language binding, use `pip install tree-sitter-python`.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  },
+  {
+    "text": "The Python language object can be loaded using `tree_sitter_python.language()` after importing `tree_sitter_python as tspython` and `from tree_sitter import Language, Parser`.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  },
+  {
+    "text": "When parsing Python source code with a parser, the encoding parameter in the parse() function must be either 'utf8' or 'utf16'.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  },
+  {
+    "text": "To inspect syntax trees, use `tree.root_node` to access the root node of the parsed tree.",
+    "verified": false,
+    "source": "live_lookup:https://github.com/tree-sitter/py-tree-sitter",
+    "added_at": "2026-10-14"
+  }
+]

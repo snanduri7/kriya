@@ -1,0 +1,6 @@
+category: General
+description: Custom template skill for tree-sitter-python.
+name: tree-sitter-python
+tags:
+- tree-sitter-python
+verification_gap_acknowledged: true

@@ -1,0 +1,6 @@
+# Add architectural rules here (one per line)
+
+To install the tree-sitter-python language binding, use `pip install tree-sitter-python`.
+The Python language object can be loaded using `tree_sitter_python.language()` after importing `tree_sitter_python as tspython` and `from tree_sitter import Language, Parser`.
+When parsing Python source code with a parser, the encoding parameter in the parse() function must be either 'utf8' or 'utf16'.
+To inspect syntax trees, use `tree.root_node` to access the root node of the parsed tree.

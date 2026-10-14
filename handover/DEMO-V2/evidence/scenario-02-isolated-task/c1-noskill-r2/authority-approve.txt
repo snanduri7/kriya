@@ -1,0 +1,44 @@
+10 security-authority field(s) pending approval:
+  - autonomy.mode
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "human-in-the-loop"
+  - embedding.base_url
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "http://127.0.0.1:18766/v1"
+  - llm.base_url
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "http://127.0.0.1:18766/v1"
+  - llm_chain
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          [{"model": "qwen3.6:35b-a3b-q4_K_M", "base_url": "http://127.0.0.1:18766/v1", "api_key": "***REDACTED***", "reasoning": false, "context_window": 32768, "temperature": 0.2}]
+  - paths.memory
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "/Users/sriramnanduri/kriya-demo-v2-work/scenario-02/c1-noskill-r2/memory"
+  - paths.skills
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "/Users/sriramnanduri/kriya-demo-v2-work/scenario-02/c1-noskill-r2/skills"
+  - paths.state
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "/Users/sriramnanduri/kriya-demo-v2-work/scenario-02/c1-noskill-r2/state"
+  - search.base_url
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          ""
+  - workflow_controller.enabled
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          true
+  - workflow_controller.mode
+      classification: security_authority
+      source:         auto_discovered_cwd
+      value:          "enforce"
+
+Approved. Artifact written to /Users/sriramnanduri/.kriya/authority/b4efc0b78a769f433624220be88ff64da51af0231baef5f858762a38112315b4.json (set digest 3bc06e996ea14503...).
+This is the default local store for this workspace - ordinary `kriya generate`/`fix`/etc. will now honor it automatically. For CI, copy this file via your own external channel and pass it with --trust-file (or set KRIYA_TRUST_FILE) - Kriya never ships or auto-provisions it.

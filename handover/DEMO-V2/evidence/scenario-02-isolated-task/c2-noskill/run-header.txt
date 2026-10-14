@@ -1,0 +1,2 @@
+mode=noskill run_id=c2-noskill started=2026-10-14T10:27:56Z kriya=Kriya 0.1.0 (commit UNKNOWN, tree UNKNOWN; build provenance unavailable) product_head=3d7daa24bc87d4fd573235366e9116b31cd557f9
+generate/driver exit code: 1 (3 = an unrecognised prompt stopped the run)

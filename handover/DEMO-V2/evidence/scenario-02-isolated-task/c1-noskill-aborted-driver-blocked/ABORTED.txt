@@ -1,0 +1,1 @@
+ABORTED by the harness (driver did not recognise the Skill Gap prompt); no Developer call was made; kept as evidence, not a model result

@@ -1,0 +1,59 @@
+.FFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+______________________________ test_no_functions _______________________________
+test_outline.py:14: in test_no_functions
+    assert outline.count_top_level_functions("x = 1\nprint(x)\n") == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+______________________________ test_empty_source _______________________________
+test_outline.py:18: in test_empty_source
+    assert outline.count_top_level_functions("") == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+_________________________ test_two_top_level_functions _________________________
+test_outline.py:22: in test_two_top_level_functions
+    assert outline.count_top_level_functions("def a():\n    pass\n\ndef b():\n    return 1\n") == 2
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+__________________________ test_async_function_counts __________________________
+test_outline.py:26: in test_async_function_counts
+    assert outline.count_top_level_functions("async def f():\n    pass\n") == 1
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+______________ test_nested_functions_and_methods_are_not_counted _______________
+test_outline.py:31: in test_nested_functions_and_methods_are_not_counted
+    assert outline.count_top_level_functions(source) == 1
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+___ test_syntax_error_does_not_raise_and_recognisable_functions_are_counted ____
+test_outline.py:35: in test_syntax_error_does_not_raise_and_recognisable_functions_are_counted
+    assert outline.count_top_level_functions(SYNTAX_ERROR_SOURCE) == 2
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+______________ test_the_parser_library_named_in_the_goal_is_used _______________
+test_outline.py:39: in test_the_parser_library_named_in_the_goal_is_used
+    outline.count_top_level_functions("x = 1\n")
+outline.py:5: in count_top_level_functions
+    raise NotImplementedError
+E   NotImplementedError
+=========================== short test summary info ============================
+FAILED test_outline.py::test_no_functions - NotImplementedError
+FAILED test_outline.py::test_empty_source - NotImplementedError
+FAILED test_outline.py::test_two_top_level_functions - NotImplementedError
+FAILED test_outline.py::test_async_function_counts - NotImplementedError
+FAILED test_outline.py::test_nested_functions_and_methods_are_not_counted - N...
+FAILED test_outline.py::test_syntax_error_does_not_raise_and_recognisable_functions_are_counted
+FAILED test_outline.py::test_the_parser_library_named_in_the_goal_is_used - N...
+7 failed, 1 passed in 0.03s
