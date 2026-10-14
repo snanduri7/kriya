@@ -218,3 +218,15 @@ export function userEvidence(input: TrustInput): TrustItem[] {
     : { category: 'Final result', text: 'No evidence store was read for this run', state: 'unknown' });
   return items;
 }
+
+// ------------------------------------------------------------------ a run that did not complete, in words
+
+/**
+ * What happened to a run that failed, as a sentence a person can act on. Only the recorded failure category and commit result select the words; the raw record
+ * (category, exit code, commit result) stays in the technical reason. Categories this table does not know get the neutral sentence, never a guess about the cause.
+ */
+export function failureSummary(category: string | null | undefined, commitResult: string | null | undefined): string {
+  const nothingApplied = commitResult !== null && commitResult !== undefined && commitResult !== 'COMMITTED' ? ' Nothing was applied to your folder.' : '';
+  if (category === 'quality_gate_failed') return `The change did not pass Kriya's checks (build, tests or verification).${nothingApplied}`;
+  return `Kriya could not complete the requested change.${nothingApplied}`;
+}

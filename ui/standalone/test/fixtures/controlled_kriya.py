@@ -19,6 +19,12 @@ Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die
   review             -> records a candidate and a passing gate, then reaches the REAL change-approval path (kriya.control.launch.request_change_approval, the same
                         call the generate callback makes) and waits for the human's decision: approve -> the run succeeds; reject -> the run ends human_rejected,
                         exactly as the workflow's abort does (its result carries a checkpoint-style run_id that is NOT the trace row id)
+  Optional script keys (PRODUCT-UX-COMPLETION screenshots and smokes; all opt-in, absent = the behaviour above):
+    "diffs": [{"path": "...", "diff": "<unified diff text>"}]   the change the review is about (and the candidate/trace records follow it) instead of the synthetic one-line diff
+    "compiled_goal": true   the trace row of the unit carries the COMPILED "=== Authoritative Goal ===" prompt and names a terminal "<id>.enforce" row that holds the original request
+    "rich_events": true     records the run events a real run leaves (generation.completed, candidate_gates.passed, approval.decision, terminal_regression.passed, attempt.passed)
+    "gate_outcomes": [...]  the gate outcomes stored on the trace row (e.g. a recorded runtime execution with steps)
+    "post_approval_ms": n   how long the run keeps working after an approval (so a screenshot can see "Finishing")
 """
 import asyncio
 import json
@@ -39,6 +45,19 @@ from kriya.core.state_paths import resolve_state_directory
 from kriya.core.trace import TraceLogger
 
 SCRIPT = json.loads(os.environ.get("KRIYA_CONTROLLED_SCRIPT", "{}"))
+DIFFS = SCRIPT.get("diffs") or []
+
+
+def _changes_of_diffs(diffs):
+    out = []
+    for d in diffs:
+        lines = d["diff"].splitlines()
+        out.append({"path": d["path"], "kind": "added" if any(line.startswith("@@ -0,0 ") for line in lines) else "modified",
+                    "lines_added": sum(1 for line in lines if line.startswith("+") and not line.startswith("+++")), "lines_removed": sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))})
+    return out
+
+
+CHANGES = SCRIPT.get("changes") or (_changes_of_diffs(DIFFS) if DIFFS else [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}])
 STEP = float(SCRIPT.get("step_ms", 300)) / 1000.0
 OUTCOME = SCRIPT.get("outcome", "success")
 MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review)\]")
@@ -66,7 +85,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             scope.emit("model.request", {"role": "developer"})
             scope.emit("model.result", {"finish_reason": "stop"})
             time.sleep(STEP)
-            for change in SCRIPT.get("changes") or [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}]:
+            for change in CHANGES:
                 kind = change.get("kind", "added")
                 payload = {"decision": "STAGED", "path": change["path"], "created": kind == "added", "deleted": kind == "deleted", "unchanged": False,
                            "lines_added": change.get("lines_added", 1), "lines_removed": change.get("lines_removed", 0), "text_diff": True}
@@ -91,27 +110,48 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             approved = None
             if OUTCOME == "review" and passed:
                 from kriya.control.launch import request_change_approval
-                scripted = SCRIPT.get("changes") or [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}]
-                awaiting = request_change_approval(
-                    [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted],
-                    "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
+                scripted = CHANGES
+                files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS
+                         else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted])
+                awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
                 approved = asyncio.run(awaiting) if awaiting is not None else False
+                decided_at = time.time()
+                if approved and SCRIPT.get("post_approval_ms"):
+                    time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()
         success = (OUTCOME in ("success", "hold") and passed) or approved is True
         rejected = OUTCOME == "review" and passed and not approved
         status = "success" if success else "human_rejected" if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
                    "message": "attempt evidence store", "failure_type": None, "operation": None, "details": pointer, "created_at": started}]
-        TraceLogger(os.path.join(resolve_state_directory(cfg)[0], "traces.db")).log_run(
-            run_id=trace_id, goal=goal, duration_sec=time.time() - started, attempts=1, status=status, files_modified=["src/clamp.py"] if success else [],
-            failure_category=None if success else status if rejected else "quality_gate_failed", run_events=events)
+        if SCRIPT.get("rich_events"):
+            def event(kind, at, **details):
+                return {"kind": kind, "attempt": 1, "source": "workflow", "authority": "authoritative", "message": kind, "failure_type": None, "operation": None, "details": details, "created_at": at}
+            now = time.time()
+            events += [event("attempt.started", started + 0.5), event("generation.completed", started + 1.0, file_count=len(CHANGES)),
+                       event("candidate_gates.passed", started + 1.5, passed=passed, terminal=False)]
+            if OUTCOME == "review" and passed:
+                events.append(event("approval.decision", now - 0.2, outcome="approved" if approved else "rejected", triggers=["human_in_the_loop"]))
+            if success:
+                events += [event("terminal_regression.passed", now - 0.1, passed=True, terminal=True), event("attempt.passed", now, passed=True, applied=True)]
+        logger = TraceLogger(os.path.join(resolve_state_directory(cfg)[0], "traces.db"))
+        modified = [c["path"] for c in CHANGES] if success else []
+        common = dict(duration_sec=time.time() - started, attempts=1, status=status, files_modified=modified, failure_category=None if success else status if rejected else "quality_gate_failed")
+        if SCRIPT.get("compiled_goal"):
+            enforce_id = f"{trace_id}.enforce"
+            compiled = ("=== Authoritative Goal ===\nThis is the real, unmediated user request - the source of truth for what is actually required.\n\n" + goal
+                        + "\n\n=== Planned Implementation ===\nPlanner detail the user never wrote.")
+            logger.log_run(run_id=trace_id, goal=compiled, run_events=events, gate_outcomes=SCRIPT.get("gate_outcomes"), enforce_run_id=enforce_id, **common)
+            logger.log_run(run_id=enforce_id, goal=goal, run_events=[], **common)
+        else:
+            logger.log_run(run_id=trace_id, goal=goal, run_events=events, gate_outcomes=SCRIPT.get("gate_outcomes"), **common)
         if success:
             _complete_successful_run(context)
     if rejected:
         # the workflow's own abort result: no status, a checkpoint-style run_id (NOT the trace row id)
         output.result = {"files": [], "quality_gates_passed": False, "review": "reviewed", "run_id": "20200101T000000-0badc0de"}
         sys.exit(1)
-    output.result = {"status": status, "quality_gates_passed": success, "run_id": trace_id, "files": ["src/clamp.py"] if success else [],
+    output.result = {"status": status, "quality_gates_passed": success, "run_id": trace_id, "files": [c["path"] for c in CHANGES] if success else [],
                      **({} if success else {"failure_category": "quality_gate_failed"})}
     sys.exit(0 if success else 1)
 

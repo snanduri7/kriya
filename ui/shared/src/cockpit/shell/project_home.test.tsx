@@ -186,8 +186,9 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     act(() => host.exec!.finish());
     await waitFor(() => expect(run).toHaveAttribute('data-outcome', 'success'));
     expect(within(run).queryByText('✓ Your change was applied successfully.')).toBeNull();
-    expect(within(run).getByText('NO_COMMIT')).toBeInTheDocument();
-    expect(run.querySelector('.ck-applied')!.textContent).toMatch(/Check your folder/);
+    expect(run.querySelector('.ck-applied')!.textContent).toMatch(/did not record that the change was applied.*Check your folder/);
+    expect(run.querySelector('.ck-applied')!.textContent).not.toContain('NO_COMMIT'); // the raw record is one disclosure down
+    expect(within(within(run).getByText('Technical status').closest('details')!).getByText(/commit result NO_COMMIT/)).toBeInTheDocument();
   });
 
   it('a failure says "Run failed" with Kriya\'s recorded reason and the last stage reached - no raw events needed', async () => {
@@ -198,6 +199,8 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     expect(within(run).getByRole('heading', { name: 'Run failed' })).toBeInTheDocument();
     expect(within(run).getByText('What happened')).toBeInTheDocument();
     expect(within(run).getByText(/Failed to create an isolated generation sandbox \(fixture\)/)).toBeInTheDocument(); // Kriya's recorded reason (its raw text sits under Technical reason)
+    expect(within(run).getByTestId('what-happened')).toHaveTextContent(/did not pass Kriya's checks/);
+    expect(within(run).getByTestId('what-happened').textContent).not.toMatch(/failure category|exit code|NOT_COMMITTED|quality_gate/);
     expect(within(run).getByText('How far it got')).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'View Failure Details' })).toBeInTheDocument();
     expect(within(run).getByRole('button', { name: 'Copy failure details' })).toBeInTheDocument();

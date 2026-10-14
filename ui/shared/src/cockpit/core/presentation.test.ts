@@ -92,7 +92,7 @@ describe('activityText and changeSummary', () => {
   });
 });
 
-import { eventClock, humanTimeline, userEvidence } from './presentation';
+import { eventClock, failureSummary, humanTimeline, userEvidence } from './presentation';
 import type { RunEvent } from '../../model/kup';
 
 const ev = (kind: string, created_at: number, extra: Partial<RunEvent> = {}): RunEvent => ({ kind, created_at, ...extra }) as RunEvent;
@@ -151,5 +151,18 @@ describe('userEvidence: why should I trust this result? Only recorded facts tick
     expect(items.find((i) => i.category === 'Approval')!.state).toBe('bad');
     expect(items.find((i) => i.category === 'Final result')).toMatchObject({ state: 'bad' });
     expect(userEvidence({ ...base, evidence: { status: 'VERIFIED', sealed: false } }).at(-1)!.state).toBe('unknown'); // verified chain but not sealed: not claimed as final
+  });
+});
+
+describe('failureSummary: words for a failure, the raw record stays technical', () => {
+  it('names the failed checks only for the one category that says so, and says nothing was applied only when the commit result says so', () => {
+    expect(failureSummary('quality_gate_failed', 'NOT_COMMITTED')).toBe("The change did not pass Kriya's checks (build, tests or verification). Nothing was applied to your folder.");
+    expect(failureSummary('quality_gate_failed', null)).toBe("The change did not pass Kriya's checks (build, tests or verification).");
+    expect(failureSummary('something_new', 'NO_COMMIT')).toBe('Kriya could not complete the requested change. Nothing was applied to your folder.');
+    expect(failureSummary(null, undefined)).toBe('Kriya could not complete the requested change.');
+    expect(failureSummary('quality_gate_failed', 'COMMITTED')).not.toMatch(/Nothing was applied/);
+  });
+  it('never carries a mechanism word', () => {
+    for (const c of ['quality_gate_failed', 'x', null]) expect(failureSummary(c as string, 'NOT_COMMITTED')).not.toMatch(/category|exit code|NOT_COMMITTED|digest|seq/i);
   });
 });

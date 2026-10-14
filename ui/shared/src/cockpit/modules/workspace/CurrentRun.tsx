@@ -1,4 +1,4 @@
-import { ApplicationResult, ApprovalReview, Badge, CopyText, FileDiff, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, ApprovalReview, Badge, CopyText, FileDiff, failureSummary, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -33,7 +33,7 @@ function Completed({ phase }: { phase: RunPhase }) {
   return (
     <div className="ck-outcome">
       <p className="ck-applied" data-testid="applied-statement">
-        {applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya&apos;s record of applying the change says: <span className="mono">{outcome.commitResult ?? 'nothing recorded'}</span>. Check your folder.</span>}
+        {applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya did not record that the change was applied to your folder. Check your folder before relying on it.</span>}
         {approvedReview ? ' You approved the change.' : ''}
       </p>
 
@@ -80,7 +80,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
       <p data-testid="what-happened"><span className="muted">What happened</span><br />
         {outcome.approval ? (
           <span><strong>{APPROVAL_KIND[outcome.approval.kind] ?? outcome.approval.kind}.</strong> {outcome.approval.reason}</span>
-        ) : <span>{outcome.detail}</span>}
+        ) : <span>{outcome.kind === 'failure' ? failureSummary(run.status?.launch.ended?.failure_category, outcome.commitResult) : outcome.detail}</span>}
       </p>
       {outcome.approval ? (
         <div>
@@ -92,7 +92,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
       <details className="ck-tech">
         <summary>Technical reason</summary>
-        <div className="muted small">{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span><strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : <span>Outcome kind <span className="mono">{outcome.kind}</span></span>}</div>
+        <div className="muted small"><span className="mono">{outcome.kind === 'failure' ? outcome.detail : `Outcome kind ${outcome.kind}`}</span>{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span> · <strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : null}</div>
         <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p>
       </details>
     </div>

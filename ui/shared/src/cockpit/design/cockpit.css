@@ -173,3 +173,5 @@
 .ck-setup-card { display: flex; flex-direction: column; gap: 6px; border-style: solid; border-color: var(--ck-accent); }
 .ck-setup-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 16px; margin: 2px 0; }
 .ck-setup-facts dt { text-transform: uppercase; letter-spacing: .04em; } .ck-setup-facts dd { margin: 0; }
+/* the decision bar of a change review stays in view while a long diff is read */
+.ck-review .ck-decision { position: sticky; bottom: 0; z-index: 2; margin: 4px -14px -12px; padding: 8px 14px; background: #2a2208; border-top: 1px solid var(--ck-warn); }

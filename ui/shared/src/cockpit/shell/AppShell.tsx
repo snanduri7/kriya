@@ -129,7 +129,7 @@ function Shell({ registry, viewportWidth, initialPage, initialInspectorOpen }: {
         )}
       </div>
       )}
-      {folderOpen && workspace && runSelected ? <EvidenceDrawer modules={drawer} /> : null}
+      {folderOpen && workspace && runSelected && showInspector ? <EvidenceDrawer modules={drawer} /> : null} {/* Build / Tests / Git / Raw Events are the technical layer: they open with the technical timeline */}
       <NewProjectDialog />
     </div>
     </NavigationContext.Provider>

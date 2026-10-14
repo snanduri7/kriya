@@ -129,7 +129,7 @@ function RunsList() {
       ) : null}
       {current && filtering && filtered.runs.length === 0 && current.runs.length > 0 ? <div className="ck-state"><strong>No loaded run matches these filters</strong><button type="button" onClick={() => setFilter(NO_FILTER)}>Clear filters</button></div> : null}
       {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>{active ? 'No completed runs yet.' : 'No runs yet.'}</strong>Kriya found no run whose evidence names this project. <button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button></div> : null}
-      {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
+      {current?.scope ? <details className="ck-tech"><summary>About this list</summary><div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div></details> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
     </div>
   );
