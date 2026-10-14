@@ -111,7 +111,7 @@ def test_fixture_identity_is_complete_and_well_formed() -> None:
 
 def test_nothing_machine_specific_or_heavy_is_committed() -> None:
     for path in DEMO_V2.rglob("*"):
-        if not path.is_file():
+        if not path.is_file() or "__pycache__" in path.parts:  # bytecode is a by-product of importing the stub in a test, not a committed asset
             continue
         assert path.stat().st_size <= MAX_FILE_BYTES, f"{path} is too large for a contract/template"
         text = path.read_text(encoding="utf-8")
