@@ -1,0 +1,169 @@
+{
+ "TASK_ID": "MR-P16",
+ "candidate_id": "pydantic-settings#826",
+ "repository_id": "pydantic/pydantic-settings",
+ "base_revision": "2ae12c7276c54cbe050060acf82086a8cdfc6c8f",
+ "fix_revision": "7563595fd60182cf55dc39597bad2f3bb4bba04f",
+ "goal_digest": "b846fdd7b54340adeebffb47064e3704bdab89ebafada28d00cb14e4bf58a797",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/pydantic_pydantic-settings"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "b709f41b5c8970fe1c3ab062f66b2db4e1c298e74168ab8562d867033260c93e",
+  "spec_digest": "13bfe49a5d710cff9fb55e2ac8c47d57dec2888cad3cfba9a105ef0f063b6c5a",
+  "hidden_tests_digest": "90dc12fb53a2e9bb01bec64b10a24b0430e86cce726f41aecd6867ab3cdf457d",
+  "required_tests": 171,
+  "fail_to_pass": 2,
+  "pass_to_pass": 169,
+  "selectors": [
+   "tests/test_source_cli.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "1c6859cbb8639176ded3ed07bd41b8b6cda73757b94439e6b43c5aae7229c17e",
+  "set_digest": "928a1c1cb1d97a7df0a99cad8c841fa860a17b2c939400898f4de1aad2d62836",
+  "tests": 423,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 31,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "4b03ab66445dc81bb71838436b4c9c05f79377ec0733a339429c4187515e5827",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   169,
+   169,
+   169
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   2,
+   2,
+   2
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "d85b9696ef3d239965e9a871e1b94ddd12a00500d2c35a46abecb8a3992ae5c8",
+  "test_patch_digest": "5fe38a91c1427e3460f0ec5871cca79ea63aeeec4df9633cede38c62be9f2be9",
+  "ref_tree_digest": "b4c3b66dd86cabe3e419abb70e8a978d9f5b04948debb12481a4f19a543ad032",
+  "upstream": "https://github.com/pydantic/pydantic-settings/pull/826",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "31 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 1.3,
+   "regress_secs": 1.8,
+   "ref_good_total_secs": 3.1,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_3": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/pydantic/pydantic-settings/pull/826",
+  "pr_created": "2026-03-27T08:59:19Z",
+  "pr_merged": "2026-04-02T07:25:41Z",
+  "issues": [
+   {
+    "number": 825,
+    "created_at": "2026-03-27T03:59:21Z",
+    "url": "https://github.com/pydantic/pydantic-settings/issues/825"
+   }
+  ],
+  "goal_sources": [
+   "issue pydantic/pydantic-settings#825",
+   "PR pydantic/pydantic-settings#826 description (symptom statement only)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description and the contract asserted by the upstream tests; no patch content used",
+  "ws_tree_digest": "a68d6f3b926eabbaa0dd6d1afe1950b3d571b2fba710325bf47b0715161795da"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 2,
+  "reference_test_files": 1,
+  "reference_churn": 65,
+  "reference_churn_bucket": "M",
+  "localization_shape": "multi_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 2,
+  "accept_tests": 171,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "pydantic_settings/sources",
+   "pydantic_settings/sources/providers"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": true
+ }
+}

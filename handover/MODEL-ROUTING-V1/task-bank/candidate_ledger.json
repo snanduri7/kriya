@@ -1,0 +1,716 @@
+[
+ {
+  "candidate": "JSON-java#1044",
+  "frozen_as": null,
+  "repo": "stleary/JSON-java",
+  "pr": 1044,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus"
+ },
+ {
+  "candidate": "JSON-java#1046",
+  "frozen_as": "MR-J01",
+  "repo": "stleary/JSON-java",
+  "pr": 1046,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "JSON-java#1085",
+  "frozen_as": null,
+  "repo": "stleary/JSON-java",
+  "pr": 1085,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus"
+ },
+ {
+  "candidate": "arrow#1201",
+  "frozen_as": null,
+  "repo": "arrow-py/arrow",
+  "pr": 1201,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "trivial one-constant feature; baseline fails by import error; reference run partly failing in pinned environment"
+ },
+ {
+  "candidate": "attrs#1320",
+  "frozen_as": null,
+  "repo": "python-attrs/attrs",
+  "pr": 1320,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus: attrs capped at one task"
+ },
+ {
+  "candidate": "attrs#1401",
+  "frozen_as": "MR-P01",
+  "repo": "python-attrs/attrs",
+  "pr": 1401,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "boltons#416",
+  "frozen_as": null,
+  "repo": "mahmoud/boltons",
+  "pr": 416,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: small PathLike conversion (triviality)"
+ },
+ {
+  "candidate": "click#2604",
+  "frozen_as": null,
+  "repo": "pallets/click",
+  "pr": 2604,
+  "status": "REJECTED_FROM_FINAL_BANK",
+  "probed": true,
+  "certified": true,
+  "note": "EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved, not a reserve; not a certification-quality failure",
+  "was_frozen_as": "MR-P02"
+ },
+ {
+  "candidate": "click#2788",
+  "frozen_as": null,
+  "repo": "pallets/click",
+  "pr": 2788,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus (click capped)"
+ },
+ {
+  "candidate": "commonmark-java#310",
+  "frozen_as": null,
+  "repo": "commonmark/commonmark-java",
+  "pr": 310,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus: commonmark capped at one task"
+ },
+ {
+  "candidate": "commonmark-java#340",
+  "frozen_as": "MR-J02",
+  "repo": "commonmark/commonmark-java",
+  "pr": 340,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "commonmark-java#416",
+  "frozen_as": null,
+  "repo": "commonmark/commonmark-java",
+  "pr": 416,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus"
+ },
+ {
+  "candidate": "commons-codec#435",
+  "frozen_as": null,
+  "repo": "apache/commons-codec",
+  "pr": 435,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: one-line change whose goal would essentially state the fix (triviality)"
+ },
+ {
+  "candidate": "commons-collections#685",
+  "frozen_as": null,
+  "repo": "apache/commons-collections",
+  "pr": 685,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; regression run ~130 s; not certified"
+ },
+ {
+  "candidate": "commons-compress#725",
+  "frozen_as": null,
+  "repo": "apache/commons-compress",
+  "pr": 725,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "ENVIRONMENT_UNAVAILABLE: depends on an unreleased commons-io SNAPSHOT not resolvable offline"
+ },
+ {
+  "candidate": "commons-configuration#186",
+  "frozen_as": null,
+  "repo": "apache/commons-configuration",
+  "pr": 186,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "diff between fix parent and merge commit does not equal the PR file list (rebase-merge); dropped before probing"
+ },
+ {
+  "candidate": "commons-configuration#569",
+  "frozen_as": null,
+  "repo": "apache/commons-configuration",
+  "pr": 569,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0: hidden tests also pass on the base revision"
+ },
+ {
+  "candidate": "commons-io#847",
+  "frozen_as": null,
+  "repo": "apache/commons-io",
+  "pr": 847,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; regression run ~210 s; not certified"
+ },
+ {
+  "candidate": "commons-io#860",
+  "frozen_as": null,
+  "repo": "apache/commons-io",
+  "pr": 860,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; regression run ~210 s (6.3k tests); not certified"
+ },
+ {
+  "candidate": "commons-numbers#136",
+  "frozen_as": null,
+  "repo": "apache/commons-numbers",
+  "pr": 136,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: upstream PR has no description (title only) so no authoritative public text to write a fair goal from"
+ },
+ {
+  "candidate": "commons-validator#397",
+  "frozen_as": null,
+  "repo": "apache/commons-validator",
+  "pr": 397,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: generic PR template body, no issue text to write a fair goal from"
+ },
+ {
+  "candidate": "datafaker#1465",
+  "frozen_as": null,
+  "repo": "datafaker-net/datafaker",
+  "pr": 1465,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0: hidden tests also pass on the base revision"
+ },
+ {
+  "candidate": "datafaker#1855",
+  "frozen_as": null,
+  "repo": "datafaker-net/datafaker",
+  "pr": 1855,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0: hidden tests also pass on the base revision (no discriminating test)"
+ },
+ {
+  "candidate": "deepdiff#608",
+  "frozen_as": null,
+  "repo": "seperman/deepdiff",
+  "pr": 608,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "reference fails in the pinned environment"
+ },
+ {
+  "candidate": "deepdiff#609",
+  "frozen_as": null,
+  "repo": "seperman/deepdiff",
+  "pr": 609,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "reference fails in the pinned environment (pydantic-version mismatch in unrelated tests of the same file)"
+ },
+ {
+  "candidate": "gson#2735",
+  "frozen_as": null,
+  "repo": "google/gson",
+  "pr": 2735,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0 (OSGi regression test passes on base)"
+ },
+ {
+  "candidate": "gson#2789",
+  "frozen_as": null,
+  "repo": "google/gson",
+  "pr": 2789,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable (F2P=2); surplus: gson capped at one task"
+ },
+ {
+  "candidate": "gson#2795",
+  "frozen_as": null,
+  "repo": "google/gson",
+  "pr": 2795,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "test is a failsafe integration test (OSGi manifest IT) not run by the surefire test phase; not probed"
+ },
+ {
+  "candidate": "gson#3098",
+  "frozen_as": "MR-J03",
+  "repo": "google/gson",
+  "pr": 3098,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "humanize#173",
+  "frozen_as": null,
+  "repo": "python-humanize/humanize",
+  "pr": 173,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "reference fails (time-dependent tests) in the pinned environment"
+ },
+ {
+  "candidate": "humanize#329",
+  "frozen_as": null,
+  "repo": "python-humanize/humanize",
+  "pr": 329,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: small rounding fix (triviality)"
+ },
+ {
+  "candidate": "ical4j#801",
+  "frozen_as": null,
+  "repo": "ical4j/ical4j",
+  "pr": 801,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable but 40 existing tests are superseded by the fix (regression set would exclude them); not certified"
+ },
+ {
+  "candidate": "ical4j#907",
+  "frozen_as": null,
+  "repo": "ical4j/ical4j",
+  "pr": 907,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "tests are Groovy/Spock, outside the Java-test selector; not probed"
+ },
+ {
+  "candidate": "itsdangerous#378",
+  "frozen_as": null,
+  "repo": "pallets/itsdangerous",
+  "pr": 378,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "baseline fails by import break (new symbol) and 8 base tests superseded; not pursued"
+ },
+ {
+  "candidate": "jackson-core#1665",
+  "frozen_as": "MR-J04",
+  "repo": "FasterXML/jackson-core",
+  "pr": 1665,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "jackson-core#1754",
+  "frozen_as": null,
+  "repo": "FasterXML/jackson-core",
+  "pr": 1754,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus: jackson-core capped at one task"
+ },
+ {
+  "candidate": "javaparser#4727",
+  "frozen_as": "MR-J05",
+  "repo": "javaparser/javaparser",
+  "pr": 4727,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "jdbi#2548",
+  "frozen_as": null,
+  "repo": "jdbi/jdbi",
+  "pr": 2548,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "not probed"
+ },
+ {
+  "candidate": "jdbi#2681",
+  "frozen_as": "MR-J06",
+  "repo": "jdbi/jdbi",
+  "pr": 2681,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "jdbi#2780",
+  "frozen_as": null,
+  "repo": "jdbi/jdbi",
+  "pr": 2780,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable (F2P=26, API-surface feature with compile-break baseline, 470 s); not certified"
+ },
+ {
+  "candidate": "jinja#1664",
+  "frozen_as": null,
+  "repo": "pallets/jinja",
+  "pr": 1664,
+  "status": "REJECTED_FROM_FINAL_BANK",
+  "probed": true,
+  "certified": true,
+  "note": "EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved, not a reserve; not a certification-quality failure",
+  "was_frozen_as": "MR-P03"
+ },
+ {
+  "candidate": "jinja#1702",
+  "frozen_as": null,
+  "repo": "pallets/jinja",
+  "pr": 1702,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus (jinja capped)"
+ },
+ {
+  "candidate": "jsonschema#1390",
+  "frozen_as": null,
+  "repo": "python-jsonschema/jsonschema",
+  "pr": 1390,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "test dependency (jsonpath-ng) not provisioned by the dependency-group parser; not pursued"
+ },
+ {
+  "candidate": "keyring#577",
+  "frozen_as": null,
+  "repo": "jaraco/keyring",
+  "pr": 577,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "SyntaxError on Python 3.12 in the 2022-era tree"
+ },
+ {
+  "candidate": "keyring#695",
+  "frozen_as": null,
+  "repo": "jaraco/keyring",
+  "pr": 695,
+  "status": "REJECTED_FROM_FINAL_BANK",
+  "probed": true,
+  "certified": true,
+  "note": "EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved, not a reserve; not a certification-quality failure",
+  "was_frozen_as": "MR-P04"
+ },
+ {
+  "candidate": "mapstruct#2975",
+  "frozen_as": "MR-J07",
+  "repo": "mapstruct/mapstruct",
+  "pr": 2975,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "mapstruct#3888",
+  "frozen_as": null,
+  "repo": "mapstruct/mapstruct",
+  "pr": 3888,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "not probed (JDK 21-only test module)"
+ },
+ {
+  "candidate": "markdown#1494",
+  "frozen_as": null,
+  "repo": "Python-Markdown/markdown",
+  "pr": 1494,
+  "status": "REJECTED_FROM_FINAL_BANK",
+  "probed": true,
+  "certified": true,
+  "note": "EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved, not a reserve; not a certification-quality failure",
+  "was_frozen_as": "MR-P05"
+ },
+ {
+  "candidate": "markdown#1529",
+  "frozen_as": null,
+  "repo": "Python-Markdown/markdown",
+  "pr": 1529,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "reference fails 6 target tests under Python 3.12.13 (stdlib html.parser behaviour differs from the fix era)"
+ },
+ {
+  "candidate": "marshmallow#2264",
+  "frozen_as": null,
+  "repo": "marshmallow-code/marshmallow",
+  "pr": 2264,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0: hidden tests also pass on the base revision"
+ },
+ {
+  "candidate": "mistune#393",
+  "frozen_as": null,
+  "repo": "lepture/mistune",
+  "pr": 393,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus (mistune capped)"
+ },
+ {
+  "candidate": "mistune#427",
+  "frozen_as": "MR-P06",
+  "repo": "lepture/mistune",
+  "pr": 427,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "mistune#452",
+  "frozen_as": null,
+  "repo": "lepture/mistune",
+  "pr": 452,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable (F2P=2) but the reference PR also rewrites CI workflows; reserve not certified"
+ },
+ {
+  "candidate": "mkdocs#2959",
+  "frozen_as": null,
+  "repo": "mkdocs/mkdocs",
+  "pr": 2959,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "same as mkdocs#3320"
+ },
+ {
+  "candidate": "mkdocs#3265",
+  "frozen_as": null,
+  "repo": "mkdocs/mkdocs",
+  "pr": 3265,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "same as mkdocs#3320"
+ },
+ {
+  "candidate": "mkdocs#3320",
+  "frozen_as": null,
+  "repo": "mkdocs/mkdocs",
+  "pr": 3320,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "entry-point based plugin loading not reproducible from a scratch tree; reference REJECT in every run"
+ },
+ {
+  "candidate": "mybatis-3#3456",
+  "frozen_as": "MR-J08",
+  "repo": "mybatis/mybatis-3",
+  "pr": 3456,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "mybatis-3#3714",
+  "frozen_as": null,
+  "repo": "mybatis/mybatis-3",
+  "pr": 3714,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus (second mybatis task not needed)"
+ },
+ {
+  "candidate": "parse#221",
+  "frozen_as": null,
+  "repo": "r1chardj0n3s/parse",
+  "pr": 221,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; trivial"
+ },
+ {
+  "candidate": "pluggy#758",
+  "frozen_as": "MR-P07",
+  "repo": "pytest-dev/pluggy",
+  "pr": 758,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": "FROZEN (see list)"
+ },
+ {
+  "candidate": "prettytable#429",
+  "frozen_as": "MR-P08",
+  "repo": "jazzband/prettytable",
+  "pr": 429,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "pydantic-settings#767",
+  "frozen_as": "MR-P09",
+  "repo": "pydantic/pydantic-settings",
+  "pr": 767,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "python-pathspec#78",
+  "frozen_as": null,
+  "repo": "cpburnz/python-pathspec",
+  "pr": 78,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "F2P=0: hidden tests also pass on the base revision"
+ },
+ {
+  "candidate": "python-tabulate#268",
+  "frozen_as": null,
+  "repo": "astanin/python-tabulate",
+  "pr": 268,
+  "status": "CERTIFIED_RESERVE",
+  "probed": true,
+  "certified": true,
+  "note": "certified; reserve: single-line fix in a single large file (triviality), kept as swap candidate"
+ },
+ {
+  "candidate": "python-tabulate#313",
+  "frozen_as": null,
+  "repo": "astanin/python-tabulate",
+  "pr": 313,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "pyproject comment-out hunk is unrelated to the behaviour; reference partly failing (optional dependency)"
+ },
+ {
+  "candidate": "resilience4j#2209",
+  "frozen_as": "MR-J09",
+  "repo": "resilience4j/resilience4j",
+  "pr": 2209,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "resilience4j#2301",
+  "frozen_as": null,
+  "repo": "resilience4j/resilience4j",
+  "pr": 2301,
+  "status": "NOT_SELECTED",
+  "probed": false,
+  "certified": false,
+  "note": "no Java tests in src/test/java (Groovy/Kotlin) -> not probed"
+ },
+ {
+  "candidate": "resilience4j#2507",
+  "frozen_as": "MR-J10",
+  "repo": "resilience4j/resilience4j",
+  "pr": 2507,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": "FROZEN"
+ },
+ {
+  "candidate": "sqlparse#633",
+  "frozen_as": null,
+  "repo": "andialbrecht/sqlparse",
+  "pr": 633,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable; surplus (sqlparse capped)"
+ },
+ {
+  "candidate": "sqlparse#865",
+  "frozen_as": "MR-P10",
+  "repo": "andialbrecht/sqlparse",
+  "pr": 865,
+  "status": "FROZEN",
+  "probed": true,
+  "certified": true,
+  "note": ""
+ },
+ {
+  "candidate": "typer#1788",
+  "frozen_as": null,
+  "repo": "tiangolo/typer",
+  "pr": 1788,
+  "status": "NOT_SELECTED",
+  "probed": true,
+  "certified": false,
+  "note": "probed viable but regression run 268 s (docs tests) and tiny envvar fix; not certified"
+ }
+]

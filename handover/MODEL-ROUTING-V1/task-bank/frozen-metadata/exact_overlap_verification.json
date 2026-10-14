@@ -1,0 +1,99 @@
+{
+ "MR-P02": {
+  "task": "MR-P02",
+  "dataset": "nebius/SWE-rebench-V2",
+  "instance_id": "pallets__click-2604",
+  "repo": "pallets/click",
+  "theirs_base": "b63ace28d50b53e74b5260f6cb357ccfe5560133",
+  "our_base": "b63ace28d50b53e74b5260f6cb357ccfe5560133",
+  "base_equal": true,
+  "created_at": "2023-09-01 21:14:41",
+  "their_patch_files": [
+   "CHANGES.rst",
+   "src/click/decorators.py"
+  ],
+  "our_prod_files": [
+   "CHANGES.rst",
+   "src/click/decorators.py"
+  ],
+  "files_equal": true,
+  "f2p_sample": [
+   "tests/test_command_decorators.py::test_generate_name[init_data_command]",
+   "tests/test_command_decorators.py::test_generate_name[init_data_cmd]",
+   "tests/test_command_decorators.py::test_generate_name[init_data_group]"
+  ]
+ },
+ "MR-P03": {
+  "task": "MR-P03",
+  "dataset": "nebius/SWE-rebench-V2",
+  "instance_id": "pallets__jinja-1664",
+  "repo": "pallets/jinja",
+  "theirs_base": "1d55cddbb28e433779511f28f13a2d8c4ec45826",
+  "our_base": "1d55cddbb28e433779511f28f13a2d8c4ec45826",
+  "base_equal": true,
+  "created_at": "2022-05-02 18:10:05",
+  "their_patch_files": [
+   "CHANGES.rst",
+   "docs/templates.rst",
+   "src/jinja2/compiler.py",
+   "src/jinja2/parser.py"
+  ],
+  "our_prod_files": [
+   "CHANGES.rst",
+   "docs/templates.rst",
+   "src/jinja2/compiler.py",
+   "src/jinja2/parser.py"
+  ],
+  "files_equal": true,
+  "f2p_sample": [
+   "tests/test_core_tags.py::TestSet::test_namespace_set_tuple"
+  ]
+ },
+ "MR-P04": {
+  "task": "MR-P04",
+  "dataset": "nebius/SWE-rebench",
+  "instance_id": "jaraco__keyring-695",
+  "repo": "jaraco/keyring",
+  "theirs_base": "00410507a850ff6dac1b62e6c6ae80185bad64c4",
+  "our_base": "00410507a850ff6dac1b62e6c6ae80185bad64c4",
+  "base_equal": true,
+  "created_at": "2024-09-19 11:38:35",
+  "their_patch_files": [
+   "keyring/cli.py",
+   "keyring/credentials.py",
+   "newsfragments/694.bugfix.rst"
+  ],
+  "our_prod_files": [
+   "keyring/cli.py",
+   "keyring/credentials.py",
+   "newsfragments/694.bugfix.rst"
+  ],
+  "files_equal": true,
+  "f2p_sample": [
+   "tests/test_cli.py::test_get_anonymous[json]",
+   "tests/test_cli.py::test_get_anonymous[plain]"
+  ]
+ },
+ "MR-P05": {
+  "task": "MR-P05",
+  "dataset": "nebius/SWE-rebench-V2",
+  "instance_id": "python-markdown__markdown-1494",
+  "repo": "Python-Markdown/markdown",
+  "theirs_base": "0b5e80efbb83f119e0e38801bf5b5b5864c67cd0",
+  "our_base": "0b5e80efbb83f119e0e38801bf5b5b5864c67cd0",
+  "base_equal": true,
+  "created_at": "2024-12-12 20:02:13",
+  "their_patch_files": [
+   "docs/changelog.md",
+   "markdown/extensions/toc.py"
+  ],
+  "our_prod_files": [
+   "docs/changelog.md",
+   "markdown/extensions/toc.py"
+  ],
+  "files_equal": true,
+  "f2p_sample": [
+   "tests/test_syntax/extensions/test_toc.py::TestTOC::test_escaped_char_in_attr_list"
+  ]
+ }
+}

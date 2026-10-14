@@ -1,0 +1,286 @@
+{
+ "id": "jackson-core#1665",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 12 required tests passed",
+    "secs": 5.9,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 26.0,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 12 required tests passed",
+    "secs": 5.9,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 26.2,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 12 required tests passed",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 24.6,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/12 required tests failed or were absent (executed 12)",
+    "secs": 5.9,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+     "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+    ],
+    "note": "",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 25.5,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/12 required tests failed or were absent (executed 12)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+     "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+    ],
+    "note": "",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 25.7,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/12 required tests failed or were absent (executed 12)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+     "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+    ],
+    "note": "",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 24.9,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/12 required tests failed or were absent (executed 12)",
+    "secs": 5.7,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/12 required tests failed or were absent (executed 12)",
+    "secs": 6.1,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/12 required tests failed or were absent (executed 12)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 12 required tests passed",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1830 required tests passed",
+    "secs": 25.1,
+    "setup_secs": 0.2,
+    "n_executed": 1832,
+    "n_required": 1830,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~src/test/java/tools/jackson/core/unittest/json/TestRootValues.java', '~src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/12 required tests failed or were absent (executed 12)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 12,
+    "n_required": 12,
+    "missing_head": [
+     "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+     "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+    ],
+    "note": "",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "2 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 5.9,
+  "regress_secs": 26.2,
+  "ref_good_total_secs": 31.5,
+  "baseline_setup_secs": 0.2
+ },
+ "repeats": 3
+}

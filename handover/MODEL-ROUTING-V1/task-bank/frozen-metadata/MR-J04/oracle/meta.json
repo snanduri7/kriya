@@ -1,0 +1,25 @@
+{
+ "id": "jackson-core#1665",
+ "repo": "FasterXML/jackson-core",
+ "pr": 1665,
+ "lang": "java",
+ "build": "maven",
+ "module": "",
+ "classes": [
+  "tools.jackson.core.unittest.json.TestRootValues",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest"
+ ],
+ "test_files": [
+  "src/test/java/tools/jackson/core/unittest/json/TestRootValues.java",
+  "src/test/java/tools/jackson/core/unittest/json/async/AsyncRootValuesTest.java"
+ ],
+ "prod_files": [
+  "src/main/java/tools/jackson/core/json/UTF8DataInputJsonParser.java",
+  "src/main/java/tools/jackson/core/json/UTF8StreamJsonParser.java",
+  "src/main/java/tools/jackson/core/json/async/NonBlockingUtf8JsonParserBase.java"
+ ],
+ "other_files": [
+  "release-notes/CREDITS",
+  "release-notes/VERSION"
+ ]
+}

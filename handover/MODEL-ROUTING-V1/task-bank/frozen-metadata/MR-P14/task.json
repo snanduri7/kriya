@@ -1,0 +1,168 @@
+{
+ "TASK_ID": "MR-P14",
+ "candidate_id": "jsonschema#972",
+ "repository_id": "python-jsonschema/jsonschema",
+ "base_revision": "28a7598673966b73c1789a9fdd03dbd8bd9a02b7",
+ "fix_revision": "726d546d0429b0c42526472d65e0ea58da794df1",
+ "goal_digest": "6a61589819392b429c1cc3c9170ffafbc69826f7cc6dc7e4b26335e12c6dfcef",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/python-jsonschema_jsonschema"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "40fe06942b71cc091d5c00fab85badffe267c19f6b1d29e0dfbb3b5203f37883",
+  "spec_digest": "a0df99f0ed27907834b85443ca2e050d4ef4e424a0c6d9e6b5d79110ed2509c0",
+  "hidden_tests_digest": "ca7e4c04cf1f6cdc7c7b0b4657bfd7f244197f6648cfee3d327a5f7cd55f9265",
+  "required_tests": 33,
+  "fail_to_pass": 1,
+  "pass_to_pass": 32,
+  "selectors": [
+   "jsonschema/tests/test_exceptions.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "f143742cd43c4cad7c3ee1af2370976e1c797bef87dab636cdbe96fdc2b91cd9",
+  "set_digest": "cd31b692508ad5e4a549704c98b8b863fbdda0d2bd84559f9ce606c214ff43da",
+  "tests": 6343,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 630,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "19e4fd3e018819f0815ce365a001e2fd6ce81f6141030f4056c54019d5d2dcc6",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   32,
+   32,
+   32
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "50211c2039aae7ef5d3dc5e8214b8f56bc00b9b0e14016fe650b3f13aa239efa",
+  "test_patch_digest": "67f23f21e7f41d604717c5271e6aecdd84b12e1b7b7dbdf123c67497ddf6ab96",
+  "ref_tree_digest": "1c01b311c57ebd1d4e12942d7439c6555874a7ec0812d975cd9bda6adda94b57",
+  "upstream": "https://github.com/python-jsonschema/jsonschema/pull/972",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "630 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.6,
+   "regress_secs": 5.6,
+   "ref_good_total_secs": 6.1,
+   "baseline_setup_secs": 0.2
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_3": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/python-jsonschema/jsonschema/pull/972",
+  "pr_created": "2022-07-10T07:11:46Z",
+  "pr_merged": "2022-07-10T21:28:44Z",
+  "issues": [
+   {
+    "number": 728,
+    "created_at": "2020-08-23T10:57:07Z",
+    "url": "https://github.com/python-jsonschema/jsonschema/issues/728"
+   }
+  ],
+  "goal_sources": [
+   "issue Julian/jsonschema#728",
+   "PR Julian/jsonschema#972 (symptom statement only)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description and the contract asserted by the upstream tests (names and values the tests require); no patch content used",
+  "ws_tree_digest": "cfafe9134fdde1fc564547291ad17ed091f3314cba99ccd00a509404f1d78950"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 2,
+  "reference_test_files": 1,
+  "reference_churn": 61,
+  "reference_churn_bucket": "M",
+  "localization_shape": "multi_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 1,
+  "accept_tests": 33,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "jsonschema"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

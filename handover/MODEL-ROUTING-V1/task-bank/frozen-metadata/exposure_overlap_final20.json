@@ -1,0 +1,921 @@
+{
+ "MR-J01": {
+  "repo": "stleary/JSON-java",
+  "pr": "1046",
+  "base": "b959027aa2e0f2757ffa53f3941e729590df90ea",
+  "fix": "896ce0fb74b529ceb8618cb64cf63dec67a56e61",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 5,
+    "exact": [],
+    "related_same_file": [
+     "stleary__json-java-814",
+     "stleary__json-java-543",
+     "stleary__json-java-542"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J02": {
+  "repo": "commonmark/commonmark-java",
+  "pr": "340",
+  "base": "db57101568d9cee19acbb6c311c30f1f45913900",
+  "fix": "0fb7a1635a8f6d5f9b42deb95307e524a52e7a7d",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J03": {
+  "repo": "google/gson",
+  "pr": "3098",
+  "base": "61f2c646066e959f65cb99a826a2a759be42dbdd",
+  "fix": "b3f4ca20087f9066de4c340522ff84e0558e1ad1",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 11,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J04": {
+  "repo": "FasterXML/jackson-core",
+  "pr": "1665",
+  "base": "4f69b20ef85cbb4a163fb2b4b5e54d53dc44a062",
+  "fix": "0233dbd004d72fc87faf1ae7d11b5bd6fd4697e4",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J05": {
+  "repo": "javaparser/javaparser",
+  "pr": "4727",
+  "base": "322e7fa1cdaa03913c86cdf59aae4a59566cd2c1",
+  "fix": "b22db5a7126ea8b7380f8dd9081ed55ec23db644",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J06": {
+  "repo": "jdbi/jdbi",
+  "pr": "2681",
+  "base": "cedfb9831bfc2efc04fcdb91328483a9f9342d94",
+  "fix": "a4651ce31650cbe95713adc86762cf2f3b615652",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J07": {
+  "repo": "mapstruct/mapstruct",
+  "pr": "2975",
+  "base": "237543c47cb1827189e8c8d81b5b5b9c2eabadf1",
+  "fix": "b24e831cf0960cc25a4967fe6e1f11c536c0b118",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J08": {
+  "repo": "mybatis/mybatis-3",
+  "pr": "3456",
+  "base": "294aa353cbe3d8f35f8c656fbb54a9b416c1c9b5",
+  "fix": "a0ce555bf4edc92eb8dcc20e0a8cf7f84fe6d20b",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J09": {
+  "repo": "resilience4j/resilience4j",
+  "pr": "2209",
+  "base": "5d794b9fcdab505f37b410bf851fa316b5cb6751",
+  "fix": "a662dad254fd310c88de980f357d815f8650ef88",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-J10": {
+  "repo": "resilience4j/resilience4j",
+  "pr": "2507",
+  "base": "158b64c235ecec44791923e4155d7e74e1217c30",
+  "fix": "cec580d01b3fc33dcb501043463f18ca881b9779",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P01": {
+  "repo": "python-attrs/attrs",
+  "pr": "1401",
+  "base": "75723b7720952ac0a4c7d3e277b6714ba55ded18",
+  "fix": "e048efcb395443608d184a149c0adbca166cb833",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 45,
+    "exact": [],
+    "related_same_file": [
+     "python-attrs__attrs-1009",
+     "python-attrs__attrs-817",
+     "python-attrs__attrs-1410",
+     "python-attrs__attrs-563",
+     "python-attrs__attrs-1321",
+     "python-attrs__attrs-763",
+     "python-attrs__attrs-560",
+     "python-attrs__attrs-431"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P06": {
+  "repo": "lepture/mistune",
+  "pr": "427",
+  "base": "c85632528f6f3d9d974bfae300716ac997a8d2c1",
+  "fix": "c82ad09675a5603166cf34bf1682953b56efb9ae",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 4,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P07": {
+  "repo": "pytest-dev/pluggy",
+  "pr": "758",
+  "base": "78a1d52545dfb2c910bb690a089a815803439655",
+  "fix": "86670ff63cccaaa61a234b3cab0a4f70abfbb66b",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 8,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P08": {
+  "repo": "jazzband/prettytable",
+  "pr": "429",
+  "base": "c26bced68fa441850240ebc2105e289651d5a3a1",
+  "fix": "714b053125c66d44a4ad52558c5c0e78f37b930e",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P09": {
+  "repo": "pydantic/pydantic-settings",
+  "pr": "767",
+  "base": "f6ddaee324a6f35e418505a0222bd26f1894446e",
+  "fix": "a04b03450e62f583cdaee2d93df693b991aeb319",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P10": {
+  "repo": "andialbrecht/sqlparse",
+  "pr": "865",
+  "base": "df8e28495a87954a9d52de70c33ef7225c53b28f",
+  "fix": "f66d12c245412f28c58f045b646eb53c0e691b8b",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 11,
+    "exact": [],
+    "related_same_file": [
+     "andialbrecht__sqlparse-451",
+     "andialbrecht__sqlparse-629",
+     "andialbrecht__sqlparse-633",
+     "andialbrecht__sqlparse-746",
+     "andialbrecht__sqlparse-768"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "andialbrecht__sqlparse-633",
+     "andialbrecht__sqlparse-746"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P13": {
+  "repo": "marshmallow-code/marshmallow",
+  "pr": "2928",
+  "base": "28f911b1240f127cc37b0d400a47e3ae5d573faa",
+  "fix": "c1e727e16bed9851c6e77dde0119ee2d4f1ba08d",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 61,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1002",
+     "marshmallow-code__marshmallow-1036",
+     "marshmallow-code__marshmallow-1067",
+     "marshmallow-code__marshmallow-1078",
+     "marshmallow-code__marshmallow-1079",
+     "marshmallow-code__marshmallow-1142",
+     "marshmallow-code__marshmallow-1220",
+     "marshmallow-code__marshmallow-1278"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1735"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P14": {
+  "repo": "python-jsonschema/jsonschema",
+  "pr": "972",
+  "base": "28a7598673966b73c1789a9fdd03dbd8bd9a02b7",
+  "fix": "726d546d0429b0c42526472d65e0ea58da794df1",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P15": {
+  "repo": "mahmoud/boltons",
+  "pr": "445",
+  "base": "78e8638e695d78ccc2dc641ef87e38fa51185840",
+  "fix": "b5c495bec206741ec25cd82ecc869e0b59bb0d10",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 8,
+    "exact": [],
+    "related_same_file": [
+     "mahmoud__boltons-183",
+     "mahmoud__boltons-203"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 6,
+    "exact": [],
+    "related_same_file": [
+     "mahmoud__boltons-203",
+     "mahmoud__boltons-244"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "MR-P16": {
+  "repo": "pydantic/pydantic-settings",
+  "pr": "826",
+  "base": "2ae12c7276c54cbe050060acf82086a8cdfc6c8f",
+  "fix": "7563595fd60182cf55dc39597bad2f3bb4bba04f",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ }
+}

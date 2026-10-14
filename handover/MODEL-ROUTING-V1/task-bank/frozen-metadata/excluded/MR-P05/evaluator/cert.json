@@ -1,0 +1,275 @@
+{
+ "id": "markdown#1494",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 71 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 71 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 71 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/71 required tests failed or were absent (executed 71)",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_toc.TestTOC::test_escaped_char_in_attr_list"
+    ],
+    "note": "",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/71 required tests failed or were absent (executed 71)",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_toc.TestTOC::test_escaped_char_in_attr_list"
+    ],
+    "note": "",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/71 required tests failed or were absent (executed 71)",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_toc.TestTOC::test_escaped_char_in_attr_list"
+    ],
+    "note": "",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 71 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1005 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.2,
+    "n_executed": 1150,
+    "n_required": 1005,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/71 required tests failed or were absent (executed 71)",
+    "secs": 0.8,
+    "setup_secs": 0.2,
+    "n_executed": 71,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_toc.TestTOC::test_escaped_char_in_attr_list"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 70,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_backslash_escape_value",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_after_block",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_after_inline",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_in_double_quote",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_in_single_quote",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_empty_attr_list"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py', '-markdown/test_tools.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 71,
+    "missing_head": [
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_backslash_escape_value",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_after_block",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_after_inline",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_in_double_quote",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_curly_in_single_quote",
+     "tests.test_syntax.extensions.test_attr_list.TestAttrList::test_empty_attr_list"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_syntax/extensions/test_attr_list.py', '~tests/test_syntax/extensions/test_toc.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)",
+  "145 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.8,
+  "regress_secs": 1.8,
+  "ref_good_total_secs": 2.6,
+  "baseline_setup_secs": 0.2
+ },
+ "repeats": 3
+}

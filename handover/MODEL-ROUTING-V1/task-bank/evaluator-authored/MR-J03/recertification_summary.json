@@ -1,0 +1,89 @@
+{
+ "before": {
+  "near_miss_0": {
+   "expected": "REJECT",
+   "verdict": "REJECT"
+  },
+  "near_miss_1": {
+   "expected": "REJECT",
+   "verdict": "REJECT"
+  },
+  "near_miss_2": {
+   "expected": "REJECT",
+   "verdict": "PASS"
+  },
+  "near_miss_3": {
+   "expected": "REJECT",
+   "verdict": "PASS"
+  },
+  "harmless": {
+   "expected": "PASS",
+   "verdict": "PASS"
+  },
+  "tamper_planted_pass": {
+   "expected": "REJECT",
+   "verdict": "REJECT"
+  }
+ },
+ "after": {
+  "near_miss_0": {
+   "expected": "REJECT",
+   "verdict": "REJECT",
+   "reason": "candidate fault: compile/syntax/import error or explicit contract violation"
+  },
+  "near_miss_1": {
+   "expected": "REJECT",
+   "verdict": "REJECT",
+   "reason": "2/107 required tests failed or were absent (executed 108)"
+  },
+  "near_miss_2": {
+   "expected": "REJECT",
+   "verdict": "REJECT",
+   "reason": "1/107 required tests failed or were absent (executed 108)"
+  },
+  "near_miss_3": {
+   "expected": "REJECT",
+   "verdict": "REJECT",
+   "reason": "1/107 required tests failed or were absent (executed 108)"
+  },
+  "harmless": {
+   "expected": "PASS",
+   "verdict": "PASS",
+   "reason": "all 107 required tests passed"
+  },
+  "tamper_planted_pass": {
+   "expected": "REJECT",
+   "verdict": "REJECT",
+   "reason": "9/107 required tests failed or were absent (executed 108)"
+  }
+ },
+ "ref": [
+  [
+   "PASS",
+   "PASS"
+  ],
+  [
+   "PASS",
+   "PASS"
+  ],
+  [
+   "PASS",
+   "PASS"
+  ]
+ ],
+ "baseline": [
+  [
+   "REJECT",
+   "PASS"
+  ],
+  [
+   "REJECT",
+   "PASS"
+  ],
+  [
+   "REJECT",
+   "PASS"
+  ]
+ ],
+ "verdict": "CERTIFIED-WITH-LIMITS"
+}

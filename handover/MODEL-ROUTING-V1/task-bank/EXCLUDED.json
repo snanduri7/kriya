@@ -1,0 +1,9 @@
+{
+ "reason": "REJECTED_FROM_FINAL_BANK: EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved under bank/excluded/<TID>; NOT reserves",
+ "tasks": {
+  "MR-P02": "click#2604",
+  "MR-P03": "jinja#1664",
+  "MR-P04": "keyring#695",
+  "MR-P05": "markdown#1494"
+ }
+}

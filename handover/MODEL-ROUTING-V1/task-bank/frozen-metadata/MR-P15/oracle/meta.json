@@ -1,0 +1,21 @@
+{
+ "id": "boltons#445",
+ "repo": "mahmoud/boltons",
+ "pr": 445,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_funcutils_fb_py3.py"
+ ],
+ "pkg": "boltons",
+ "src_layout": false,
+ "test_files": [
+  "tests/test_funcutils_fb_py3.py"
+ ],
+ "prod_files": [
+  "boltons/funcutils.py"
+ ],
+ "other_files": [
+  "CHANGELOG.md"
+ ]
+}

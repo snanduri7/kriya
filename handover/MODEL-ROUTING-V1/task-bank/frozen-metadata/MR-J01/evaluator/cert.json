@@ -1,0 +1,284 @@
+{
+ "id": "JSON-java#1046",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 68 required tests passed",
+    "secs": 3.4,
+    "setup_secs": 0.1,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.9,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 68 required tests passed",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.9,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 68 required tests passed",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.8,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "4/68 required tests failed or were absent (executed 68)",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::testOutOfRangeDecimalEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityInAttributeThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testSurrogateHexEntityThrowsJSONException"
+    ],
+    "note": "",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 4
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.8,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "4/68 required tests failed or were absent (executed 68)",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::testOutOfRangeDecimalEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityInAttributeThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testSurrogateHexEntityThrowsJSONException"
+    ],
+    "note": "",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 4
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.8,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "4/68 required tests failed or were absent (executed 68)",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::testOutOfRangeDecimalEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityInAttributeThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testSurrogateHexEntityThrowsJSONException"
+    ],
+    "note": "",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 4
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.9,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "4/68 required tests failed or were absent (executed 68)",
+    "secs": 3.2,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::testOutOfRangeDecimalEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityInAttributeThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testSurrogateHexEntityThrowsJSONException"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 4
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.1,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::clarifyCurrentBehavior",
+     "org.json.junit.XMLTest::contentOperations",
+     "org.json.junit.XMLTest::shouldCreateExplicitEndTagWithEmptyValueWhenConfigured",
+     "org.json.junit.XMLTest::shouldHandleArraytoString",
+     "org.json.junit.XMLTest::shouldHandleCommentsInXML",
+     "org.json.junit.XMLTest::shouldHandleContentArraytoString"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 4
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 68 required tests passed",
+    "secs": 3.3,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 767 required tests passed",
+    "secs": 3.8,
+    "setup_secs": 0.0,
+    "n_executed": 773,
+    "n_required": 767,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/json/junit/XMLTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "4/68 required tests failed or were absent (executed 68)",
+    "secs": 3.4,
+    "setup_secs": 0.0,
+    "n_executed": 68,
+    "n_required": 68,
+    "missing_head": [
+     "org.json.junit.XMLTest::testOutOfRangeDecimalEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityInAttributeThrowsJSONException",
+     "org.json.junit.XMLTest::testOutOfRangeHexEntityThrowsJSONException",
+     "org.json.junit.XMLTest::testSurrogateHexEntityThrowsJSONException"
+    ],
+    "note": "",
+    "p2p_pass": 64,
+    "f2p_failed_or_absent": 4
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "6 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 3.4,
+  "regress_secs": 3.9,
+  "ref_good_total_secs": 7.2,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

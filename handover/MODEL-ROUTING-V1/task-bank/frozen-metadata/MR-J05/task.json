@@ -1,0 +1,150 @@
+{
+ "TASK_ID": "MR-J05",
+ "candidate_id": "javaparser#4727",
+ "repository_id": "javaparser/javaparser",
+ "base_revision": "322e7fa1cdaa03913c86cdf59aae4a59566cd2c1",
+ "fix_revision": "b22db5a7126ea8b7380f8dd9081ed55ec23db644",
+ "goal_digest": "3486ff5cd8846b3f3ab7fcd372c2e713d7b68907969da32d1d567dd0b55729f0",
+ "language": "java",
+ "build_system": "maven",
+ "setup_manifest": {
+  "jdk": "17",
+  "python": null,
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/javaparser_javaparser"
+  },
+  "env": {},
+  "python_build": null
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "6da45693566138cfd71d6e38d911ff04a5596d86b350a3925fd94cd144ccba64",
+  "spec_digest": "d21d8948c349c855b0adc8ee1877ce75abf719a1aa0206870821f63fba860013",
+  "hidden_tests_digest": "9d25f35b4ab01f0883c9fe785ce4b929d0e1198195613155a803d52c651032ff",
+  "required_tests": 2,
+  "fail_to_pass": 1,
+  "pass_to_pass": 1,
+  "selectors": [
+   "com.github.javaparser.symbolsolver.resolution.Issue4703Test"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "2b18d2a875d939ddc209567cb1e2155ff3ab647b4cf8466a8dd45dde1f1584c6",
+  "set_digest": "81c9698a42fe25b9402035d8be69943530e77a85a36856536a3476f79fcd5e7f",
+  "tests": 1917,
+  "scope": "tests of module javaparser-symbol-solver-testing and the reactor modules it depends on (-am); downstream modules are not covered",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 33,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "8f26c54d98d612f69151bdbb5158021b3486a795959ffd73636969826dc28589",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   1,
+   1,
+   1
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "8ba10f4b74a982188722aa83c085b9b3e407035b6afe9687a7f5d91563956f2a",
+  "test_patch_digest": "4586ee68284ad116b030a1c623a6b5c26b81c19d90dd369ac9c61198d109606f",
+  "ref_tree_digest": "d0197c640e28aca7748792f77f383b2304b03e527a931d796b05a7bda75a1d11",
+  "upstream": "https://github.com/javaparser/javaparser/pull/4727",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "33 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 9.4,
+   "regress_secs": 28.0,
+   "ref_good_total_secs": 37.1,
+   "baseline_setup_secs": 0.9
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": false,
+    "verdict": "PASS"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/javaparser/javaparser/pull/4727",
+  "pr_created": "2025-04-11T13:53:28Z",
+  "pr_merged": "2025-04-11T15:32:28Z",
+  "issues": [
+   {
+    "number": 4703,
+    "created_at": "2025-03-31T12:46:52Z",
+    "url": "https://github.com/javaparser/javaparser/issues/4703"
+   }
+  ],
+  "goal_sources": [
+   "issue javaparser/javaparser#4703"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "0e3b611ab4b2de9ab8f2f1cb8db3b3aae561c5bf487adf84366d7a3027ee4238"
+ },
+ "metadata": {
+  "language": "java",
+  "build_system": "maven",
+  "module_structure": "multi_module",
+  "reference_prod_files": 2,
+  "reference_test_files": 1,
+  "reference_churn": 95,
+  "reference_churn_bucket": "L",
+  "localization_shape": "multi_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 1,
+  "accept_tests": 2,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "javaparser-core/src/main/java/com/github/javaparser/resolution/logic"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

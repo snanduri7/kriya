@@ -1,0 +1,319 @@
+{
+ "id": "attrs#1401",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 13 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 8.5,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 13 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 8.7,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 13 required tests passed",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 8.2,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/13 required tests failed or were absent (executed 13)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+     "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check"
+    ],
+    "note": "",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 8.1,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/13 required tests failed or were absent (executed 13)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+     "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check"
+    ],
+    "note": "",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 8.3,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/13 required tests failed or were absent (executed 13)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+     "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check"
+    ],
+    "note": "",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 9.0,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "10/13 required tests failed or were absent (executed 13)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_add_field",
+     "tests.test_hooks.TestTransformHook::test_hook_applied",
+     "tests.test_hooks.TestTransformHook::test_hook_applied_auto_attrib",
+     "tests.test_hooks.TestTransformHook::test_hook_applied_modify_attrib",
+     "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+     "tests.test_hooks.TestTransformHook::test_hook_override_alias"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 3,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/13 required tests failed or were absent (executed 13)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_with_inheritance"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 10,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 13 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1337 required tests passed",
+    "secs": 9.1,
+    "setup_secs": 0.0,
+    "n_executed": 1430,
+    "n_required": 1337,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/13 required tests failed or were absent (executed 13)",
+    "secs": 1.4,
+    "setup_secs": 0.0,
+    "n_executed": 13,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+     "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~conftest.py']",
+    "p2p_pass": 11,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestAsDictHook::test_asdict",
+     "tests.test_hooks.TestAsDictHook::test_asdict_calls",
+     "tests.test_hooks.TestTransformHook::test_attrs_attrclass",
+     "tests.test_hooks.TestTransformHook::test_hook_add_field",
+     "tests.test_hooks.TestTransformHook::test_hook_applied",
+     "tests.test_hooks.TestTransformHook::test_hook_applied_auto_attrib"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.5,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 13,
+    "missing_head": [
+     "tests.test_hooks.TestAsDictHook::test_asdict",
+     "tests.test_hooks.TestAsDictHook::test_asdict_calls",
+     "tests.test_hooks.TestTransformHook::test_attrs_attrclass",
+     "tests.test_hooks.TestTransformHook::test_hook_add_field",
+     "tests.test_hooks.TestTransformHook::test_hook_applied",
+     "tests.test_hooks.TestTransformHook::test_hook_applied_auto_attrib"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_hooks.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "93 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 1.2,
+  "regress_secs": 8.7,
+  "ref_good_total_secs": 9.6,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

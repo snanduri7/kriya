@@ -1,0 +1,18 @@
+{
+ "id": "resilience4j#2507",
+ "repo": "resilience4j/resilience4j",
+ "pr": 2507,
+ "lang": "java",
+ "build": "gradle",
+ "module": "resilience4j-bulkhead",
+ "classes": [
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest"
+ ],
+ "test_files": [
+  "resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java"
+ ],
+ "prod_files": [
+  "resilience4j-bulkhead/src/main/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfig.java"
+ ],
+ "other_files": []
+}

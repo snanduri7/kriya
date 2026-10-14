@@ -1,0 +1,22 @@
+{
+ "id": "mistune#427",
+ "repo": "lepture/mistune",
+ "pr": 427,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests"
+ ],
+ "pkg": "mistune",
+ "src_layout": true,
+ "test_files": [
+  "tests/fixtures/fenced_toc.txt",
+  "tests/fixtures/hook_toc.txt",
+  "tests/fixtures/rst_toc.txt"
+ ],
+ "prod_files": [
+  "src/mistune/directives/toc.py",
+  "src/mistune/toc.py"
+ ],
+ "other_files": []
+}

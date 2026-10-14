@@ -1,0 +1,40 @@
+{
+ "id": "jackson-core#1665",
+ "accept_set": [
+  "tools.jackson.core.unittest.json.TestRootValues::brokenNumber",
+  "tools.jackson.core.unittest.json.TestRootValues::invalidToken",
+  "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+  "tools.jackson.core.unittest.json.TestRootValues::rootOffsetIssue516Bytes",
+  "tools.jackson.core.unittest.json.TestRootValues::rootOffsetIssue516Chars",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleBooleans",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleNumbers",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleWrites",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::mixedRootSequence",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::tokenRootSequence",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::tokenRootTokens"
+ ],
+ "F2P": [
+  "tools.jackson.core.unittest.json.TestRootValues::missingRootSeparatorUTF8",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::missingRootSeparatorUTF8"
+ ],
+ "P2P_accept": [
+  "tools.jackson.core.unittest.json.TestRootValues::brokenNumber",
+  "tools.jackson.core.unittest.json.TestRootValues::invalidToken",
+  "tools.jackson.core.unittest.json.TestRootValues::rootOffsetIssue516Bytes",
+  "tools.jackson.core.unittest.json.TestRootValues::rootOffsetIssue516Chars",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleBooleans",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleNumbers",
+  "tools.jackson.core.unittest.json.TestRootValues::simpleWrites",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::mixedRootSequence",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::tokenRootSequence",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest::tokenRootTokens"
+ ],
+ "accept_selectors": [
+  "tools.jackson.core.unittest.json.TestRootValues",
+  "tools.jackson.core.unittest.json.async.AsyncRootValuesTest"
+ ],
+ "regress_scope": "tests of module <root> and the reactor modules it depends on (-am); downstream modules are not covered",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

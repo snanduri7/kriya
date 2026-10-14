@@ -1,0 +1,166 @@
+{
+ "TASK_ID": "MR-P08",
+ "candidate_id": "prettytable#429",
+ "repository_id": "jazzband/prettytable",
+ "base_revision": "c26bced68fa441850240ebc2105e289651d5a3a1",
+ "fix_revision": "714b053125c66d44a4ad52558c5c0e78f37b930e",
+ "goal_digest": "0a646d5f4cf9c515383a09bc8a594549971204b1d99de4140759af8171e42385",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/jazzband_prettytable"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "b803c29cd3e60af14085c008085940233e7df1fede93ffa284fadb274dc3de51",
+  "spec_digest": "c6959b6bd4f8642a0973b126b37c0b63257e6213b5d42a5bdcb3d7e2b7d9404f",
+  "hidden_tests_digest": "8e4e271dad61e5d95d54a3a41a0611262deb6c883f3e33aab4fa6c656b2d98b1",
+  "required_tests": 205,
+  "fail_to_pass": 1,
+  "pass_to_pass": 204,
+  "selectors": [
+   "tests/test_prettytable.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "deaf0e39c092dfd09628e2c421a78aa222376e3aef04177bf106916560badca6",
+  "set_digest": "135ff04eb2314cd6d713fa76f62f2af28f40ed7273f0feb32481744f4a89410f",
+  "tests": 303,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "6fc9de636c61ef9f5a612030cdfd3de70e3855e442e07ec2bab2a72e7d91cb1c",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   204,
+   204,
+   204
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "38272db88572021b93a2c516fa7705ef1b1a4a3e4d2416cf924d134dcac98c1e",
+  "test_patch_digest": "d806a7566cea28f0de1928a2db8e3588bc9ee953691184026c73ec2f8e068a55",
+  "ref_tree_digest": "3d1024d95ab5374b75e869fd7994e77df703428ac4d48849edb4ec523d0f5847",
+  "upstream": "https://github.com/jazzband/prettytable/pull/429",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED",
+  "limits": [],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.8,
+   "regress_secs": 0.9,
+   "ref_good_total_secs": 1.7,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_3": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/prettytable/prettytable/pull/429",
+  "pr_created": "2026-01-10T17:26:52Z",
+  "pr_merged": "2026-01-19T14:15:02Z",
+  "issues": [
+   {
+    "number": 202,
+    "created_at": "2022-09-30T13:29:48Z",
+    "url": "https://github.com/jazzband/prettytable/issues/202"
+   }
+  ],
+  "goal_sources": [
+   "issue jazzband/prettytable#202",
+   "PR #429 description"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "57d4d192ed023948fc5652870b07745c633204ba147a8b6242482371c597e74a"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 115,
+  "reference_churn_bucket": "L",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 1,
+  "accept_tests": 205,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "src/prettytable"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

@@ -1,0 +1,22 @@
+{
+ "MR-J01": "JSON-java#1046",
+ "MR-J02": "commonmark-java#340",
+ "MR-J03": "gson#3098",
+ "MR-J04": "jackson-core#1665",
+ "MR-J05": "javaparser#4727",
+ "MR-J06": "jdbi#2681",
+ "MR-J07": "mapstruct#2975",
+ "MR-J08": "mybatis-3#3456",
+ "MR-J09": "resilience4j#2209",
+ "MR-J10": "resilience4j#2507",
+ "MR-P01": "attrs#1401",
+ "MR-P06": "mistune#427",
+ "MR-P07": "pluggy#758",
+ "MR-P08": "prettytable#429",
+ "MR-P09": "pydantic-settings#767",
+ "MR-P10": "sqlparse#865",
+ "MR-P13": "marshmallow#2928",
+ "MR-P14": "jsonschema#972",
+ "MR-P15": "boltons#445",
+ "MR-P16": "pydantic-settings#826"
+}

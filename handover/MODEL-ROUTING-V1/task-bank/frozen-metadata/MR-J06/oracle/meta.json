@@ -1,0 +1,20 @@
+{
+ "id": "jdbi#2681",
+ "repo": "jdbi/jdbi",
+ "pr": 2681,
+ "lang": "java",
+ "build": "maven",
+ "module": "core",
+ "classes": [
+  "org.jdbi.v3.core.TestCloseConnection"
+ ],
+ "test_files": [
+  "core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java"
+ ],
+ "prod_files": [
+  "core/src/main/java/org/jdbi/v3/core/Jdbi.java"
+ ],
+ "other_files": [
+  "RELEASE_NOTES.md"
+ ]
+}

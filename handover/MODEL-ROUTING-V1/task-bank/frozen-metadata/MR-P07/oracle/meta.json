@@ -1,0 +1,21 @@
+{
+ "id": "pluggy#758",
+ "repo": "pytest-dev/pluggy",
+ "pr": 758,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "testing/test_details.py"
+ ],
+ "pkg": "pluggy",
+ "src_layout": true,
+ "test_files": [
+  "testing/test_details.py"
+ ],
+ "prod_files": [
+  "pyproject.toml"
+ ],
+ "other_files": [
+  "changelog/757.bugfix.rst"
+ ]
+}

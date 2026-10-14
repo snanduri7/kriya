@@ -1,0 +1,350 @@
+{
+ "id": "jinja#1664",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 63 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.2,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 63 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.1,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 63 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.1,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.2,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.1,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.1,
+    "setup_secs": 0.0,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/63 required tests failed or were absent (executed 63)",
+    "secs": 1.3,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_redefined",
+     "tests.test_core_tags.TestSet::test_set_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 60,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "46/63 required tests failed or were absent (executed 63)",
+    "secs": 3.5,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestForLoop::test_call_in_loop",
+     "tests.test_core_tags.TestForLoop::test_changed",
+     "tests.test_core_tags.TestForLoop::test_context_vars",
+     "tests.test_core_tags.TestForLoop::test_cycling",
+     "tests.test_core_tags.TestForLoop::test_else",
+     "tests.test_core_tags.TestForLoop::test_else_scoping_item"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 63 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 906 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 906,
+    "n_required": 906,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/63 required tests failed or were absent (executed 63)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 63,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestSet::test_namespace_set_tuple"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 62,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestForLoop::test_call_in_loop",
+     "tests.test_core_tags.TestForLoop::test_changed",
+     "tests.test_core_tags.TestForLoop::test_context_vars",
+     "tests.test_core_tags.TestForLoop::test_cycling",
+     "tests.test_core_tags.TestForLoop::test_else",
+     "tests.test_core_tags.TestForLoop::test_else_scoping_item"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.1,
+    "n_executed": 0,
+    "n_required": 63,
+    "missing_head": [
+     "tests.test_core_tags.TestForLoop::test_call_in_loop",
+     "tests.test_core_tags.TestForLoop::test_changed",
+     "tests.test_core_tags.TestForLoop::test_context_vars",
+     "tests.test_core_tags.TestForLoop::test_cycling",
+     "tests.test_core_tags.TestForLoop::test_else",
+     "tests.test_core_tags.TestForLoop::test_else_scoping_item"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_core_tags.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED",
+ "limits": [],
+ "cost": {
+  "accept_secs": 0.9,
+  "regress_secs": 2.2,
+  "ref_good_total_secs": 3.0,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

@@ -1,0 +1,112 @@
+{
+ "algorithm": "exact L1-imbalance minimiser over per-language n/2 splits, hash tie-break (tools/freeze_bank.py:partition)",
+ "seed": "MODEL-ROUTING-V1/stage2/partition/1",
+ "features": [
+  "lang",
+  "build",
+  "type",
+  "loc",
+  "mod",
+  "churn",
+  "anchor"
+ ],
+ "total_l1_imbalance": 6,
+ "bank_manifest_hash": "cbdb68031cc9e1e044c3fb51d1ddf3e7a8a52656d9b81a9849c3013b046d364d",
+ "partition": {
+  "ROUTING-DEV": [
+   "MR-J01",
+   "MR-J02",
+   "MR-J03",
+   "MR-J04",
+   "MR-J09",
+   "MR-P01",
+   "MR-P07",
+   "MR-P10",
+   "MR-P14",
+   "MR-P15"
+  ],
+  "FINAL-HOLDOUT": [
+   "MR-J05",
+   "MR-J06",
+   "MR-J07",
+   "MR-J08",
+   "MR-J10",
+   "MR-P06",
+   "MR-P08",
+   "MR-P09",
+   "MR-P13",
+   "MR-P16"
+  ]
+ },
+ "balance_dev_vs_holdout": {
+  "anchor=False": [
+   6,
+   6
+  ],
+  "anchor=True": [
+   4,
+   4
+  ],
+  "build=gradle": [
+   1,
+   1
+  ],
+  "build=maven": [
+   4,
+   4
+  ],
+  "build=python": [
+   5,
+   5
+  ],
+  "churn=L": [
+   2,
+   3
+  ],
+  "churn=M": [
+   5,
+   4
+  ],
+  "churn=S": [
+   3,
+   3
+  ],
+  "lang=java": [
+   5,
+   5
+  ],
+  "lang=python": [
+   5,
+   5
+  ],
+  "loc=multi_file": [
+   5,
+   5
+  ],
+  "loc=single_file": [
+   5,
+   5
+  ],
+  "mod=multi_module": [
+   3,
+   4
+  ],
+  "mod=single_module": [
+   7,
+   6
+  ],
+  "type=bug_fix": [
+   8,
+   9
+  ],
+  "type=build_config": [
+   1,
+   0
+  ],
+  "type=feature": [
+   1,
+   1
+  ]
+ },
+ "partition_hash": "3df2ff4de78d11ca82a7818d3e4a2885af8df6ac344c621687e7e1db5cc6a2a6"
+}

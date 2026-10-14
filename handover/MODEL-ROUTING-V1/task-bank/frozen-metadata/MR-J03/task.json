@@ -1,0 +1,161 @@
+{
+ "TASK_ID": "MR-J03",
+ "candidate_id": "gson#3098",
+ "repository_id": "google/gson",
+ "base_revision": "61f2c646066e959f65cb99a826a2a759be42dbdd",
+ "fix_revision": "b3f4ca20087f9066de4c340522ff84e0558e1ad1",
+ "goal_digest": "dc09cfb81615be4655c19d2a9a9d2bd63575a3b355426a4d62c039010dc2930d",
+ "language": "java",
+ "build_system": "maven",
+ "setup_manifest": {
+  "jdk": "17",
+  "python": null,
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/google_gson"
+  },
+  "env": {},
+  "python_build": null
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "2d344caa0ea2c9fc15872b45afe2e333077898d2ffb4e2863cf22dbef8d9d1ee",
+  "spec_digest": "f018dc266c992268e154ce69225016156575ec392866f8b467a68c712f78852c",
+  "hidden_tests_digest": "0401367ecac74e3d3afc8af7e800903c9846adc85b2fb0b0190b85e181402ed6",
+  "required_tests": 107,
+  "fail_to_pass": 9,
+  "pass_to_pass": 98,
+  "selectors": [
+   "com.google.gson.functional.JsonParserTest",
+   "com.google.gson.functional.MapTest",
+   "com.google.gson.stream.JsonReaderPathTest",
+   "com.google.gson.stream.JsonReaderPromotedKeyPathTest"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "2f1e3dff2ff87298ba1be1011e22530c5e919aa284ab8862ec87118ea206f6ba",
+  "set_digest": "2a87666ad4398d464a98611d1af5a24645b99244f19256a1b2a2e93879307843",
+  "tests": 4607,
+  "scope": "tests of module gson and the reactor modules it depends on (-am); downstream modules are not covered",
+  "excluded_superseded_by_fix": 4,
+  "excluded_base_failing_or_skipped": 19,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "ed5c038484da80c973e75ac1ee9d069147bc85e520ccdba169d0073a84e2d6a3",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   98,
+   98,
+   98
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   9,
+   9,
+   9
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "b73347ac3fd946c0ffd783a8630eb219a2f1df2c0789c42e48203df9f13387f5",
+  "test_patch_digest": "42169e2c30256537a53914178e8e57a55e6680fe8c0c07e338aad7e3f4b9ad73",
+  "ref_tree_digest": "ef754263ba76f49b3fe251c692dddaa17e832ecd478ee61c83a0cc62d5c77a17",
+  "upstream": "https://github.com/google/gson/pull/3098",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "4 base tests superseded by the fix and excluded from the regression set",
+   "19 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 5.8,
+   "regress_secs": 6.9,
+   "ref_good_total_secs": 12.6,
+   "baseline_setup_secs": 0.2
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_3": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/google/gson/pull/3098",
+  "pr_created": "2026-08-22T18:35:56Z",
+  "pr_merged": "2026-08-27T01:13:23Z",
+  "issues": [
+   {
+    "number": 1768,
+    "created_at": "2020-08-25T23:24:21Z",
+    "url": "https://github.com/google/gson/issues/1768"
+   }
+  ],
+  "goal_sources": [
+   "issue google/gson#1768",
+   "PR google/gson#3098 description (symptom statement only)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "24cf15cac0856efd2bb8e59b655720b8530b0e7717c22038840639443bfefde8"
+ },
+ "metadata": {
+  "language": "java",
+  "build_system": "maven",
+  "module_structure": "multi_module",
+  "reference_prod_files": 2,
+  "reference_test_files": 3,
+  "reference_churn": 66,
+  "reference_churn_bucket": "M",
+  "localization_shape": "multi_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 9,
+  "accept_tests": 107,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "gson/src/main/java/com/google/gson/internal/bind",
+   "gson/src/main/java/com/google/gson/stream"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

@@ -1,0 +1,335 @@
+{
+ "id": "keyring#695",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 8 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.3,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 8 required tests passed",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 8 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.2,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.5,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.4,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.3,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get[json]",
+     "tests.test_cli::test_get[plain]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 4,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 8 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 52 required tests passed",
+    "secs": 2.2,
+    "setup_secs": 0.0,
+    "n_executed": 130,
+    "n_required": 52,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/8 required tests failed or were absent (executed 8)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 8,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~conftest.py']",
+    "p2p_pass": 6,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "8/8 required tests failed or were absent (executed 1)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 1,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get[json]",
+     "tests.test_cli::test_get[plain]",
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]",
+     "tests.test_cli::test_set_interactive",
+     "tests.test_cli::test_set_pipe"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 8,
+    "missing_head": [
+     "tests.test_cli::test_get[json]",
+     "tests.test_cli::test_get[plain]",
+     "tests.test_cli::test_get_anonymous[json]",
+     "tests.test_cli::test_get_anonymous[plain]",
+     "tests.test_cli::test_set_interactive",
+     "tests.test_cli::test_set_pipe"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_cli.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "78 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 1.3,
+  "regress_secs": 2.6,
+  "ref_good_total_secs": 3.4,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

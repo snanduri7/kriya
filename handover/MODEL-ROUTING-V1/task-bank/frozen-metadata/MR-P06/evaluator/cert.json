@@ -1,0 +1,340 @@
+{
+ "id": "mistune#427",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "3/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestDirective_fenced_toc::test_link_in_heading_001",
+     "tests.test_directives.TestDirective_rst_toc::test_link_in_heading_001",
+     "tests.test_hooks.TestTocHook::test_link_in_heading_001"
+    ],
+    "note": "",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 3
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "3/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestDirective_fenced_toc::test_link_in_heading_001",
+     "tests.test_directives.TestDirective_rst_toc::test_link_in_heading_001",
+     "tests.test_hooks.TestTocHook::test_link_in_heading_001"
+    ],
+    "note": "",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 3
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "3/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestDirective_fenced_toc::test_link_in_heading_001",
+     "tests.test_directives.TestDirective_rst_toc::test_link_in_heading_001",
+     "tests.test_hooks.TestTocHook::test_link_in_heading_001"
+    ],
+    "note": "",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 3
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "24/957 required tests failed or were absent (executed 957)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestCustomizeToc::test_colon_fenced_toc",
+     "tests.test_directives.TestCustomizeToc::test_fenced_toc",
+     "tests.test_directives.TestCustomizeToc::test_rst_toc",
+     "tests.test_directives.TestDirective_fenced_toc::test_collapse_toc_001",
+     "tests.test_directives.TestDirective_fenced_toc::test_complex_001",
+     "tests.test_directives.TestDirective_fenced_toc::test_html_in_heading_001"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 933,
+    "f2p_failed_or_absent": 3
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestDirective_fenced_toc::test_link_in_heading_001",
+     "tests.test_directives.TestDirective_rst_toc::test_link_in_heading_001"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_hooks.TestTocHook::test_link_in_heading_001"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 957 required tests passed",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "3/957 required tests failed or were absent (executed 957)",
+    "secs": 1.2,
+    "setup_secs": 0.0,
+    "n_executed": 957,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_directives.TestDirective_fenced_toc::test_link_in_heading_001",
+     "tests.test_directives.TestDirective_rst_toc::test_link_in_heading_001",
+     "tests.test_hooks.TestTocHook::test_link_in_heading_001"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 954,
+    "f2p_failed_or_absent": 3
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_062",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_063",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_064",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_065",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_066",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_067"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 3
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 957,
+    "missing_head": [
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_062",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_063",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_064",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_065",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_066",
+     "tests.test_commonmark.TestCommonMark::test_atx_headings_067"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~tests/fixtures/fenced_toc.txt', '~tests/fixtures/hook_toc.txt', '~tests/fixtures/rst_toc.txt']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 3
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED",
+ "limits": [],
+ "cost": {
+  "accept_secs": 1.2,
+  "regress_secs": 1.2,
+  "ref_good_total_secs": 2.4,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

@@ -1,0 +1,229 @@
+{
+ "id": "mybatis-3#3456",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 24.2,
+    "setup_secs": 0.9,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 47.4,
+    "setup_secs": 0.9,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 22.5,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 47.6,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 22.7,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 47.9,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 22.7,
+    "setup_secs": 0.9,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 46.8,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 23.6,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 46.8,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 23.0,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 46.4,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 24.6,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1960 required tests passed",
+    "secs": 46.7,
+    "setup_secs": 0.8,
+    "n_executed": 1979,
+    "n_required": 1960,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 22.7,
+    "setup_secs": 0.8,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)",
+  "19 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 24.2,
+  "regress_secs": 47.9,
+  "ref_good_total_secs": 70.8,
+  "baseline_setup_secs": 0.9
+ },
+ "repeats": 3
+}

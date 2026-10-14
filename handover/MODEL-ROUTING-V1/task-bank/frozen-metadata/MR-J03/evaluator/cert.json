@@ -1,0 +1,327 @@
+{
+ "id": "gson#3098",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 107 required tests passed",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.9,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 107 required tests passed",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.9,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 107 required tests passed",
+    "secs": 5.7,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.8,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "9/107 required tests failed or were absent (executed 108)",
+    "secs": 5.7,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.functional.JsonParserTest::testExtraCommasInMaps",
+     "com.google.gson.functional.MapTest::testMapDeserializationUnterminatedValueIncludesNameInPath",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeys",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysBothNull",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysNullFirstValue",
+     "com.google.gson.stream.JsonReaderPathTest::promoteNameToValueUpdatesPath[OBJECT_READER]"
+    ],
+    "note": "",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 9
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.8,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "9/107 required tests failed or were absent (executed 108)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.functional.JsonParserTest::testExtraCommasInMaps",
+     "com.google.gson.functional.MapTest::testMapDeserializationUnterminatedValueIncludesNameInPath",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeys",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysBothNull",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysNullFirstValue",
+     "com.google.gson.stream.JsonReaderPathTest::promoteNameToValueUpdatesPath[OBJECT_READER]"
+    ],
+    "note": "",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 9
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.9,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "9/107 required tests failed or were absent (executed 108)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.functional.JsonParserTest::testExtraCommasInMaps",
+     "com.google.gson.functional.MapTest::testMapDeserializationUnterminatedValueIncludesNameInPath",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeys",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysBothNull",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysNullFirstValue",
+     "com.google.gson.stream.JsonReaderPathTest::promoteNameToValueUpdatesPath[OBJECT_READER]"
+    ],
+    "note": "",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 9
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.8,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.2,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.JsonParserTest::testLegacyStrict",
+     "com.google.gson.JsonParserTest::testParseDeeplyNestedArrays",
+     "com.google.gson.JsonParserTest::testParseDeeplyNestedObjects",
+     "com.google.gson.JsonParserTest::testParseEmptyString",
+     "com.google.gson.JsonParserTest::testParseEmptyWhitespaceInput",
+     "com.google.gson.JsonParserTest::testParseInvalidJson"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 9
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/107 required tests failed or were absent (executed 108)",
+    "secs": 5.9,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.stream.JsonReaderPathTest::promoteNameToValueUpdatesPath[OBJECT_READER]",
+     "com.google.gson.stream.JsonReaderPromotedKeyPathTest::promotedNumericNamesUpdatePath[OBJECT_READER]"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/107 required tests failed or were absent (executed 108)",
+    "secs": 5.9,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.stream.JsonReaderPromotedKeyPathTest::promotedNumericNamesUpdatePath[STRING_READER]"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/107 required tests failed or were absent (executed 108)",
+    "secs": 5.7,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.stream.JsonReaderPromotedKeyPathTest::promotedNumericNamesUpdatePath[STRING_READER]"
+    ],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 107 required tests passed",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 4607 required tests passed",
+    "secs": 6.9,
+    "setup_secs": 0.2,
+    "n_executed": 4630,
+    "n_required": 4607,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 3 path(s) ['~gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java', '~gson/src/test/java/com/google/gson/functional/JsonParserTest.java', '~gson/src/test/java/com/google/gson/functional/MapTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "9/107 required tests failed or were absent (executed 108)",
+    "secs": 5.8,
+    "setup_secs": 0.2,
+    "n_executed": 108,
+    "n_required": 107,
+    "missing_head": [
+     "com.google.gson.functional.JsonParserTest::testExtraCommasInMaps",
+     "com.google.gson.functional.MapTest::testMapDeserializationUnterminatedValueIncludesNameInPath",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeys",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysBothNull",
+     "com.google.gson.functional.MapTest::testMapDeserializationWithDuplicateKeysNullFirstValue",
+     "com.google.gson.stream.JsonReaderPathTest::promoteNameToValueUpdatesPath[OBJECT_READER]"
+    ],
+    "note": "",
+    "p2p_pass": 98,
+    "f2p_failed_or_absent": 9
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "4 base tests superseded by the fix and excluded from the regression set",
+  "19 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 5.8,
+  "regress_secs": 6.9,
+  "ref_good_total_secs": 12.6,
+  "baseline_setup_secs": 0.2
+ },
+ "repeats": 3
+}

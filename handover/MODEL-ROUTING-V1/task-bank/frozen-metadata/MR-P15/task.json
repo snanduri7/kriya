@@ -1,0 +1,161 @@
+{
+ "TASK_ID": "MR-P15",
+ "candidate_id": "boltons#445",
+ "repository_id": "mahmoud/boltons",
+ "base_revision": "78e8638e695d78ccc2dc641ef87e38fa51185840",
+ "fix_revision": "b5c495bec206741ec25cd82ecc869e0b59bb0d10",
+ "goal_digest": "fad33b18d3553d0e98eda1c61996c3fb4dd494f4bf8f31a5524c61ab485ad6e0",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/mahmoud_boltons"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "0dc2fe3fa3d39106997c02f117c1750bbfdfa746de453ed99692a9f85fadf35f",
+  "spec_digest": "3fd0a16ac0297609902462a3f747498292700a2f5c8089159f7a31c045ec90b1",
+  "hidden_tests_digest": "f4b5c2bc43fba2ce7a30639555849cd2db65112e6e0bed45d132eab35ff3ae6f",
+  "required_tests": 19,
+  "fail_to_pass": 2,
+  "pass_to_pass": 17,
+  "selectors": [
+   "tests/test_funcutils_fb_py3.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "af72f3be725c18314d7c22b1fc2b93c104c9bd74446741ea200fabf1b8a13c42",
+  "set_digest": "ab0e2cd923b1d09a1eea6997d7a4cc56efa530ddee47cdcfd53eda6bc5157e1c",
+  "tests": 464,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "61c10d32a06c78aacfd4c22f937ee531bbb2db5013719eec48285e942dbd4f22",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   17,
+   17,
+   17
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   2,
+   2,
+   2
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "5fa36ae9d2067729753346dabfcaccc3d335d7fb8622d83f920043797cf93196",
+  "test_patch_digest": "02c64cd663b84f6f830ab46a37c8d3356a4a3a8acf4b9d9fe3b33b9f690e9be0",
+  "ref_tree_digest": "63b6c0f849d1eb69d4f6bfa498dce8b8f1f9a57cb39ccce4fd9e0af31e9046ab",
+  "upstream": "https://github.com/mahmoud/boltons/pull/445",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED",
+  "limits": [],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.9,
+   "regress_secs": 2.6,
+   "ref_good_total_secs": 3.4,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/mahmoud/boltons/pull/445",
+  "pr_created": "2026-08-07T18:46:04Z",
+  "pr_merged": "2026-08-07T21:10:06Z",
+  "issues": [
+   {
+    "number": 261,
+    "created_at": "2020-07-07T22:34:33Z",
+    "url": "https://github.com/mahmoud/boltons/issues/261"
+   }
+  ],
+  "goal_sources": [
+   "issue mahmoud/boltons#261",
+   "PR mahmoud/boltons#445 description (symptom statement only)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description and the contract asserted by the upstream tests; no patch content used",
+  "ws_tree_digest": "55e42ee054d7bc6b17fe5b1bfdcc60f00fbdc15f7fa940cab5b6349da8e3b48a"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 79,
+  "reference_churn_bucket": "M",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 2,
+  "accept_tests": 19,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "boltons"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

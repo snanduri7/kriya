@@ -1,0 +1,158 @@
+{
+ "TASK_ID": "MR-P13",
+ "candidate_id": "marshmallow#2928",
+ "repository_id": "marshmallow-code/marshmallow",
+ "base_revision": "28f911b1240f127cc37b0d400a47e3ae5d573faa",
+ "fix_revision": "c1e727e16bed9851c6e77dde0119ee2d4f1ba08d",
+ "goal_digest": "233984d6bb45f6aa9bcb9b98ff08d83ed4f9928addbff8036b97241e04f2dc36",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/marshmallow-code_marshmallow"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "e586e99a439c720c42a476bd99607d1ada7829e7c001539fabb3e80a679ec9aa",
+  "spec_digest": "85b512d8e4b187fa8b7d231916d6238a4c383782466819b7d1357c35aae4ca5f",
+  "hidden_tests_digest": "e897f6f757cd972332d1d1de724c97e065787bac12933a24cd80c070c11745c2",
+  "required_tests": 207,
+  "fail_to_pass": 6,
+  "pass_to_pass": 201,
+  "selectors": [
+   "tests/test_validate.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "738c0db1eff35a4669c1d2afb739bbc1cac1895972f99659a42e45f0f484c015",
+  "set_digest": "b7558d49e36d91fe5f2eb694a89c63002142f4a72762ceba303080899944cfc5",
+  "tests": 1147,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 2,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "a834b8291fcf68ba6037b6c7707563884c17efe3c07622206c59a750874cfdf0",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   201,
+   201,
+   201
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   6,
+   6,
+   6
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "7309060519ff101f09a7b088461f7c028b9f36c5125a8201dfbd80edce4bd19a",
+  "test_patch_digest": "f0b6a0654f73183f4d6075dd9effe3d165461848fcfaf43e3a4edd2bfd0bd57e",
+  "ref_tree_digest": "8784abfa9710c87f501b6397b8404b2c95d79c61add760aa6f17691028c46fe7",
+  "upstream": "https://github.com/marshmallow-code/marshmallow/pull/2928",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "2 base tests superseded by the fix and excluded from the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.8,
+   "regress_secs": 1.7,
+   "ref_good_total_secs": 2.5,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": false,
+    "verdict": "PASS"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/marshmallow-code/marshmallow/pull/2928",
+  "pr_created": "2026-03-26T13:35:21Z",
+  "pr_merged": "2026-04-01T12:20:20Z",
+  "issues": [
+   {
+    "number": 2821,
+    "created_at": "2025-04-20T21:15:10Z",
+    "url": "https://github.com/marshmallow-code/marshmallow/issues/2821"
+   }
+  ],
+  "goal_sources": [
+   "issue marshmallow-code/marshmallow#2821",
+   "PR marshmallow-code/marshmallow#2928 description (symptom statement only)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description and the contract asserted by the upstream tests (names and values the tests require); no patch content used",
+  "ws_tree_digest": "10472463d5df1c994ba36058ae5c77b34cd5ab1a4d95b3f18df674479c38a86e"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 65,
+  "reference_churn_bucket": "M",
+  "localization_shape": "single_file",
+  "task_type": "feature",
+  "regression_reported": false,
+  "f2p_tests": 6,
+  "accept_tests": 207,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "src/marshmallow"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

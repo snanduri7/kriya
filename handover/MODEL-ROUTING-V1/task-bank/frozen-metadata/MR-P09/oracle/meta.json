@@ -1,0 +1,21 @@
+{
+ "id": "pydantic-settings#767",
+ "repo": "pydantic/pydantic-settings",
+ "pr": 767,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_settings.py"
+ ],
+ "pkg": "pydantic_settings",
+ "src_layout": false,
+ "test_files": [
+  "tests/conftest.py",
+  "tests/test_settings.py"
+ ],
+ "prod_files": [
+  "pydantic_settings/sources/base.py",
+  "pydantic_settings/sources/providers/gcp.py"
+ ],
+ "other_files": []
+}

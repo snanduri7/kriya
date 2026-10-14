@@ -1,0 +1,147 @@
+{
+ "TASK_ID": "MR-P07",
+ "candidate_id": "pluggy#758",
+ "repository_id": "pytest-dev/pluggy",
+ "base_revision": "78a1d52545dfb2c910bb690a089a815803439655",
+ "fix_revision": "86670ff63cccaaa61a234b3cab0a4f70abfbb66b",
+ "goal_digest": "795c78dab5191a29681f0e90a1c1aead1ef63ad7553863dcdf68f5ef11a06a60",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/pytest-dev_pluggy"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "40633792296950890db158c9b9af3e9341991b98ac4627fb130e397a832f8c88",
+  "spec_digest": "f83a953cd6fc9f230c8c9f32fe697ef808ea8b25af5006b3402d205d19671a13",
+  "hidden_tests_digest": "fbe7a2b250c49035254a9b563deba23ca5f1a4a27b9e242aa92bfd6582fcf187",
+  "required_tests": 17,
+  "fail_to_pass": 1,
+  "pass_to_pass": 16,
+  "selectors": [
+   "testing/test_details.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "00e8b0f0c37237f29623abb3ab7509cdee58091434f2db613dd92fa904b5c7a3",
+  "set_digest": "71d12c16a09aa92fab38ff76eb39a61c2c8f3eaeac9dbb8f9133562327984d44",
+  "tests": 202,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "2b0f1b7676a0d16c2f13cb0a0545de852335a77b07e5265544d569516f135cfc",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   16,
+   16,
+   16
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "2fb27be751dab67e4c155825f6d23479f0e71f2b6b984b37d64d5d9541735209",
+  "test_patch_digest": "7f9ac436d8cdf0f11c9d78b07eddf1835fac01aa4fbedf1e3e7b931f0c43a3c4",
+  "ref_tree_digest": "06fc5df6161e59fa86a078ad207302676efba8fa08747eae3a84e30a9b3bf1b6",
+  "upstream": "https://github.com/pytest-dev/pluggy/pull/758",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "no near-miss control (fewer than two executable production hunks, or none applied)"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.8,
+   "regress_secs": 1.0,
+   "ref_good_total_secs": 1.8,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/pytest-dev/pluggy/pull/758",
+  "pr_created": "2026-10-08T08:15:15Z",
+  "pr_merged": "2026-10-08T08:36:12Z",
+  "issues": [
+   {
+    "number": 757,
+    "created_at": "2026-10-08T06:58:22Z",
+    "url": "https://github.com/pytest-dev/pluggy/issues/757"
+   }
+  ],
+  "goal_sources": [
+   "issue pytest-dev/pluggy#757"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "9ade6f8b050c308edc6300d93df3543088a8cd1e66826d2f0bbc95c21f21cea1"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 18,
+  "reference_churn_bucket": "S",
+  "localization_shape": "single_file",
+  "task_type": "build_config",
+  "regression_reported": true,
+  "f2p_tests": 1,
+  "accept_tests": 17,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "."
+  ],
+  "size_tier": "anchor_small",
+  "upstream_pr_ai_assisted_per_pr_text": true
+ }
+}

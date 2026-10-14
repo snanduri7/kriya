@@ -1,0 +1,364 @@
+{
+ "id": "prettytable#429",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 205 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 205 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 205 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/205 required tests failed or were absent (executed 205)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/205 required tests failed or were absent (executed 205)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/205 required tests failed or were absent (executed 205)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "179/205 required tests failed or were absent (executed 205)",
+    "secs": 10.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 26,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "179/205 required tests failed or were absent (executed 205)",
+    "secs": 9.4,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 26,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "179/205 required tests failed or were absent (executed 205)",
+    "secs": 10.3,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 26,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "179/205 required tests failed or were absent (executed 205)",
+    "secs": 9.2,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 26,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 205 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 303 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 303,
+    "n_required": 303,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/205 required tests failed or were absent (executed 205)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 205,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 204,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 205,
+    "missing_head": [
+     "tests.test_prettytable.TestAlignment::test_aligned_ascii",
+     "tests.test_prettytable.TestAlignment::test_aligned_html",
+     "tests.test_prettytable.TestAlignment::test_aligned_latex",
+     "tests.test_prettytable.TestAlignment::test_aligned_mediawiki",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column",
+     "tests.test_prettytable.TestAlignment::test_aligned_one_column_invalid"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_prettytable.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED",
+ "limits": [],
+ "cost": {
+  "accept_secs": 0.8,
+  "regress_secs": 0.9,
+  "ref_good_total_secs": 1.7,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

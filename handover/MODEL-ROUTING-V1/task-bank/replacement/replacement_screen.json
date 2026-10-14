@@ -1,0 +1,1357 @@
+{
+ "tomlkit#526": {
+  "repo": "sdispater/tomlkit",
+  "pr": "526",
+  "base": "86f45625bf67b5ae875fec8ced6d9032aef886e1",
+  "fix": "ee4eedbacc8eb72872af050996c7396ecce190b9",
+  "title": "Fix duplicated prefix and captured sibling when replacing a dotted key with a table",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 21,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-122",
+     "sdispater__tomlkit-162",
+     "sdispater__tomlkit-173",
+     "sdispater__tomlkit-179",
+     "sdispater__tomlkit-206",
+     "sdispater__tomlkit-219",
+     "sdispater__tomlkit-234"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-82",
+     "sdispater__tomlkit-68",
+     "sdispater__tomlkit-187"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "tomlkit#510": {
+  "repo": "sdispater/tomlkit",
+  "pr": "510",
+  "base": "afa41a570bfa26d585f851f2a081e3da80e629c9",
+  "fix": "ea9263f9e1dfd5715fabc2951699f0ee144eced9",
+  "title": "Limit parser nesting depth instead of crashing with RecursionError",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 21,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-122",
+     "sdispater__tomlkit-162",
+     "sdispater__tomlkit-168",
+     "sdispater__tomlkit-265",
+     "sdispater__tomlkit-268"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-76",
+     "sdispater__tomlkit-71"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "tomlkit#409": {
+  "repo": "sdispater/tomlkit",
+  "pr": "409",
+  "base": "f0c50e0a4371df420bb7e7e61af099ac6f3c8e51",
+  "fix": "832e85579ea9029aae53ebbb1812c537abf9dd03",
+  "title": "Fix removal of items from `Array`s",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 21,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-122",
+     "sdispater__tomlkit-155",
+     "sdispater__tomlkit-156",
+     "sdispater__tomlkit-162",
+     "sdispater__tomlkit-168",
+     "sdispater__tomlkit-174",
+     "sdispater__tomlkit-182",
+     "sdispater__tomlkit-189"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-103",
+     "sdispater__tomlkit-187",
+     "sdispater__tomlkit-177",
+     "sdispater__tomlkit-76",
+     "sdispater__tomlkit-71"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "tomlkit#507": {
+  "repo": "sdispater/tomlkit",
+  "pr": "507",
+  "base": "9ac3f98214dbfbca0157b6c370c7986f497c34e4",
+  "fix": "25ae63abce3181fd376aed7acdc52418d126df04",
+  "title": "Merge AoT fragments when building an out-of-order table proxy",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 21,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-122",
+     "sdispater__tomlkit-162",
+     "sdispater__tomlkit-173",
+     "sdispater__tomlkit-179",
+     "sdispater__tomlkit-206",
+     "sdispater__tomlkit-219",
+     "sdispater__tomlkit-234"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-82",
+     "sdispater__tomlkit-68",
+     "sdispater__tomlkit-187"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "tomlkit#500": {
+  "repo": "sdispater/tomlkit",
+  "pr": "500",
+  "base": "eaa897d6d0300f7ffc78188c8957b98aaa5c8c65",
+  "fix": "a076a6afbe035694bd6b1cfdbd8ad7284e93b862",
+  "title": "Fix corrupt output when adding to a dotted key inside an inline table",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 21,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-122",
+     "sdispater__tomlkit-155",
+     "sdispater__tomlkit-156",
+     "sdispater__tomlkit-162",
+     "sdispater__tomlkit-174",
+     "sdispater__tomlkit-182",
+     "sdispater__tomlkit-189",
+     "sdispater__tomlkit-218"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "sdispater__tomlkit-103",
+     "sdispater__tomlkit-187",
+     "sdispater__tomlkit-177"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "marshmallow#2928": {
+  "repo": "marshmallow-code/marshmallow",
+  "pr": "2928",
+  "base": "28f911b1240f127cc37b0d400a47e3ae5d573faa",
+  "fix": "c1e727e16bed9851c6e77dde0119ee2d4f1ba08d",
+  "title": "Add support for IDNs to validate.URL",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 61,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1524",
+     "marshmallow-code__marshmallow-1777",
+     "marshmallow-code__marshmallow-2123",
+     "marshmallow-code__marshmallow-2708",
+     "marshmallow-code__marshmallow-2800"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "marshmallow#2937": {
+  "repo": "marshmallow-code/marshmallow",
+  "pr": "2937",
+  "base": "4acb783c73130f762aa5b0df6b65ff7685d5ff2c",
+  "fix": "f07eadc87dfac25ed505d5cd9d186920f2682733",
+  "title": "Fix validate.Email to accept IDNs",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 61,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1524",
+     "marshmallow-code__marshmallow-1777",
+     "marshmallow-code__marshmallow-2123",
+     "marshmallow-code__marshmallow-2708",
+     "marshmallow-code__marshmallow-2800"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "marshmallow#2909": {
+  "repo": "marshmallow-code/marshmallow",
+  "pr": "2909",
+  "base": "070dde08bad456e743a0d2e1842c142a799a9568",
+  "fix": "65374df0c31cdc45acc4435741779298201306a2",
+  "title": "Fix OneOf.options() emitting phantom entries when labels outnumber choices",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 61,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1524",
+     "marshmallow-code__marshmallow-1777",
+     "marshmallow-code__marshmallow-2123",
+     "marshmallow-code__marshmallow-2708",
+     "marshmallow-code__marshmallow-2800"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "marshmallow#2901": {
+  "repo": "marshmallow-code/marshmallow",
+  "pr": "2901",
+  "base": "fea5428567960f15be0c9a3a4b99c0d9bb63848c",
+  "fix": "070dde08bad456e743a0d2e1842c142a799a9568",
+  "title": "Fix Constant field with required=True raising ValueError",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 61,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1142",
+     "marshmallow-code__marshmallow-1164",
+     "marshmallow-code__marshmallow-1229",
+     "marshmallow-code__marshmallow-1278",
+     "marshmallow-code__marshmallow-1304",
+     "marshmallow-code__marshmallow-1359",
+     "marshmallow-code__marshmallow-1382",
+     "marshmallow-code__marshmallow-1385"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": [
+     "marshmallow-code__marshmallow-1735"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "click#2555": {
+  "repo": "pallets/click",
+  "pr": "2555",
+  "base": "9a536eebd958558c2cd24c17fb66fac112f1ac91",
+  "fix": "549947111c4af2191dd4b245e1de2c25d20c36d6",
+  "title": "echo doesn't fail with no streams",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 70,
+    "exact": [
+     "pallets__click-2555"
+    ],
+    "related_same_file": [
+     "pallets__click-1609",
+     "pallets__click-1698",
+     "pallets__click-1803",
+     "pallets__click-1543",
+     "pallets__click-1830",
+     "pallets__click-2333",
+     "pallets__click-1850",
+     "pallets__click-2555"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "click#3152": {
+  "repo": "pallets/click",
+  "pr": "3152",
+  "base": "7f7bbe4569ea68e8dabee232eade069ef3310aea",
+  "fix": "ebcd548d50662bc8fa4f8b9ec7fe13cb8310bfaa",
+  "title": "Fix handling of options which set both is_flag=False and flag_value=...",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 70,
+    "exact": [],
+    "related_same_file": [
+     "pallets__click-2380",
+     "pallets__click-2248",
+     "pallets__click-1679",
+     "pallets__click-2369",
+     "pallets__click-1805",
+     "pallets__click-1594",
+     "pallets__click-1848",
+     "pallets__click-1915"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "click#2730": {
+  "repo": "pallets/click",
+  "pr": "2730",
+  "base": "5b1624bf09947d6f10eaffd63d6fb737dfe7656a",
+  "fix": "bc16dbf788861266177661b576291a1b264fb5de",
+  "title": "fix bug in show defaults when using a flag option and a default map",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 70,
+    "exact": [
+     "pallets__click-2730"
+    ],
+    "related_same_file": [
+     "pallets__click-2380",
+     "pallets__click-2248",
+     "pallets__click-1679",
+     "pallets__click-2369",
+     "pallets__click-1805",
+     "pallets__click-1594",
+     "pallets__click-1848",
+     "pallets__click-1915"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "click#2380": {
+  "repo": "pallets/click",
+  "pr": "2380",
+  "base": "df9ad4085d60710b507b54c8fc369ee186eb1d64",
+  "fix": "e4066e1f325088ee42ae7bc0bc6c2e47533ff2c3",
+  "title": "Do not suppress EOFError/KeyboardInterrupt when standalone is disabled",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 70,
+    "exact": [
+     "pallets__click-2380"
+    ],
+    "related_same_file": [
+     "pallets__click-2380",
+     "pallets__click-2248",
+     "pallets__click-1679",
+     "pallets__click-2369",
+     "pallets__click-1805",
+     "pallets__click-1594",
+     "pallets__click-1848",
+     "pallets__click-1915"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "jinja#2022": {
+  "repo": "pallets/jinja",
+  "pr": "2022",
+  "base": "3ef3ba885bc7a465b022abfd525d6bb4a1c8dd3c",
+  "fix": "39d9ffff1f33a5e5141af655857f9dbe6b6df03d",
+  "title": "Make compiled output deterministic for tuple unpacking in set tag",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 23,
+    "exact": [
+     "pallets__jinja-2022"
+    ],
+    "related_same_file": [
+     "pallets__jinja-1664",
+     "pallets__jinja-1495",
+     "pallets__jinja-1511",
+     "pallets__jinja-1852",
+     "pallets__jinja-1449",
+     "pallets__jinja-2022",
+     "pallets__jinja-1614"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "jinja#2026": {
+  "repo": "pallets/jinja",
+  "pr": "2026",
+  "base": "39d9ffff1f33a5e5141af655857f9dbe6b6df03d",
+  "fix": "ba8847a466d0f3ad622502f86e819737a4b9fdc7",
+  "title": "Preserve `__slots__` metadata on Undefined types",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 23,
+    "exact": [
+     "pallets__jinja-2026"
+    ],
+    "related_same_file": [
+     "pallets__jinja-1455",
+     "pallets__jinja-1702",
+     "pallets__jinja-1511",
+     "pallets__jinja-2026"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "jinja#1782": {
+  "repo": "pallets/jinja",
+  "pr": "1782",
+  "base": "a4abbfd7538e9ff216244266579232585033136c",
+  "fix": "20be10e566a505cc47bdec5fa6ad56d5fbdfb4ae",
+  "title": "make unique filter async aware",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 23,
+    "exact": [
+     "pallets__jinja-1782"
+    ],
+    "related_same_file": [
+     "pallets__jinja-1984",
+     "pallets__jinja-1782",
+     "pallets__jinja-1465",
+     "pallets__jinja-1762"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "jinja#2029": {
+  "repo": "pallets/jinja",
+  "pr": "2029",
+  "base": "ba8847a466d0f3ad622502f86e819737a4b9fdc7",
+  "fix": "1dc04bccf9384cced4262d7ca7157638b0ebd970",
+  "title": "Fix pickle/copy support for the `missing` singleton",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 23,
+    "exact": [
+     "pallets__jinja-2029"
+    ],
+    "related_same_file": [
+     "pallets__jinja-2029"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "markdown#1629": {
+  "repo": "Python-Markdown/markdown",
+  "pr": "1629",
+  "base": "4c8a8d6dba941046f9d43e67ab02e628419bbac1",
+  "fix": "c74b8d84aee380847dd28d16f6b827d027623908",
+  "title": "Honor tags added to block_level_elements after md_in_html loads",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 41,
+    "exact": [],
+    "related_same_file": [
+     "python-markdown__markdown-1071",
+     "python-markdown__markdown-1072",
+     "python-markdown__markdown-1044",
+     "python-markdown__markdown-1050"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "markdown#1440": {
+  "repo": "Python-Markdown/markdown",
+  "pr": "1440",
+  "base": "c334a3e47e6565469344154f966cf0eb9aca0de3",
+  "fix": "421f1e88ff4661b4433b97ec57b040a2a74e5aed",
+  "title": "Give smarty treeprocessor higher priority than toc",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 41,
+    "exact": [
+     "python-markdown__markdown-1440"
+    ],
+    "related_same_file": [
+     "python-markdown__markdown-1440",
+     "python-markdown__markdown-1348"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "markdown#1272": {
+  "repo": "Python-Markdown/markdown",
+  "pr": "1272",
+  "base": "77fb7f1b51076becff488a9b42ef2883153262a0",
+  "fix": "c0f6e5a31ea8e7fe98910a0523144c2a96fa9bf1",
+  "title": "Move backslash unescaping to treeprocessor",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 41,
+    "exact": [],
+    "related_same_file": [
+     "python-markdown__markdown-1225",
+     "python-markdown__markdown-1121",
+     "python-markdown__markdown-1294",
+     "python-markdown__markdown-1361",
+     "python-markdown__markdown-881",
+     "python-markdown__markdown-886",
+     "python-markdown__markdown-934",
+     "python-markdown__markdown-901"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "jsonschema#972": {
+  "repo": "python-jsonschema/jsonschema",
+  "pr": "972",
+  "base": "28a7598673966b73c1789a9fdd03dbd8bd9a02b7",
+  "fix": "726d546d0429b0c42526472d65e0ea58da794df1",
+  "title": "Enhance best match to prefer errors from matching types.",
+  "worst": "SAME REPOSITORY ONLY",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "parse#223": {
+  "repo": "r1chardj0n3s/parse",
+  "pr": "223",
+  "base": "738447715c76f8ebc460b33320307faccafbc599",
+  "fix": "cd6bf203ab0353c038a0556fbbe0851ff56f539d",
+  "title": "Fix microsecond precision loss in timestamp parsing",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 6,
+    "exact": [],
+    "related_same_file": [
+     "r1chardj0n3s__parse-132",
+     "r1chardj0n3s__parse-165",
+     "r1chardj0n3s__parse-174",
+     "r1chardj0n3s__parse-184",
+     "r1chardj0n3s__parse-74",
+     "r1chardj0n3s__parse-81"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 3,
+    "exact": [],
+    "related_same_file": [
+     "r1chardj0n3s__parse-132",
+     "r1chardj0n3s__parse-74",
+     "r1chardj0n3s__parse-81"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 90,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "parse#184": {
+  "repo": "r1chardj0n3s/parse",
+  "pr": "184",
+  "base": "e0c19dcf7b8192630fcf4692c771860585b669e8",
+  "fix": "334db144c2813e9029cb890bbd49edd30f67ab9b",
+  "title": "allow hyphen in field name",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 6,
+    "exact": [
+     "r1chardj0n3s__parse-184"
+    ],
+    "related_same_file": [
+     "r1chardj0n3s__parse-132",
+     "r1chardj0n3s__parse-165",
+     "r1chardj0n3s__parse-174",
+     "r1chardj0n3s__parse-184",
+     "r1chardj0n3s__parse-74",
+     "r1chardj0n3s__parse-81"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 3,
+    "exact": [],
+    "related_same_file": [
+     "r1chardj0n3s__parse-132",
+     "r1chardj0n3s__parse-74",
+     "r1chardj0n3s__parse-81"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 90,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "markupsafe#418": {
+  "repo": "pallets/markupsafe",
+  "pr": "418",
+  "base": "73e6a4886564a554c4a19983d29c97f9fc95457d",
+  "fix": "60a6512315d0ce05e6788808f80be526f2084b3f",
+  "title": "Fix for spurious whitespace in striptags output",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 38,
+    "exact": [
+     "pallets__markupsafe.620c06c9.pr_418"
+    ],
+    "related_same_file": []
+   }
+  }
+ },
+ "deepdiff#598": {
+  "repo": "seperman/deepdiff",
+  "pr": "598",
+  "base": "dd5c58eac3a9879f08ac9f0022ef9b84c42f40b7",
+  "fix": "611fbb398117b845dfa90143047cebcee131e84f",
+  "title": "Handle negative imaginary parts in number_to_string (#551)",
+  "worst": "SAME REPOSITORY ONLY",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 6,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 2,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ }
+}

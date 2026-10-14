@@ -1,0 +1,158 @@
+{
+ "TASK_ID": "MR-P01",
+ "candidate_id": "attrs#1401",
+ "repository_id": "python-attrs/attrs",
+ "base_revision": "75723b7720952ac0a4c7d3e277b6714ba55ded18",
+ "fix_revision": "e048efcb395443608d184a149c0adbca166cb833",
+ "goal_digest": "d1d17b2adfa05ff7cecdcaff8dae685ede64cff4069854f9c3b9ad1345ffcf70",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/python-attrs_attrs"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "2fb6590d843d93b5ecd19348883c55a15a88b4ee679209ea2360f05b4ffd666e",
+  "spec_digest": "b11b561ee62d186b0e642d8a842d9f9728383321994baf4eceef3cf2fb0c2694",
+  "hidden_tests_digest": "ee902b5c26f54b7b41cd8c4d4e2721c4f25d87c56359d36463e87497dfa4e9ee",
+  "required_tests": 13,
+  "fail_to_pass": 2,
+  "pass_to_pass": 11,
+  "selectors": [
+   "tests/test_hooks.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "fbf01efd32d87d5adbead477dd53207d3b5ae99a0d20bd0a9d1cf37a70f3de3c",
+  "set_digest": "f819299e885876edc020ee5dda46a1a0fdf383e59b89151750eccdc7838fed09",
+  "tests": 1337,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 93,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "56619876e9926ee2b61f06a1ae14a444ce6a91e5a8064af0e9eac17fe4db914f",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   11,
+   11,
+   11
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   2,
+   2,
+   2
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "79abd76ec6a44f7afa545a55e1d2dc9bf523667dcdebfacb3bda89b8903e8ea5",
+  "test_patch_digest": "01d4a47f6b4d8c875577985122201c74e69ef1cc2aefa4259f7e7a43f1ecc16a",
+  "ref_tree_digest": "9063e7323c056b336caffa964982a24c05126f73e302cf475472b25d90aeb2cc",
+  "upstream": "https://github.com/python-attrs/attrs/pull/1401",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "93 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 1.2,
+   "regress_secs": 8.7,
+   "ref_good_total_secs": 9.6,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/python-attrs/attrs/pull/1401",
+  "pr_created": "2025-01-31T23:19:58Z",
+  "pr_merged": "2025-02-09T07:31:05Z",
+  "issues": [
+   {
+    "number": 1147,
+    "created_at": "2023-06-13T20:16:25Z",
+    "url": "https://github.com/python-attrs/attrs/issues/1147"
+   }
+  ],
+  "goal_sources": [
+   "issue python-attrs/attrs#1147",
+   "PR #1401 description (stated behavior)"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "d9b613a991c99c9503e671ae3013671c41cce90ac27979ef61c564d20cc6c4ea"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 95,
+  "reference_churn_bucket": "L",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 2,
+  "accept_tests": 13,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "src/attr"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

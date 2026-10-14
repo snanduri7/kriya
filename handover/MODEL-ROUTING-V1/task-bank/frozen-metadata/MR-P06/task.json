@@ -1,0 +1,161 @@
+{
+ "TASK_ID": "MR-P06",
+ "candidate_id": "mistune#427",
+ "repository_id": "lepture/mistune",
+ "base_revision": "c85632528f6f3d9d974bfae300716ac997a8d2c1",
+ "fix_revision": "c82ad09675a5603166cf34bf1682953b56efb9ae",
+ "goal_digest": "d6e1871d5d37648b37a225e4398dfc1454f569cc1f34fdcbd2bb219d20f94acc",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/lepture_mistune"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "0a81147734744358805128f6a5c97c90b6c98e582cc3f7deab5e60a4d1a4a41a",
+  "spec_digest": "ac527422b956f031b5f28db659c60b399c79208240fa7366743a6801c228a36e",
+  "hidden_tests_digest": "d8c0a87dc4e40c8ab01e7207fcd4fa9efeec0e6c7879d5d1b8382f6d69973880",
+  "required_tests": 957,
+  "fail_to_pass": 3,
+  "pass_to_pass": 954,
+  "selectors": [
+   "tests"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "8f17bdb1d8b83871e51b2fcdf437629814fad0d7886229b67c2e618f686da27e",
+  "set_digest": "7cba4540d8f943c66121a53e30f1286d376253a363b58b22fb272514c33dd5d3",
+  "tests": 957,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "f4bd2bf8cc957847174516a206efd58e65e831767a748f6d190c948605499ee3",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   954,
+   954,
+   954
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   3,
+   3,
+   3
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "f7c82a7e5693440eb39b6c0e90ab67161f9a927a7b760859e93b474ab08794c6",
+  "test_patch_digest": "eecced84a781c1f66576e9a77eefc76bdf8c4f2b485588bc62dc466db91b8111",
+  "ref_tree_digest": "50d764794e34a9cc161c066409a29a5d42210feab4f339ab7c002287a92a5f6f",
+  "upstream": "https://github.com/lepture/mistune/pull/427",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED",
+  "limits": [],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 1.2,
+   "regress_secs": 1.2,
+   "ref_good_total_secs": 2.4,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/lepture/mistune/pull/427",
+  "pr_created": "2025-12-21T10:38:13Z",
+  "pr_merged": "2025-12-21T14:58:56Z",
+  "issues": [
+   {
+    "number": 426,
+    "created_at": "2025-12-21T09:55:04Z",
+    "url": "https://github.com/lepture/mistune/issues/426"
+   }
+  ],
+  "goal_sources": [
+   "issue lepture/mistune#426"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "d09dc117c13a6d945ab444aed94cc71cf214148a9a676f4d9b0a650523b9cc59"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 2,
+  "reference_test_files": 3,
+  "reference_churn": 20,
+  "reference_churn_bucket": "S",
+  "localization_shape": "multi_file",
+  "task_type": "bug_fix",
+  "regression_reported": true,
+  "f2p_tests": 3,
+  "accept_tests": 957,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "src/mistune",
+   "src/mistune/directives"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

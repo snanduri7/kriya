@@ -1,0 +1,19 @@
+{
+ "id": "javaparser#4727",
+ "repo": "javaparser/javaparser",
+ "pr": 4727,
+ "lang": "java",
+ "build": "maven",
+ "module": "javaparser-symbol-solver-testing",
+ "classes": [
+  "com.github.javaparser.symbolsolver.resolution.Issue4703Test"
+ ],
+ "test_files": [
+  "javaparser-symbol-solver-testing/src/test/java/com/github/javaparser/symbolsolver/resolution/Issue4703Test.java"
+ ],
+ "prod_files": [
+  "javaparser-core/src/main/java/com/github/javaparser/resolution/logic/ConstructorResolutionLogic.java",
+  "javaparser-core/src/main/java/com/github/javaparser/resolution/logic/MethodResolutionLogic.java"
+ ],
+ "other_files": []
+}

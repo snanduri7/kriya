@@ -1,0 +1,148 @@
+{
+ "TASK_ID": "MR-P10",
+ "candidate_id": "sqlparse#865",
+ "repository_id": "andialbrecht/sqlparse",
+ "base_revision": "df8e28495a87954a9d52de70c33ef7225c53b28f",
+ "fix_revision": "f66d12c245412f28c58f045b646eb53c0e691b8b",
+ "goal_digest": "82fdce3d421c25a031f87bb36350f76b18ac4316197cca611b65fcf76ba1d1cf",
+ "language": "python",
+ "build_system": "python",
+ "setup_manifest": {
+  "jdk": null,
+  "python": "3.12",
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/andialbrecht_sqlparse"
+  },
+  "env": {
+   "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.1"
+  },
+  "python_build": "scratch tree is built offline into <scratch>/.dist (pip --no-build-isolation --no-index --target); the venv holds no project install"
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "82ce452d32a864486a76332fa36a4a8c5de4af7b208d6c45be36f735625904c4",
+  "spec_digest": "fedeb8f712e33ccf59f4566c85245c8f8c5890e912a82d79c7f2e2ca07969893",
+  "hidden_tests_digest": "34b022e3af327fe6e8068b7ef45902834cbc4342e0a88db52b2b50f1f5f288cf",
+  "required_tests": 88,
+  "fail_to_pass": 1,
+  "pass_to_pass": 87,
+  "selectors": [
+   "tests/test_parse.py"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "b242c48239dbe23139dba52007b4bf7d13434c19c6bc8068404b2214db765aa5",
+  "set_digest": "5f8f5f922aaf178b0bee13c7a176c0b9e9de0a480bbf6aa7f6576120da909795",
+  "tests": 490,
+  "scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 2,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "858c9d293aabec7679e5ac0dcd3fe42b1b32874523d86b805f8fbd37576104ed",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   87,
+   87,
+   87
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "85a02e211a9e70dc66c09b370451f915ed4c39ed3597a12b25754f789357e6d2",
+  "test_patch_digest": "88eff5399db272f5fd6cb0945cba5b9c7cb97256e71948414f511dbd521db73e",
+  "ref_tree_digest": "cec7e33db33584c4682ef5f2918d78c2ce8c29adc9e20c70b555c0ce5e3eb3bf",
+  "upstream": "https://github.com/andialbrecht/sqlparse/pull/865",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "no near-miss control (fewer than two executable production hunks, or none applied)",
+   "2 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 0.7,
+   "regress_secs": 1.8,
+   "ref_good_total_secs": 2.5,
+   "baseline_setup_secs": 0.0
+  },
+  "known_good_stable": true,
+  "controls": {
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "delete_package": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "unsatisfiable_requires_python": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/andialbrecht/sqlparse/pull/865",
+  "pr_created": "2026-07-19T06:55:44Z",
+  "pr_merged": "2026-07-25T09:44:58Z",
+  "issues": [
+   {
+    "number": 332,
+    "created_at": "2017-05-05T09:44:56Z",
+    "url": "https://github.com/andialbrecht/sqlparse/issues/332"
+   }
+  ],
+  "goal_sources": [
+   "issue andialbrecht/sqlparse#332"
+  ],
+  "goal_derivation": "Used only the issue text and the symptom lines of the PR; the PR's root-cause analysis was not used.",
+  "ws_tree_digest": "5cd7c51dfd4e9fe1e69ce21bb262b0459a56a786b63cf9b754fb542905e0ef6b"
+ },
+ "metadata": {
+  "language": "python",
+  "build_system": "python",
+  "module_structure": "single_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 25,
+  "reference_churn_bucket": "S",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 1,
+  "accept_tests": 88,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "sqlparse"
+  ],
+  "size_tier": "anchor_small",
+  "upstream_pr_ai_assisted_per_pr_text": true
+ }
+}

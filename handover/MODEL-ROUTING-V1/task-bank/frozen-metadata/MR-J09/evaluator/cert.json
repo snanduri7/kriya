@@ -1,0 +1,228 @@
+{
+ "id": "resilience4j#2209",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 7.1,
+    "setup_secs": 0.9,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 6.1,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 6.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 29.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 29.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 29.0,
+    "setup_secs": 0.9,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.8,
+    "setup_secs": 0.8,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 6.1,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 118 required tests passed",
+    "secs": 9.9,
+    "setup_secs": 0.9,
+    "n_executed": 118,
+    "n_required": 118,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 28.9,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)"
+ ],
+ "cost": {
+  "accept_secs": 7.1,
+  "regress_secs": 9.9,
+  "ref_good_total_secs": 16.3,
+  "baseline_setup_secs": 0.8
+ },
+ "repeats": 3
+}

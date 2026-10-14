@@ -1,0 +1,19 @@
+{
+ "id": "prettytable#429",
+ "repo": "jazzband/prettytable",
+ "pr": 429,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_prettytable.py"
+ ],
+ "pkg": "prettytable",
+ "src_layout": true,
+ "test_files": [
+  "tests/test_prettytable.py"
+ ],
+ "prod_files": [
+  "src/prettytable/prettytable.py"
+ ],
+ "other_files": []
+}

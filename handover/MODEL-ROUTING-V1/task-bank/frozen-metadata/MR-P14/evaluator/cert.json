@@ -1,0 +1,361 @@
+{
+ "id": "jsonschema#972",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 33 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.6,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 33 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 33 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/33 required tests failed or were absent (executed 33)",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types"
+    ],
+    "note": "",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/33 required tests failed or were absent (executed 33)",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types"
+    ],
+    "note": "",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/33 required tests failed or were absent (executed 33)",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types"
+    ],
+    "note": "",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "13/33 required tests failed or were absent (executed 33)",
+    "secs": 0.9,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_boolean_schemas",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_allOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_anyOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_oneOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_nested_context_for_oneOf"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 20,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/33 required tests failed or were absent (executed 33)",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "9/33 required tests failed or were absent (executed 33)",
+    "secs": 0.9,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_boolean_schemas",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_allOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_anyOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_oneOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_nested_context_for_oneOf"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 24,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "32/33 required tests failed or were absent (executed 33)",
+    "secs": 1.0,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_boolean_schemas",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_allOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_anyOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_oneOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_nested_context_for_oneOf"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 33 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 6343 required tests passed",
+    "secs": 5.5,
+    "setup_secs": 0.2,
+    "n_executed": 6973,
+    "n_required": 6343,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/33 required tests failed or were absent (executed 33)",
+    "secs": 0.6,
+    "setup_secs": 0.2,
+    "n_executed": 33,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 32,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_boolean_schemas",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_allOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_anyOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_oneOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_nested_context_for_oneOf"
+    ],
+    "note": "test infrastructure restored from ws: 12 path(s) ['-jsonschema/tests/test_utils.py', '-jsonschema/tests/_suite.py', '-jsonschema/tests/test_deprecations.py', '-jsonschema/tests/test_exceptions.py', '-jsonschema/tests/__init__.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 33,
+    "missing_head": [
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_boolean_schemas",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_allOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_anyOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_if_the_most_relevant_error_is_oneOf_it_is_traversed",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_it_prioritizes_matching_types",
+     "jsonschema.tests.test_exceptions.TestBestMatch::test_nested_context_for_oneOf"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~jsonschema/tests/test_exceptions.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "630 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.6,
+  "regress_secs": 5.6,
+  "ref_good_total_secs": 6.1,
+  "baseline_setup_secs": 0.2
+ },
+ "repeats": 3
+}

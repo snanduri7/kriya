@@ -1,0 +1,19 @@
+{
+ "id": "JSON-java#1046",
+ "repo": "stleary/JSON-java",
+ "pr": 1046,
+ "lang": "java",
+ "build": "maven",
+ "module": "",
+ "classes": [
+  "org.json.junit.XMLTest"
+ ],
+ "test_files": [
+  "src/test/java/org/json/junit/XMLTest.java"
+ ],
+ "prod_files": [
+  "src/main/java/org/json/XML.java",
+  "src/main/java/org/json/XMLTokener.java"
+ ],
+ "other_files": []
+}

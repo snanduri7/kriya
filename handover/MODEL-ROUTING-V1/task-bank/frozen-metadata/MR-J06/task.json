@@ -1,0 +1,151 @@
+{
+ "TASK_ID": "MR-J06",
+ "candidate_id": "jdbi#2681",
+ "repository_id": "jdbi/jdbi",
+ "base_revision": "cedfb9831bfc2efc04fcdb91328483a9f9342d94",
+ "fix_revision": "a4651ce31650cbe95713adc86762cf2f3b615652",
+ "goal_digest": "ea86df3cfcd412694ae08d2b4748d0791555d84c963c70c531db313a0dbef4ef",
+ "language": "java",
+ "build_system": "maven",
+ "setup_manifest": {
+  "jdk": "21",
+  "python": null,
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/jdbi_jdbi"
+  },
+  "env": {},
+  "python_build": null
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "f402b79b7ce0a2c713cd386f040b7c93c58ef979b6887f37134feea391c8a8c7",
+  "spec_digest": "2d3b7e5e568a4754ab58b086146b1fe1fddc1e7118a07750f5858a53b581867a",
+  "hidden_tests_digest": "3462e464f3f5a054e1a40bd8b8219e73c3fd89c1d54be5e6d8293afa63fbcb36",
+  "required_tests": 2,
+  "fail_to_pass": 1,
+  "pass_to_pass": 1,
+  "selectors": [
+   "org.jdbi.v3.core.TestCloseConnection"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "f72db7ce6917dbaf5fbdfc35a5af684c13afe3be6e6e58f75118ef7125099ec0",
+  "set_digest": "1b2a3a9a65ed9342390117e4a8f27f6e5810631a35d6c43ede3b5a8af2573726",
+  "tests": 977,
+  "scope": "tests of module core and the reactor modules it depends on (-am); downstream modules are not covered",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 2,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "e205fdd584b433178cc1f43a42c2ef2e9e0989f585810a0ebcf6940f773b2e50",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   1,
+   1,
+   1
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "921246901a126fdaa373eeef528b10419343fff558c5b2f5062154928b27cf15",
+  "test_patch_digest": "85870a98920e0baef266307796c3ff4ab06e8d9b666cb95f926190e496e2fae8",
+  "ref_tree_digest": "0e2a613bb66cc5c3adb48126a850de090e2a577a8e43354661f2f5f1c93579c2",
+  "upstream": "https://github.com/jdbi/jdbi/pull/2681",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "2 base tests fail or are skipped in this environment and are outside the regression set"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 10.3,
+   "regress_secs": 20.0,
+   "ref_good_total_secs": 28.7,
+   "baseline_setup_secs": 0.6
+  },
+  "known_good_stable": true,
+  "controls": {
+   "near_miss_0": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_1": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "near_miss_2": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   },
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/jdbi/jdbi/pull/2681",
+  "pr_created": "2024-07-05T18:11:12Z",
+  "pr_merged": "2024-07-05T20:42:39Z",
+  "issues": [
+   {
+    "number": 2676,
+    "created_at": "2024-06-07T02:20:41Z",
+    "url": "https://github.com/jdbi/jdbi/issues/2676"
+   }
+  ],
+  "goal_sources": [
+   "issue jdbi/jdbi#2676",
+   "PR #2681 title"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "7e723cd64979cb2991ac8ec9f3e8bf557408c191bd93670a67ad2c2d4166c4a4"
+ },
+ "metadata": {
+  "language": "java",
+  "build_system": "maven",
+  "module_structure": "multi_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 74,
+  "reference_churn_bucket": "M",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": true,
+  "f2p_tests": 1,
+  "accept_tests": 2,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "core/src/main/java/org/jdbi/v3/core"
+  ],
+  "size_tier": "standard",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

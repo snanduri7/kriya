@@ -1,0 +1,279 @@
+{
+ "id": "click#3152",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 537 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 537 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 537 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/537 required tests failed or were absent (executed 537)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[int-args4-1\\n]",
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[str-args1-FlagValue\\n]"
+    ],
+    "note": "",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/537 required tests failed or were absent (executed 537)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[int-args4-1\\n]",
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[str-args1-FlagValue\\n]"
+    ],
+    "note": "",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/537 required tests failed or were absent (executed 537)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[int-args4-1\\n]",
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[str-args1-FlagValue\\n]"
+    ],
+    "note": "",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 537 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1313 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.1,
+    "n_executed": 1336,
+    "n_required": 1313,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/537 required tests failed or were absent (executed 537)",
+    "secs": 0.9,
+    "setup_secs": 0.1,
+    "n_executed": 537,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[int-args4-1\\n]",
+     "tests.test_options::test_flag_value_on_option_with_zero_or_one_args[str-args1-FlagValue\\n]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 535,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.1,
+    "n_executed": 0,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_aliases_for_flags",
+     "tests.test_options::test_argument_custom_class",
+     "tests.test_options::test_bad_defaults_for_multiple[False-2-42-None-Error: Invalid value for '-a': Value must be an iterable.]",
+     "tests.test_options::test_bad_defaults_for_multiple[False-2-default14-None-Error: Invalid value for '-a': Takes 2 values but 1 was given.]",
+     "tests.test_options::test_bad_defaults_for_multiple[True-1--None-Error: Invalid value for '-a': Value must be an iterable.]",
+     "tests.test_options::test_bad_defaults_for_multiple[True-1-12-None-Error: Invalid value for '-a': Value must be an iterable.]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.1,
+    "n_executed": 0,
+    "n_required": 537,
+    "missing_head": [
+     "tests.test_options::test_aliases_for_flags",
+     "tests.test_options::test_argument_custom_class",
+     "tests.test_options::test_bad_defaults_for_multiple[False-2-42-None-Error: Invalid value for '-a': Value must be an iterable.]",
+     "tests.test_options::test_bad_defaults_for_multiple[False-2-default14-None-Error: Invalid value for '-a': Takes 2 values but 1 was given.]",
+     "tests.test_options::test_bad_defaults_for_multiple[True-1--None-Error: Invalid value for '-a': Value must be an iterable.]",
+     "tests.test_options::test_bad_defaults_for_multiple[True-1-12-None-Error: Invalid value for '-a': Value must be an iterable.]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_options.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)",
+  "23 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.9,
+  "regress_secs": 2.0,
+  "ref_good_total_secs": 2.9,
+  "baseline_setup_secs": 0.1
+ },
+ "repeats": 3
+}

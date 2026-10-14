@@ -1,0 +1,19 @@
+{
+ "id": "mybatis-3#3456",
+ "accept_set": [
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound",
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldWhereInsertWhitespace"
+ ],
+ "F2P": [
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldThrowIfUnknownElementFound"
+ ],
+ "P2P_accept": [
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest::shouldWhereInsertWhitespace"
+ ],
+ "accept_selectors": [
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest"
+ ],
+ "regress_scope": "tests of module <root> and the reactor modules it depends on (-am); downstream modules are not covered",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

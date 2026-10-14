@@ -1,0 +1,41 @@
+{
+ "id": "attrs#1401",
+ "accept_set": [
+  "tests.test_hooks.TestAsDictHook::test_asdict",
+  "tests.test_hooks.TestAsDictHook::test_asdict_calls",
+  "tests.test_hooks.TestTransformHook::test_attrs_attrclass",
+  "tests.test_hooks.TestTransformHook::test_hook_add_field",
+  "tests.test_hooks.TestTransformHook::test_hook_applied",
+  "tests.test_hooks.TestTransformHook::test_hook_applied_auto_attrib",
+  "tests.test_hooks.TestTransformHook::test_hook_applied_modify_attrib",
+  "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+  "tests.test_hooks.TestTransformHook::test_hook_override_alias",
+  "tests.test_hooks.TestTransformHook::test_hook_remove_field",
+  "tests.test_hooks.TestTransformHook::test_hook_reorder_fields",
+  "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check",
+  "tests.test_hooks.TestTransformHook::test_hook_with_inheritance"
+ ],
+ "F2P": [
+  "tests.test_hooks.TestTransformHook::test_hook_conflicting_defaults_after_reorder",
+  "tests.test_hooks.TestTransformHook::test_hook_reorder_fields_before_order_check"
+ ],
+ "P2P_accept": [
+  "tests.test_hooks.TestAsDictHook::test_asdict",
+  "tests.test_hooks.TestAsDictHook::test_asdict_calls",
+  "tests.test_hooks.TestTransformHook::test_attrs_attrclass",
+  "tests.test_hooks.TestTransformHook::test_hook_add_field",
+  "tests.test_hooks.TestTransformHook::test_hook_applied",
+  "tests.test_hooks.TestTransformHook::test_hook_applied_auto_attrib",
+  "tests.test_hooks.TestTransformHook::test_hook_applied_modify_attrib",
+  "tests.test_hooks.TestTransformHook::test_hook_override_alias",
+  "tests.test_hooks.TestTransformHook::test_hook_remove_field",
+  "tests.test_hooks.TestTransformHook::test_hook_reorder_fields",
+  "tests.test_hooks.TestTransformHook::test_hook_with_inheritance"
+ ],
+ "accept_selectors": [
+  "tests/test_hooks.py"
+ ],
+ "regress_scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

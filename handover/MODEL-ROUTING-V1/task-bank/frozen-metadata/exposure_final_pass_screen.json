@@ -1,0 +1,409 @@
+{
+ "sqlparse#768": {
+  "repo": "andialbrecht/sqlparse",
+  "pr": "768",
+  "base": "617b8f6cd3c55bacf2c80130901508518753f7e1",
+  "fix": "e03b74e608b71dd06824c2cb42421c0d790248e3",
+  "title": "Fixes #701: Add the OVER clause and include it in the Function tokens.",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 11,
+    "exact": [
+     "andialbrecht__sqlparse-768"
+    ],
+    "related_same_file": [
+     "andialbrecht__sqlparse-231",
+     "andialbrecht__sqlparse-451",
+     "andialbrecht__sqlparse-629",
+     "andialbrecht__sqlparse-633",
+     "andialbrecht__sqlparse-676",
+     "andialbrecht__sqlparse-746",
+     "andialbrecht__sqlparse-768"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 7,
+    "exact": [],
+    "related_same_file": [
+     "andialbrecht__sqlparse-231",
+     "andialbrecht__sqlparse-633",
+     "andialbrecht__sqlparse-676",
+     "andialbrecht__sqlparse-746"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "pydantic-settings#826": {
+  "repo": "pydantic/pydantic-settings",
+  "pr": "826",
+  "base": "2ae12c7276c54cbe050060acf82086a8cdfc6c8f",
+  "fix": "7563595fd60182cf55dc39597bad2f3bb4bba04f",
+  "title": "Fix CLI not recognizing field name with validate_by_name and AliasChoices",
+  "worst": "NO KNOWN OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "pydantic-settings#648": {
+  "repo": "pydantic/pydantic-settings",
+  "pr": "648",
+  "base": "0814553b142602f62e5f5b2bb10733ffda70d5fa",
+  "fix": "1fc20873d208979dfac0fa336f99fc05c0562ae8",
+  "title": "Avoid env_prefix falling back to env vars without prefix",
+  "worst": "NO KNOWN OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "attrs#1253": {
+  "repo": "python-attrs/attrs",
+  "pr": "1253",
+  "base": "82a14627fddbd0b2d802fbc574fa3b1ef010a801",
+  "fix": "88e2896ca9351cd48711bd320571a832ae122cd5",
+  "title": "Preserve AttributeError in slotted classes with cached_property",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 45,
+    "exact": [],
+    "related_same_file": [
+     "python-attrs__attrs-1009",
+     "python-attrs__attrs-817",
+     "python-attrs__attrs-1410",
+     "python-attrs__attrs-563",
+     "python-attrs__attrs-1321",
+     "python-attrs__attrs-763",
+     "python-attrs__attrs-560",
+     "python-attrs__attrs-431"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "attrs#1117": {
+  "repo": "python-attrs/attrs",
+  "pr": "1117",
+  "base": "22ae8473fb88d6e585b05c709e81e1a46398a649",
+  "fix": "a14e1859b820b4e090ccc7c2bc73e61fbdbaefb2",
+  "title": "Raise a deprecation warning when evolve receives insta as a kw arg",
+  "worst": "EXACT/MATERIAL TASK OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "EXACT/MATERIAL TASK OVERLAP",
+    "same_repo_rows": 45,
+    "exact": [
+     "python-attrs__attrs-1117"
+    ],
+    "related_same_file": [
+     "python-attrs__attrs-704",
+     "python-attrs__attrs-806",
+     "python-attrs__attrs-843",
+     "python-attrs__attrs-888",
+     "python-attrs__attrs-1165",
+     "python-attrs__attrs-1117"
+    ]
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "boltons#445": {
+  "repo": "mahmoud/boltons",
+  "pr": "445",
+  "base": "78e8638e695d78ccc2dc641ef87e38fa51185840",
+  "fix": "b5c495bec206741ec25cd82ecc869e0b59bb0d10",
+  "title": "funcutils: forward target-keyword-only args as keywords in wraps invocations",
+  "worst": "POSSIBLE RELATED TASK",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 8,
+    "exact": [],
+    "related_same_file": [
+     "mahmoud__boltons-183",
+     "mahmoud__boltons-203"
+    ]
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "POSSIBLE RELATED TASK",
+    "same_repo_rows": 6,
+    "exact": [],
+    "related_same_file": [
+     "mahmoud__boltons-203",
+     "mahmoud__boltons-244"
+    ]
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "prettytable#299": {
+  "repo": "jazzband/prettytable",
+  "pr": "299",
+  "base": "2702d6b714164eba38e2bdd5b02ab30d1b5d0a80",
+  "fix": "0edf8e9745b87d229b32fcdfa3a7dadf5d87d73d",
+  "title": "Change how size of headers are calculated to fix ColorTable with title",
+  "worst": "NO KNOWN OVERLAP",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ },
+ "mistune#423": {
+  "repo": "lepture/mistune",
+  "pr": "423",
+  "base": "9f4ff6fb4004de8dd6912cdeb6816b3bbbf9ba61",
+  "fix": "4adac1c6e7e14e7deeb1bf6c6cd8c6816f537691",
+  "title": "feat: Support footnotes that start on the next line.",
+  "worst": "SAME REPOSITORY ONLY",
+  "per_dataset": {
+   "nebius/SWE-rebench": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 4,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-rebench-V2": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "nebius/SWE-bench-extra": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 1,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-Gym/SWE-Gym": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-bench": {
+    "class": "NO KNOWN OVERLAP",
+    "same_repo_rows": 0,
+    "exact": [],
+    "related_same_file": []
+   },
+   "SWE-bench/SWE-smith": {
+    "class": "SAME REPOSITORY ONLY",
+    "same_repo_rows": 300,
+    "exact": [],
+    "related_same_file": []
+   }
+  }
+ }
+}

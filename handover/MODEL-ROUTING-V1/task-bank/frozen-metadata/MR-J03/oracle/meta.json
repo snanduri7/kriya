@@ -1,0 +1,24 @@
+{
+ "id": "gson#3098",
+ "repo": "google/gson",
+ "pr": 3098,
+ "lang": "java",
+ "build": "maven",
+ "module": "gson",
+ "classes": [
+  "com.google.gson.functional.JsonParserTest",
+  "com.google.gson.functional.MapTest",
+  "com.google.gson.stream.JsonReaderPathTest",
+  "com.google.gson.stream.JsonReaderPromotedKeyPathTest"
+ ],
+ "test_files": [
+  "gson/src/test/java/com/google/gson/functional/JsonParserTest.java",
+  "gson/src/test/java/com/google/gson/functional/MapTest.java",
+  "gson/src/test/java/com/google/gson/stream/JsonReaderPathTest.java"
+ ],
+ "prod_files": [
+  "gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java",
+  "gson/src/main/java/com/google/gson/stream/JsonReader.java"
+ ],
+ "other_files": []
+}

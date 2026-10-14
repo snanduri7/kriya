@@ -1,0 +1,308 @@
+{
+ "id": "pydantic-settings#767",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 185 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 185 required tests passed",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.9,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 185 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.9,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/185 required tests failed or were absent (executed 185)",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_validation_alias_alias_choices_with_alias_path_first"
+    ],
+    "note": "",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.9,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/185 required tests failed or were absent (executed 185)",
+    "secs": 1.1,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_validation_alias_alias_choices_with_alias_path_first"
+    ],
+    "note": "",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/185 required tests failed or were absent (executed 185)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_validation_alias_alias_choices_with_alias_path_first"
+    ],
+    "note": "",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 185 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/185 required tests failed or were absent (executed 185)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_validation_alias_alias_choices_with_alias_path_first"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 185 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 397 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 419,
+    "n_required": 397,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/185 required tests failed or were absent (executed 185)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 185,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_validation_alias_alias_choices_with_alias_path_first"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 184,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_alias_nested_model_default_partial_update",
+     "tests.test_settings::test_alias_resolution_init_source",
+     "tests.test_settings::test_alias_set",
+     "tests.test_settings::test_annotated",
+     "tests.test_settings::test_annotated_list",
+     "tests.test_settings::test_annotated_with_type"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.4,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 185,
+    "missing_head": [
+     "tests.test_settings::test_alias_nested_model_default_partial_update",
+     "tests.test_settings::test_alias_resolution_init_source",
+     "tests.test_settings::test_alias_set",
+     "tests.test_settings::test_annotated",
+     "tests.test_settings::test_annotated_list",
+     "tests.test_settings::test_annotated_with_type"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/conftest.py', '~tests/test_settings.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "22 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 1.1,
+  "regress_secs": 1.9,
+  "ref_good_total_secs": 2.9,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

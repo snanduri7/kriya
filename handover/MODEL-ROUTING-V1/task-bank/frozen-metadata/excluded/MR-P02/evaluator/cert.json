@@ -1,0 +1,345 @@
+{
+ "id": "click#2604",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.4,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.6,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.6,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "5/34 required tests failed or were absent (executed 34)",
+    "secs": 0.6,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]",
+     "tests.test_command_decorators::test_generate_name[init_data_grp]",
+     "tests.test_commands::test_other_command_invoke_with_defaults"
+    ],
+    "note": "",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 5
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.5,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "5/34 required tests failed or were absent (executed 34)",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]",
+     "tests.test_command_decorators::test_generate_name[init_data_grp]",
+     "tests.test_commands::test_other_command_invoke_with_defaults"
+    ],
+    "note": "",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 5
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.5,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "5/34 required tests failed or were absent (executed 34)",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]",
+     "tests.test_command_decorators::test_generate_name[init_data_grp]",
+     "tests.test_commands::test_other_command_invoke_with_defaults"
+    ],
+    "note": "",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 5
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.6,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "5/34 required tests failed or were absent (executed 34)",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]",
+     "tests.test_command_decorators::test_generate_name[init_data_grp]",
+     "tests.test_commands::test_other_command_invoke_with_defaults"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 5
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 34 required tests passed",
+    "secs": 0.6,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 587 required tests passed",
+    "secs": 1.6,
+    "setup_secs": 0.1,
+    "n_executed": 611,
+    "n_required": 587,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "5/34 required tests failed or were absent (executed 34)",
+    "secs": 0.6,
+    "setup_secs": 0.1,
+    "n_executed": 34,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]",
+     "tests.test_command_decorators::test_generate_name[init_data_grp]",
+     "tests.test_commands::test_other_command_invoke_with_defaults"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 29,
+    "f2p_failed_or_absent": 5
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.1,
+    "n_executed": 0,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_command_no_parens",
+     "tests.test_command_decorators::test_custom_command_no_parens",
+     "tests.test_command_decorators::test_generate_name[init_data]",
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 5
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.1,
+    "n_executed": 0,
+    "n_required": 34,
+    "missing_head": [
+     "tests.test_command_decorators::test_command_no_parens",
+     "tests.test_command_decorators::test_custom_command_no_parens",
+     "tests.test_command_decorators::test_generate_name[init_data]",
+     "tests.test_command_decorators::test_generate_name[init_data_cmd]",
+     "tests.test_command_decorators::test_generate_name[init_data_command]",
+     "tests.test_command_decorators::test_generate_name[init_data_group]"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['~tests/test_command_decorators.py', '~tests/test_commands.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 5
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "1 base tests superseded by the fix and excluded from the regression set",
+  "23 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.7,
+  "regress_secs": 1.6,
+  "ref_good_total_secs": 2.2,
+  "baseline_setup_secs": 0.1
+ },
+ "repeats": 3
+}

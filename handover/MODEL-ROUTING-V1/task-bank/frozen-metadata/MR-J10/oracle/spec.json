@@ -1,0 +1,43 @@
+{
+ "id": "resilience4j#2507",
+ "accept_set": [
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildCustom()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalCoreThreadPoolSize()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxCoreThreads()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxThreadPoolSize()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxWait()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalQueueCapacity()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorConfig()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorConfigDefault()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorSetAsBean()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorSetAsBeanOverrideSetAsClass()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::createFromBaseConfig()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldCopyAllFields()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::testToString()"
+ ],
+ "F2P": [
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()"
+ ],
+ "P2P_accept": [
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildCustom()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalCoreThreadPoolSize()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxCoreThreads()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxThreadPoolSize()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalMaxWait()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::buildWithIllegalQueueCapacity()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorConfig()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorConfigDefault()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorSetAsBean()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::contextPropagatorSetAsBeanOverrideSetAsClass()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::createFromBaseConfig()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldCopyAllFields()",
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::testToString()"
+ ],
+ "accept_selectors": [
+  "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest"
+ ],
+ "regress_scope": "tests of module resilience4j-bulkhead only (gradle :module:test); downstream modules are not covered",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

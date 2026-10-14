@@ -1,0 +1,337 @@
+{
+ "id": "boltons#445",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 19 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.5,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 19 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.5,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 19 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "15/19 required tests failed or were absent (executed 19)",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_get_invocation_sig_str[None-args-kwargs-None-a-kwonlydefaults0-*args, a=a, **kwargs-(*args, a, **kwargs)]",
+     "tests.test_funcutils_fb_py3::test_remove_kwonly_arg",
+     "tests.test_funcutils_fb_py3::test_update_wrapper_partial[boltons.funcutils]",
+     "tests.test_funcutils_fb_py3::test_update_wrapper_partial[functools]",
+     "tests.test_funcutils_fb_py3::test_wraps_async",
+     "tests.test_funcutils_fb_py3::test_wraps_defaulted_arg_before_varargs"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 4,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 19 required tests passed",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 464 required tests passed",
+    "secs": 2.6,
+    "setup_secs": 0.0,
+    "n_executed": 464,
+    "n_required": 464,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "2/19 required tests failed or were absent (executed 19)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 19,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+     "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 17,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_FunctionBuilder_add_arg_kwonly",
+     "tests.test_funcutils_fb_py3::test_copy_function_kw_defaults_py3",
+     "tests.test_funcutils_fb_py3::test_defaults_dict",
+     "tests.test_funcutils_fb_py3::test_get_arg_names",
+     "tests.test_funcutils_fb_py3::test_get_invocation_sig_str[None-args-kwargs-None-a-kwonlydefaults0-*args, a=a, **kwargs-(*args, a, **kwargs)]",
+     "tests.test_funcutils_fb_py3::test_remove_kwonly_arg"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 19,
+    "missing_head": [
+     "tests.test_funcutils_fb_py3::test_FunctionBuilder_add_arg_kwonly",
+     "tests.test_funcutils_fb_py3::test_copy_function_kw_defaults_py3",
+     "tests.test_funcutils_fb_py3::test_defaults_dict",
+     "tests.test_funcutils_fb_py3::test_get_arg_names",
+     "tests.test_funcutils_fb_py3::test_get_invocation_sig_str[None-args-kwargs-None-a-kwonlydefaults0-*args, a=a, **kwargs-(*args, a, **kwargs)]",
+     "tests.test_funcutils_fb_py3::test_remove_kwonly_arg"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_funcutils_fb_py3.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 2
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED",
+ "limits": [],
+ "cost": {
+  "accept_secs": 0.9,
+  "regress_secs": 2.6,
+  "ref_good_total_secs": 3.4,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

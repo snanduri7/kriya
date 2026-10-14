@@ -1,0 +1,18 @@
+{
+ "id": "mybatis-3#3456",
+ "repo": "mybatis/mybatis-3",
+ "pr": 3456,
+ "lang": "java",
+ "build": "maven",
+ "module": "",
+ "classes": [
+  "org.apache.ibatis.scripting.xmltags.XMLScriptBuilderTest"
+ ],
+ "test_files": [
+  "src/test/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilderTest.java"
+ ],
+ "prod_files": [
+  "src/main/java/org/apache/ibatis/scripting/xmltags/XMLScriptBuilder.java"
+ ],
+ "other_files": []
+}

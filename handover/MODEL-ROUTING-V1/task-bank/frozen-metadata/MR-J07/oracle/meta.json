@@ -1,0 +1,22 @@
+{
+ "id": "mapstruct#2975",
+ "repo": "mapstruct/mapstruct",
+ "pr": 2975,
+ "lang": "java",
+ "build": "maven",
+ "module": "processor",
+ "classes": [
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Mapper",
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Test"
+ ],
+ "test_files": [
+  "processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java",
+  "processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java"
+ ],
+ "prod_files": [
+  "processor/src/main/resources/org/mapstruct/ap/internal/model/MethodReference.ftl",
+  "processor/src/main/resources/org/mapstruct/ap/internal/model/MethodReferencePresenceCheck.ftl",
+  "processor/src/main/resources/org/mapstruct/ap/internal/model/common/SourceRHS.ftl"
+ ],
+ "other_files": []
+}

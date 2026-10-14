@@ -1,0 +1,229 @@
+{
+ "id": "resilience4j#2507",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 2.1,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.9,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.8,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.9,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 4.3,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.9,
+    "setup_secs": 0.7,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 4.3,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.8,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 4.2,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.8,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 14 required tests passed",
+    "secs": 2.0,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 136 required tests passed",
+    "secs": 7.9,
+    "setup_secs": 0.8,
+    "n_executed": 137,
+    "n_required": 136,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~resilience4j-bulkhead/src/test/java/io/github/resilience4j/bulkhead/ThreadPoolBulkheadConfigTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/14 required tests failed or were absent (executed 14)",
+    "secs": 4.2,
+    "setup_secs": 0.8,
+    "n_executed": 14,
+    "n_required": 14,
+    "missing_head": [
+     "io.github.resilience4j.bulkhead.ThreadPoolBulkheadConfigTest::fromShouldNotMutateBaseConfig()"
+    ],
+    "note": "",
+    "p2p_pass": 13,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)",
+  "1 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 2.1,
+  "regress_secs": 7.9,
+  "ref_good_total_secs": 9.9,
+  "baseline_setup_secs": 0.8
+ },
+ "repeats": 3
+}

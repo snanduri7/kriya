@@ -1,0 +1,20 @@
+{
+ "id": "commonmark-java#340",
+ "repo": "commonmark/commonmark-java",
+ "pr": 340,
+ "lang": "java",
+ "build": "maven",
+ "module": "commonmark",
+ "classes": [
+  "org.commonmark.test.HtmlRendererTest"
+ ],
+ "test_files": [
+  "commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java"
+ ],
+ "prod_files": [
+  "commonmark/src/main/java/org/commonmark/renderer/html/CoreHtmlNodeRenderer.java",
+  "commonmark/src/main/java/org/commonmark/renderer/html/HtmlNodeRendererContext.java",
+  "commonmark/src/main/java/org/commonmark/renderer/html/HtmlRenderer.java"
+ ],
+ "other_files": []
+}

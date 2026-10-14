@@ -1,0 +1,370 @@
+{
+ "id": "tomlkit#510",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "7/146 required tests failed or were absent (executed 146)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_parse_accepts_nesting_at_the_depth_limit",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = 1}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]]"
+    ],
+    "note": "",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 7
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "7/146 required tests failed or were absent (executed 146)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_parse_accepts_nesting_at_the_depth_limit",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = 1}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]]"
+    ],
+    "note": "",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 7
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "7/146 required tests failed or were absent (executed 146)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_parse_accepts_nesting_at_the_depth_limit",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = 1}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]]"
+    ],
+    "note": "",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 7
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "30/146 required tests failed or were absent (executed 146)",
+    "secs": 1.3,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_dump_nested_dotted_table",
+     "tests.test_api::test_dumps_wrapper_delegating_as_string_preserves_layout",
+     "tests.test_api::test_load_from_file_object[0.5.0]",
+     "tests.test_api::test_load_from_file_object[example]",
+     "tests.test_api::test_load_from_file_object[fruit]",
+     "tests.test_api::test_load_from_file_object[hard]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 110,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "27/146 required tests failed or were absent (executed 146)",
+    "secs": 1.5,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_array",
+     "tests.test_api::test_load_from_file_object[example]",
+     "tests.test_api::test_load_from_file_object[hard]",
+     "tests.test_api::test_load_from_file_object[pyproject]",
+     "tests.test_api::test_load_from_file_object[test]",
+     "tests.test_api::test_original_string_and_dumped_string_are_equal[example]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 116,
+    "f2p_failed_or_absent": 4
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "3/146 required tests failed or were absent (executed 146)",
+    "secs": 0.9,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a = 1]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 3
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 312 required tests passed",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 313,
+    "n_required": 312,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "7/146 required tests failed or were absent (executed 146)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_parse_accepts_nesting_at_the_depth_limit",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a]\\nx = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a = 1]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+     "tests.test_api::test_parse_rejects_deeply_nested_documents[x = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = [{a = 1}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 7
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.5,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 146,
+    "missing_head": [
+     "tests.test_api::test_a_raw_dict_can_be_dumped",
+     "tests.test_api::test_add_dotted_key",
+     "tests.test_api::test_aot",
+     "tests.test_api::test_array",
+     "tests.test_api::test_boolean",
+     "tests.test_api::test_build_super_table"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 7
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 146 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 146,
+    "n_required": 146,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_api.py']",
+    "p2p_pass": 139,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  }
+ },
+ "verdict": "REJECTED",
+ "limits": [
+  "1 base tests fail or are skipped in this environment and are outside the regression set",
+  "ref_ok=True baseline_broken=True env_problem=False failed_controls=['unsatisfiable_requires_python']"
+ ],
+ "cost": {
+  "accept_secs": 0.8,
+  "regress_secs": 1.0,
+  "ref_good_total_secs": 1.8,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

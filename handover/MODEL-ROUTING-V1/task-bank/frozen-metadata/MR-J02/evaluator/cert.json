@@ -1,0 +1,336 @@
+{
+ "id": "commonmark-java#340",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 24 required tests passed",
+    "secs": 3.4,
+    "setup_secs": 0.2,
+    "n_executed": 24,
+    "n_required": 24,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.6,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 24 required tests passed",
+    "secs": 3.4,
+    "setup_secs": 0.2,
+    "n_executed": 24,
+    "n_required": 24,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.6,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 24 required tests passed",
+    "secs": 3.4,
+    "setup_secs": 0.2,
+    "n_executed": 24,
+    "n_required": 24,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.6,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.7,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.7,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.7,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.6,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.8,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.7,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/24 required tests failed or were absent (executed 24)",
+    "secs": 3.3,
+    "setup_secs": 0.2,
+    "n_executed": 24,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::omitSingleParagraphP"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.3,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.9,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_3": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.4,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 24 required tests passed",
+    "secs": 3.3,
+    "setup_secs": 0.2,
+    "n_executed": 24,
+    "n_required": 24,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 2203 required tests passed",
+    "secs": 6.6,
+    "setup_secs": 0.2,
+    "n_executed": 2204,
+    "n_required": 2203,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~commonmark/src/test/java/org/commonmark/test/HtmlRendererTest.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 2.7,
+    "setup_secs": 0.2,
+    "n_executed": 0,
+    "n_required": 24,
+    "missing_head": [
+     "org.commonmark.test.HtmlRendererTest::attributeEscaping",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderFactoryNewInstanceForEachRender",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForCodeBlock",
+     "org.commonmark.test.HtmlRendererTest::attributeProviderForImage",
+     "org.commonmark.test.HtmlRendererTest::canRenderContentsOfSingleParagraph",
+     "org.commonmark.test.HtmlRendererTest::characterReferencesWithoutSemicolonsShouldNotBeParsedShouldBeEscaped"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 24
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "baseline fails by compile/import break: the goal must state the public API (reviewer judgement)",
+  "1 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 3.4,
+  "regress_secs": 6.6,
+  "ref_good_total_secs": 10.0,
+  "baseline_setup_secs": 0.2
+ },
+ "repeats": 3
+}

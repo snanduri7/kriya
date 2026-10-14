@@ -1,0 +1,21 @@
+{
+ "id": "marshmallow#2928",
+ "repo": "marshmallow-code/marshmallow",
+ "pr": 2928,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_validate.py"
+ ],
+ "pkg": "marshmallow",
+ "src_layout": true,
+ "test_files": [
+  "tests/test_validate.py"
+ ],
+ "prod_files": [
+  "src/marshmallow/validate.py"
+ ],
+ "other_files": [
+  "CHANGELOG.rst"
+ ]
+}

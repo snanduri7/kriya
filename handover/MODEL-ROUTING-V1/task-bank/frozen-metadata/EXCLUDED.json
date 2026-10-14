@@ -1,0 +1,12 @@
+{
+ "reason": "REJECTED_FROM_FINAL_BANK: EXACT_PUBLIC_BENCHMARK_OVERLAP (owner decision 2026-10-14); certification evidence preserved under bank/excluded/<TID>; NOT reserves",
+ "tasks": {
+  "MR-P02": "click#2604",
+  "MR-P03": "jinja#1664",
+  "MR-P04": "keyring#695",
+  "MR-P05": "markdown#1494",
+  "MR-P11": "tomlkit#510 - STRONG FUTURE CANDIDATE, BLOCKED_BY_CERTIFICATION_CONTROL_APPLICABILITY (backlog TASK-BANK-CONTROL-APPLICABILITY-001, not implemented); authoritative tool verdict REJECTED",
+  "MR-P12": "click#3152 - BLOCKED BY INDEPENDENT REVIEW (goal sentence \"is_flag=False and no flag_value must continue to require an argument\" is false at base and reference when no default is set; negative requirement untested; one-token variant \"= True\" passes accept 537/537 and regress 1313/1313; one-token change like refused python-tabulate#268). Certified CERTIFIED-WITH-LIMITS by the tool, kept as evidence only."
+ },
+ "p11_note": "owner decision 2026-10-14: not owner-overridden into the bank"
+}

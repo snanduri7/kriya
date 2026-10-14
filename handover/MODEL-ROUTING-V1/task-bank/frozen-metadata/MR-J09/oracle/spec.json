@@ -1,0 +1,43 @@
+{
+ "id": "resilience4j#2209",
+ "accept_set": [
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterOneAttemptInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterThreeAttemptsInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterTwoAttemptsInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldContinueRetryingAndEmitProperEventsIfIntervalFunctionReturnsZeroOrMore",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetry",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetryWhenReturnVoid",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetryWithThatResult",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRethrowExceptionInCaseOfExceptionAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryInCaseOResultRetryMatchAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryInCaseOfAnExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryTowAttemptsInCaseOResultRetryMatchAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldStopRetryingAndEmitProperEventsIfIntervalFunctionReturnsLessThanZero",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldThrowOnceMaxAttemptsReachedIfConfigured"
+ ],
+ "F2P": [
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteExceptionallyWhenRetryOnExPredicateThrows"
+ ],
+ "P2P_accept": [
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterOneAttemptInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterThreeAttemptsInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldCompleteFutureAfterTwoAttemptsInCaseOfExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldContinueRetryingAndEmitProperEventsIfIntervalFunctionReturnsZeroOrMore",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetry",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetryWhenReturnVoid",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldNotRetryWithThatResult",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRethrowExceptionInCaseOfExceptionAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryInCaseOResultRetryMatchAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryInCaseOfAnExceptionAtAsyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldRetryTowAttemptsInCaseOResultRetryMatchAtSyncStage",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldStopRetryingAndEmitProperEventsIfIntervalFunctionReturnsLessThanZero",
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest::shouldThrowOnceMaxAttemptsReachedIfConfigured"
+ ],
+ "accept_selectors": [
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest"
+ ],
+ "regress_scope": "tests of module resilience4j-retry only (gradle :module:test); downstream modules are not covered",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

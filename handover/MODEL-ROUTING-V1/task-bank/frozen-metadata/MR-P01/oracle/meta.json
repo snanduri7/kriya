@@ -1,0 +1,21 @@
+{
+ "id": "attrs#1401",
+ "repo": "python-attrs/attrs",
+ "pr": 1401,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_hooks.py"
+ ],
+ "pkg": "attr",
+ "src_layout": true,
+ "test_files": [
+  "tests/test_hooks.py"
+ ],
+ "prod_files": [
+  "src/attr/_make.py"
+ ],
+ "other_files": [
+  "changelog.d/1147.change.md"
+ ]
+}

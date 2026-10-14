@@ -1,0 +1,136 @@
+{
+ "TASK_ID": "MR-J09",
+ "candidate_id": "resilience4j#2209",
+ "repository_id": "resilience4j/resilience4j",
+ "base_revision": "5d794b9fcdab505f37b410bf851fa316b5cb6751",
+ "fix_revision": "a662dad254fd310c88de980f357d815f8650ef88",
+ "goal_digest": "48e2f4a59d8a2eca020a4c3c3ace46bd09b5022d6cb85d42d489b18b26ab5ec1",
+ "language": "java",
+ "build_system": "gradle",
+ "setup_manifest": {
+  "jdk": "17",
+  "python": null,
+  "network_at_evaluation": false,
+  "caches": {
+   "maven_local_repo": "bank/m2",
+   "gradle_user_home": "bank/gradle-home",
+   "gradle_distributions": "bank/dist",
+   "python_venv": "bank/venvs/resilience4j_resilience4j"
+  },
+  "env": {},
+  "python_build": null
+ },
+ "accept_oracle": {
+  "script": "oracle/accept.sh",
+  "digest": "8e8a28d5a3d6724a808b58e453f898a4a4d749b53911c1ac102ef95d40b71572",
+  "spec_digest": "a07a48ec007c8a829928a227b79ccdb7d63f54a6a856f9711e0a51699dfa4317",
+  "hidden_tests_digest": "4cc1a1a55ab76a2f6a50cff14e7e4e7e319cc8f88a37517713ebf5000defc91b",
+  "required_tests": 14,
+  "fail_to_pass": 1,
+  "pass_to_pass": 13,
+  "selectors": [
+   "io.github.resilience4j.retry.internal.CompletionStageRetryTest"
+  ],
+  "covers": "behavior of the hidden upstream tests changed/added by the fix, by test ID; solver edits to test infrastructure are restored before the run"
+ },
+ "regression_oracle": {
+  "script": "oracle/regress.sh",
+  "digest": "9288778a5e485022cd65fda3371b11375fb982f82670141d6e28554e67efa070",
+  "set_digest": "f1c53131365d01311c4aa27b6b6b603dd69051dfeb2464d246fe74fed9179ea7",
+  "tests": 118,
+  "scope": "tests of module resilience4j-retry only (gradle :module:test); downstream modules are not covered",
+  "excluded_superseded_by_fix": 0,
+  "excluded_base_failing_or_skipped": 0,
+  "covers": "every test passing on BASE and on REFERENCE(with original tests) in the scope above"
+ },
+ "oracle_meta_digest": "bd5a7ced1dd27846dbafc5333e031dbae8230e070d19017f0f1bc67d313054e0",
+ "environment_preflight": {
+  "baseline_accept_verdicts": [
+   "REJECT",
+   "REJECT",
+   "REJECT"
+  ],
+  "baseline_p2p_passing": [
+   13,
+   13,
+   13
+  ],
+  "f2p_failed_or_absent_at_baseline": [
+   1,
+   1,
+   1
+  ],
+  "baseline_compile_break": false
+ },
+ "reference_fix": {
+  "patch_digest": "851fd6dcd5db997441035d46953a1e46d78be44f94561b60e0a4e9dcc6b99101",
+  "test_patch_digest": "2efe7f2fd7c140d8983eb182c72f2c3088c84603879c758d1350299658b4784f",
+  "ref_tree_digest": "a86bb294e2d74232f20279589a383a842535069e2f3782d35b8d85cf9a2dea01",
+  "upstream": "https://github.com/resilience4j/resilience4j/pull/2209",
+  "evaluator_only": true
+ },
+ "certification": {
+  "verdict": "CERTIFIED-WITH-LIMITS",
+  "limits": [
+   "no near-miss control (fewer than two executable production hunks, or none applied)"
+  ],
+  "repeats": 3,
+  "cost": {
+   "accept_secs": 7.1,
+   "regress_secs": 9.9,
+   "ref_good_total_secs": 16.3,
+   "baseline_setup_secs": 0.8
+  },
+  "known_good_stable": true,
+  "controls": {
+   "harmless": {
+    "expected": "PASS",
+    "as_expected": true,
+    "verdict": "PASS"
+   },
+   "tamper_planted_pass": {
+    "expected": "REJECT",
+    "as_expected": true,
+    "verdict": "REJECT"
+   }
+  }
+ },
+ "provenance": {
+  "pr_url": "https://github.com/resilience4j/resilience4j/pull/2209",
+  "pr_created": "2024-09-29T02:57:09Z",
+  "pr_merged": "2024-10-11T07:24:05Z",
+  "issues": [
+   {
+    "number": 2198,
+    "created_at": "2024-09-05T08:46:15Z",
+    "url": "https://github.com/resilience4j/resilience4j/issues/2198"
+   }
+  ],
+  "goal_sources": [
+   "issue resilience4j/resilience4j#2198",
+   "PR #2209 description"
+  ],
+  "goal_derivation": "restated from the public issue/PR description; no patch content used",
+  "ws_tree_digest": "98ef6daabadebc7a6f3f1044112483996fc58d0208649e8bb86346fc2737a68c"
+ },
+ "metadata": {
+  "language": "java",
+  "build_system": "gradle",
+  "module_structure": "multi_module",
+  "reference_prod_files": 1,
+  "reference_test_files": 1,
+  "reference_churn": 38,
+  "reference_churn_bucket": "S",
+  "localization_shape": "single_file",
+  "task_type": "bug_fix",
+  "regression_reported": false,
+  "f2p_tests": 1,
+  "accept_tests": 14,
+  "baseline_fails_by_compile_break": false,
+  "reference_dirs": [
+   "resilience4j-retry/src/main/java/io/github/resilience4j/retry"
+  ],
+  "size_tier": "anchor_small",
+  "upstream_pr_ai_assisted_per_pr_text": false
+ }
+}

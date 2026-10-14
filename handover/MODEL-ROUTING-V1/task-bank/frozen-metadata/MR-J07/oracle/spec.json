@@ -1,0 +1,17 @@
+{
+ "id": "mapstruct#2975",
+ "accept_set": [
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+ ],
+ "F2P": [
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+ ],
+ "P2P_accept": [],
+ "accept_selectors": [
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Mapper",
+  "org.mapstruct.ap.test.bugs._2937.Issue2937Test"
+ ],
+ "regress_scope": "tests of module processor and the reactor modules it depends on (-am); downstream modules are not covered",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

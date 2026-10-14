@@ -1,0 +1,90 @@
+{
+ "stage": "MODEL-ROUTING-V1 stage 2 task bank",
+ "TASK_BANK": "FROZEN",
+ "BANK_MANIFEST_HASH": "cbdb68031cc9e1e044c3fb51d1ddf3e7a8a52656d9b81a9849c3013b046d364d",
+ "BANK_MANIFEST_FILE_SHA256": "50f3dea9e6ba83ca7eaff391c6023ae183a413aa9a02bbbc7124f58f8db5c827",
+ "PARTITION_HASH": "3df2ff4de78d11ca82a7818d3e4a2885af8df6ac344c621687e7e1db5cc6a2a6",
+ "PARTITION_FILE_SHA256": "e16a8bcd072b3cc22ca14181158e539edfcc01ba5f7a5f65702daa4911a486ba",
+ "partition_seed": "MODEL-ROUTING-V1/stage2/partition/1",
+ "ROUTING-DEV": [
+  "MR-J01",
+  "MR-J02",
+  "MR-J03",
+  "MR-J04",
+  "MR-J09",
+  "MR-P01",
+  "MR-P07",
+  "MR-P10",
+  "MR-P14",
+  "MR-P15"
+ ],
+ "FINAL-HOLDOUT": {
+  "status": "SEALED - not to be opened for model-quality testing without explicit owner approval",
+  "seal_sha256": "0b96dcac8a05753e4b125e6b272de8d4b07edf65145a1dbcdfb78a026ee80dd4",
+  "ids": [
+   "MR-J05",
+   "MR-J06",
+   "MR-J07",
+   "MR-J08",
+   "MR-J10",
+   "MR-P06",
+   "MR-P08",
+   "MR-P09",
+   "MR-P13",
+   "MR-P16"
+  ],
+  "package_digests": {
+   "MR-J05": "af6bf0bee08efaac096fd4d4f17155c1146d94fde9a5d09f194552f41e9bf977",
+   "MR-J06": "71b3fe39eb3bf872c644145fbb87a9fbea5479ddc9a11647cff250f7150d2e6e",
+   "MR-J07": "6cabcbdf34d311f5f9f2294204189e870ddd4e4d3a1dda34dee0d7e5576c5345",
+   "MR-J08": "8670493d59a5310fb9756d4db864bbd35c3f212103120b69a63b6a6b1f05cf3e",
+   "MR-J10": "82b0c6df89c6368499947c963784c676fea88e55593b3089004a44a1d0585867",
+   "MR-P06": "da0d5c4319890dc3de9e9ce164cbaa83bda5e0f06f2fd53d4e118440df2e4a18",
+   "MR-P08": "1a389bb47d60349179a5159c8ddaf65894f4f4a593f15e7224154228c19a5bf6",
+   "MR-P09": "8a0cac75c704f4ef850b3a327fe52343c89e214906844224753ee731e46d4ade",
+   "MR-P13": "c0c854266ba488e7827a67e70875e581b3c7a00c33f07ab2ced3bdf3aa16f18b",
+   "MR-P16": "7a8575fb6d7a739db10b91d7d4e9b02e67322df1bc5a34ff699e715041ab754b"
+  },
+  "goal_digests": {
+   "MR-J05": "3486ff5cd8846b3f3ab7fcd372c2e713d7b68907969da32d1d567dd0b55729f0",
+   "MR-J06": "ea86df3cfcd412694ae08d2b4748d0791555d84c963c70c531db313a0dbef4ef",
+   "MR-J07": "59a02d44beb63513853afc5d4d4fbc66fe47ad69518f91e37d2f5c06d3dc1f43",
+   "MR-J08": "d53f8dd3ec0d36ad6a083f9c1ab04b2cd0cf164e1a162070ed1976cca9a0ccda",
+   "MR-J10": "557e08f60d9f10878c8da8eafbf9a0a95e208169d2d52f5859713e63e4676102",
+   "MR-P06": "d6e1871d5d37648b37a225e4398dfc1454f569cc1f34fdcbd2bb219d20f94acc",
+   "MR-P08": "0a646d5f4cf9c515383a09bc8a594549971204b1d99de4140759af8171e42385",
+   "MR-P09": "3b920d9351dba55e5963510849509254c7d9ac40e7447c5bd91689b97d938a1d",
+   "MR-P13": "233984d6bb45f6aa9bcb9b98ff08d83ed4f9928addbff8036b97241e04f2dc36",
+   "MR-P16": "b846fdd7b54340adeebffb47064e3704bdab89ebafada28d00cb14e4bf58a797"
+  }
+ },
+ "task_package_digests": {
+  "MR-J01": "dc5f2c1021d1c855300538084040bdb89b44e61f3e09212cb49543f203eff00c",
+  "MR-J02": "ac1aca353d37cffd2ac744f2657cab647568473588889ed7fd7b30ef725dae72",
+  "MR-J03": "a8e7381f982a72e44c486b0733513e86f030f7bb7bf190d42eb4c03952895eda",
+  "MR-J04": "c7ea9d50aa5c8cd0cbfe5b3ddd9e8705b12accd69b97a7088649f8ce0a62e9cb",
+  "MR-J05": "af6bf0bee08efaac096fd4d4f17155c1146d94fde9a5d09f194552f41e9bf977",
+  "MR-J06": "71b3fe39eb3bf872c644145fbb87a9fbea5479ddc9a11647cff250f7150d2e6e",
+  "MR-J07": "6cabcbdf34d311f5f9f2294204189e870ddd4e4d3a1dda34dee0d7e5576c5345",
+  "MR-J08": "8670493d59a5310fb9756d4db864bbd35c3f212103120b69a63b6a6b1f05cf3e",
+  "MR-J09": "405f68e2c62609cccb73b8bcc60ecb4193b1e41d0fb99ba14cc29fcf4520fc41",
+  "MR-J10": "82b0c6df89c6368499947c963784c676fea88e55593b3089004a44a1d0585867",
+  "MR-P01": "f016afa37fb9ada7cca7cfc6a56c1a3bd4427202871d70b7a4398dbe7efa7cec",
+  "MR-P06": "da0d5c4319890dc3de9e9ce164cbaa83bda5e0f06f2fd53d4e118440df2e4a18",
+  "MR-P07": "60064e99a578f90c646b0ffe28c43ea56cd6e66b2317dc7af274a3da5f23f763",
+  "MR-P08": "1a389bb47d60349179a5159c8ddaf65894f4f4a593f15e7224154228c19a5bf6",
+  "MR-P09": "8a0cac75c704f4ef850b3a327fe52343c89e214906844224753ee731e46d4ade",
+  "MR-P10": "753b40689d362caae11db6f0b21e4703a83912d4ae6e5d2ef23faa851e7fb23a",
+  "MR-P13": "c0c854266ba488e7827a67e70875e581b3c7a00c33f07ab2ced3bdf3aa16f18b",
+  "MR-P14": "19dcb394c6046059feed0712321cdc6a2c9bab45747aa68c43b9b69c503c3801",
+  "MR-P15": "f79ea6a759c51287d0e99b000eaa4688b70833027eddb6cc9cdb9fb671b81538",
+  "MR-P16": "7a8575fb6d7a739db10b91d7d4e9b02e67322df1bc5a34ff699e715041ab754b"
+ },
+ "integrity_file_sha256": "f3a9f06179e0f18cc70cc814c667b7a2e1ec91dd2fe89d04d3b0cbf661e79a65",
+ "leakscan_file_sha256": "ecd834a1a0e6823c5cecb65c7a88974f4d101bcde0aee8fed8c967c153153292",
+ "vendored_evaluator_tools": {
+  "bank_eval.py": "490c1ef35237ceff629148dfc7a05db29981a80970476fc4f78345ea3d3b016d",
+  "bank_tool.py": "6d12ed105243ec368dcf518cd5f445acd3383f27fd2a527caf985c9ba334845f",
+  "oracle_preflight.py": "7095ebc306657ead122c057870e157f1a4e95c84ca1f049497a1f01619082055"
+ }
+}

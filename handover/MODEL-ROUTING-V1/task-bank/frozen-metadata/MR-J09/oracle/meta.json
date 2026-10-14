@@ -1,0 +1,18 @@
+{
+ "id": "resilience4j#2209",
+ "repo": "resilience4j/resilience4j",
+ "pr": 2209,
+ "lang": "java",
+ "build": "gradle",
+ "module": "resilience4j-retry",
+ "classes": [
+  "io.github.resilience4j.retry.internal.CompletionStageRetryTest"
+ ],
+ "test_files": [
+  "resilience4j-retry/src/test/java/io/github/resilience4j/retry/internal/CompletionStageRetryTest.java"
+ ],
+ "prod_files": [
+  "resilience4j-retry/src/main/java/io/github/resilience4j/retry/Retry.java"
+ ],
+ "other_files": []
+}

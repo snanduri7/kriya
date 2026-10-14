@@ -1,0 +1,333 @@
+{
+ "id": "marshmallow#2928",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 207 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 207 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 207 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "6/207 required tests failed or were absent (executed 207)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_url_idn_valid[http://\\u0645\\u062b\\u0627\\u0644.\\u0625\\u062e\\u062a\\u0628\\u0627\\u0631]",
+     "tests.test_validate::test_url_idn_valid[http://www.\\u0627\\u062e\\u062a\\u0628\\u0627\\u0631.com:8080/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\u09a4\\u09cc\\u09b9\\u09bf\\u09a6\\u09c1\\u09b0.\\u09ac\\u09be\\u0982\\u09b2\\u09be]",
+     "tests.test_validate::test_url_idn_valid[https://\\u4f8b\\u3048.jp/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\xfc\\xf1\\xee\\xe7\\xf6d\\xe9.com/path?q=1#frag]",
+     "tests.test_validate::test_url_idn_valid[https://m\\xfcnchen.de]"
+    ],
+    "note": "",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 6
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "6/207 required tests failed or were absent (executed 207)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_url_idn_valid[http://\\u0645\\u062b\\u0627\\u0644.\\u0625\\u062e\\u062a\\u0628\\u0627\\u0631]",
+     "tests.test_validate::test_url_idn_valid[http://www.\\u0627\\u062e\\u062a\\u0628\\u0627\\u0631.com:8080/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\u09a4\\u09cc\\u09b9\\u09bf\\u09a6\\u09c1\\u09b0.\\u09ac\\u09be\\u0982\\u09b2\\u09be]",
+     "tests.test_validate::test_url_idn_valid[https://\\u4f8b\\u3048.jp/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\xfc\\xf1\\xee\\xe7\\xf6d\\xe9.com/path?q=1#frag]",
+     "tests.test_validate::test_url_idn_valid[https://m\\xfcnchen.de]"
+    ],
+    "note": "",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 6
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "6/207 required tests failed or were absent (executed 207)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_url_idn_valid[http://\\u0645\\u062b\\u0627\\u0644.\\u0625\\u062e\\u062a\\u0628\\u0627\\u0631]",
+     "tests.test_validate::test_url_idn_valid[http://www.\\u0627\\u062e\\u062a\\u0628\\u0627\\u0631.com:8080/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\u09a4\\u09cc\\u09b9\\u09bf\\u09a6\\u09c1\\u09b0.\\u09ac\\u09be\\u0982\\u09b2\\u09be]",
+     "tests.test_validate::test_url_idn_valid[https://\\u4f8b\\u3048.jp/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\xfc\\xf1\\xee\\xe7\\xf6d\\xe9.com/path?q=1#frag]",
+     "tests.test_validate::test_url_idn_valid[https://m\\xfcnchen.de]"
+    ],
+    "note": "",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 6
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.6,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "18/207 required tests failed or were absent (executed 207)",
+    "secs": 1.0,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_url_dont_require_tld_invalid[http//example]",
+     "tests.test_validate::test_url_dont_require_tld_invalid[http:// /foo/bar]",
+     "tests.test_validate::test_url_dont_require_tld_invalid[http://.example.org]",
+     "tests.test_validate::test_url_dont_require_tld_invalid[http:///foo/bar]",
+     "tests.test_validate::test_url_dont_require_tld_invalid[http://example\\n]",
+     "tests.test_validate::test_url_dont_require_tld_valid[http://123.45.67.8/]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 189,
+    "f2p_failed_or_absent": 6
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 207 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 0
+   },
+   "expected": "REJECT",
+   "as_expected": false
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 207 required tests passed",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1147 required tests passed",
+    "secs": 1.7,
+    "setup_secs": 0.0,
+    "n_executed": 1149,
+    "n_required": 1147,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "6/207 required tests failed or were absent (executed 207)",
+    "secs": 0.8,
+    "setup_secs": 0.0,
+    "n_executed": 207,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_url_idn_valid[http://\\u0645\\u062b\\u0627\\u0644.\\u0625\\u062e\\u062a\\u0628\\u0627\\u0631]",
+     "tests.test_validate::test_url_idn_valid[http://www.\\u0627\\u062e\\u062a\\u0628\\u0627\\u0631.com:8080/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\u09a4\\u09cc\\u09b9\\u09bf\\u09a6\\u09c1\\u09b0.\\u09ac\\u09be\\u0982\\u09b2\\u09be]",
+     "tests.test_validate::test_url_idn_valid[https://\\u4f8b\\u3048.jp/path]",
+     "tests.test_validate::test_url_idn_valid[https://\\xfc\\xf1\\xee\\xe7\\xf6d\\xe9.com/path?q=1#frag]",
+     "tests.test_validate::test_url_idn_valid[https://m\\xfcnchen.de]"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 201,
+    "f2p_failed_or_absent": 6
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_and",
+     "tests.test_validate::test_contains_only_in_string",
+     "tests.test_validate::test_contains_only_unhashable_types",
+     "tests.test_validate::test_containsnoneof_custom_message",
+     "tests.test_validate::test_containsnoneof_error_message",
+     "tests.test_validate::test_containsnoneof_in_list"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 6
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 207,
+    "missing_head": [
+     "tests.test_validate::test_and",
+     "tests.test_validate::test_contains_only_in_string",
+     "tests.test_validate::test_contains_only_unhashable_types",
+     "tests.test_validate::test_containsnoneof_custom_message",
+     "tests.test_validate::test_containsnoneof_error_message",
+     "tests.test_validate::test_containsnoneof_in_list"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_validate.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 6
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "2 base tests superseded by the fix and excluded from the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.8,
+  "regress_secs": 1.7,
+  "ref_good_total_secs": 2.5,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}

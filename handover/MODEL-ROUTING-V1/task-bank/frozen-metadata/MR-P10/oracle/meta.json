@@ -1,0 +1,19 @@
+{
+ "id": "sqlparse#865",
+ "repo": "andialbrecht/sqlparse",
+ "pr": 865,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_parse.py"
+ ],
+ "pkg": "sqlparse",
+ "src_layout": false,
+ "test_files": [
+  "tests/test_parse.py"
+ ],
+ "prod_files": [
+  "sqlparse/sql.py"
+ ],
+ "other_files": []
+}

@@ -1,0 +1,282 @@
+{
+ "id": "mapstruct#2975",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 1 required tests passed",
+    "secs": 10.8,
+    "setup_secs": 1.7,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 124.0,
+    "setup_secs": 1.6,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 1 required tests passed",
+    "secs": 10.8,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 123.6,
+    "setup_secs": 1.6,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 1 required tests passed",
+    "secs": 10.7,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 126.8,
+    "setup_secs": 1.7,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.7,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 124.0,
+    "setup_secs": 1.6,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.5,
+    "setup_secs": 1.5,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 124.1,
+    "setup_secs": 1.5,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.6,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 123.1,
+    "setup_secs": 1.6,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.7,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.5,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.7,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 1 required tests passed",
+    "secs": 10.7,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 1393 required tests passed",
+    "secs": 124.4,
+    "setup_secs": 1.6,
+    "n_executed": 1395,
+    "n_required": 1393,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 2 path(s) ['+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Test.java', '+processor/src/test/java/org/mapstruct/ap/test/bugs/_2937/Issue2937Mapper.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/1 required tests failed or were absent (executed 1)",
+    "secs": 10.3,
+    "setup_secs": 1.6,
+    "n_executed": 1,
+    "n_required": 1,
+    "missing_head": [
+     "org.mapstruct.ap.test.bugs._2937.Issue2937Test::shouldCorrectlyUseConditionalForAdder"
+    ],
+    "note": "",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "2 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 10.8,
+  "regress_secs": 126.8,
+  "ref_good_total_secs": 135.6,
+  "baseline_setup_secs": 1.6
+ },
+ "repeats": 3
+}

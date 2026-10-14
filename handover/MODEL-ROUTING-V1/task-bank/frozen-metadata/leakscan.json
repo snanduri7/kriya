@@ -1,0 +1,134 @@
+[
+ {
+  "task": "MR-J01",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ },
+ {
+  "task": "MR-J02",
+  "ref_only_identifiers_total": 3,
+  "findings": [
+   "goal token 'HtmlRenderer' is a changed-file stem (also in the public issue/PR text)",
+   "goal token 'omitSingleParagraphP' is a reference-only identifier (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-J03",
+  "ref_only_identifiers_total": 5,
+  "findings": [
+   "goal token 'JsonReader' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-J04",
+  "ref_only_identifiers_total": 6,
+  "findings": [
+   "goal token 'continuation' is a reference-only identifier (NOT in public text)"
+  ]
+ },
+ {
+  "task": "MR-J05",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ },
+ {
+  "task": "MR-J06",
+  "ref_only_identifiers_total": 0,
+  "findings": [
+   "goal token 'Jdbi' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-J07",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ },
+ {
+  "task": "MR-J08",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ },
+ {
+  "task": "MR-J09",
+  "ref_only_identifiers_total": 1,
+  "findings": [
+   "goal token 'Retry' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-J10",
+  "ref_only_identifiers_total": 0,
+  "findings": [
+   "goal token 'ThreadPoolBulkheadConfig' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P01",
+  "ref_only_identifiers_total": 1,
+  "findings": []
+ },
+ {
+  "task": "MR-P06",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ },
+ {
+  "task": "MR-P07",
+  "ref_only_identifiers_total": 20,
+  "findings": [
+   "goal token 'Homepage' is a reference-only identifier (also in the public issue/PR text)",
+   "goal token 'PyPI' is a reference-only identifier (also in the public issue/PR text)",
+   "goal token 'links' is a reference-only identifier (also in the public issue/PR text)",
+   "goal token 'tools' is a reference-only identifier (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P08",
+  "ref_only_identifiers_total": 7,
+  "findings": [
+   "goal token 'modified' is a reference-only identifier (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P09",
+  "ref_only_identifiers_total": 1,
+  "findings": []
+ },
+ {
+  "task": "MR-P10",
+  "ref_only_identifiers_total": 1,
+  "findings": [
+   "goal token 'component' is a reference-only identifier (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P13",
+  "ref_only_identifiers_total": 15,
+  "findings": [
+   "goal token 'letters' is a reference-only identifier (NOT in public text)",
+   "goal token 'validate' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P14",
+  "ref_only_identifiers_total": 5,
+  "findings": [
+   "goal token 'branches' is a reference-only identifier (NOT in public text)",
+   "goal token 'exceptions' is a changed-file stem (also in the public issue/PR text)",
+   "goal token 'validators' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P15",
+  "ref_only_identifiers_total": 9,
+  "findings": [
+   "goal token 'alone' is a reference-only identifier (NOT in public text)",
+   "goal token 'funcutils' is a changed-file stem (also in the public issue/PR text)"
+  ]
+ },
+ {
+  "task": "MR-P16",
+  "ref_only_identifiers_total": 0,
+  "findings": []
+ }
+]

@@ -1,0 +1,285 @@
+{
+ "id": "jdbi#2681",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 9.3,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 19.1,
+    "setup_secs": 0.8,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 10.3,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 20.0,
+    "setup_secs": 0.7,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 9.2,
+    "setup_secs": 0.6,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 18.2,
+    "setup_secs": 0.6,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 9.3,
+    "setup_secs": 0.6,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 18.2,
+    "setup_secs": 0.6,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 10.3,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 20.5,
+    "setup_secs": 0.7,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 9.5,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 20.3,
+    "setup_secs": 0.7,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "near_miss_0": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 5.0,
+    "setup_secs": 0.8,
+    "n_executed": 0,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection",
+     "org.jdbi.v3.core.TestCloseConnection::customizeConnectionThrows"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_1": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 4.9,
+    "setup_secs": 0.8,
+    "n_executed": 0,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection",
+     "org.jdbi.v3.core.TestCloseConnection::customizeConnectionThrows"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "near_miss_2": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate fault: compile/syntax/import error or explicit contract violation",
+    "secs": 4.9,
+    "setup_secs": 0.8,
+    "n_executed": 0,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection",
+     "org.jdbi.v3.core.TestCloseConnection::customizeConnectionThrows"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 2 required tests passed",
+    "secs": 9.4,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 977 required tests passed",
+    "secs": 18.2,
+    "setup_secs": 0.7,
+    "n_executed": 979,
+    "n_required": 977,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+core/src/test/java/org/jdbi/v3/core/TestCloseConnection.java']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/2 required tests failed or were absent (executed 2)",
+    "secs": 9.1,
+    "setup_secs": 0.7,
+    "n_executed": 2,
+    "n_required": 2,
+    "missing_head": [
+     "org.jdbi.v3.core.TestCloseConnection::closeCustomizedConnection"
+    ],
+    "note": "",
+    "p2p_pass": 1,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "2 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 10.3,
+  "regress_secs": 20.0,
+  "ref_good_total_secs": 28.7,
+  "baseline_setup_secs": 0.6
+ },
+ "repeats": 3
+}

@@ -1,0 +1,53 @@
+{
+ "id": "boltons#445",
+ "accept_set": [
+  "tests.test_funcutils_fb_py3::test_FunctionBuilder_add_arg_kwonly",
+  "tests.test_funcutils_fb_py3::test_copy_function_kw_defaults_py3",
+  "tests.test_funcutils_fb_py3::test_defaults_dict",
+  "tests.test_funcutils_fb_py3::test_get_arg_names",
+  "tests.test_funcutils_fb_py3::test_get_invocation_sig_str[None-args-kwargs-None-a-kwonlydefaults0-*args, a=a, **kwargs-(*args, a, **kwargs)]",
+  "tests.test_funcutils_fb_py3::test_remove_kwonly_arg",
+  "tests.test_funcutils_fb_py3::test_update_wrapper_partial[boltons.funcutils]",
+  "tests.test_funcutils_fb_py3::test_update_wrapper_partial[functools]",
+  "tests.test_funcutils_fb_py3::test_wraps_async",
+  "tests.test_funcutils_fb_py3::test_wraps_defaulted_arg_before_varargs",
+  "tests.test_funcutils_fb_py3::test_wraps_defaulted_arg_keyword_forwarding",
+  "tests.test_funcutils_fb_py3::test_wraps_hide_wrapped",
+  "tests.test_funcutils_fb_py3::test_wraps_inner_kwarg_only",
+  "tests.test_funcutils_fb_py3::test_wraps_posonly_defaulted_arg",
+  "tests.test_funcutils_fb_py3::test_wraps_py3",
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg",
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs",
+  "tests.test_funcutils_fb_py3::test_wraps_uninspectable_target"
+ ],
+ "F2P": [
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_no_default",
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg_with_varargs"
+ ],
+ "P2P_accept": [
+  "tests.test_funcutils_fb_py3::test_FunctionBuilder_add_arg_kwonly",
+  "tests.test_funcutils_fb_py3::test_copy_function_kw_defaults_py3",
+  "tests.test_funcutils_fb_py3::test_defaults_dict",
+  "tests.test_funcutils_fb_py3::test_get_arg_names",
+  "tests.test_funcutils_fb_py3::test_get_invocation_sig_str[None-args-kwargs-None-a-kwonlydefaults0-*args, a=a, **kwargs-(*args, a, **kwargs)]",
+  "tests.test_funcutils_fb_py3::test_remove_kwonly_arg",
+  "tests.test_funcutils_fb_py3::test_update_wrapper_partial[boltons.funcutils]",
+  "tests.test_funcutils_fb_py3::test_update_wrapper_partial[functools]",
+  "tests.test_funcutils_fb_py3::test_wraps_async",
+  "tests.test_funcutils_fb_py3::test_wraps_defaulted_arg_before_varargs",
+  "tests.test_funcutils_fb_py3::test_wraps_defaulted_arg_keyword_forwarding",
+  "tests.test_funcutils_fb_py3::test_wraps_hide_wrapped",
+  "tests.test_funcutils_fb_py3::test_wraps_inner_kwarg_only",
+  "tests.test_funcutils_fb_py3::test_wraps_posonly_defaulted_arg",
+  "tests.test_funcutils_fb_py3::test_wraps_py3",
+  "tests.test_funcutils_fb_py3::test_wraps_target_kwonly_arg",
+  "tests.test_funcutils_fb_py3::test_wraps_uninspectable_target"
+ ],
+ "accept_selectors": [
+  "tests/test_funcutils_fb_py3.py"
+ ],
+ "regress_scope": "full pytest run from the repository root (collection errors in the pinned environment are tolerated)",
+ "baseline_compile_break": false,
+ "f2p_absent_at_base": 0
+}

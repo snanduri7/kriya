@@ -1,0 +1,20 @@
+{
+ "id": "pydantic-settings#826",
+ "repo": "pydantic/pydantic-settings",
+ "pr": 826,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "tests/test_source_cli.py"
+ ],
+ "pkg": "pydantic_settings",
+ "src_layout": false,
+ "test_files": [
+  "tests/test_source_cli.py"
+ ],
+ "prod_files": [
+  "pydantic_settings/sources/providers/cli.py",
+  "pydantic_settings/sources/utils.py"
+ ],
+ "other_files": []
+}

@@ -1,0 +1,22 @@
+{
+ "id": "jsonschema#972",
+ "repo": "python-jsonschema/jsonschema",
+ "pr": 972,
+ "lang": "python",
+ "build": "python",
+ "test_modules": [
+  "jsonschema/tests/test_exceptions.py"
+ ],
+ "pkg": "jsonschema",
+ "src_layout": false,
+ "test_files": [
+  "jsonschema/tests/test_exceptions.py"
+ ],
+ "prod_files": [
+  "jsonschema/exceptions.py",
+  "jsonschema/validators.py"
+ ],
+ "other_files": [
+  "CHANGELOG.rst"
+ ]
+}

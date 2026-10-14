@@ -1,0 +1,100 @@
+[
+ [
+  0,
+  1,
+  "REJECT",
+  "2/107 required tests failed or were absent (executed 108)",
+  "String name = (String) entry.getKey();"
+ ],
+ [
+  1,
+  null,
+  "REJECT",
+  "candidate fault: compile/syntax/import error or explicit con",
+  "/**"
+ ],
+ [
+  2,
+  0,
+  "REJECT",
+  "candidate fault: compile/syntax/import error or explicit con",
+  "/** Records a promoted property name in the JSON path after it has been consumed"
+ ],
+ [
+  3,
+  null,
+  "REJECT",
+  "6/107 required tests failed or were absent (executed 108)",
+  "recordPromotedName(result);"
+ ],
+ [
+  4,
+  null,
+  "PASS",
+  "all 107 required tests passed",
+  "recordPromotedName(Long.toString(peekedLong));"
+ ],
+ [
+  5,
+  2,
+  "REJECT",
+  "1/107 required tests failed or were absent (executed 108)",
+  "String literal = peekedString;"
+ ],
+ [
+  6,
+  null,
+  "PASS",
+  "all 107 required tests passed",
+  "recordPromotedName(Long.toString(peekedLong));"
+ ],
+ [
+  7,
+  null,
+  "REJECT",
+  "1/107 required tests failed or were absent (executed 108)",
+  "recordPromotedName(peekedString);"
+ ],
+ [
+  8,
+  3,
+  "REJECT",
+  "1/107 required tests failed or were absent (executed 108)",
+  "String literal = peekedString;"
+ ],
+ [
+  9,
+  null,
+  "PASS",
+  "all 107 required tests passed",
+  "recordPromotedName(Long.toString(peekedLong));"
+ ],
+ [
+  10,
+  null,
+  "REJECT",
+  "1/107 required tests failed or were absent (executed 108)",
+  "recordPromotedName(peekedString);"
+ ],
+ [
+  11,
+  null,
+  "REJECT",
+  "1/107 required tests failed or were absent (executed 108)",
+  "String literal = peekedString;"
+ ],
+ [
+  12,
+  null,
+  "PASS",
+  "all 107 required tests passed",
+  "recordPromotedName(\"<skipped>\");"
+ ],
+ [
+  13,
+  null,
+  "REJECT",
+  "7/107 required tests failed or were absent (executed 108)",
+  "// Remember to update the JSON path once this name is consumed as a value (#1768"
+ ]
+]

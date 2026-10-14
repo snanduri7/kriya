@@ -1,0 +1,275 @@
+{
+ "id": "sqlparse#865",
+ "ref": [
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 88 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 88 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 88 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "baseline": [
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/88 required tests failed or were absent (executed 88)",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_get_real_name_multi_part_dotted"
+    ],
+    "note": "",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/88 required tests failed or were absent (executed 88)",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_get_real_name_multi_part_dotted"
+    ],
+    "note": "",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  },
+  {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/88 required tests failed or were absent (executed 88)",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_get_real_name_multi_part_dotted"
+    ],
+    "note": "",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 1
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   }
+  }
+ ],
+ "controls": {
+  "harmless": {
+   "accept": {
+    "verdict": "PASS",
+    "reason": "all 88 required tests passed",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 0
+   },
+   "regress": {
+    "verdict": "PASS",
+    "reason": "all 490 required tests passed",
+    "secs": 1.8,
+    "setup_secs": 0.0,
+    "n_executed": 492,
+    "n_required": 490,
+    "missing_head": [],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": null,
+    "f2p_failed_or_absent": null
+   },
+   "expected": "PASS",
+   "as_expected": true
+  },
+  "tamper_planted_pass": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "1/88 required tests failed or were absent (executed 88)",
+    "secs": 0.7,
+    "setup_secs": 0.0,
+    "n_executed": 88,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_get_real_name_multi_part_dotted"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['+conftest.py']",
+    "p2p_pass": 87,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "delete_package": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_2d_array_index",
+     "tests.test_parse::test_aliased_array_index",
+     "tests.test_parse::test_array_index_function_result",
+     "tests.test_parse::test_array_literal",
+     "tests.test_parse::test_configurable_keywords",
+     "tests.test_parse::test_configurable_regex"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  },
+  "unsatisfiable_requires_python": {
+   "accept": {
+    "verdict": "REJECT",
+    "reason": "candidate package does not build",
+    "secs": 0.3,
+    "setup_secs": 0.0,
+    "n_executed": 0,
+    "n_required": 88,
+    "missing_head": [
+     "tests.test_parse::test_2d_array_index",
+     "tests.test_parse::test_aliased_array_index",
+     "tests.test_parse::test_array_index_function_result",
+     "tests.test_parse::test_array_literal",
+     "tests.test_parse::test_configurable_keywords",
+     "tests.test_parse::test_configurable_regex"
+    ],
+    "note": "test infrastructure restored from ws: 1 path(s) ['~tests/test_parse.py']",
+    "p2p_pass": 0,
+    "f2p_failed_or_absent": 1
+   },
+   "expected": "REJECT",
+   "as_expected": true
+  }
+ },
+ "verdict": "CERTIFIED-WITH-LIMITS",
+ "limits": [
+  "no near-miss control (fewer than two executable production hunks, or none applied)",
+  "2 base tests fail or are skipped in this environment and are outside the regression set"
+ ],
+ "cost": {
+  "accept_secs": 0.7,
+  "regress_secs": 1.8,
+  "ref_good_total_secs": 2.5,
+  "baseline_setup_secs": 0.0
+ },
+ "repeats": 3
+}
