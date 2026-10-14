@@ -330,8 +330,37 @@ export interface RunDetail {
   diagnostics: Section;
   comparisons: Section;
   output: Section;
+  application_outcome?: Section1;
   [k: string]: unknown;
 }
+export interface Section1 {
+  /**
+   * Availability of an optional panel section (P-24). A host treats any value outside this list as unknown, never as success.
+   */
+  availability: 'recorded' | 'not_recorded' | 'unreadable' | 'excluded' | 'unsupported';
+  /**
+   * Which persisted record the data comes from (e.g. runs.run_events).
+   */
+  provenance?: string | null;
+  /**
+   * Why the section is not recorded/unreadable/excluded/unsupported (free text from Kriya).
+   */
+  reason?: string | null;
+  /**
+   * Present and non-null only when availability is recorded.
+   */
+  data?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  [k: string]: unknown;
+}
+
 // ---- RunEvent (history.schema.json#/$defs/RunEvent) ----
 /**
  * A recorded run event EXACTLY as Kriya serializes it (kriya/workflow/run_events.py::RunEvent.to_dict; every stored event is produced by it): kind, attempt, source, authority, message, failure_type, operation, details, created_at. Every field beyond these is preserved verbatim.
@@ -890,6 +919,29 @@ export interface ChangeApprovalReview {
       }[];
     }[];
   }[];
+}
+
+// ---- ApplicationOutcome (history.schema.json#/$defs/ApplicationOutcome) ----
+/**
+ * Did Kriya execute the application it built? EXECUTED carries the recorded command, exit code and bounded, secret-scrubbed output; `succeeded` is true only when the gate recorded success AND the last step exited 0 without timing out. NOT_APPLICABLE: no runtime execution was recorded (Kriya has no authoritative start instruction, so none is offered). UNKNOWN: the record is unreadable.
+ */
+export interface ApplicationOutcome {
+  status: 'EXECUTED' | 'NOT_APPLICABLE' | 'UNKNOWN';
+  reason?: string;
+  succeeded?: boolean;
+  attempt?: number | null;
+  command?: string | null;
+  commands?: string[];
+  exit_code?: number | null;
+  timed_out?: boolean;
+  stdout?: {
+    text: string;
+    truncated: boolean;
+  };
+  stderr?: {
+    text: string;
+    truncated: boolean;
+  };
 }
 
 // ---- ExecutionContext (workspace.schema.json#/$defs/ExecutionContext) ----

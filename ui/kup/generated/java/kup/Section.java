@@ -9,6 +9,9 @@ import java.util.Map;
 /**
  * An optional panel section: availability first; data only when recorded (D-5: nothing is
  * reconstructed).
+ *
+ * Section whose data is an ApplicationOutcome: a read-only projection of the recorded
+ * runtime-gate execution.
  */
 public class Section {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).

@@ -19,6 +19,7 @@ export const validateWorkspaceCreate: ((value: unknown) => boolean) & { errors?:
 export const validateConfigurationApprovalStatus: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateConfigurationApprove: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateChangeApprovalReview: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
+export const validateApplicationOutcome: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateExecutionContext: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateExecutionModelProbe: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };
 export const validateSkillsList: ((value: unknown) => boolean) & { errors?: { instancePath: string; message?: string; params?: Record<string, unknown> }[] | null };

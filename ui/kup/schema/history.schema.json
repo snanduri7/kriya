@@ -145,9 +145,24 @@
         "attribution": { "$ref": "common.schema.json#/$defs/Section" },
         "diagnostics": { "$ref": "common.schema.json#/$defs/Section" },
         "comparisons": { "$ref": "common.schema.json#/$defs/Section" },
-        "output": { "$ref": "common.schema.json#/$defs/Section" }
+        "output": { "$ref": "common.schema.json#/$defs/Section" },
+        "application_outcome": { "description": "Section whose data is an ApplicationOutcome: a read-only projection of the recorded runtime-gate execution.", "$ref": "common.schema.json#/$defs/Section" }
       },
       "additionalProperties": true
+    },
+    "ApplicationOutcome": {
+      "description": "Did Kriya execute the application it built? EXECUTED carries the recorded command, exit code and bounded, secret-scrubbed output; `succeeded` is true only when the gate recorded success AND the last step exited 0 without timing out. NOT_APPLICABLE: no runtime execution was recorded (Kriya has no authoritative start instruction, so none is offered). UNKNOWN: the record is unreadable.",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["EXECUTED", "NOT_APPLICABLE", "UNKNOWN"] }, "reason": { "type": "string" },
+        "succeeded": { "type": "boolean" }, "attempt": { "type": ["integer", "null"] },
+        "command": { "type": ["string", "null"] }, "commands": { "type": "array", "items": { "type": "string" } },
+        "exit_code": { "type": ["integer", "null"] }, "timed_out": { "type": "boolean" },
+        "stdout": { "type": "object", "required": ["text", "truncated"], "properties": { "text": { "type": "string" }, "truncated": { "type": "boolean" } }, "additionalProperties": false },
+        "stderr": { "type": "object", "required": ["text", "truncated"], "properties": { "text": { "type": "string" }, "truncated": { "type": "boolean" } }, "additionalProperties": false }
+      },
+      "additionalProperties": false
     },
     "Prompt": {
       "description": "history.prompt: explicitly requested stored prompt_rendered, labelled with its known role/scope; no claim of per-attempt completeness (P-25, P-30).",

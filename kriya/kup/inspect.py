@@ -283,6 +283,11 @@ def history_detail(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
     for col in JSON_TEXT_COLUMNS:
         parsed, present = _parsed_json_text(row[col])
         detail[col] = _section(parsed, f"runs.{col}", present, None if present else "column is NULL in the stored row")
+    # PRODUCT-UX-COMPLETION: a read-only projection of the recorded runtime-gate execution (never a guess; see kriya/kup/application_outcome.py).
+    from kriya.kup.application_outcome import application_outcome
+
+    gates = detail["gate_outcomes"]
+    detail["application_outcome"] = _section(application_outcome(gates["data"] if gates["availability"] == "recorded" else None), "derived:runs.gate_outcomes")
     # Not persisted by this Kriya version (P-30, D-5): honest, never reconstructed.
     for name, reason in (("context", "the trace row persists context only inside run_events (context.* events); no context record is stored"),
                          ("attribution", "the baseline persists failure categories, not causal attribution"),

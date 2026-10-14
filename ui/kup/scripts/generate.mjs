@@ -48,6 +48,7 @@ const TYPES = [
   ['ConfigurationApprovalStatus', 'workspace.schema.json', '#/$defs/ConfigurationApprovalStatus'],
   ['ConfigurationApprove', 'workspace.schema.json', '#/$defs/ConfigurationApprove'],
   ['ChangeApprovalReview', 'workspace.schema.json', '#/$defs/ChangeApprovalReview'],
+  ['ApplicationOutcome', 'history.schema.json', '#/$defs/ApplicationOutcome'],
   ['ExecutionContext', 'workspace.schema.json', '#/$defs/ExecutionContext'],
   ['ExecutionModelProbe', 'workspace.schema.json', '#/$defs/ExecutionModelProbe'],
   ['SkillsList', 'catalog.schema.json', '#/$defs/SkillsList'],

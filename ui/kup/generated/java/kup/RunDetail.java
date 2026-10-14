@@ -17,6 +17,7 @@ public class RunDetail {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
+    private Section applicationOutcome;
     private Section attribution;
     private Section comparisons;
     private Section context;
@@ -30,6 +31,15 @@ public class RunDetail {
     private Section output;
     private RunSummary run;
     private Section runEvents;
+
+    /**
+     * Section whose data is an ApplicationOutcome: a read-only projection of the recorded
+     * runtime-gate execution.
+     */
+    @JsonProperty("application_outcome")
+    public Section getApplicationOutcome() { return applicationOutcome; }
+    @JsonProperty("application_outcome")
+    public void setApplicationOutcome(Section value) { this.applicationOutcome = value; }
 
     @JsonProperty("attribution")
     public Section getAttribution() { return attribution; }

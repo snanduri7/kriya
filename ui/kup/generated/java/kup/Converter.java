@@ -32,6 +32,7 @@
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
 //     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
 //     ChangeApprovalReview data = Converter.ChangeApprovalReviewFromJsonString(jsonString);
+//     ApplicationOutcome data = Converter.ApplicationOutcomeFromJsonString(jsonString);
 //     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
 //     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
 //     SkillsList data = Converter.SkillsListFromJsonString(jsonString);
@@ -279,6 +280,14 @@ public class Converter {
 
     public static String ChangeApprovalReviewToJsonString(ChangeApprovalReview obj) throws JsonProcessingException {
         return getChangeApprovalReviewObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ApplicationOutcome ApplicationOutcomeFromJsonString(String json) throws IOException {
+        return getApplicationOutcomeObjectReader().readValue(json);
+    }
+
+    public static String ApplicationOutcomeToJsonString(ApplicationOutcome obj) throws JsonProcessingException {
+        return getApplicationOutcomeObjectWriter().writeValueAsString(obj);
     }
 
     public static ExecutionContext ExecutionContextFromJsonString(String json) throws IOException {
@@ -1147,6 +1156,37 @@ public class Converter {
     private static ObjectWriter getChangeApprovalReviewObjectWriter() {
         if (ChangeApprovalReviewWriter == null) instantiateChangeApprovalReviewMapper();
         return ChangeApprovalReviewWriter;
+    }
+
+    private static ObjectReader ApplicationOutcomeReader;
+    private static ObjectWriter ApplicationOutcomeWriter;
+
+    private static void instantiateApplicationOutcomeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ApplicationOutcomeReader = mapper.readerFor(ApplicationOutcome.class);
+        ApplicationOutcomeWriter = mapper.writerFor(ApplicationOutcome.class);
+    }
+
+    private static ObjectReader getApplicationOutcomeObjectReader() {
+        if (ApplicationOutcomeReader == null) instantiateApplicationOutcomeMapper();
+        return ApplicationOutcomeReader;
+    }
+
+    private static ObjectWriter getApplicationOutcomeObjectWriter() {
+        if (ApplicationOutcomeWriter == null) instantiateApplicationOutcomeMapper();
+        return ApplicationOutcomeWriter;
     }
 
     private static ObjectReader ExecutionContextReader;
