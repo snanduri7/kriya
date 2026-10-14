@@ -1,4 +1,4 @@
-"""Demo V2 scenario 02: the isolated offline-reuse task (count_top_level_functions) is a fair, deterministic discriminator.
+"""Demo V2 scenario 02, REJECTED candidate 1 (count_top_level_functions; its no-skill baseline passed, see the pre-registration addendum): the isolated offline-reuse task is a fair, deterministic discriminator.
 
 No model, no network. Real pytest runs of the fixture's own tests against hand-written implementations: the current-API reference must pass, and each obsolete or
 non-conforming construction must fail the way it is predicted to. A task that every variant passed, or that leaks the API fact, would not demonstrate knowledge reuse.
@@ -12,7 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SC = ROOT / "demo-v2" / "scenarios" / "02-knowledge-skill"
-FIXTURE = ROOT / "demo-v2" / "fixtures" / "knowledge-skill" / "repo"
+FIXTURE = ROOT / "demo-v2" / "fixtures" / "knowledge-skill-c1-rejected" / "repo"
+GOAL = SC / "goal.candidate-1-rejected.md"
 
 REFERENCE = '''
 import tree_sitter_python as tspython
@@ -115,14 +116,14 @@ def test_the_syntax_error_input_has_a_stable_recoverable_count_in_the_installed_
 
 def test_the_task_does_not_leak_the_api_fact_into_anything_the_model_can_read():
     forbidden = ("Parser", "Language", "language()", "root_node", "set_language", "tspython", "tree_sitter_python", "build_library", ".parse(", "children", "node.type")
-    readable = [SC / "goal.md", *(p for p in FIXTURE.iterdir() if p.is_file())]
-    assert {p.name for p in readable} == {"goal.md", "README.md", "requirements.txt", "outline.py", "test_outline.py"}
+    readable = [GOAL, *(p for p in FIXTURE.iterdir() if p.is_file())]
+    assert {p.name for p in readable} == {"goal.candidate-1-rejected.md", "README.md", "requirements.txt", "outline.py", "test_outline.py"}
     for path in readable:
         text = path.read_text(encoding="utf-8")
         for token in forbidden:
             assert token not in text, (path.name, token)
     # the goal still carries what KnowledgeGuard needs (pins) and the library the tests check, and requirements.txt matches the pins
-    goal = (SC / "goal.md").read_text(encoding="utf-8")
+    goal = GOAL.read_text(encoding="utf-8")
     assert "tree-sitter==0.25.2" in goal and "tree-sitter-python==0.25.0" in goal
     assert "tree-sitter==0.25.2" in (FIXTURE / "requirements.txt").read_text(encoding="utf-8")
 
@@ -130,4 +131,4 @@ def test_the_task_does_not_leak_the_api_fact_into_anything_the_model_can_read():
 def test_the_rejected_complex_task_is_kept_and_labelled_not_used():
     old = (SC / "goal.rejected-complex-task.md").read_text(encoding="utf-8")
     assert old.startswith("<!-- SCENARIO-B-COMPLEX-TASK-NOT-DEMO-SUITABLE")
-    assert old != (SC / "goal.md").read_text(encoding="utf-8")
+    assert old != GOAL.read_text(encoding="utf-8")

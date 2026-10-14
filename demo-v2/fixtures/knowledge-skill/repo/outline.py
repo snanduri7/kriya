@@ -1,5 +1,5 @@
-"""Counting functions in Python source code."""
+"""Locating functions in Python source code."""
 
 
-def count_top_level_functions(source: str) -> int:
+def function_start_offsets(data: bytes) -> list[int]:
     raise NotImplementedError

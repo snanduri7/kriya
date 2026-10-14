@@ -49,7 +49,11 @@ fixtures:
   - id: knowledge-skill
     dir: fixtures/knowledge-skill
     identity_file: fixtures/knowledge-skill/fixture.env
-    in_git: true       # self-authored; UNVALIDATED (scenario 02 is stopped)
+    in_git: true       # self-authored; candidate 2 (UTF-16 function offsets); UNVALIDATED (scenario 02 is stopped)
+  - id: knowledge-skill-c1-rejected
+    dir: fixtures/knowledge-skill-c1-rejected
+    identity_file: fixtures/knowledge-skill-c1-rejected/fixture.env
+    in_git: true       # candidate 1, REJECTED: its no-skill baseline passed completely; kept as evidence
 scripts:
   prepare: scripts/prepare_demo.sh
   reset: scripts/reset_demo.sh

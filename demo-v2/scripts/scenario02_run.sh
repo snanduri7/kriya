@@ -29,7 +29,7 @@ case "$MODE" in noskill|skill|acquire) ;; *) die "--mode must be noskill, skill 
 assert_work_outside_repo
 ensure_work_area
 SC_DIR="$(scenario_dir 02)"
-load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env"
+load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env"   # the ACTIVE candidate
 RUN="$DEMO_V2_WORK/scenario-02/$RUN_ID"
 [ ! -e "$RUN" ] || die "$RUN already exists; evidence is never overwritten (choose a new --run-id)"
 WS="$RUN/workspace"; EV="$RUN/evidence"
