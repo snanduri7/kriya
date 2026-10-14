@@ -4345,9 +4345,8 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
     afterward invalidates this approval entirely; it is not a blanket grant
     to the repository, the config file, or any future field."""
     from kriya.config.authority_approval import (
-        build_approval_artifact,
         describe_pending,
-        save_approval_artifact,
+        grant_local_approval,
         validate_trust_path_outside_workspace,
     )
 
@@ -4375,8 +4374,7 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
             sys.exit(1)
 
     try:
-        artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
-        save_approval_artifact(out_path, artifact)
+        artifact, _written = grant_local_approval(state.violations, state.config_dict, state.workspace_root, out_path)
     except _authority_user_errors() as error:
         _authority_fail(error)
     click.secho(

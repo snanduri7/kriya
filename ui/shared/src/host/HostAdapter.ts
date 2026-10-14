@@ -1,4 +1,4 @@
-import type { DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -77,6 +77,9 @@ export interface ExecutionHostPort {
   state(): Promise<ExecutionState>;
   /** Review decision (GUI final): the host forwards ONE typed decision to Kriya's `launch-decision` action and reports Kriya's answer. It never decides. */
   decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
+  /** Configuration approval: the host forwards ONE typed request ({workspace, fingerprint of the configuration the person reviewed}) to Kriya's `configuration.approve` and reports Kriya's answer.
+   * It never approves "whatever is current", never carries a setting, value or path, and holds no authority: Kriya re-resolves the configuration and refuses (APPROVAL_STALE) if it changed. Absent on a host with no execution backend. */
+  approveConfiguration?(request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult>;
   /** Ask the host for a native notification (approval waiting / run finished / run ended without success). Absent on a host with none. */
   notify?(request: NotifyRequest): Promise<NotifyResult>;
 }

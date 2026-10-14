@@ -6,12 +6,14 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SKILLS_DESCRIBE, SKILLS_LIST, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, TOOLS_APPROVAL_STATE, TOOLS_DESCRIBE, TOOLS_LIST, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
+    CAPABILITIES, CONFIGURATION_APPROVAL_STATUS, CONFIGURATION_APPROVE, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SKILLS_DESCRIBE, SKILLS_LIST, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, TOOLS_APPROVAL_STATE, TOOLS_DESCRIBE, TOOLS_LIST, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
         switch (this) {
             case CAPABILITIES: return "capabilities";
+            case CONFIGURATION_APPROVAL_STATUS: return "configuration.approval_status";
+            case CONFIGURATION_APPROVE: return "configuration.approve";
             case EVIDENCE_CALL_CONTENT: return "evidence.call_content";
             case EVIDENCE_CHANGE_CONTENT: return "evidence.change_content";
             case EVIDENCE_MANIFEST: return "evidence.manifest";
@@ -43,6 +45,8 @@ public enum Operation {
     @JsonCreator
     public static Operation forValue(String value) throws IOException {
         if (value.equals("capabilities")) return CAPABILITIES;
+        if (value.equals("configuration.approval_status")) return CONFIGURATION_APPROVAL_STATUS;
+        if (value.equals("configuration.approve")) return CONFIGURATION_APPROVE;
         if (value.equals("evidence.call_content")) return EVIDENCE_CALL_CONTENT;
         if (value.equals("evidence.change_content")) return EVIDENCE_CHANGE_CONTENT;
         if (value.equals("evidence.manifest")) return EVIDENCE_MANIFEST;

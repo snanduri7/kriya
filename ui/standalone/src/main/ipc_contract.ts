@@ -23,6 +23,10 @@ export const IPC_CHANNELS = {
   // GUI final: the review decision. ONE typed action (workspace + the identities Kriya gave the pending review + approve|reject); the host forwards it to
   // Kriya's review-decision action and reports Kriya's answer. The renderer cannot name a command, an option or a different authority.
   decideApproval: 'kriya:host:execution:decide',
+  // GUI configuration approval: ONE typed action ({workspace, fingerprint}) that asks Kriya to record the approval for the configuration the person reviewed.
+  // Deliberately NOT part of the generic query channel (`configuration.approve` is refused there, like `workspace.create`); the renderer can never name a setting,
+  // a value, a path or a digest to trust. See config_approval_host.ts.
+  approveConfiguration: 'kriya:host:config:approve',
   // End-user experience: New Project. Two typed steps; the renderer never names where a project is created (an opaque token for a folder the person chose
   // in the NATIVE chooser stands for the parent) and Kriya (`workspace.create`) makes the folder. See project_host.ts.
   chooseProjectParent: 'kriya:host:project:choose-parent',
@@ -83,6 +87,8 @@ export type KupRequest =
   | { operation: 'execution.preflight'; workspace: string }
   | { operation: 'launch.status'; workspace: string; launch_id: string }
   | { operation: 'workspace.create'; parent: string; name: string }
+  | { operation: 'configuration.approval_status'; workspace: string }
+  | { operation: 'configuration.approve'; workspace: string; fingerprint: string }
   | { operation: 'execution.context'; workspace: string }
   | { operation: 'execution.model_probe'; workspace: string }
   | { operation: 'skills.list'; workspace: string }
@@ -200,6 +206,10 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     case 'workspace.create':
       // Never reachable from the renderer's generic query channel: creating a folder needs the token-gated, native-chooser flow (project_host.ts).
       return { ok: false, message: 'workspace.create is not available through the query channel' };
+    case 'configuration.approve':
+      // Never reachable from the renderer's generic query channel: an approval is a security decision with its own typed channel (config_approval_host.ts).
+      return { ok: false, message: 'configuration.approve is not available through the query channel' };
+    case 'configuration.approval_status':
     case 'workspace.status':
     case 'workspace.describe':
     case 'execution.context':
@@ -282,6 +292,17 @@ export function validateDecideApproval(v: unknown): ValidationResult<DecideAppro
   if (typeof v.candidate_digest !== 'string' || !CANDIDATE_DIGEST_RE.test(v.candidate_digest)) return { ok: false, message: 'candidate_digest is malformed' };
   if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
   return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, candidate_digest: v.candidate_digest, decision: v.decision } };
+}
+
+export const FINGERPRINT_RE = /^sha256:[0-9a-f]{64}$/;
+export interface ApproveConfigurationRequest { workspace: string; fingerprint: string }
+
+/** Configuration approval: exactly {workspace, fingerprint}. There is no field for a setting, a value, a path, a digest to trust or a store location. */
+export function validateApproveConfiguration(v: unknown): ValidationResult<ApproveConfigurationRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'fingerprint,workspace') return { ok: false, message: 'approveConfiguration takes exactly workspace and fingerprint' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.fingerprint !== 'string' || !FINGERPRINT_RE.test(v.fingerprint)) return { ok: false, message: 'fingerprint must be the review fingerprint Kriya gave (sha256:<64 hex>)' };
+  return { ok: true, value: { workspace: w.value, fingerprint: v.fingerprint } };
 }
 
 export function validateOpenInIde(v: unknown): ValidationResult<{ path: string; line?: number }> {

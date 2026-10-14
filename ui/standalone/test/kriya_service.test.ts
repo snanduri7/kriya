@@ -62,10 +62,12 @@ describe('allowlist (nothing but typed KUP requests reaches the child)', () => {
     expect(() => toServiceRequest('q1', { operation: 'history.list', snapshot_id: SID, shell: 'x' } as unknown as KupRequest)).toThrow(/does not take: shell/);
   });
   it('the table covers exactly the operations the host validator accepts', () => {
-    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'];
-    // workspace.create is in the SERVICE table (the host's own token-gated New Project flow sends it) but is NEVER accepted from the renderer's query channel.
-    expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create'].sort());
+    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'configuration.approval_status'];
+    // workspace.create and configuration.approve are in the SERVICE table (the host's own token-gated flows send them) but are NEVER accepted from the renderer's query channel.
+    expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create', 'configuration.approve'].sort());
     expect(validateKupRequest({ operation: 'workspace.create', parent: '/tmp', name: 'x' }).ok).toBe(false);
+    expect(validateKupRequest({ operation: 'configuration.approve', workspace: '/tmp', fingerprint: 'sha256:' + 'a'.repeat(64) }).ok).toBe(false);
+    expect(validateKupRequest({ operation: 'configuration.approval_status', workspace: '/tmp' }).ok).toBe(true);
     for (const op of ['recover', 'generate', 'fix', 'evidence.blob', 'history.delete', 'shell', '']) expect(validateKupRequest({ operation: op }).ok, op).toBe(false);
     expect(SERVICE_ARGV).toEqual(['kup-stdio']);
     expect(IPC_CHANNELS.query).toBe('kriya:kup:query');

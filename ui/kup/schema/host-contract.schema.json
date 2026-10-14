@@ -250,6 +250,18 @@
         {
           "type": "object",
           "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "configuration.approval_status" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace", "fingerprint"],
+          "properties": { "operation": { "const": "configuration.approve" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace"],
           "properties": { "operation": { "const": "execution.context" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
           "additionalProperties": false
         },
@@ -1103,6 +1115,23 @@
             "null"
           ]
         }
+      },
+      "additionalProperties": false
+    },
+    "ApproveConfigurationRequest": {
+      "description": "Approve the configuration the person reviewed. Exactly these two fields: the folder (which must be the one the host has open) and the review fingerprint Kriya gave with configuration.approval_status. There is no field for settings, values, a path, a digest to trust or a store location.",
+      "type": "object",
+      "required": ["workspace", "fingerprint"],
+      "properties": { "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint." } },
+      "additionalProperties": false
+    },
+    "ApproveConfigurationResult": {
+      "description": "Kriya's answer to an approval request, passed through. approved=true means Kriya wrote (or found already current) the approval for exactly the reviewed configuration. approved=false carries a closed code: APPROVAL_STALE (the configuration changed after it was reviewed; nothing was approved), APPROVAL_UNAVAILABLE, or a host refusal such as WORKSPACE_NOT_OPEN, INVALID_REQUEST, RUN_ACTIVE, APPROVAL_IN_FLIGHT.",
+      "type": "object",
+      "required": ["approved", "outcome", "code", "message", "reason"],
+      "properties": {
+        "approved": { "type": "boolean" }, "outcome": { "type": ["string", "null"] }, "code": { "type": ["string", "null"] },
+        "message": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
 import { GoalComposer } from './GoalComposer';
 import { PreflightSummary, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
@@ -26,13 +27,15 @@ function ProjectHome() {
   const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
   const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
   const showDetails = () => setDetailsOpen(true);
+  // The only thing between the person and Start Run is an approval they can give here.
+  const actionOnly = ex.canApproveConfiguration && summary.state === 'blocked' && summary.blockers.length > 0 && summary.blockers.every((b) => b.code === CONFIG_APPROVAL_BLOCKER);
   return (
     <div className="ck-project">
       <div className="ck-project-head">
         <h1>{f.name}</h1>
         <span className="muted mono small" title={f.workspace}>{f.workspace}</span>
         <span className="grow" />
-        {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
+        {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : actionOnly ? <Badge tone="warn">Action required</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
       </div>
       {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
       <RecentRuns />

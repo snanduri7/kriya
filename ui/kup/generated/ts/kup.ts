@@ -31,6 +31,8 @@ export type ErrorCode =
   | 'EVIDENCE_BLOB_TOO_LARGE'
   | 'WORKSPACE_UNAVAILABLE'
   | 'LAUNCH_NOT_FOUND'
+  | 'APPROVAL_STALE'
+  | 'APPROVAL_UNAVAILABLE'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -60,6 +62,8 @@ export interface Envelope {
     | 'tools.list'
     | 'tools.describe'
     | 'tools.approval_state'
+    | 'configuration.approval_status'
+    | 'configuration.approve'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -776,6 +780,50 @@ export interface WorkspaceCreate {
   [k: string]: unknown;
 }
 
+// ---- ConfigurationApprovalStatus (workspace.schema.json#/$defs/ConfigurationApprovalStatus) ----
+/**
+ * data of `configuration.approval_status`: which operator-controlled settings of a folder need an approval and whether a current approval covers them, exactly as `kriya authority inspect` reports it. Only the NAMES of the settings are carried; no configuration value is ever sent.
+ */
+export interface ConfigurationApprovalStatus {
+  workspace: string;
+  identity: string;
+  /**
+   * not_required: nothing in the configuration needs approval. required: a current approval does not cover it. approved: a current approval covers it. unavailable: an approval cannot be given from this application (see reason).
+   */
+  status: 'not_required' | 'required' | 'approved' | 'unavailable';
+  /**
+   * no_approval | stale_approval | store_unreadable | trust_file_in_effect | trust_file_inside_workspace | store_inside_workspace | null
+   */
+  reason: string | null;
+  required: boolean;
+  can_approve: boolean;
+  blocking_reason: string | null;
+  protected_fields: {
+    field: string;
+    classification: string;
+    source: string;
+  }[];
+  fingerprint: null | string;
+  scope: string;
+  values_shown: false;
+  note: string;
+  [k: string]: unknown;
+}
+
+// ---- ConfigurationApprove (workspace.schema.json#/$defs/ConfigurationApprove) ----
+/**
+ * data of `configuration.approve`: the approval Kriya recorded (the same artifact `kriya authority approve` writes), or already_approved when a current approval already covered the reviewed configuration and nothing was written.
+ */
+export interface ConfigurationApprove {
+  workspace: string;
+  identity: string;
+  outcome: 'approved' | 'already_approved';
+  approved_fields: string[];
+  approval_digest: string | null;
+  scope: string;
+  [k: string]: unknown;
+}
+
 // ---- ExecutionContext (workspace.schema.json#/$defs/ExecutionContext) ----
 /**
  * data of `execution.context`: the Skills, tools and per-role model routing a run in this folder would have, from the resolved configuration and files; starts no process and touches no network. Rule text, commands, arguments, environment and credentials are never included.
@@ -1405,6 +1453,24 @@ export type KupRequest =
       name: string;
     }
   | {
+      operation: 'configuration.approval_status';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'configuration.approve';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      /**
+       * The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint.
+       */
+      fingerprint: string;
+    }
+  | {
       operation: 'execution.context';
       /**
        * Absolute path without control characters.
@@ -1653,6 +1719,33 @@ export interface DecideApprovalResult {
   review_id?: string | null;
   decision?: string | null;
   decided_at?: string | null;
+}
+
+// ---- ApproveConfigurationRequest (host-contract.schema.json#/$defs/ApproveConfigurationRequest) ----
+/**
+ * Approve the configuration the person reviewed. Exactly these two fields: the folder (which must be the one the host has open) and the review fingerprint Kriya gave with configuration.approval_status. There is no field for settings, values, a path, a digest to trust or a store location.
+ */
+export interface ApproveConfigurationRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  /**
+   * The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint.
+   */
+  fingerprint: string;
+}
+
+// ---- ApproveConfigurationResult (host-contract.schema.json#/$defs/ApproveConfigurationResult) ----
+/**
+ * Kriya's answer to an approval request, passed through. approved=true means Kriya wrote (or found already current) the approval for exactly the reviewed configuration. approved=false carries a closed code: APPROVAL_STALE (the configuration changed after it was reviewed; nothing was approved), APPROVAL_UNAVAILABLE, or a host refusal such as WORKSPACE_NOT_OPEN, INVALID_REQUEST, RUN_ACTIVE, APPROVAL_IN_FLIGHT.
+ */
+export interface ApproveConfigurationResult {
+  approved: boolean;
+  outcome: string | null;
+  code: string | null;
+  message: string | null;
+  reason: string | null;
 }
 
 // ---- RecentWorkspaces (host-contract.schema.json#/$defs/RecentWorkspaces) ----

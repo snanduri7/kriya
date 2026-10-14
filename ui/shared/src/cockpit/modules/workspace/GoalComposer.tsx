@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Badge, useExecution } from '../../core';
+import { CONFIG_APPROVAL_BLOCKER, ConfigApprovalCard } from './ConfigApproval';
 import { BLOCKER_FIX, type ReadinessSummary } from './Readiness';
 
 export const GOAL_MAX = 16000;
@@ -35,6 +37,12 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
   const reason = startDisabledReason(summary, empty, tooLong);
   const canStart = reason === null && !ex.locked;
   const submit = () => { if (canStart && !ex.starting) void ex.start(); };
+  // Configuration approval is an ACTION the person takes here (Kriya records it); every other blocker is shown as it is. Both are Kriya's own preflight.
+  const blocked = summary.state === 'blocked' || summary.state === 'error';
+  const approvalBlocker = ex.canApproveConfiguration && summary.state === 'blocked' ? summary.blockers.find((b) => b.code === CONFIG_APPROVAL_BLOCKER) : undefined;
+  const others = approvalBlocker ? summary.blockers.filter((b) => b !== approvalBlocker) : summary.blockers;
+  const [approvedNote, setApprovedNote] = useState(false);
+  const approvalOnly = approvalBlocker !== undefined && others.length === 0;
   return (
     <section className="ck-composer" aria-label="Start a run">
       <h2>What do you want Kriya to do?</h2>
@@ -43,14 +51,16 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
         placeholder="Describe the engineering task, e.g. “Add a clamp(value, low, high) function with tests.”"
         onChange={(e) => ex.setGoal(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); } }} />
-      {summary.state === 'blocked' || summary.state === 'error' ? (
+      {approvalBlocker ? <ConfigApprovalCard onDetails={onDetails} onApproved={() => setApprovedNote(true)} /> : null}
+      {blocked && others.length ? (
         <div className="ck-state ck-blocker" role="alert">
-          <strong>⚠ Cannot start a run</strong>
-          <ul>{summary.blockers.map((b) => <li key={b.code}>{b.message} <span className="muted small">({b.code})</span>{BLOCKER_FIX[b.code] ? <div className="muted small">{BLOCKER_FIX[b.code]}</div> : null}</li>)}</ul>
+          <strong>{approvalBlocker ? 'Also needs attention' : '⚠ Cannot start a run'}</strong>
+          <ul>{others.map((b) => <li key={b.code}>{b.message} <span className="muted small">({b.code})</span>{BLOCKER_FIX[b.code] ? <div className="muted small">{BLOCKER_FIX[b.code]}</div> : null}</li>)}</ul>
           <button type="button" onClick={onRecheck}>Check again</button>{' '}
           <button type="button" className="ck-link" onClick={onDetails}>View configuration</button>
         </div>
       ) : null}
+      {approvedNote && !approvalBlocker && summary.state !== 'checking' ? <div className="ck-state" role="status"><strong>✓ Configuration approved</strong></div> : null}
       {summary.warnings.length ? <div className="ck-state" role="note"><strong>⚠ A run can start, but</strong><ul>{summary.warnings.map((w) => <li key={w}>{w}</li>)}</ul><button type="button" className="ck-link" onClick={onDetails}>View readiness details</button></div> : null}
       {ex.refusal ? (
         <div className="ck-state" role="alert">
@@ -65,7 +75,7 @@ export function GoalComposer({ summary, onDetails, onRecheck }: { summary: Readi
         <kbd className="ck-kbd" aria-hidden="true">{START_SHORTCUT}</kbd>
         <button type="button" className="ck-primary ck-cta ck-start" disabled={!canStart || ex.starting} aria-describedby="ck-start-why" onClick={submit}>{ex.starting ? 'Starting…' : 'Start Run'}</button>
       </div>
-      <div id="ck-start-why" className="muted small" role="status">{reason && summary.state !== 'blocked' && summary.state !== 'error' ? reason : ''}</div>
+      <div id="ck-start-why" className="muted small" role="status">{approvalOnly ? 'Approve the configuration above to start.' : reason && !blocked ? reason : ''}</div>
     </section>
   );
 }

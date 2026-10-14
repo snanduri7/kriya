@@ -476,6 +476,38 @@ def resolve_with_approval(
     return violations
 
 
+# --- Granting: the ONE function every client uses to write a local approval -----
+
+def grant_local_approval(
+    violations: List[ConfigAuthorityViolation], config_dict: Dict[str, Any], workspace_root: str,
+    out_path: Optional[str] = None,
+) -> Tuple[ApprovalArtifact, str]:
+    """Builds and persists the approval for EXACTLY the violations passed in (computed against ``config_dict``), at ``out_path`` or this
+    workspace's default local store. The one write path of an approval: ``kriya authority approve`` and the desktop's
+    ``configuration.approve`` (kriya/kup/authority_ops.py) both call it, so the two clients cannot differ in what they persist. It decides
+    nothing: the caller has already resolved the configuration fresh and obtained the human confirmation."""
+    path = out_path or default_local_approval_path(workspace_root)
+    artifact = build_approval_artifact(violations, config_dict, workspace_root)
+    save_approval_artifact(path, artifact)
+    return artifact, path
+
+
+# --- Review fingerprint: what a person reviewed, comparable at approval time -------
+
+# Process-local and random: a fingerprint is only ever compared by this process (a review taken before a restart of the Kriya service is refused as
+# stale and reviewed again), and a holder of a fingerprint cannot use it to test guesses of an MCP ``env`` secret offline.
+_REVIEW_FINGERPRINT_SALT = secrets.token_hex(16)
+
+
+def review_fingerprint(violations: List[ConfigAuthorityViolation], config_dict: Dict[str, Any]) -> Optional[str]:
+    """``sha256:<hex>`` over the complete security-field set exactly as an approval would bind it (same record builder, same set digest), or
+    None when nothing needs approval. NOT an approval digest: the artifact's own salt and digests are untouched. It exists so that an approval
+    can be tied to the configuration a person reviewed (a different set, or any changed value, gives a different fingerprint)."""
+    if not violations:
+        return None
+    return "sha256:" + compute_set_digest(build_security_field_records(violations, config_dict, _REVIEW_FINGERPRINT_SALT))
+
+
 # --- Display: safe, redacted representation for inspect/approve CLI --------
 
 def _redact_display_value(field_path: str, value: Any) -> Any:

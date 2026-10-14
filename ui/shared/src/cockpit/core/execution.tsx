@@ -12,7 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionHostPort } from '../../host/HostAdapter';
-import type { DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
+import type { ApproveConfigurationResult, DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
 import type { SelectionStore } from './selectionStore';
@@ -83,6 +83,13 @@ export interface ExecutionApi {
   setGoal(goal: string): void;
   preflight: PreflightState;
   refreshPreflight(): void;
+  /** A re-check is in flight: `preflight` still shows the PREVIOUS answer until Kriya's new one arrives. */
+  preflightStale: boolean;
+  /** This host can record a configuration approval (the Project page offers Review & Approve only then). */
+  canApproveConfiguration: boolean;
+  /** Ask Kriya to record the approval for the configuration the person reviewed (its fingerprint, as Kriya gave it). Kriya re-resolves and refuses a changed
+   * configuration; the preflight is ALWAYS asked again afterwards - readiness is never concluded from this answer. The typed goal is untouched. */
+  approveConfiguration(fingerprint: string): Promise<ApproveConfigurationResult>;
   /** A Start Run request is in flight (preflight round trip + launch): the button is disabled and a second click is not sent. */
   starting: boolean;
   refusal: StartRefusal | null;
@@ -300,6 +307,19 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   }, [port, workspace]);
 
   const refreshPreflight = useCallback(() => setNonce((n) => n + 1), []);
+  const preflightStale = key !== null && done !== null && done.key !== key && done.workspace === workspace;
+  const canApproveConfiguration = port?.approveConfiguration !== undefined;
+  const approveConfiguration = useCallback(async (fingerprint: string): Promise<ApproveConfigurationResult> => {
+    if (!port?.approveConfiguration || workspace === null) return { approved: false, outcome: null, code: 'EXECUTION_UNAVAILABLE', message: 'This host cannot record a configuration approval.', reason: null };
+    let result: ApproveConfigurationResult;
+    try {
+      result = await port.approveConfiguration({ workspace, fingerprint });
+    } catch (error) {
+      result = { approved: false, outcome: null, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), reason: null };
+    }
+    refreshPreflight(); // whatever the answer, readiness is read from Kriya again
+    return result;
+  }, [port, workspace, refreshPreflight]);
 
   const start = useCallback(async () => {
     if (!port || workspace === null || startingRef.current) return;
@@ -415,7 +435,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const locked = starting || (run !== null && run.stage !== 'finished');
   // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
   const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
-    [port, goal, preflight, refreshPreflight, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
+    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }

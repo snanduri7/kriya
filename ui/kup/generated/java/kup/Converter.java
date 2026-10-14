@@ -29,6 +29,8 @@
 //     ExecutionPreflight data = Converter.ExecutionPreflightFromJsonString(jsonString);
 //     LaunchStatus data = Converter.LaunchStatusFromJsonString(jsonString);
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
+//     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
+//     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
 //     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
 //     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
 //     SkillsList data = Converter.SkillsListFromJsonString(jsonString);
@@ -57,6 +59,8 @@
 //     ExecutionState data = Converter.ExecutionStateFromJsonString(jsonString);
 //     DecideApprovalRequest data = Converter.DecideApprovalRequestFromJsonString(jsonString);
 //     DecideApprovalResult data = Converter.DecideApprovalResultFromJsonString(jsonString);
+//     ApproveConfigurationRequest data = Converter.ApproveConfigurationRequestFromJsonString(jsonString);
+//     ApproveConfigurationResult data = Converter.ApproveConfigurationResultFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
 
 package kup;
@@ -250,6 +254,22 @@ public class Converter {
 
     public static String WorkspaceCreateToJsonString(WorkspaceCreate obj) throws JsonProcessingException {
         return getWorkspaceCreateObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ConfigurationApprovalStatus ConfigurationApprovalStatusFromJsonString(String json) throws IOException {
+        return getConfigurationApprovalStatusObjectReader().readValue(json);
+    }
+
+    public static String ConfigurationApprovalStatusToJsonString(ConfigurationApprovalStatus obj) throws JsonProcessingException {
+        return getConfigurationApprovalStatusObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ConfigurationApprove ConfigurationApproveFromJsonString(String json) throws IOException {
+        return getConfigurationApproveObjectReader().readValue(json);
+    }
+
+    public static String ConfigurationApproveToJsonString(ConfigurationApprove obj) throws JsonProcessingException {
+        return getConfigurationApproveObjectWriter().writeValueAsString(obj);
     }
 
     public static ExecutionContext ExecutionContextFromJsonString(String json) throws IOException {
@@ -474,6 +494,22 @@ public class Converter {
 
     public static String DecideApprovalResultToJsonString(DecideApprovalResult obj) throws JsonProcessingException {
         return getDecideApprovalResultObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ApproveConfigurationRequest ApproveConfigurationRequestFromJsonString(String json) throws IOException {
+        return getApproveConfigurationRequestObjectReader().readValue(json);
+    }
+
+    public static String ApproveConfigurationRequestToJsonString(ApproveConfigurationRequest obj) throws JsonProcessingException {
+        return getApproveConfigurationRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ApproveConfigurationResult ApproveConfigurationResultFromJsonString(String json) throws IOException {
+        return getApproveConfigurationResultObjectReader().readValue(json);
+    }
+
+    public static String ApproveConfigurationResultToJsonString(ApproveConfigurationResult obj) throws JsonProcessingException {
+        return getApproveConfigurationResultObjectWriter().writeValueAsString(obj);
     }
 
     public static List<String> RecentWorkspacesFromJsonString(String json) throws IOException {
@@ -1009,6 +1045,68 @@ public class Converter {
     private static ObjectWriter getWorkspaceCreateObjectWriter() {
         if (WorkspaceCreateWriter == null) instantiateWorkspaceCreateMapper();
         return WorkspaceCreateWriter;
+    }
+
+    private static ObjectReader ConfigurationApprovalStatusReader;
+    private static ObjectWriter ConfigurationApprovalStatusWriter;
+
+    private static void instantiateConfigurationApprovalStatusMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ConfigurationApprovalStatusReader = mapper.readerFor(ConfigurationApprovalStatus.class);
+        ConfigurationApprovalStatusWriter = mapper.writerFor(ConfigurationApprovalStatus.class);
+    }
+
+    private static ObjectReader getConfigurationApprovalStatusObjectReader() {
+        if (ConfigurationApprovalStatusReader == null) instantiateConfigurationApprovalStatusMapper();
+        return ConfigurationApprovalStatusReader;
+    }
+
+    private static ObjectWriter getConfigurationApprovalStatusObjectWriter() {
+        if (ConfigurationApprovalStatusWriter == null) instantiateConfigurationApprovalStatusMapper();
+        return ConfigurationApprovalStatusWriter;
+    }
+
+    private static ObjectReader ConfigurationApproveReader;
+    private static ObjectWriter ConfigurationApproveWriter;
+
+    private static void instantiateConfigurationApproveMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ConfigurationApproveReader = mapper.readerFor(ConfigurationApprove.class);
+        ConfigurationApproveWriter = mapper.writerFor(ConfigurationApprove.class);
+    }
+
+    private static ObjectReader getConfigurationApproveObjectReader() {
+        if (ConfigurationApproveReader == null) instantiateConfigurationApproveMapper();
+        return ConfigurationApproveReader;
+    }
+
+    private static ObjectWriter getConfigurationApproveObjectWriter() {
+        if (ConfigurationApproveWriter == null) instantiateConfigurationApproveMapper();
+        return ConfigurationApproveWriter;
     }
 
     private static ObjectReader ExecutionContextReader;
@@ -1877,6 +1975,68 @@ public class Converter {
     private static ObjectWriter getDecideApprovalResultObjectWriter() {
         if (DecideApprovalResultWriter == null) instantiateDecideApprovalResultMapper();
         return DecideApprovalResultWriter;
+    }
+
+    private static ObjectReader ApproveConfigurationRequestReader;
+    private static ObjectWriter ApproveConfigurationRequestWriter;
+
+    private static void instantiateApproveConfigurationRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ApproveConfigurationRequestReader = mapper.readerFor(ApproveConfigurationRequest.class);
+        ApproveConfigurationRequestWriter = mapper.writerFor(ApproveConfigurationRequest.class);
+    }
+
+    private static ObjectReader getApproveConfigurationRequestObjectReader() {
+        if (ApproveConfigurationRequestReader == null) instantiateApproveConfigurationRequestMapper();
+        return ApproveConfigurationRequestReader;
+    }
+
+    private static ObjectWriter getApproveConfigurationRequestObjectWriter() {
+        if (ApproveConfigurationRequestWriter == null) instantiateApproveConfigurationRequestMapper();
+        return ApproveConfigurationRequestWriter;
+    }
+
+    private static ObjectReader ApproveConfigurationResultReader;
+    private static ObjectWriter ApproveConfigurationResultWriter;
+
+    private static void instantiateApproveConfigurationResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ApproveConfigurationResultReader = mapper.readerFor(ApproveConfigurationResult.class);
+        ApproveConfigurationResultWriter = mapper.writerFor(ApproveConfigurationResult.class);
+    }
+
+    private static ObjectReader getApproveConfigurationResultObjectReader() {
+        if (ApproveConfigurationResultReader == null) instantiateApproveConfigurationResultMapper();
+        return ApproveConfigurationResultReader;
+    }
+
+    private static ObjectWriter getApproveConfigurationResultObjectWriter() {
+        if (ApproveConfigurationResultWriter == null) instantiateApproveConfigurationResultMapper();
+        return ApproveConfigurationResultWriter;
     }
 
     private static ObjectReader RecentWorkspacesReader;

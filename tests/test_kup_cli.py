@@ -236,6 +236,19 @@ def test_every_error_code_is_producible():
             produced.add(json.loads(res.output)["error"]["code"])  # EVIDENCE_CONTENT_UNAVAILABLE / EVIDENCE_BLOB_TOO_LARGE
     produced.add(_json(["traces", "--json", "--describe-workspace", os.path.join(os.path.dirname(os.path.abspath(__file__)), "no-such-folder")])["error"]["code"])  # WORKSPACE_UNAVAILABLE
     produced.add(_json(["traces", "--json", "--launch-status", "20261010T101010-00000000", "--workspace", os.path.dirname(os.path.abspath(__file__))])["error"]["code"])  # LAUNCH_NOT_FOUND
+    # GUI configuration approval: a stale review and an approval that cannot be recorded, through the real operations in a scratch folder (own authority store)
+    import tempfile
+
+    from kriya.kup.cli_ops import run_kup_operation
+    with tempfile.TemporaryDirectory() as scratch, patch.dict(os.environ, {"KRIYA_AUTHORITY_HOME": os.path.join(scratch, "authority")}):
+        folder = os.path.join(scratch, "proj")
+        os.mkdir(folder)
+        with open(os.path.join(folder, "kriya.yaml"), "w") as f:
+            f.write("mcp:\n  x:\n    command: /bin/true\n")
+        produced.add(run_kup_operation(AppConfig(), {"operation": "configuration.approve", "workspace": folder, "fingerprint": "sha256:" + "0" * 64})["error"]["code"])  # APPROVAL_STALE
+        with patch.dict(os.environ, {"KRIYA_TRUST_FILE": os.path.join(scratch, "trust.json")}):
+            reviewed = run_kup_operation(AppConfig(), {"operation": "configuration.approval_status", "workspace": folder})["data"]["fingerprint"]
+            produced.add(run_kup_operation(AppConfig(), {"operation": "configuration.approve", "workspace": folder, "fingerprint": reviewed})["error"]["code"])  # APPROVAL_UNAVAILABLE
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below
     assert produced >= set(policy.ERROR_CODES), set(policy.ERROR_CODES) - produced

@@ -140,7 +140,8 @@ def test_concurrent_creators_produce_exactly_one_winner(tmp_path):
 def test_create_works_even_when_configuration_is_unusable():
     """The serve loop loads no configuration for workspace.create: a broken kriya.yaml cannot block making a folder."""
     src = open(serve.__file__, encoding="utf-8").read()
-    assert 'operation not in ("workspace.status", "workspace.create")' in src
+    assert "operation not in NO_CONFIGURATION_OPERATIONS" in src
+    assert {"workspace.status", "workspace.create"} <= set(serve.NO_CONFIGURATION_OPERATIONS)
 
 
 def test_create_is_in_the_vocabulary_with_its_exact_arguments():

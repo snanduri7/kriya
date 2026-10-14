@@ -7,7 +7,7 @@
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
-import type { DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
 
 export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review';
 
@@ -27,6 +27,21 @@ export interface FixtureExecutionOptions {
     stateDirectory?: string | null;
     observable?: boolean;
     approvals?: 'change_review' | 'configured_mode';
+  };
+  /**
+   * A scripted configuration-authority world (DEV/TEST ONLY): the operator-controlled settings this folder's configuration carries. While any exist and no current
+   * approval covers them, the preflight reports the CONFIG_AUTHORITY_REFUSED blocker (as Kriya does) and `configuration.approval_status` lists their NAMES.
+   * `configuration.approve` records an approval only for the fingerprint the status gave and only while the configuration is unchanged (`changeConfiguration()`).
+   * It takes precedence over `facts.authority`.
+   */
+  configuration?: {
+    fields: readonly string[];
+    /** The approval cannot be given from this application: the status is `unavailable` with this reason. */
+    unavailable?: { reason: string; message: string };
+    /** `configuration.approve` fails with this typed error (e.g. APPROVAL_UNAVAILABLE / store_unwritable). */
+    approveFault?: { code: string; message: string; reason?: string };
+    /** The host offers no way to record an approval (a browser test host): the page falls back to saying so. */
+    noApprovalPort?: boolean;
   };
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
@@ -64,9 +79,16 @@ export class FixtureExecution {
   /** Every decision request the host received (for assertions). */
   readonly decisions: DecideApprovalRequest[] = [];
   readonly port: ExecutionHostPort;
+  /** Every configuration approval request the host received, and every status read (for assertions). */
+  readonly approvals: ApproveConfigurationRequest[] = [];
+  statusReads = 0;
+  private configFields: string[];
+  private configRevision = 1;
+  private approvedFingerprint: string | null = null;
 
   constructor(private readonly options: FixtureExecutionOptions = {}) {
     this.outcome = options.outcome ?? 'success';
+    this.configFields = [...(options.configuration?.fields ?? [])];
     this.port = {
       startRun: async (request): Promise<StartRunResult> => {
         this.starts.push({ workspace: request.workspace, goal: request.goal });
@@ -82,11 +104,55 @@ export class FixtureExecution {
       },
       state: async (): Promise<ExecutionState> => this.hostState(),
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
+      ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.approveConfig(request) }),
       notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
     };
   }
 
   setOutcome(outcome: FixtureOutcome): void { this.outcome = outcome; }
+
+  // ---- the scripted configuration-authority world ---------------------------------------------------------------------
+  /** Test hook: the folder's operator-controlled settings change (any of them added, removed or changed): the fingerprint changes, a prior approval stops covering. */
+  changeConfiguration(fields?: readonly string[]): void { if (fields) this.configFields = [...fields]; this.configRevision += 1; }
+  /** Test hook: the approval is revoked (as `kriya authority revoke`). */
+  revokeConfigurationApproval(): void { this.approvedFingerprint = null; }
+  private configScripted(): boolean { return this.options.configuration !== undefined; }
+  private fingerprint(): string | null {
+    if (this.configFields.length === 0) return null;
+    let h = 17;
+    for (const ch of `${this.configFields.join(',')}#${this.configRevision}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return 'sha256:' + h.toString(16).padStart(8, '0').repeat(8);
+  }
+  private configCovered(): boolean { const fp = this.fingerprint(); return fp !== null && this.approvedFingerprint === fp; }
+  /** `configuration.approval_status` data: NAMES only, as Kriya reports it. */
+  approvalStatus(workspace: string): ConfigurationApprovalStatus {
+    this.statusReads += 1;
+    const fp = this.fingerprint();
+    const unavailable = this.options.configuration?.unavailable;
+    const covered = this.configCovered();
+    const status = fp === null ? 'not_required' : unavailable ? 'unavailable' : covered ? 'approved' : 'required';
+    return {
+      workspace, identity: 'ab'.repeat(32), status, reason: status === 'required' ? (this.approvedFingerprint === null ? 'no_approval' : 'stale_approval') : unavailable?.reason ?? null, required: fp !== null,
+      can_approve: status === 'required', blocking_reason: unavailable?.message ?? null,
+      protected_fields: this.configFields.map((field) => ({ field, classification: field.startsWith('mcp.') ? 'security_authority' : 'platform_policy', source: 'auto_discovered_cwd' })),
+      fingerprint: fp, scope: 'This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.',
+      values_shown: false, note: 'Only the names of the settings are shown. Their values are not sent to the application.',
+    } as ConfigurationApprovalStatus;
+  }
+  /** Kriya's `configuration.approve`, scripted: the same refusals in the same order (grammar, stale, unavailable, fault), then the approval. */
+  private approveConfig(request: ApproveConfigurationRequest): ApproveConfigurationResult {
+    this.approvals.push(request);
+    const no = (code: string, message: string, reason: string | null = null): ApproveConfigurationResult => ({ approved: false, outcome: null, code, message, reason });
+    if (!/^sha256:[0-9a-f]{64}$/.test(request.fingerprint)) return no('INVALID_REQUEST', 'fingerprint must be the review fingerprint Kriya gave (sha256:<64 hex>)', 'invalid_fingerprint');
+    if (this.fingerprint() !== request.fingerprint) return no('APPROVAL_STALE', 'The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.', 'configuration_changed');
+    const unavailable = this.options.configuration?.unavailable;
+    if (unavailable) return no('APPROVAL_UNAVAILABLE', unavailable.message, unavailable.reason);
+    const fault = this.options.configuration?.approveFault;
+    if (fault) return no(fault.code, fault.message, fault.reason ?? null);
+    if (this.configCovered()) return { approved: true, outcome: 'already_approved', code: null, message: null, reason: null };
+    this.approvedFingerprint = request.fingerprint;
+    return { approved: true, outcome: 'approved', code: null, message: null, reason: null };
+  }
   launched(): boolean { return this.frame >= 0; }
   workspace(): string { return this.launchWorkspace; }
   goal(): string { return this.launchGoal; }
@@ -128,8 +194,9 @@ export class FixtureExecution {
   /** `execution.preflight` for a folder: ready unless the folder is scripted with a blocker. */
   preflight(workspace: string, stateDirectory: string, blocked: { code: string; message: string } | null): Json {
     const facts = this.options.facts ?? {};
-    const blockers = [...(blocked ? [blocked] : []), ...(facts.blockers ?? [])];
-    const authority = facts.authority ?? 'no_findings';
+    const scripted = this.configScripted();
+    const authority = scripted ? (this.configFields.length === 0 ? 'no_findings' : this.configCovered() ? 'approved' : 'refused') : facts.authority ?? 'no_findings';
+    const blockers = [...(blocked ? [blocked] : []), ...(scripted && authority === 'refused' ? [{ code: 'CONFIG_AUTHORITY_REFUSED', message: `${this.configFields.length} field(s) in this folder's configuration need an operator approval (kriya authority approve): ${this.configFields.slice(0, 6).join(', ')}` }] : []), ...(facts.blockers ?? [])];
     const git = facts.gitAvailable === false ? { tool: 'git', available: false, path: null, reason: 'exits 69: the Xcode license has not been accepted' } : { tool: 'git', available: true, path: '/usr/bin/git' };
     return {
       ready: blockers.length === 0, blockers,

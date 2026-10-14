@@ -58,6 +58,8 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     case 'launch.status':
       return ['traces', '--json', '--launch-status', request.launch_id, '--workspace', request.workspace];
     case 'workspace.create':
+    case 'configuration.approval_status':
+    case 'configuration.approve':
     case 'execution.context':
     case 'execution.model_probe':
     case 'skills.list':

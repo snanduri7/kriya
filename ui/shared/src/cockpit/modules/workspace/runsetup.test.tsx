@@ -17,7 +17,7 @@ async function openPanel(fixture: FixtureHostOptions = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
   goTo('Project');
-  await screen.findAllByText(/^✓ Ready|Cannot start/);
+  await screen.findAllByText(/^✓ Ready|Cannot start|Action required/);
   const readiness = await screen.findByRole('region', { name: 'Readiness' }); // under Project details: the compact summary is what sits above Start Run
   return { ...mounted, readiness };
 }
@@ -256,11 +256,15 @@ describe('readiness matrix: each failure names Kriya\'s fact, its code, and the 
     expect(alert).toHaveTextContent('accepting the Xcode license makes /usr/bin/git work');
     expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
   });
-  it('configuration authority refused: the Configuration row is red and names the terminal action an operator takes', async () => {
+  it('configuration authority refused: the Configuration row says it needs approval and the page offers the approval itself, not a terminal command', async () => {
     const { readiness } = await open({ authority: 'refused', blockers: [{ code: 'CONFIG_AUTHORITY_REFUSED', message: '2 field(s) in this folder\'s configuration need an operator approval' }] });
     const config = row(readiness, 'Configuration');
-    expect(within(config).getByText(/Refused: operator-only fields need an approval/)).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('`kriya authority approve` in a terminal; this application cannot');
+    expect(within(config).getByText(/Needs approval: operator-controlled settings have not been approved yet/)).toBeInTheDocument();
+    const card = screen.getByRole('region', { name: 'Configuration approval' });
+    expect(card).toHaveTextContent('ACTION REQUIRED');
+    expect(card).toHaveTextContent('Configuration approval required');
+    expect(screen.queryByText(/in a terminal; this application cannot/)).toBeNull();
+    expect(screen.queryByText(/Cannot start a run/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Start Run' })).toBeDisabled();
   });
   it('configuration that does not load: red, "unreadable", with the fix being the kriya.yaml; routing and Skills say they cannot be shown', async () => {

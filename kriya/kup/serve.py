@@ -51,6 +51,8 @@ ARGUMENTS: Dict[str, frozenset] = {
     "execution.preflight": frozenset({"workspace"}),
     "launch.status": frozenset({"workspace", "launch_id"}),
     "workspace.create": frozenset({"parent", "name"}),
+    "configuration.approval_status": frozenset({"workspace"}),
+    "configuration.approve": frozenset({"workspace", "fingerprint"}),
     "execution.context": frozenset({"workspace"}),
     "execution.model_probe": frozenset({"workspace"}),
     "skills.list": frozenset({"workspace"}),
@@ -64,6 +66,9 @@ ARGUMENTS: Dict[str, frozenset] = {
     "evidence.change_content": frozenset({"run_id", "seq", "part"}),
     "evidence.call_content": frozenset({"run_id", "seq", "part"}),
 }
+# Operations that load no configuration of the service itself, like `kriya runs status`: creating a folder must work when a configuration is broken, and
+# reviewing / approving a folder's configuration is how a denied one is made usable (`kriya authority` is likewise reachable while a configuration is denied).
+NO_CONFIGURATION_OPERATIONS = ("workspace.status", "workspace.create", "configuration.approval_status", "configuration.approve")
 assert set(ARGUMENTS) == set(policy.OPERATIONS), "every KUP operation has an argument table, and nothing else is dispatchable"
 
 
@@ -127,7 +132,7 @@ def answer(request: Dict[str, Any], config_path: Optional[str], trust_file: Opti
 
     operation, request_id = request["operation"], request["id"]
     cfg = None
-    if operation not in ("workspace.status", "workspace.create"):  # operations that, like `kriya runs status`, load no configuration (creating a folder must work when a configuration is broken)
+    if operation not in NO_CONFIGURATION_OPERATIONS:
         try:
             cfg = load_config(config_path, trust_file=trust_file)  # per request: SECURITY_AUTHORITY is never read once and kept
         except Exception as error:  # noqa: BLE001 - any load failure is the typed D-7 envelope, as the one-shot command does

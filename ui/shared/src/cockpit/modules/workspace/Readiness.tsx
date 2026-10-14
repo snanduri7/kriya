@@ -10,13 +10,14 @@ const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR', config: '
 const AUTHORITY: Record<string, string> = {
   no_findings: 'No findings: this folder\'s configuration sets nothing only an operator may set',
   approved: 'Operator-only fields are present and covered by a durable approval',
-  refused: 'Refused: operator-only fields need an approval (kriya authority approve)',
+  refused: 'Needs approval: operator-controlled settings have not been approved yet',
   failed: 'The configuration could not be loaded',
 };
 
 /** Who can fix a blocker, keyed on Kriya's closed blocker codes. The code and Kriya's own message are always shown too; this only says what authority acts next. */
 const BLOCKER_FIX: Record<string, string> = {
-  CONFIG_AUTHORITY_REFUSED: 'An operator must approve those fields with `kriya authority approve` in a terminal; this application cannot.',
+  // Shown only by a host that cannot record the approval itself; on the desktop the Project page offers Review & Approve instead.
+  CONFIG_AUTHORITY_REFUSED: 'This window cannot record the approval. In a terminal, run `kriya authority approve` in this folder, then check again.',
   CONFIG_LOAD_FAILED: 'Fix the kriya.yaml in this folder (or the Kriya installation). Kriya will not guess a configuration.',
   RUN_ACTIVE: 'Wait for the other run to finish; one run owns a folder at a time.',
   RECOVERY_REQUIRED: 'The last run left the folder mid-change. Recover it with `kriya runs recover` in a terminal, then check again.',

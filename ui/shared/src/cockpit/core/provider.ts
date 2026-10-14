@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
 } from '../../model/kup';
 import type { ExecutionHostPort, HostSettings, OpenInIdeResult, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -46,6 +46,8 @@ export interface UIProvider {
   describeWorkspace(workspace: string, signal?: AbortSignal): Promise<ProviderResult<WorkspaceDescribe>>;
   /** What a run in this folder would be, resolved by Kriya as a terminal `kriya generate` there would be (configuration, state directory, models, authority). */
   executionPreflight(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionPreflight>>;
+  /** Which operator-controlled settings of this folder need an approval and whether a current approval covers them: NAMES only, a review fingerprint, never a value. */
+  configurationApprovalStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ConfigurationApprovalStatus>>;
   /** The Skills, tools and per-role model routing a run in this folder would have (configuration/file-derived; starts nothing). */
   executionContext(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionContext>>;
   /** One bounded probe of the configured local model server(s): is it answering, and does it serve each configured model. */

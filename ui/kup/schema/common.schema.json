@@ -82,6 +82,8 @@
         "EVIDENCE_BLOB_TOO_LARGE",
         "WORKSPACE_UNAVAILABLE",
         "LAUNCH_NOT_FOUND",
+        "APPROVAL_STALE",
+        "APPROVAL_UNAVAILABLE",
         "HOST_ERROR"
       ]
     },
@@ -257,6 +259,8 @@
             "tools.list",
             "tools.describe",
             "tools.approval_state",
+            "configuration.approval_status",
+            "configuration.approve",
             "snapshot.acquire",
             "snapshot.list",
             "snapshot.prune",

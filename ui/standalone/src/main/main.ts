@@ -23,6 +23,7 @@ import { runKriya } from './kriya_process';
 import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
+import { ConfigApprovalHost } from './config_approval_host';
 import { ProjectHost } from './project_host';
 import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
@@ -66,6 +67,7 @@ let settings: SettingsStore;
 let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
 let approvals: ApprovalHost;
+let configApprovals: ConfigApprovalHost;
 let projects: ProjectHost;
 let notifications: NotificationHost;
 const liveNotifications = new Set<Notification>(); // a shown notification is kept until it is clicked or closed (otherwise it can be collected before the person sees it)
@@ -257,6 +259,10 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return approvals.decide(raw);
   });
+  ipcMain.handle(IPC_CHANNELS.approveConfiguration, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return configApprovals.approve(raw);
+  });
   ipcMain.handle(IPC_CHANNELS.notifyRun, (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return notifications.notify(raw);
@@ -312,6 +318,10 @@ app.whenReady().then(async () => {
     launch: launchExecution, prepare: prepareExecution, currentWorkspace: () => workspaces.current(), mintLaunchId, now: () => new Date(),
     preflight: (workspace) => kupQuery({ operation: 'execution.preflight', workspace }),
     log: dev?.traceLine,
+  });
+  configApprovals = new ConfigApprovalHost({
+    approve: (workspace, fingerprint) => kupQuery({ operation: 'configuration.approve', workspace, fingerprint }),
+    currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   approvals = new ApprovalHost({
     run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,

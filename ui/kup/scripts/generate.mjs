@@ -45,6 +45,8 @@ const TYPES = [
   ['ExecutionPreflight', 'workspace.schema.json', '#/$defs/ExecutionPreflight'],
   ['LaunchStatus', 'workspace.schema.json', '#/$defs/LaunchStatus'],
   ['WorkspaceCreate', 'workspace.schema.json', '#/$defs/WorkspaceCreate'],
+  ['ConfigurationApprovalStatus', 'workspace.schema.json', '#/$defs/ConfigurationApprovalStatus'],
+  ['ConfigurationApprove', 'workspace.schema.json', '#/$defs/ConfigurationApprove'],
   ['ExecutionContext', 'workspace.schema.json', '#/$defs/ExecutionContext'],
   ['ExecutionModelProbe', 'workspace.schema.json', '#/$defs/ExecutionModelProbe'],
   ['SkillsList', 'catalog.schema.json', '#/$defs/SkillsList'],
@@ -73,6 +75,8 @@ const TYPES = [
   ['ExecutionState', 'host-contract.schema.json', '#/$defs/ExecutionState'],
   ['DecideApprovalRequest', 'host-contract.schema.json', '#/$defs/DecideApprovalRequest'],
   ['DecideApprovalResult', 'host-contract.schema.json', '#/$defs/DecideApprovalResult'],
+  ['ApproveConfigurationRequest', 'host-contract.schema.json', '#/$defs/ApproveConfigurationRequest'],
+  ['ApproveConfigurationResult', 'host-contract.schema.json', '#/$defs/ApproveConfigurationResult'],
   ['RecentWorkspaces', 'host-contract.schema.json', '#/$defs/RecentWorkspaces'],
   ['HostMessages', 'host-contract.schema.json', '#/$defs/Messages'],
 ];

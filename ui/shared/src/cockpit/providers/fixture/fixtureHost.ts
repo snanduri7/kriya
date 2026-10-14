@@ -239,7 +239,7 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'configuration.approval_status', 'configuration.approve'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
@@ -391,6 +391,11 @@ export class FixtureHost implements HostAdapter {
         return this.env('execution.preflight', this.exec.preflight(request.workspace, SOURCE.state_directory, blocked), this.live, SOURCE);
       }
       case 'workspace.create': return this.err('workspace.create', 'INVALID_REQUEST', 'the fixture host creates projects through its workspace port only');
+      case 'configuration.approval_status': {
+        if (!this.folder(request.workspace) || !this.exec) return this.err('configuration.approval_status', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        return this.env('configuration.approval_status', this.exec.approvalStatus(request.workspace), this.live, null);
+      }
+      case 'configuration.approve': return this.err('configuration.approve', 'INVALID_REQUEST', 'configuration.approve is not available through the query channel');
       case 'execution.context': {
         if (!this.folder(request.workspace)) return this.err('execution.context', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
         const name = request.workspace.slice(request.workspace.lastIndexOf('/') + 1);

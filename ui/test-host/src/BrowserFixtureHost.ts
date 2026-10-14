@@ -75,6 +75,8 @@ export class BrowserFixtureHost implements HostAdapter {
       case 'launch.status': return this.load('errors/LAUNCH_NOT_FOUND.json') as Promise<KupEnvelope>;
       // The legacy M1 inspector has no New Project, Skills or Tools views.
       case 'workspace.create':
+      case 'configuration.approval_status':
+      case 'configuration.approve':
       case 'execution.context':
       case 'execution.model_probe':
       case 'skills.list':

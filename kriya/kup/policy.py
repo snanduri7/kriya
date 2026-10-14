@@ -45,6 +45,8 @@ OPERATIONS = (
     "tools.list",  # configured MCP servers and enabled plugins as ToolDescriptors; starts nothing
     "tools.describe",  # one ToolDescriptor by id (mcp:<server> / plugin:<name>); no secret material
     "tools.approval_state",  # what the durable invocation-approval store can say about one tool without starting it (never APPROVED)
+    "configuration.approval_status",  # which operator-controlled settings of a folder need approval, and whether a current approval covers them; names only, never values
+    "configuration.approve",  # record the approval for exactly the configuration the person reviewed (a typed {workspace, fingerprint}); the same write the CLI makes
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",
@@ -82,12 +84,15 @@ EVIDENCE_CONTENT_UNAVAILABLE = "EVIDENCE_CONTENT_UNAVAILABLE"  # authorized, but
 WORKSPACE_UNAVAILABLE = "WORKSPACE_UNAVAILABLE"              # a folder to open is missing, not a directory or unreadable (extra: reason)
 LAUNCH_NOT_FOUND = "LAUNCH_NOT_FOUND"                        # no launch record with that id for the folder (extra: reason)
 EVIDENCE_BLOB_TOO_LARGE = "EVIDENCE_BLOB_TOO_LARGE"          # the part is over the response cap (extra: bytes_total)
+APPROVAL_STALE = "APPROVAL_STALE"                            # the configuration is not the one the person reviewed; nothing was approved (extra: reason)
+APPROVAL_UNAVAILABLE = "APPROVAL_UNAVAILABLE"                # an approval cannot be recorded here: trust file in effect, store inside the folder, store unwritable (extra: reason)
 ERROR_CODES = (
     UNSUPPORTED_SCHEMA_VERSION, INVALID_RESPONSE, INVALID_REQUEST, STORE_BUSY, READ_ONLY_UNAVAILABLE,
     RESPONSE_TOO_LARGE, CONFIG_AUTHORITY_REFUSED, CONFIG_LOAD_FAILED, SNAPSHOT_MISSING, SNAPSHOT_UNAVAILABLE, SNAPSHOT_FAILED,
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
     EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
     EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, WORKSPACE_UNAVAILABLE, LAUNCH_NOT_FOUND,
+    APPROVAL_STALE, APPROVAL_UNAVAILABLE,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.

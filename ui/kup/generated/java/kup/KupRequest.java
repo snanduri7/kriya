@@ -22,6 +22,7 @@ public class KupRequest {
     private String runid;
     private String name;
     private String parent;
+    private String fingerprint;
     private String skillid;
     private String toolid;
     private String launchid;
@@ -97,6 +98,15 @@ public class KupRequest {
     public String getParent() { return parent; }
     @JsonProperty("parent")
     public void setParent(String value) { this.parent = value; }
+
+    /**
+     * The review fingerprint Kriya gave with the status this person reviewed; Kriya approves
+     * only if the configuration it now resolves has the same fingerprint.
+     */
+    @JsonProperty("fingerprint")
+    public String getFingerprint() { return fingerprint; }
+    @JsonProperty("fingerprint")
+    public void setFingerprint(String value) { this.fingerprint = value; }
 
     /**
      * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.

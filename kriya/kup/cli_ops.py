@@ -60,6 +60,10 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             return _workspace_describe(cfg, request, request_id)
         if operation in ("execution.preflight", "launch.status"):
             return _execution(cfg, operation, request, request_id)
+        if operation in ("configuration.approval_status", "configuration.approve"):
+            from kriya.kup import authority_ops
+
+            return (authority_ops.status if operation == "configuration.approval_status" else authority_ops.approve)(cfg, request, request_id)
         if operation == "workspace.create":
             from kriya.kup import project_ops
 
