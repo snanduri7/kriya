@@ -60,6 +60,11 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     case 'workspace.create':
     case 'execution.context':
     case 'execution.model_probe':
+    case 'skills.list':
+    case 'skills.describe':
+    case 'tools.list':
+    case 'tools.describe':
+    case 'tools.approval_state':
       // Served by the persistent Kriya service only (the one-shot grammar has no flag for them, by design).
       throw new Error(`${request.operation} is served only by the persistent Kriya service`);
     default: {

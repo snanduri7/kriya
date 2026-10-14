@@ -62,7 +62,7 @@ describe('allowlist (nothing but typed KUP requests reaches the child)', () => {
     expect(() => toServiceRequest('q1', { operation: 'history.list', snapshot_id: SID, shell: 'x' } as unknown as KupRequest)).toThrow(/does not take: shell/);
   });
   it('the table covers exactly the operations the host validator accepts', () => {
-    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'];
+    const accepted = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'];
     // workspace.create is in the SERVICE table (the host's own token-gated New Project flow sends it) but is NEVER accepted from the renderer's query channel.
     expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create'].sort());
     expect(validateKupRequest({ operation: 'workspace.create', parent: '/tmp', name: 'x' }).ok).toBe(false);

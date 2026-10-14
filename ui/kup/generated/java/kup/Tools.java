@@ -13,16 +13,16 @@ public class Tools {
     @JsonAnySetter
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
-    private Health health;
+    private ToolsHealth health;
     private String healthNote;
     private String management;
     private List<MCPServer> mcpServers;
     private Plugins plugins;
 
     @JsonProperty("health")
-    public Health getHealth() { return health; }
+    public ToolsHealth getHealth() { return health; }
     @JsonProperty("health")
-    public void setHealth(Health value) { this.health = value; }
+    public void setHealth(ToolsHealth value) { this.health = value; }
 
     @JsonProperty("health_note")
     public String getHealthNote() { return healthNote; }

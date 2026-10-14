@@ -261,6 +261,36 @@
         },
         {
           "type": "object",
+          "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "skills.list" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace", "skill_id"],
+          "properties": { "operation": { "const": "skills.describe" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "skill_id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "description": "An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "tools.list" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace", "tool_id"],
+          "properties": { "operation": { "const": "tools.describe" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "tool_id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "description": "An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["operation", "workspace", "tool_id"],
+          "properties": { "operation": { "const": "tools.approval_state" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "tool_id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "description": "An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "required": [
             "operation",
             "workspace",

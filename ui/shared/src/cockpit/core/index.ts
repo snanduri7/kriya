@@ -1,5 +1,6 @@
 /** The public surface of UI Core: the only thing feature modules import (from '../../core'). */
 export * from './async';
+export * from './catalogView';
 export { CopyText } from './CopyText';
 export * from './availability';
 export * from './capability';

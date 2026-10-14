@@ -22,6 +22,8 @@ public class KupRequest {
     private String runid;
     private String name;
     private String parent;
+    private String skillid;
+    private String toolid;
     private String launchid;
     private Boolean fromTrace;
     private Long attempt;
@@ -95,6 +97,22 @@ public class KupRequest {
     public String getParent() { return parent; }
     @JsonProperty("parent")
     public void setParent(String value) { this.parent = value; }
+
+    /**
+     * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.
+     */
+    @JsonProperty("skill_id")
+    public String getSkillid() { return skillid; }
+    @JsonProperty("skill_id")
+    public void setSkillid(String value) { this.skillid = value; }
+
+    /**
+     * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.
+     */
+    @JsonProperty("tool_id")
+    public String getToolid() { return toolid; }
+    @JsonProperty("tool_id")
+    public void setToolid(String value) { this.toolid = value; }
 
     /**
      * The shape of a Kriya run id; the launch id IS the run id.

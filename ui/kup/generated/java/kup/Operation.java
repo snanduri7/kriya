@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
+    CAPABILITIES, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SKILLS_DESCRIBE, SKILLS_LIST, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, TOOLS_APPROVAL_STATE, TOOLS_DESCRIBE, TOOLS_LIST, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
@@ -24,10 +24,15 @@ public enum Operation {
             case HISTORY_LIST: return "history.list";
             case HISTORY_PROMPT: return "history.prompt";
             case LAUNCH_STATUS: return "launch.status";
+            case SKILLS_DESCRIBE: return "skills.describe";
+            case SKILLS_LIST: return "skills.list";
             case SNAPSHOT_ACQUIRE: return "snapshot.acquire";
             case SNAPSHOT_LIST: return "snapshot.list";
             case SNAPSHOT_PRUNE: return "snapshot.prune";
             case SNAPSHOT_VERIFY: return "snapshot.verify";
+            case TOOLS_APPROVAL_STATE: return "tools.approval_state";
+            case TOOLS_DESCRIBE: return "tools.describe";
+            case TOOLS_LIST: return "tools.list";
             case WORKSPACE_CREATE: return "workspace.create";
             case WORKSPACE_DESCRIBE: return "workspace.describe";
             case WORKSPACE_STATUS: return "workspace.status";
@@ -50,10 +55,15 @@ public enum Operation {
         if (value.equals("history.list")) return HISTORY_LIST;
         if (value.equals("history.prompt")) return HISTORY_PROMPT;
         if (value.equals("launch.status")) return LAUNCH_STATUS;
+        if (value.equals("skills.describe")) return SKILLS_DESCRIBE;
+        if (value.equals("skills.list")) return SKILLS_LIST;
         if (value.equals("snapshot.acquire")) return SNAPSHOT_ACQUIRE;
         if (value.equals("snapshot.list")) return SNAPSHOT_LIST;
         if (value.equals("snapshot.prune")) return SNAPSHOT_PRUNE;
         if (value.equals("snapshot.verify")) return SNAPSHOT_VERIFY;
+        if (value.equals("tools.approval_state")) return TOOLS_APPROVAL_STATE;
+        if (value.equals("tools.describe")) return TOOLS_DESCRIBE;
+        if (value.equals("tools.list")) return TOOLS_LIST;
         if (value.equals("workspace.create")) return WORKSPACE_CREATE;
         if (value.equals("workspace.describe")) return WORKSPACE_DESCRIBE;
         if (value.equals("workspace.status")) return WORKSPACE_STATUS;

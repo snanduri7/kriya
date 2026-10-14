@@ -19,7 +19,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlsplit, urlunsplit
 
 from kriya.control.workspace_identity import workspace_identity
@@ -27,10 +27,9 @@ from kriya.core.llm import is_local_url
 from kriya.kup.execution import _CWD_LOCK, _load_in
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.workspace_ops import validated_workspace
-from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.skills.service import MAX_SKILLS, SkillService
 
 ROLES = ("planner", "architect", "developer", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
-MAX_SKILLS = 500
 PROBE_TIMEOUT_SECONDS = 3.0
 PROBE_DEADLINE_SECONDS = 4.0  # the WHOLE probe, however many endpoints: the persistent service answers one request at a time, so this read must be short
 PROBE_MAX_ENDPOINTS = 6
@@ -67,33 +66,15 @@ def routing(cfg) -> List[Dict[str, Any]]:
     return rows
 
 
-def _staged_rule_count(skill_dir: Optional[str]) -> int:
-    if not skill_dir:
-        return 0
-    try:
-        with open(os.path.join(skill_dir, "staged_rules.txt"), "r", encoding="utf-8", errors="replace") as handle:
-            return sum(1 for line in handle if line.strip())
-    except OSError:
-        return 0
-
-
 def skills_summary(cfg, workspace: str) -> Dict[str, Any]:
-    from kriya.skills.skill import SkillEngine, get_global_skills_dir
-
-    engine = SkillEngine.from_config(cfg, workspace_path=workspace)
-    engine.discover_and_load()
-    shared = os.path.realpath(get_global_skills_dir())
-    items = []
-    for skill in sorted(engine.list_skills(), key=lambda s: s.name.lower())[:MAX_SKILLS]:
-        origin = "kriya_install" if skill.source_path and path_relation(shared, skill.source_path) is PathRelation.WITHIN else "workspace_or_configured"
-        items.append({
-            "name": skill.name, "description": skill.description, "category": skill.category, "tags": list(skill.tags)[:20],
-            "supported_versions": skill.supported_versions, "verified": skill.verified, "verified_context": skill.verified_context,
-            "verified_at": skill.verified_at, "gap_acknowledged": skill.verification_gap_acknowledged, "origin": origin,
-            "rule_count": len(skill.rules), "has_instructions": bool(skill.instructions.strip()), "example_count": len(skill.examples),
-            "staged_rule_count": _staged_rule_count(skill.source_path),
-        })
-    total = len(engine.list_skills())
+    """The Skills metadata block of ``execution.context``: built from ``SkillService`` (the one owner of how a skill is described), unchanged on the wire."""
+    descriptors, total = SkillService(cfg, workspace).list()
+    items = [{
+        "name": d.name, "description": d.description, "category": d.category, "tags": list(d.tags), "supported_versions": d.supported_versions,
+        "verified": d.verified, "verified_context": d.verified_context, "verified_at": d.verified_at, "gap_acknowledged": d.verification_gap_acknowledged,
+        "origin": d.origin, "rule_count": d.rule_count, "has_instructions": d.has_instructions, "example_count": d.example_count,
+        "staged_rule_count": d.staged_rule_count,
+    } for d in descriptors]
     return {"items": items, "total": total, "truncated": total > MAX_SKILLS, "selection": "automatic",
             "selection_note": "Kriya selects Skills automatically for each run from the goal and the repository; there is no manual selection. The Skills a run used are recorded with the run.",
             "management": "Skills are created, reviewed and promoted with `kriya skills` in a terminal; this application does not change them."}

@@ -17,8 +17,8 @@ const CHARS = ['a', 'Z', '0', '9', '-', '_', '.', ':', '/', ' ', '\u0000', '\n',
 const str = (max = 40): string => Array.from({ length: Math.floor(rand() * max) }, () => pick(CHARS)).join('');
 const WEIRD: unknown[] = [null, undefined, true, false, 0, -1, 1.5, NaN, Infinity, 2 ** 53, '', [], {}, [[]], () => 1, Symbol('x'), 10n, new Date(0), /x/, { toString: () => 'x' }, Object.create(null), { __proto__: { polluted: 1 } }];
 const OPS = ['capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'evidence.manifest', 'evidence.verify', 'evidence.records',
-  'evidence.change_content', 'evidence.call_content', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'shell.exec', 'evidence.__proto__', ''];
-const KEYS = ['operation', 'workspace', 'run_id', 'snapshot_id', 'launch_id', 'parent', 'name', 'token', 'kind', 'cursor', 'limit', 'seq', 'part', 'kind', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'keep', 'verify', 'from_trace', 'goal', 'path', 'line', '__proto__', 'constructor', 'extra', 'argv', 'command', 'shell'];
+  'evidence.change_content', 'evidence.call_content', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'shell.exec', 'evidence.__proto__', ''];
+const KEYS = ['operation', 'workspace', 'skill_id', 'tool_id', 'run_id', 'snapshot_id', 'launch_id', 'parent', 'name', 'token', 'kind', 'cursor', 'limit', 'seq', 'part', 'kind', 'unit', 'phase', 'role', 'attempt', 'from_seq', 'keep', 'verify', 'from_trace', 'goal', 'path', 'line', '__proto__', 'constructor', 'extra', 'argv', 'command', 'shell'];
 const value = (depth = 0): unknown => {
   const r = rand();
   if (r < 0.4) return str();
@@ -30,6 +30,7 @@ const value = (depth = 0): unknown => {
 const object = (depth = 0): Record<string, unknown> => Object.fromEntries(Array.from({ length: Math.floor(rand() * 7) }, () => [pick(KEYS), value(depth)]));
 const kupRequest = (): unknown => (rand() < 0.15 ? value() : { ...object(), operation: pick(OPS) });
 const N = 20_000;
+const PERSISTENT_ONLY = ['execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state'];
 const plain = (v: unknown) => v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
 
 describe('validators never throw and accept only the grammar', () => {
@@ -44,7 +45,7 @@ describe('validators never throw and accept only the grammar', () => {
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
       expect(OPS).toContain(result.value.operation);
       expect(result.value.operation).not.toBe('workspace.create'); // never accepted from the renderer
-      if (result.value.operation === 'execution.context' || result.value.operation === 'execution.model_probe') { expect(() => buildKriyaArgv(result.value)).toThrow(/persistent Kriya service/); continue; } // served by the persistent service only
+      if (PERSISTENT_ONLY.includes(result.value.operation)) { expect(() => buildKriyaArgv(result.value)).toThrow(/persistent Kriya service/); continue; } // served by the persistent service only
       const argv = buildKriyaArgv(result.value);
       expect(argvIsAllowed(argv), argv.join(' ')).toBe(true);
       for (const field of ['run_id', 'snapshot_id', 'cursor', 'launch_id', 'workspace'] as const) {

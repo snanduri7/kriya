@@ -51,6 +51,38 @@ const fixtureTools = (mode: FixtureContextMode) => ({
   health_note: "A server's health is learned only by starting it (`kriya mcp inspect`); opening a folder never starts one.",
 });
 
+/** DEV/TEST ONLY: scripted `skills.*` / `tools.*` content in the shapes Kriya returns (ui/kup/schema/catalog.schema.json). */
+const noProvenance = { state: 'NONE_RECORDED', tracked_rule_count: 0, untracked_rule_count: 4, verified_tracked_count: 0, sources: [] as unknown[], sources_truncated: false };
+const fixtureSkillDescriptors = (mode: FixtureContextMode) => {
+  const base = [
+    { id: 'python-testing', name: 'python-testing', description: 'Pytest conventions for generated tests', category: 'Language', tags: ['python', 'pytest'], supported_versions: '*', skill_version: null,
+      digest: 'sha256:' + '1a'.repeat(32), source: 'local_directory', origin: 'kriya_install', scope: 'install', verified: true, verified_at: '2026-10-01', verified_context: 'passed the runtime verification gate',
+      verification_gap_acknowledged: false, rule_count: 12, staged_rule_count: 0, example_count: 2, has_instructions: true,
+      provenance: { state: 'RECORDED', tracked_rule_count: 8, untracked_rule_count: 4, verified_tracked_count: 8, sources_truncated: false, sources: [
+        { source: 'https://docs.pytest.org/en/stable/how-to/fixtures.html', rule_count: 5, verified_count: 5, first_added: '2026-09-20', last_added: '2026-09-28' },
+        { source: 'https://docs.pytest.org/en/stable/how-to/parametrize.html', rule_count: 3, verified_count: 3, first_added: '2026-09-28', last_added: '2026-09-28' }] },
+      unknown_fields: ['skill_version'] },
+    { id: 'spring-boot', name: 'spring-boot', description: 'Spring Boot service layout', category: 'Framework', tags: ['java', 'spring'], supported_versions: '>=3.0.0', skill_version: null,
+      digest: 'sha256:' + '2b'.repeat(32), source: 'local_directory', origin: 'workspace_or_configured', scope: 'workspace', verified: false, verified_at: null, verified_context: null,
+      verification_gap_acknowledged: false, rule_count: 4, staged_rule_count: 3, example_count: 0, has_instructions: false, provenance: noProvenance, unknown_fields: ['skill_version'] },
+  ];
+  return mode === 'empty' ? [] : mode === 'many' ? Array.from({ length: 120 }, (_, i) => ({ ...base[i % 2]!, id: `skill-${String(i).padStart(3, '0')}`, name: `skill-${String(i).padStart(3, '0')}` })) : base;
+};
+const fixtureToolDescriptors = (mode: FixtureContextMode) => {
+  if (mode === 'empty') return [];
+  const mcp = (name: string, caps: { workspace_read: boolean; workspace_write: boolean; network: string; network_hosts: string[] }, approval: unknown, env: string[]) => ({
+    id: `mcp:${name}`, name, kind: 'mcp_server', provider: 'configured_mcp', version: null, status: 'CONFIGURED', health: 'NOT_CHECKED', declared_capabilities: caps,
+    reference: { executable: `${name}-server`, argument_count: 2, environment_variable_names: env }, scope: null, approval, unknown_fields: ['version', 'scope'] });
+  return [
+    mcp('filesystem', { workspace_read: true, workspace_write: false, network: 'denied', network_hosts: [] },
+      { state: 'UNKNOWN', reason: 'RECORDS_NEED_LIVE_TOOL_IDENTITY', records_on_file: 2, recorded_tool_names: ['list_directory', 'read_file'] }, []),
+    mcp('issues', { workspace_read: false, workspace_write: false, network: 'explicit_destinations', network_hosts: ['issues.example.org'] },
+      { state: 'NOT_APPROVED', reason: 'NO_RECORDS_FOR_SERVER', records_on_file: 0, recorded_tool_names: [] }, ['ISSUES_API_TOKEN']),
+    { id: 'plugin:core_tools', name: 'core_tools', kind: 'plugin', provider: 'enabled_plugin', version: null, status: 'ENABLED', health: 'NOT_CHECKED', declared_capabilities: null,
+      reference: { plugin: 'core_tools' }, scope: null, approval: { state: 'NOT_APPLICABLE', reason: 'NOT_AN_MCP_SERVER', records_on_file: null, recorded_tool_names: [] }, unknown_fields: ['version', 'declared_capabilities', 'scope'] },
+  ];
+};
+
 export interface FixtureHostOptions {
   /** The parent folders the scripted New Project chooser returns, in order (null = the person cancels). */
   projectParents?: readonly (string | null)[];
@@ -207,7 +239,7 @@ export class FixtureHost implements HostAdapter {
   private capabilities(): Json {
     return {
       kup_versions: [1],
-      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'],
+      operations: ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'workspace.describe', 'execution.preflight', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state'],
       identity: { kriya_version: 'fixture', commit: null, build_provenance: 'fixture' },
       limits: { list_default: 50, list_max: 200, max_response_bytes: 8388608, evidence_page_default: 200, evidence_page_max: 1000, evidence_page_max_bytes: 4194304, evidence_content_max_bytes: 1048576 },
       features: {
@@ -384,6 +416,27 @@ export class FixtureHost implements HostAdapter {
                   { for: 'planner', model: 'fixture-planner:14b', endpoint: 'http://localhost:11434/v1', available: roleState === 'model_present' ? true : roleState === 'model_missing' ? false : null, state: roleState }],
           note: 'A single bounded GET /models per distinct local endpoint, made now. It proves the server answered and lists the models it serves; it does not prove a model can complete a request.',
         }, this.live, null);
+      }
+      case 'skills.list':
+      case 'skills.describe':
+      case 'tools.list':
+      case 'tools.describe':
+      case 'tools.approval_state': {
+        if (!this.folder(request.workspace)) return this.err(request.operation, 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const mode = this.contextModeByWorkspace[request.workspace] ?? this.contextMode;
+        const unavailable = mode === 'unavailable';
+        const head = {
+          workspace: { path: request.workspace, name: request.workspace.slice(request.workspace.lastIndexOf('/') + 1), identity: 'ab'.repeat(32) }, available: !unavailable,
+          unavailable_reason: unavailable ? { code: 'CONFIG_LOAD_FAILED', message: 'ValueError: Failed to load configuration (fixture)' } : null, authority_status: unavailable ? 'failed' : 'no_findings',
+        };
+        const skills = unavailable ? [] : fixtureSkillDescriptors(mode);
+        const tools = unavailable ? [] : fixtureToolDescriptors(mode);
+        if (request.operation === 'skills.list') return this.env('skills.list', { ...head, items: skills, total: skills.length, truncated: false }, this.live, null);
+        if (request.operation === 'skills.describe') { const hit = skills.find((x) => x.id === request.skill_id.toLowerCase()) ?? null; return this.env('skills.describe', { ...head, found: hit !== null, skill: hit }, this.live, null); }
+        if (request.operation === 'tools.list') return this.env('tools.list', { ...head, items: tools, total: tools.length }, this.live, null);
+        const tool = tools.find((x) => x.id === request.tool_id) ?? null;
+        if (request.operation === 'tools.describe') return this.env('tools.describe', { ...head, found: tool !== null, tool }, this.live, null);
+        return this.env('tools.approval_state', { ...head, found: tool !== null, tool_id: unavailable ? null : request.tool_id, approval: tool ? tool.approval : unavailable ? null : { state: 'UNKNOWN', reason: 'TOOL_NOT_FOUND', records_on_file: null, recorded_tool_names: [] } }, this.live, null);
       }
       case 'launch.status': {
         const status = this.exec?.launchStatus() ?? null;

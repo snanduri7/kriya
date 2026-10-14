@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Reason {
+public enum AbsenceReason {
     CAPTURE_OFF, PRE_RECORDER, PRUNED, RECORDER_UNAVAILABLE, UNKNOWN;
 
     @JsonValue
@@ -21,12 +21,12 @@ public enum Reason {
     }
 
     @JsonCreator
-    public static Reason forValue(String value) throws IOException {
+    public static AbsenceReason forValue(String value) throws IOException {
         if (value.equals("capture_off")) return CAPTURE_OFF;
         if (value.equals("pre_recorder")) return PRE_RECORDER;
         if (value.equals("pruned")) return PRUNED;
         if (value.equals("recorder_unavailable")) return RECORDER_UNAVAILABLE;
         if (value.equals("unknown")) return UNKNOWN;
-        throw new IOException("Cannot deserialize Reason");
+        throw new IOException("Cannot deserialize AbsenceReason");
     }
 }

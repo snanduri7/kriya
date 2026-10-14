@@ -126,7 +126,7 @@ def _cockpit_features(cfg=None) -> Dict[str, Any]:
         "evidence": True, "evidence_content": content_authorized, "evidence_content_classes": sorted(set(policy.BLOB_CLASSES.values())) if content_authorized else [],
         "qualification": False, "authority": False,
         "knowledge": False, "tools": False, "experiments": False, "live": False, "actions": False,
-        "workspace_create": True, "skills_view": True, "tools_view": True, "model_probe": True,
+        "workspace_create": True, "skills_view": True, "tools_view": True, "model_probe": True, "skills_catalog": True, "tools_catalog": True,
         "evidence_capture_modes": list(evidence_model.CAPTURE_MODES),
         "evidence_verification_states": list(policy.EVIDENCE_VERIFICATION_STATES),
         "evidence_kinds": sorted(evidence_model.KINDS),

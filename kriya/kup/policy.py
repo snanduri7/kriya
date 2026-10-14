@@ -40,6 +40,11 @@ OPERATIONS = (
     "workspace.create",  # create ONE new empty project folder (end-user experience); the only operation that makes a user-visible folder
     "execution.context",  # Skills, tools and per-role model routing a run in a folder would have; configuration/file-derived, starts nothing
     "execution.model_probe",  # one bounded local GET /models per distinct endpoint: is the model server answering and does it serve the model
+    "skills.list",  # Demo V2 (read-only catalog): Skills a run in a folder would load, as SkillDescriptors; starts nothing
+    "skills.describe",  # one SkillDescriptor by id (name), incl. provenance summary; never rule text
+    "tools.list",  # configured MCP servers and enabled plugins as ToolDescriptors; starts nothing
+    "tools.describe",  # one ToolDescriptor by id (mcp:<server> / plugin:<name>); no secret material
+    "tools.approval_state",  # what the durable invocation-approval store can say about one tool without starting it (never APPROVED)
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",

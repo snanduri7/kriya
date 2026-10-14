@@ -51,6 +51,7 @@ export const LIMITS = {
   evidenceFilterMax: 256,
   listDefault: 50,
   runIdMax: 256,
+  catalogIdMax: 200, // kriya/kup/catalog_ops.py::ID_MAX
   cursorMax: 1024,
   pathMax: 4096,
   clipboardMax: 8 * 1024 * 1024,
@@ -84,6 +85,11 @@ export type KupRequest =
   | { operation: 'workspace.create'; parent: string; name: string }
   | { operation: 'execution.context'; workspace: string }
   | { operation: 'execution.model_probe'; workspace: string }
+  | { operation: 'skills.list'; workspace: string }
+  | { operation: 'skills.describe'; workspace: string; skill_id: string }
+  | { operation: 'tools.list'; workspace: string }
+  | { operation: 'tools.describe'; workspace: string; tool_id: string }
+  | { operation: 'tools.approval_state'; workspace: string; tool_id: string }
   | { operation: 'evidence.manifest'; run_id: string; snapshot_id?: string; from_trace?: boolean }
   | { operation: 'evidence.verify'; run_id: string }
   | { operation: 'evidence.change_content'; run_id: string; seq: number; part: string }
@@ -96,6 +102,13 @@ export function validateSnapshotId(v: unknown): ValidationResult<string> {
 }
 
 function isObj(v: unknown): v is Record<string, unknown> { return typeof v === 'object' && v !== null && !Array.isArray(v); }
+
+/** A catalog item id (a skill name, or mcp:<server> / plugin:<name>): bounded, no control characters. An id is identity, never a path the host opens. */
+export function validateCatalogId(v: unknown, key: string): ValidationResult<string> {
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (typeof v !== 'string' || !v.length || v.length > LIMITS.catalogIdMax || /[\u0000-\u001f\u007f]/.test(v)) return { ok: false, message: `${key} must be a non-empty string of at most ${LIMITS.catalogIdMax} characters without control characters` };
+  return { ok: true, value: v };
+}
 
 export function validateRunId(v: unknown): ValidationResult<string> {
   if (typeof v !== 'string' || !v.length || v.length > LIMITS.runIdMax) return { ok: false, message: 'run_id must be a non-empty string of at most 256 chars' };
@@ -191,10 +204,21 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     case 'workspace.describe':
     case 'execution.context':
     case 'execution.model_probe':
+    case 'skills.list':
+    case 'tools.list':
     case 'execution.preflight': {
       if (keys.join() !== 'operation,workspace') return { ok: false, message: `${v.operation} takes exactly workspace` };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
       return { ok: true, value: { operation: v.operation, workspace: w.value } };
+    }
+    case 'skills.describe':
+    case 'tools.describe':
+    case 'tools.approval_state': {
+      const idKey = v.operation === 'skills.describe' ? 'skill_id' : 'tool_id';
+      if (keys.join() !== ['operation', idKey, 'workspace'].sort().join()) return { ok: false, message: `${v.operation} takes exactly workspace and ${idKey}` };
+      const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+      const id = validateCatalogId(v[idKey], idKey); if (!id.ok) return id;
+      return { ok: true, value: (v.operation === 'skills.describe' ? { operation: v.operation, workspace: w.value, skill_id: id.value } : { operation: v.operation, workspace: w.value, tool_id: id.value }) as KupRequest };
     }
     case 'launch.status': {
       if (keys.join() !== 'launch_id,operation,workspace') return { ok: false, message: 'launch.status takes exactly workspace and launch_id' };

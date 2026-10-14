@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kriya.local/kup/v1/catalog.schema.json",
+  "title": "Catalog",
+  "description": "Demo V2 read-only catalog: data of `skills.list`, `skills.describe`, `tools.list`, `tools.describe` and `tools.approval_state`. Descriptors carry identity (id), never a filesystem path; a field the backend cannot know is null and named in unknown_fields. Rule text, command arguments, environment values and credentials are never included.",
+  "type": "object",
+  "$defs": {
+    "WorkspaceRef": {
+      "type": "object",
+      "required": ["path", "name", "identity"],
+      "properties": { "path": { "type": "string" }, "name": { "type": "string" }, "identity": { "type": "string" } },
+      "additionalProperties": true
+    },
+    "UnavailableReason": {
+      "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string" } }, "additionalProperties": true }]
+    },
+    "SkillSourceSummary": {
+      "type": "object",
+      "required": ["source", "rule_count", "verified_count", "first_added", "last_added"],
+      "properties": {
+        "source": { "type": "string", "description": "Where the rules came from, as recorded (typically a documentation URL); opaque text, bounded." },
+        "rule_count": { "type": "integer" }, "verified_count": { "type": "integer" },
+        "first_added": { "type": ["string", "null"] }, "last_added": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "ProvenanceSummary": {
+      "type": "object",
+      "required": ["state", "tracked_rule_count", "untracked_rule_count", "verified_tracked_count", "sources", "sources_truncated"],
+      "properties": {
+        "state": { "enum": ["NONE_RECORDED", "RECORDED", "UNREADABLE_OR_EMPTY"], "description": "NONE_RECORDED: no provenance file, rules are pre-existing/untracked content (not 'verified'). UNREADABLE_OR_EMPTY: a file exists but yields no usable record." },
+        "tracked_rule_count": { "type": "integer" }, "untracked_rule_count": { "type": "integer" }, "verified_tracked_count": { "type": "integer" },
+        "sources": { "type": "array", "items": { "$ref": "#/$defs/SkillSourceSummary" } },
+        "sources_truncated": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "SkillDescriptor": {
+      "type": "object",
+      "required": ["id", "name", "description", "category", "tags", "supported_versions", "skill_version", "digest", "source", "origin", "scope", "verified", "verified_at", "verified_context",
+                   "verification_gap_acknowledged", "rule_count", "staged_rule_count", "example_count", "has_instructions", "provenance", "unknown_fields"],
+      "properties": {
+        "id": { "type": "string", "description": "The skill's name, lower-cased. Identity is never a path." },
+        "name": { "type": "string" }, "description": { "type": "string" }, "category": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "supported_versions": { "type": "string", "description": "The technology version range the skill covers (not a version of the skill)." },
+        "skill_version": { "type": ["string", "null"], "description": "Always null today: a skill has no version of its own." },
+        "digest": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$", "description": "The engine's content hash, the same identity a run's provenance manifest records." },
+        "source": { "enum": ["local_directory"] },
+        "origin": { "enum": ["kriya_install", "workspace_or_configured"] },
+        "scope": { "enum": ["workspace", "install", "configured"] },
+        "verified": { "type": "boolean" }, "verified_at": { "type": ["string", "null"] }, "verified_context": { "type": ["string", "null"] },
+        "verification_gap_acknowledged": { "type": "boolean" },
+        "rule_count": { "type": "integer" }, "staged_rule_count": { "type": "integer" }, "example_count": { "type": "integer" }, "has_instructions": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/ProvenanceSummary" },
+        "unknown_fields": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "ApprovalState": {
+      "type": "object",
+      "required": ["state", "reason", "records_on_file", "recorded_tool_names"],
+      "properties": {
+        "state": { "enum": ["NOT_APPROVED", "UNKNOWN", "NOT_APPLICABLE"], "description": "There is deliberately no APPROVED: a durable approval binds to the live tool schema digest, which exists only after the server is started." },
+        "reason": { "enum": ["NO_RECORDS_FOR_SERVER", "RECORDS_NEED_LIVE_TOOL_IDENTITY", "APPROVAL_STORE_UNREADABLE_OR_INVALID", "APPROVAL_STORE_PATH_REFUSED", "NOT_AN_MCP_SERVER", "TOOL_NOT_FOUND"] },
+        "records_on_file": { "type": ["integer", "null"] },
+        "recorded_tool_names": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "DeclaredCapabilities": {
+      "type": ["object", "null"],
+      "required": ["workspace_read", "workspace_write", "network", "network_hosts"],
+      "properties": {
+        "workspace_read": { "type": "boolean" }, "workspace_write": { "type": "boolean" },
+        "network": { "enum": ["denied", "explicit_destinations", "unrestricted"] },
+        "network_hosts": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "ToolDescriptor": {
+      "type": "object",
+      "required": ["id", "name", "kind", "provider", "version", "status", "health", "declared_capabilities", "reference", "scope", "approval", "unknown_fields"],
+      "properties": {
+        "id": { "type": "string", "description": "mcp:<server> or plugin:<name>. Never a path." },
+        "name": { "type": "string" },
+        "kind": { "enum": ["mcp_server", "plugin"] },
+        "provider": { "enum": ["configured_mcp", "enabled_plugin"] },
+        "version": { "type": ["string", "null"] },
+        "status": { "enum": ["CONFIGURED", "ENABLED"] },
+        "health": { "enum": ["NOT_CHECKED"], "description": "Learned only by starting the tool, which this surface never does." },
+        "declared_capabilities": { "$ref": "#/$defs/DeclaredCapabilities" },
+        "reference": { "type": "object", "description": "What the tool is configured as, without secret material: executable basename, argument COUNT, environment variable NAMES (never values).", "additionalProperties": true },
+        "scope": { "type": ["string", "null"] },
+        "approval": { "$ref": "#/$defs/ApprovalState" },
+        "unknown_fields": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "SkillsList": {
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "items", "total", "truncated"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceRef" }, "available": { "type": "boolean" }, "unavailable_reason": { "$ref": "#/$defs/UnavailableReason" }, "authority_status": { "type": "string" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/SkillDescriptor" } }, "total": { "type": "integer" }, "truncated": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "SkillsDescribe": {
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "found", "skill"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceRef" }, "available": { "type": "boolean" }, "unavailable_reason": { "$ref": "#/$defs/UnavailableReason" }, "authority_status": { "type": "string" },
+        "found": { "type": "boolean" }, "skill": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/SkillDescriptor" }] }
+      },
+      "additionalProperties": true
+    },
+    "ToolsList": {
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "items", "total"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceRef" }, "available": { "type": "boolean" }, "unavailable_reason": { "$ref": "#/$defs/UnavailableReason" }, "authority_status": { "type": "string" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/ToolDescriptor" } }, "total": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
+    "ToolsDescribe": {
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "found", "tool"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceRef" }, "available": { "type": "boolean" }, "unavailable_reason": { "$ref": "#/$defs/UnavailableReason" }, "authority_status": { "type": "string" },
+        "found": { "type": "boolean" }, "tool": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ToolDescriptor" }] }
+      },
+      "additionalProperties": true
+    },
+    "ToolsApprovalState": {
+      "type": "object",
+      "required": ["workspace", "available", "unavailable_reason", "authority_status", "found", "tool_id", "approval"],
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceRef" }, "available": { "type": "boolean" }, "unavailable_reason": { "$ref": "#/$defs/UnavailableReason" }, "authority_status": { "type": "string" },
+        "found": { "type": "boolean" }, "tool_id": { "type": ["string", "null"] }, "approval": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ApprovalState" }] }
+      },
+      "additionalProperties": true
+    }
+  }
+}

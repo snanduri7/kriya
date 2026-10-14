@@ -13,11 +13,13 @@ describe('AppShell layout and navigation', () => {
   it('shows the Runs / Workspace / Settings destinations once capabilities load, and switches with the rail and Ctrl+number', async () => {
     renderShell();
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });
-    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Workspace', 'Settings']));
+    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Workspace', 'Skills', 'Tools', 'Settings']));
     expect(within(rail).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
     fireEvent.click(within(rail).getByRole('button', { name: 'Workspace' }));
     expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument();
-    fireEvent.keyDown(rail, { key: '3', ctrlKey: true });
+    fireEvent.keyDown(rail, { key: '3', ctrlKey: true }); // destinations are numbered by position: 3 is Skills, 5 is Settings
+    expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
+    fireEvent.keyDown(rail, { key: '5', ctrlKey: true });
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     fireEvent.keyDown(rail, { key: '1', metaKey: true });
     expect(await screen.findByRole('heading', { name: 'Runs' })).toBeInTheDocument();
@@ -26,7 +28,7 @@ describe('AppShell layout and navigation', () => {
   it('hides destinations whose capabilities are absent: no rail slot, no "coming soon"', async () => {
     renderShell({ registry: createCockpitRegistry({ disabled: ['workspace'] }) });
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });
-    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Settings']));
+    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Skills', 'Tools', 'Settings']));
   });
 
   it('the inspector is collapsed by definition at <=1180px and open above it; the user can override both ways', async () => {

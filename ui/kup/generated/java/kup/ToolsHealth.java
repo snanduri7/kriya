@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Health {
+public enum ToolsHealth {
     NOT_CHECKED;
 
     @JsonValue
@@ -17,8 +17,8 @@ public enum Health {
     }
 
     @JsonCreator
-    public static Health forValue(String value) throws IOException {
+    public static ToolsHealth forValue(String value) throws IOException {
         if (value.equals("not_checked")) return NOT_CHECKED;
-        throw new IOException("Cannot deserialize Health");
+        throw new IOException("Cannot deserialize ToolsHealth");
     }
 }

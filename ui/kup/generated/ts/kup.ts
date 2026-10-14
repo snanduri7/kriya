@@ -55,6 +55,11 @@ export interface Envelope {
     | 'workspace.create'
     | 'execution.context'
     | 'execution.model_probe'
+    | 'skills.list'
+    | 'skills.describe'
+    | 'tools.list'
+    | 'tools.describe'
+    | 'tools.approval_state'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -886,6 +891,181 @@ export interface ExecutionModelProbe {
   [k: string]: unknown;
 }
 
+// ---- SkillsList (catalog.schema.json#/$defs/SkillsList) ----
+export type UnavailableReason = null | {
+  code: string;
+  message: string;
+  [k: string]: unknown;
+};
+
+export interface SkillsList {
+  workspace: WorkspaceRef;
+  available: boolean;
+  unavailable_reason: UnavailableReason;
+  authority_status: string;
+  items: SkillDescriptor[];
+  total: number;
+  truncated: boolean;
+  [k: string]: unknown;
+}
+export interface WorkspaceRef {
+  path: string;
+  name: string;
+  identity: string;
+  [k: string]: unknown;
+}
+export interface SkillDescriptor {
+  /**
+   * The skill's name, lower-cased. Identity is never a path.
+   */
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  /**
+   * The technology version range the skill covers (not a version of the skill).
+   */
+  supported_versions: string;
+  /**
+   * Always null today: a skill has no version of its own.
+   */
+  skill_version: string | null;
+  /**
+   * The engine's content hash, the same identity a run's provenance manifest records.
+   */
+  digest: string | null;
+  source: 'local_directory';
+  origin: 'kriya_install' | 'workspace_or_configured';
+  scope: 'workspace' | 'install' | 'configured';
+  verified: boolean;
+  verified_at: string | null;
+  verified_context: string | null;
+  verification_gap_acknowledged: boolean;
+  rule_count: number;
+  staged_rule_count: number;
+  example_count: number;
+  has_instructions: boolean;
+  provenance: ProvenanceSummary;
+  unknown_fields: string[];
+  [k: string]: unknown;
+}
+export interface ProvenanceSummary {
+  /**
+   * NONE_RECORDED: no provenance file, rules are pre-existing/untracked content (not 'verified'). UNREADABLE_OR_EMPTY: a file exists but yields no usable record.
+   */
+  state: 'NONE_RECORDED' | 'RECORDED' | 'UNREADABLE_OR_EMPTY';
+  tracked_rule_count: number;
+  untracked_rule_count: number;
+  verified_tracked_count: number;
+  sources: SkillSourceSummary[];
+  sources_truncated: boolean;
+  [k: string]: unknown;
+}
+export interface SkillSourceSummary {
+  /**
+   * Where the rules came from, as recorded (typically a documentation URL); opaque text, bounded.
+   */
+  source: string;
+  rule_count: number;
+  verified_count: number;
+  first_added: string | null;
+  last_added: string | null;
+  [k: string]: unknown;
+}
+
+// ---- SkillsDescribe (catalog.schema.json#/$defs/SkillsDescribe) ----
+export interface SkillsDescribe {
+  workspace: WorkspaceRef;
+  available: boolean;
+  unavailable_reason: UnavailableReason;
+  authority_status: string;
+  found: boolean;
+  skill: null | SkillDescriptor;
+  [k: string]: unknown;
+}
+// ---- ToolsList (catalog.schema.json#/$defs/ToolsList) ----
+export type DeclaredCapabilities = {
+  workspace_read: boolean;
+  workspace_write: boolean;
+  network: 'denied' | 'explicit_destinations' | 'unrestricted';
+  network_hosts: string[];
+  [k: string]: unknown;
+} | null;
+
+export interface ToolsList {
+  workspace: WorkspaceRef;
+  available: boolean;
+  unavailable_reason: UnavailableReason;
+  authority_status: string;
+  items: ToolDescriptor[];
+  total: number;
+  [k: string]: unknown;
+}
+export interface ToolDescriptor {
+  /**
+   * mcp:<server> or plugin:<name>. Never a path.
+   */
+  id: string;
+  name: string;
+  kind: 'mcp_server' | 'plugin';
+  provider: 'configured_mcp' | 'enabled_plugin';
+  version: string | null;
+  status: 'CONFIGURED' | 'ENABLED';
+  /**
+   * Learned only by starting the tool, which this surface never does.
+   */
+  health: 'NOT_CHECKED';
+  declared_capabilities: DeclaredCapabilities;
+  /**
+   * What the tool is configured as, without secret material: executable basename, argument COUNT, environment variable NAMES (never values).
+   */
+  reference: {
+    [k: string]: unknown;
+  };
+  scope: string | null;
+  approval: ApprovalState;
+  unknown_fields: string[];
+  [k: string]: unknown;
+}
+export interface ApprovalState {
+  /**
+   * There is deliberately no APPROVED: a durable approval binds to the live tool schema digest, which exists only after the server is started.
+   */
+  state: 'NOT_APPROVED' | 'UNKNOWN' | 'NOT_APPLICABLE';
+  reason:
+    | 'NO_RECORDS_FOR_SERVER'
+    | 'RECORDS_NEED_LIVE_TOOL_IDENTITY'
+    | 'APPROVAL_STORE_UNREADABLE_OR_INVALID'
+    | 'APPROVAL_STORE_PATH_REFUSED'
+    | 'NOT_AN_MCP_SERVER'
+    | 'TOOL_NOT_FOUND';
+  records_on_file: number | null;
+  recorded_tool_names: string[];
+  [k: string]: unknown;
+}
+
+// ---- ToolsDescribe (catalog.schema.json#/$defs/ToolsDescribe) ----
+export interface ToolsDescribe {
+  workspace: WorkspaceRef;
+  available: boolean;
+  unavailable_reason: UnavailableReason;
+  authority_status: string;
+  found: boolean;
+  tool: null | ToolDescriptor;
+  [k: string]: unknown;
+}
+// ---- ToolsApprovalState (catalog.schema.json#/$defs/ToolsApprovalState) ----
+export interface ToolsApprovalState {
+  workspace: WorkspaceRef;
+  available: boolean;
+  unavailable_reason: UnavailableReason;
+  authority_status: string;
+  found: boolean;
+  tool_id: string | null;
+  approval: null | ApprovalState;
+  [k: string]: unknown;
+}
 // ---- Consistency (common.schema.json#/$defs/Consistency) ----
 /**
  * gate C-3. snapshot_copy: ONE consistent committed database image captured by SQLite's online backup inside one read transaction, read from a published snapshot; live_observation: a point-in-time observation (workspace status, snapshot directory listing); not_applicable: capabilities. sealed_store (capability set 1.1): a sealed attempt-evidence store whose chain, every referenced blob and seal were verified in the same invocation, for the head_digest reported; never returned for an unsealed or failing store.
@@ -1237,6 +1417,53 @@ export type KupRequest =
        * Absolute path without control characters.
        */
       workspace: string;
+    }
+  | {
+      operation: 'skills.list';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'skills.describe';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      /**
+       * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.
+       */
+      skill_id: string;
+    }
+  | {
+      operation: 'tools.list';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'tools.describe';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      /**
+       * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.
+       */
+      tool_id: string;
+    }
+  | {
+      operation: 'tools.approval_state';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      /**
+       * An item id (a skill name, or mcp:<server> / plugin:<name>). Never a path.
+       */
+      tool_id: string;
     }
   | {
       operation: 'launch.status';

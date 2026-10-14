@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Kind {
+public enum ConsistencyKind {
     LIVE_OBSERVATION, NOT_APPLICABLE, SEALED_STORE, SNAPSHOT_COPY;
 
     @JsonValue
@@ -20,11 +20,11 @@ public enum Kind {
     }
 
     @JsonCreator
-    public static Kind forValue(String value) throws IOException {
+    public static ConsistencyKind forValue(String value) throws IOException {
         if (value.equals("live_observation")) return LIVE_OBSERVATION;
         if (value.equals("not_applicable")) return NOT_APPLICABLE;
         if (value.equals("sealed_store")) return SEALED_STORE;
         if (value.equals("snapshot_copy")) return SNAPSHOT_COPY;
-        throw new IOException("Cannot deserialize Kind");
+        throw new IOException("Cannot deserialize ConsistencyKind");
     }
 }

@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
 } from '../../model/kup';
 import type { ExecutionHostPort, HostSettings, OpenInIdeResult, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -50,6 +50,14 @@ export interface UIProvider {
   executionContext(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionContext>>;
   /** One bounded probe of the configured local model server(s): is it answering, and does it serve each configured model. */
   executionModelProbe(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionModelProbe>>;
+  /** Skills a run in this folder would load, as descriptors (identity is the skill id, never a path; read-only; starts nothing). */
+  skillsList(workspace: string, signal?: AbortSignal): Promise<ProviderResult<SkillsList>>;
+  skillsDescribe(workspace: string, skillId: string, signal?: AbortSignal): Promise<ProviderResult<SkillsDescribe>>;
+  /** Configured MCP servers and enabled plugins as descriptors (read-only; never starts a server, never carries a secret). */
+  toolsList(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ToolsList>>;
+  toolsDescribe(workspace: string, toolId: string, signal?: AbortSignal): Promise<ProviderResult<ToolsDescribe>>;
+  /** What the durable approval store can say about one tool without starting it: NOT_APPROVED or UNKNOWN, never approved. */
+  toolsApprovalState(workspace: string, toolId: string, signal?: AbortSignal): Promise<ProviderResult<ToolsApprovalState>>;
   /** One desktop launch read back from Kriya's durable records (launch record, RunRecord, evidence store, workspace lock). */
   launchStatus(workspace: string, launchId: string, signal?: AbortSignal): Promise<ProviderResult<LaunchStatus>>;
   /** The host's Start Run port; null when this host cannot execute (a browser test host, the fixture stand-in). */

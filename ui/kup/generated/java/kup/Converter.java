@@ -31,6 +31,11 @@
 //     WorkspaceCreate data = Converter.WorkspaceCreateFromJsonString(jsonString);
 //     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
 //     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
+//     SkillsList data = Converter.SkillsListFromJsonString(jsonString);
+//     SkillsDescribe data = Converter.SkillsDescribeFromJsonString(jsonString);
+//     ToolsList data = Converter.ToolsListFromJsonString(jsonString);
+//     ToolsDescribe data = Converter.ToolsDescribeFromJsonString(jsonString);
+//     ToolsApprovalState data = Converter.ToolsApprovalStateFromJsonString(jsonString);
 //     Consistency data = Converter.ConsistencyFromJsonString(jsonString);
 //     SnapshotSummary data = Converter.SnapshotSummaryFromJsonString(jsonString);
 //     SnapshotAcquireResult data = Converter.SnapshotAcquireResultFromJsonString(jsonString);
@@ -261,6 +266,46 @@ public class Converter {
 
     public static String ExecutionModelProbeToJsonString(ExecutionModelProbe obj) throws JsonProcessingException {
         return getExecutionModelProbeObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SkillsList SkillsListFromJsonString(String json) throws IOException {
+        return getSkillsListObjectReader().readValue(json);
+    }
+
+    public static String SkillsListToJsonString(SkillsList obj) throws JsonProcessingException {
+        return getSkillsListObjectWriter().writeValueAsString(obj);
+    }
+
+    public static SkillsDescribe SkillsDescribeFromJsonString(String json) throws IOException {
+        return getSkillsDescribeObjectReader().readValue(json);
+    }
+
+    public static String SkillsDescribeToJsonString(SkillsDescribe obj) throws JsonProcessingException {
+        return getSkillsDescribeObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ToolsList ToolsListFromJsonString(String json) throws IOException {
+        return getToolsListObjectReader().readValue(json);
+    }
+
+    public static String ToolsListToJsonString(ToolsList obj) throws JsonProcessingException {
+        return getToolsListObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ToolsDescribe ToolsDescribeFromJsonString(String json) throws IOException {
+        return getToolsDescribeObjectReader().readValue(json);
+    }
+
+    public static String ToolsDescribeToJsonString(ToolsDescribe obj) throws JsonProcessingException {
+        return getToolsDescribeObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ToolsApprovalState ToolsApprovalStateFromJsonString(String json) throws IOException {
+        return getToolsApprovalStateObjectReader().readValue(json);
+    }
+
+    public static String ToolsApprovalStateToJsonString(ToolsApprovalState obj) throws JsonProcessingException {
+        return getToolsApprovalStateObjectWriter().writeValueAsString(obj);
     }
 
     public static Consistency ConsistencyFromJsonString(String json) throws IOException {
@@ -1026,6 +1071,161 @@ public class Converter {
     private static ObjectWriter getExecutionModelProbeObjectWriter() {
         if (ExecutionModelProbeWriter == null) instantiateExecutionModelProbeMapper();
         return ExecutionModelProbeWriter;
+    }
+
+    private static ObjectReader SkillsListReader;
+    private static ObjectWriter SkillsListWriter;
+
+    private static void instantiateSkillsListMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SkillsListReader = mapper.readerFor(SkillsList.class);
+        SkillsListWriter = mapper.writerFor(SkillsList.class);
+    }
+
+    private static ObjectReader getSkillsListObjectReader() {
+        if (SkillsListReader == null) instantiateSkillsListMapper();
+        return SkillsListReader;
+    }
+
+    private static ObjectWriter getSkillsListObjectWriter() {
+        if (SkillsListWriter == null) instantiateSkillsListMapper();
+        return SkillsListWriter;
+    }
+
+    private static ObjectReader SkillsDescribeReader;
+    private static ObjectWriter SkillsDescribeWriter;
+
+    private static void instantiateSkillsDescribeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        SkillsDescribeReader = mapper.readerFor(SkillsDescribe.class);
+        SkillsDescribeWriter = mapper.writerFor(SkillsDescribe.class);
+    }
+
+    private static ObjectReader getSkillsDescribeObjectReader() {
+        if (SkillsDescribeReader == null) instantiateSkillsDescribeMapper();
+        return SkillsDescribeReader;
+    }
+
+    private static ObjectWriter getSkillsDescribeObjectWriter() {
+        if (SkillsDescribeWriter == null) instantiateSkillsDescribeMapper();
+        return SkillsDescribeWriter;
+    }
+
+    private static ObjectReader ToolsListReader;
+    private static ObjectWriter ToolsListWriter;
+
+    private static void instantiateToolsListMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ToolsListReader = mapper.readerFor(ToolsList.class);
+        ToolsListWriter = mapper.writerFor(ToolsList.class);
+    }
+
+    private static ObjectReader getToolsListObjectReader() {
+        if (ToolsListReader == null) instantiateToolsListMapper();
+        return ToolsListReader;
+    }
+
+    private static ObjectWriter getToolsListObjectWriter() {
+        if (ToolsListWriter == null) instantiateToolsListMapper();
+        return ToolsListWriter;
+    }
+
+    private static ObjectReader ToolsDescribeReader;
+    private static ObjectWriter ToolsDescribeWriter;
+
+    private static void instantiateToolsDescribeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ToolsDescribeReader = mapper.readerFor(ToolsDescribe.class);
+        ToolsDescribeWriter = mapper.writerFor(ToolsDescribe.class);
+    }
+
+    private static ObjectReader getToolsDescribeObjectReader() {
+        if (ToolsDescribeReader == null) instantiateToolsDescribeMapper();
+        return ToolsDescribeReader;
+    }
+
+    private static ObjectWriter getToolsDescribeObjectWriter() {
+        if (ToolsDescribeWriter == null) instantiateToolsDescribeMapper();
+        return ToolsDescribeWriter;
+    }
+
+    private static ObjectReader ToolsApprovalStateReader;
+    private static ObjectWriter ToolsApprovalStateWriter;
+
+    private static void instantiateToolsApprovalStateMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ToolsApprovalStateReader = mapper.readerFor(ToolsApprovalState.class);
+        ToolsApprovalStateWriter = mapper.writerFor(ToolsApprovalState.class);
+    }
+
+    private static ObjectReader getToolsApprovalStateObjectReader() {
+        if (ToolsApprovalStateReader == null) instantiateToolsApprovalStateMapper();
+        return ToolsApprovalStateReader;
+    }
+
+    private static ObjectWriter getToolsApprovalStateObjectWriter() {
+        if (ToolsApprovalStateWriter == null) instantiateToolsApprovalStateMapper();
+        return ToolsApprovalStateWriter;
     }
 
     private static ObjectReader ConsistencyReader;

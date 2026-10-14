@@ -18,7 +18,7 @@ public class AbsenceClass {
 
     private String derivedFrom;
     private String detail;
-    private Reason reason;
+    private AbsenceReason reason;
     private Object recordedEvent;
     private String snapshotid;
 
@@ -33,9 +33,9 @@ public class AbsenceClass {
     public void setDetail(String value) { this.detail = value; }
 
     @JsonProperty("reason")
-    public Reason getReason() { return reason; }
+    public AbsenceReason getReason() { return reason; }
     @JsonProperty("reason")
-    public void setReason(Reason value) { this.reason = value; }
+    public void setReason(AbsenceReason value) { this.reason = value; }
 
     /**
      * The evidence.attempt_store event details exactly as stored; null when the event is absent

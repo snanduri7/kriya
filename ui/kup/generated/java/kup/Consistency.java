@@ -24,7 +24,7 @@ public class Consistency {
     private String acquisitionCompletedAt;
     private String acquisitionStartedAt;
     private String headDigest;
-    private Kind kind;
+    private ConsistencyKind kind;
     private boolean liveStream;
     private String snapshotid;
     private SourceMetadataAtAcquisitionClass sourceMetadataAtAcquisition;
@@ -57,9 +57,9 @@ public class Consistency {
     public void setHeadDigest(String value) { this.headDigest = value; }
 
     @JsonProperty("kind")
-    public Kind getKind() { return kind; }
+    public ConsistencyKind getKind() { return kind; }
     @JsonProperty("kind")
-    public void setKind(Kind value) { this.kind = value; }
+    public void setKind(ConsistencyKind value) { this.kind = value; }
 
     @JsonProperty("live_stream")
     public boolean getLiveStream() { return liveStream; }

@@ -4,12 +4,12 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
 export const KUP_SCHEMA_VERSION = 1 as const;
-export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'] as const;
+export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'] as const;
 /** Closed vocabulary (gate). HOST_ERROR is minted by a host for transport failures. */
 export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'EVIDENCE_STORE_UNREADABLE', 'EVIDENCE_SCHEMA_UNSUPPORTED', 'EVIDENCE_STORE_NOT_FOUND', 'EVIDENCE_VERIFY_FAILED', 'EVIDENCE_HEAD_CHANGED', 'EVIDENCE_CONTENT_POLICY', 'EVIDENCE_CONTENT_UNAVAILABLE', 'EVIDENCE_BLOB_TOO_LARGE', 'WORKSPACE_UNAVAILABLE', 'LAUNCH_NOT_FOUND', 'HOST_ERROR'] as const;
 export const CONSISTENCY_KINDS = ['snapshot_copy', 'live_observation', 'not_applicable', 'sealed_store'] as const;
@@ -48,6 +48,11 @@ export const validate = {
   workspaceCreate: (x: unknown) => run<WorkspaceCreate>('validateWorkspaceCreate', x),
   executionContext: (x: unknown) => run<ExecutionContext>('validateExecutionContext', x),
   executionModelProbe: (x: unknown) => run<ExecutionModelProbe>('validateExecutionModelProbe', x),
+  skillsList: (x: unknown) => run<SkillsList>('validateSkillsList', x),
+  skillsDescribe: (x: unknown) => run<SkillsDescribe>('validateSkillsDescribe', x),
+  toolsList: (x: unknown) => run<ToolsList>('validateToolsList', x),
+  toolsDescribe: (x: unknown) => run<ToolsDescribe>('validateToolsDescribe', x),
+  toolsApprovalState: (x: unknown) => run<ToolsApprovalState>('validateToolsApprovalState', x),
   workspaceChoice: (x: unknown) => run<WorkspaceChoice>('validateWorkspaceChoice', x),
   recentWorkspaces: (x: unknown) => run<RecentWorkspaces>('validateRecentWorkspaces', x),
   startRunRequest: (x: unknown) => run<StartRunRequest>('validateStartRunRequest', x),
@@ -87,6 +92,11 @@ export function validateData(operation: string, data: unknown): Validation<unkno
     case 'workspace.create': return validate.workspaceCreate(data);
     case 'execution.context': return validate.executionContext(data);
     case 'execution.model_probe': return validate.executionModelProbe(data);
+    case 'skills.list': return validate.skillsList(data);
+    case 'skills.describe': return validate.skillsDescribe(data);
+    case 'tools.list': return validate.toolsList(data);
+    case 'tools.describe': return validate.toolsDescribe(data);
+    case 'tools.approval_state': return validate.toolsApprovalState(data);
     case 'snapshot.acquire': return validate.snapshotAcquireResult(data);
     case 'snapshot.list': return validate.snapshotList(data);
     case 'snapshot.prune': return validate.snapshotPrune(data);
