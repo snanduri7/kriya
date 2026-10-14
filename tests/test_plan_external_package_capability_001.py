@@ -117,3 +117,109 @@ def test_a_capability_supplied_by_a_declared_dependency_is_accepted(workspace):
         assert s2["requires"] == ["outline-module"] and s2["depends_on"] == ["s1"]
         _s1_file(plan)["requires_capabilities"] = []
     assert _validate(_variant(2, edit), workspace) == (True, [], [])
+
+
+# ---- GENERIC PLAN-REPAIR CONTRACT CLARIFICATION (owner decision 2026-10-14) -----------------------------------------------------------------------
+# One generic distinction, no technology-specific text: requires_capabilities is ONLY for a capability another PLANNED SUBTASK supplies; a library, package, runtime or tool the
+# project or execution environment supplies is an environment dependency (environment_requirements). The validator's acceptance rules are NOT changed by this work: the tests above
+# (and A-E below) pin them; F-G pin the new deterministic repair feedback and the one-sentence contract rule.
+from kriya.agents.contracts import ENVIRONMENT_DEPENDENCY_RULE  # noqa: E402 - grouped with the clarification tests
+from kriya.workflow.planner_repair import build_structured_plan_repair_prompt, unprovided_capability_facts  # noqa: E402
+from kriya.workflow.workflow_controller import (  # noqa: E402
+    AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
+    build_authoritative_planner_request,
+)
+
+TECHNOLOGY_WORDS = ("tree-sitter", "tree_sitter", "treesitter", "pip", "requirements.txt", "pyproject", "maven", "pom.xml", "npm", "package.json", "gradle", "cargo", "scenario")
+
+
+@pytest.mark.parametrize("capability", ["numpy", "requests", "lodash", "org.example:some-library", "left-pad", "@scope/pkg", "some_python_module"])
+def test_C_no_package_like_name_is_exempt_from_the_undeclared_capability_rule(workspace, capability):
+    valid, codes, _ = _validate(_variant(2, lambda p: _s1_file(p).update(requires_capabilities=[capability])), workspace)
+    assert valid is False and codes == ["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], capability
+
+
+@pytest.mark.parametrize("dependency", ["numpy", "lodash", "org.example:some-library", "some_python_module"])
+def test_E_any_external_dependency_in_environment_requirements_is_accepted(workspace, dependency):
+    edit = lambda p: _s1_file(p).update(requires_capabilities=[], environment_requirements=["python", dependency])  # noqa: E731
+    assert _validate(_variant(2, edit), workspace) == (True, [], [])
+
+
+def _feedback_for(attempt: int, workspace: str) -> str:
+    valid, codes, errors = _validate(RESPONSES[attempt], workspace)
+    assert valid is False
+    return build_structured_plan_repair_prompt(DATA["goal"], RESPONSES[attempt], errors, codes, attempt + 1)
+
+
+@pytest.mark.parametrize("attempt", [0, 1, 2])
+def test_F_the_repair_feedback_for_an_unprovided_capability_states_the_generic_distinction(workspace, attempt):
+    feedback = _feedback_for(attempt, workspace)
+    assert "UNPROVIDED_CAPABILITY" in feedback
+    section = feedback[feedback.index("UNPROVIDED_CAPABILITY"):]
+    section = section[:section.index("\n- ", 10)] if "\n- " in section[10:] else section
+    # typed facts: the capability, its consumer subtask and file
+    assert f'capability="{PACKAGE}"' in section and "subtask=s1" in section and "file=outline.py" in section
+    # the decision boundary, in the repository's own terms
+    assert "requires_capabilities" in section and "another planned subtask" in section and "environment_requirements" in section
+    # the three valid repairs, in order; Kriya does not choose a branch for the model
+    assert section.index("1.") < section.index("2.") < section.index("3.")
+    assert "provides" in section and "add the missing provider" in section and "supplied by the project or execution environment" in section
+    # the dead end the old feedback led into
+    assert "SUBTASK_REQUIREMENT_UNPROVIDED" in section
+
+
+def test_F_a_capability_a_planned_subtask_does_provide_gets_no_unprovided_block(workspace):
+    plan = _variant(2, lambda p: (_s1_file(p).update(requires_capabilities=[]), p["subtasks"][1]["planned_files"][0].update(requires_capabilities=["outline-module"])))
+    p = json.loads(plan)
+    p["subtasks"][1]["requires"] = []  # the consumer forgets the requires edge: a DIFFERENT repair (the existing prerequisite correction), not an unprovided capability
+    valid, codes, errors = _validate(json.dumps(p), workspace)
+    assert valid is False and "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in codes
+    assert unprovided_capability_facts(json.dumps(p)) == []
+    assert "UNPROVIDED_CAPABILITY" not in build_structured_plan_repair_prompt(DATA["goal"], json.dumps(p), errors, codes, 1)
+
+
+def test_F_facts_are_typed_deduplicated_and_skip_exempt_ambient_tools():
+    plan = json.loads(RESPONSES[2])
+    _s1_file(plan)["requires_capabilities"] = [PACKAGE, PACKAGE, "pytest", "", "other-cap"]
+    facts = unprovided_capability_facts(json.dumps(plan))
+    assert facts == [{"capability": PACKAGE, "subtask_id": "s1", "planned_file": "outline.py"}, {"capability": "other-cap", "subtask_id": "s1", "planned_file": "outline.py"}]
+
+
+def test_G_the_new_feedback_carries_no_technology_or_package_specific_text():
+    plan = json.loads(RESPONSES[2])
+    _s1_file(plan)["requires_capabilities"] = ["zz-synthetic-capability-9"]
+    text = build_structured_plan_repair_prompt("Make a thing.", json.dumps(plan), ["x"], ["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], 1)
+    block = text[text.index("UNPROVIDED_CAPABILITY"):]
+    block = block[:block.index("\n- ", 10)] if "\n- " in block[10:] else block
+    for word in TECHNOLOGY_WORDS:
+        assert word not in block.lower(), word
+    assert 'capability="zz-synthetic-capability-9"' in block  # the only specific text is the capability name taken from the plan itself
+
+
+def test_the_contract_rule_is_one_concise_generic_sentence_present_wherever_the_dependency_fields_are_taught():
+    assert ". " not in ENVIRONMENT_DEPENDENCY_RULE and ENVIRONMENT_DEPENDENCY_RULE.endswith(".") and len(ENVIRONMENT_DEPENDENCY_RULE) < 330  # one sentence
+    assert "environment_requirements" in ENVIRONMENT_DEPENDENCY_RULE and "requires_capabilities" in ENVIRONMENT_DEPENDENCY_RULE
+    assert not any(word in ENVIRONMENT_DEPENDENCY_RULE.lower() for word in TECHNOLOGY_WORDS)
+    assert ENVIRONMENT_DEPENDENCY_RULE in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT  # the structured Planner's system prompt (kriya/workflow/workflow_controller.py)
+    assert AUTHORITATIVE_PLANNER_SYSTEM_PROMPT.count(ENVIRONMENT_DEPENDENCY_RULE) == 1
+    request = build_authoritative_planner_request("Make a thing.")
+    assert request.count(ENVIRONMENT_DEPENDENCY_RULE) == 1  # the user-message protocol is generated independently of the system prompt
+
+
+def test_the_legacy_planner_agent_prompt_states_the_same_rule():
+    from kriya.agents.agent import PlannerAgent
+    prompt = PlannerAgent.__new__(PlannerAgent).system_prompt
+    assert prompt.count(ENVIRONMENT_DEPENDENCY_RULE) == 1
+
+
+def test_the_unprovided_capability_block_appears_only_for_the_reason_codes_that_report_it():
+    for codes in (["SUBTASK_DEPENDENCY_CYCLE"], ["PLANNED_ARTIFACT_PREREQUISITE_INVALID"], []):
+        text = build_structured_plan_repair_prompt(DATA["goal"], RESPONSES[2], ["x"], codes, 1)
+        assert "UNPROVIDED_CAPABILITY" not in text, codes
+    for codes in (["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], ["SUBTASK_REQUIREMENT_UNPROVIDED"]):
+        assert "UNPROVIDED_CAPABILITY" in build_structured_plan_repair_prompt(DATA["goal"], RESPONSES[2], ["x"], codes, 1), codes
+
+
+def test_an_unparsable_previous_plan_produces_no_block_and_no_exception():
+    assert unprovided_capability_facts("not json at all") == [] and unprovided_capability_facts("") == []
+    assert "UNPROVIDED_CAPABILITY" not in build_structured_plan_repair_prompt("g", "not json", ["x"], ["PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED"], 1)

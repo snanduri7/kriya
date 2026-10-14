@@ -59,6 +59,14 @@ logger = logging.getLogger(__name__)
 # authored subtask text to isolate from) means the ENTIRE goal text stays
 # authoritative, exactly as it always has - this is additive, not a
 # behavior change for that path.
+# The ONE statement of how a plan represents a dependency that is not produced by another planned subtask. Defined once; every independently generated Planner contract
+# (the structured Planner system prompt, its user-message protocol and the Planner agent's own system prompt) includes this exact sentence. Deliberately generic: no technology,
+# language or package manager is named.
+ENVIRONMENT_DEPENDENCY_RULE = (
+    "A library, package, runtime or tool that the project or execution environment supplies, rather than another planned subtask, is an environment dependency: "
+    "declare it in planned_files[].environment_requirements, not in requires_capabilities or in subtask requires/provides."
+)
+
 AUTHORITATIVE_GOAL_SECTION_HEADER = "=== Authoritative Goal ==="
 PLANNED_IMPLEMENTATION_SECTION_HEADER = "=== Planned Implementation Strategy ==="
 

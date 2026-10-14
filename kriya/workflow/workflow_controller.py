@@ -84,6 +84,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
+    ENVIRONMENT_DEPENDENCY_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     parse_planner_structured_output,
 )
@@ -748,6 +749,7 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "planned_files[].environment_requirements, never in subtask requires/provides. "
     "planned_files[].requires_capabilities names only an exact capability supplied by another "
     "planned subtask. "
+    + ENVIRONMENT_DEPENDENCY_RULE + " "
     "If a test or other planned artifact references a real, pre-existing production file that "
     "the goal does not require changing, do not invent a subtask to own it - list its exact "
     "existing path in that artifact's own planned_files[].preserved_references instead, to "
@@ -1146,7 +1148,8 @@ def build_authoritative_planner_request(
         "- Put ambient runtimes and tools such as java, maven, python, node, and pytest in "
         "planned_files[].environment_requirements, never in subtask requires/provides. "
         "planned_files[].requires_capabilities names only exact capabilities supplied by another "
-        "planned subtask.\n"
+        "planned subtask. "
+        + ENVIRONMENT_DEPENDENCY_RULE + "\n"
         "- If a stage's entrypoint may terminate the process and another stage's tests are "
         "expected to exercise it directly, keep the process-terminating call separate from the "
         "directly-tested logic (a thin wrapper performs termination, tests target the underlying "

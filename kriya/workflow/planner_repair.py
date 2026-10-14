@@ -224,6 +224,57 @@ def _names_a_verifier_kind_as_a_type(errors: List[str]) -> bool:
     return any(_VERIFIER_KIND_AS_TYPE.search(error or "") for error in errors)
 
 
+def unprovided_capability_facts(previous_plan_text: str) -> List[Dict[str, str]]:
+    """Typed facts about every planned-file ``requires_capabilities`` entry that NO planned subtask provides, read deterministically from the previous plan (never from error text,
+    never from the model's own explanation).
+
+    Why this exists: an entry that no planned subtask supplies is rejected by plan validation, and the validator's own message ("... does not declare that capability in requires")
+    reads as if declaring it in ``requires`` were the fix; that is itself rejected (SUBTASK_REQUIREMENT_UNPROVIDED) because nothing provides it. Only the Planner knows whether such a
+    name is really another subtask's output or a dependency the project/environment supplies, so these facts let the repair feedback state the boundary and the valid repairs
+    without choosing one. An entry a planned subtask DOES provide is not reported here (the existing exact-prerequisite correction handles a missing requires/depends_on edge), and
+    the ambient tool names plan validation exempts are never reported (they are never rejected). Returns [] when the text is not a parsable structured plan."""
+    from kriya.agents.contracts import parse_planner_structured_output
+    from kriya.workflow.plan_validation import _AMBIENT_TOOL_REQUIREMENTS
+
+    output, _issue = parse_planner_structured_output(previous_plan_text)
+    if output is None:
+        return []
+    provided = {value for subtask in output.subtasks for value in subtask.provides}
+    facts: List[Dict[str, str]] = []
+    seen = set()
+    for subtask in output.subtasks:
+        for planned_file in subtask.planned_files:
+            for capability in planned_file.requires_capabilities:
+                key = (capability, subtask.id, planned_file.path)
+                if not capability or capability.lower() in _AMBIENT_TOOL_REQUIREMENTS or capability in provided or key in seen:
+                    continue
+                seen.add(key)
+                facts.append({"capability": capability, "subtask_id": subtask.id, "planned_file": planned_file.path})
+    return facts
+
+
+def format_unprovided_capability_feedback(facts: List[Dict[str, str]]) -> str:
+    """The repair-prompt block for :func:`unprovided_capability_facts`: the typed facts, the decision boundary, and the three valid repairs. Generic by construction: the only
+    specific text is each capability name and location, taken from the plan itself."""
+    if not facts:
+        return ""
+    lines = [
+        "- UNPROVIDED_CAPABILITY: a planned file's requires_capabilities names a capability that no planned subtask provides.\n",
+    ]
+    for fact in facts:
+        lines.append(f'  capability="{fact["capability"]}" consumer: subtask={fact["subtask_id"]} file={fact["planned_file"]}\n')
+    lines.append(
+        "  requires_capabilities is only for a capability produced by another planned subtask (that subtask lists it in provides; the consumer lists it in requires and depends_on). "
+        "Choose the valid repair that is true for each capability named above:\n"
+        "  1. reference a capability that another planned subtask already provides, using its exact provides value;\n"
+        "  2. add the missing provider subtask, if producing that capability is genuinely part of this plan;\n"
+        "  3. if it is a library, package, runtime or tool supplied by the project or execution environment rather than by a planned subtask, remove it from requires_capabilities "
+        "(and from the subtask's requires, if it was added there) and declare it in that planned file's environment_requirements instead.\n"
+        "  Adding it to requires without a provider is not a repair: it is rejected as SUBTASK_REQUIREMENT_UNPROVIDED.\n"
+    )
+    return "".join(lines)
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,
@@ -396,6 +447,8 @@ def build_structured_plan_repair_prompt(
                 "requires_runtime_execution true, all together. An acceptance criterion a tool proves is method "
                 "'tool' with that tool_name; 'judgment' is for what no tool can check.\n"
             )
+    if "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in reason_codes or "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
+        targeted_correction += format_unprovided_capability_feedback(unprovided_capability_facts(previous_plan_text))
     if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
         targeted_correction += (
             "- Replace each unprovided requires value with the exact, character-for-character "

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
+    ENVIRONMENT_DEPENDENCY_RULE,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
     REPOSITORY_PRECEDENT_REUSE_GUIDANCE,
     MilestoneV2,
@@ -551,6 +552,7 @@ class PlannerAgent(BaseAgent):
             "Put ambient runtimes and tools such as java, maven, python, node, and pytest in "
             "environment_requirements instead; never put ambient tools in subtask "
             "requires/provides. "
+            + ENVIRONMENT_DEPENDENCY_RULE + " "
             "Derive concise global_invariants from the original request (runtime, platform, architecture, "
             "integration, entrypoint, and packaging constraints), each with a short stable id and a "
             "statement, and reference the relevant ones by id in each subtask's "
