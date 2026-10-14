@@ -11,12 +11,11 @@ Show that Kriya can acquire missing technology knowledge through a governed, app
 provenance-backed skill, make that skill visible in the GUI, and then use it for a concrete task with public lookup unavailable.
 
 ## STATUS
-**STOPPED AND RETURNED TO THE OWNER (architectural stop rule 4), 2026-10-14. Nothing here is validated.** Four live attempts with py-tree-sitter 0.25 as the candidate technology established steps 1 and part of 2 only:
-the skill is absent, the knowledge guard flags both libraries (HIGH, post-cutoff) once the workspace has a `requirements.txt` and the goal pins them as `name==version`, and the operator's acknowledgement is recorded in the governance log.
-Every run that got that far then stopped in planning (`PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED`, identical across all repair rounds), so no lookup, reference review or skill was ever produced; steps 3-10 are NOT measured.
-Classification (2026-10-14, deterministic reproducer, no new model run): the planner blocker is a `PLANNER_MODEL_DEFECT`: the Planner put an installed package into a planned file's `requires_capabilities` against its own stated contract, in 6 of 6 recorded answers. Per the owner's rule no validator or prompt change was made and no technology was switched; the scenario waits for the owner.
-Full evidence, the traced path and the options: `handover/DEMO-V2/FINDINGS.md` (F1, F2), test `tests/test_plan_external_package_capability_001.py`, registry row `PLAN-EXTERNAL-PACKAGE-CAPABILITY-001`.
-Earlier evidence does not establish this scenario either: Artemis (demo-02) acquired documents that did not cover its task; Ignite (demo-01) used a pre-authored skill. The groundwork (goal, configuration templates, `prompt_rules.json`, `scripts/answer_prompts.py`) is kept and UNVALIDATED.
+**STOPPED AND RETURNED TO THE OWNER at the first new blocker (2026-10-14). Steps 1-7 are measured; steps 8 and 10 are not achieved or not measured; step 9 is measured at prompt level only.** Nothing here is validated as a demo.
+After the planner blocker was classified (`PLANNER_MODEL_DEFECT`, with the generic contract and repair-feedback improvement that followed: `handover/DEMO-V2/FINDINGS.md` F2) one controlled live retry (same technology, goal intent, model route; no manual plan edit) got a valid plan on its first attempt and then ran the acquisition: knowledge-risk acknowledgement and governed lookups recorded, two skills created from the official pages with `live_lookup:<url>` provenance, shown populated in the Skills page.
+The Developer prompt contained the acquired rules and the generated code used exactly that API. The run then failed in generation for a different reason: the model's `outline.py` missed nested functions and the model could not repair it through the edit protocol (F10). No Kriya defect is claimed; no further runs were made.
+Per step: 1 PASS; 2 PASS on earlier no-knowledge evidence; 3 PASS; 4 PASS; 5 PASS; 6 PASS; 7 PASS (screenshots); 8 NOT MEASURED; 9 prompt-level only (acquisition run); 10 NOT ACHIEVED. Evidence: `handover/DEMO-V2/evidence/scenario-02-live-retry-1/`. Options for the owner are in `FINDINGS.md` F1/F10.
+The groundwork (goal, configuration templates, `prompt_rules.json`, `scripts/answer_prompts.py`, fixture with `requirements.txt`) is kept; `prepare`/`reset` for this scenario are not implemented.
 
 ## PRECONDITIONS
 - A technology chosen and qualified (NONE is, see STATUS): a public, current documentation set whose lookup yields rules that cover what the chosen task needs.

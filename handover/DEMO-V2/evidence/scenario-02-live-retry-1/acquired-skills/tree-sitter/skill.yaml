@@ -1,0 +1,5 @@
+category: General
+description: Custom template skill for tree-sitter.
+name: tree-sitter
+tags:
+- tree-sitter
