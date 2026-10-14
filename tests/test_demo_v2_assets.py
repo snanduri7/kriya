@@ -73,7 +73,7 @@ def test_manifest_matches_the_files_and_the_scenario_status_text() -> None:
         status = _sections((directory / "SCENARIO.md").read_text(encoding="utf-8"))["STATUS"]
         # The manifest's status and the scenario's own words must not disagree about what has been measured.
         keyword = {"REHEARSED_ONCE_PASS": "REHEARSED ONCE, PASS", "PROVISIONAL_NO_TECHNOLOGY_SELECTED": "PROVISIONAL",
-                   "DESIGN_FEASIBILITY_PROBE_PENDING": "DESIGN"}[scenario["status"]]
+                   "REHEARSED_PASS_REPRODUCIBLE_CONTROLLED": "REHEARSED, PASS, REPRODUCIBLE"}[scenario["status"]]
         assert keyword in status, scenario["id"]
         if scenario["expected"]:
             assert (DEMO_V2 / scenario["expected"]).is_file()

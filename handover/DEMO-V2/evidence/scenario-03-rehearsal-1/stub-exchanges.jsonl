@@ -1,0 +1,9 @@
+{"seq": 1, "at": 1791954055.615, "kind": "chat", "role": "system:You are Kriya's authoritative structured Planner. Return exa", "index": 0, "step": "SCRIPTED: single-unit plan (recorded earlier from a real run of the same goal)"}
+{"seq": 2, "at": 1791954056.748, "kind": "chat", "role": "developer", "index": 0, "step": "SCRIPTED: plausible but wrong candidate (returns the discount amount, not the discounted price)"}
+{"seq": 3, "at": 1791954057.324, "kind": "chat", "role": "system:You are the Kriya File List Planner. Your task is to identif", "index": 0, "step": "recorded verbatim"}
+{"seq": 4, "at": 1791954057.332, "kind": "chat", "role": "developer", "index": 1, "step": "recorded verbatim"}
+{"seq": 5, "at": 1791954057.824, "kind": "chat", "role": "system:You are the Kriya Run Verification Judge. You decide whether", "index": 0, "step": "recorded verbatim"}
+{"seq": 6, "at": 1791954057.832, "kind": "chat", "role": "system:You are the Kriya Goal Spec Compliance Checker. Classify eac", "index": 0, "step": "recorded verbatim"}
+{"seq": 7, "at": 1791954057.89, "kind": "chat", "role": "reviewer", "index": 0, "step": "recorded verbatim"}
+{"seq": 8, "at": 1791954087.396, "kind": "chat", "role": "system:You are a senior software engineer. Extract durable, project", "index": 0, "step": "recorded verbatim"}
+{"seq": 9, "at": 1791954087.492, "kind": "chat", "role": "system:You are the Kriya Goal Spec Compliance Checker. Classify eac", "index": 1, "step": "recorded verbatim"}

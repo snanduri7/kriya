@@ -13,7 +13,7 @@ claim production readiness.
 |---|---|---|---|---|
 | `01-normal-coding` | Normal GUI coding flow (brownfield bug fix) | live local model | none | **REHEARSED ONCE, PASS** (live, 2026-10-14) |
 | `02-knowledge-skill` | Terminal acquisition, GUI skill view, offline GUI run | live local model | acquisition step only | **PROVISIONAL** - no technology selected yet |
-| `03-controlled-repair` | Controlled repair of a wrong model candidate | **scripted stub (CONTROLLED)** | none | **DESIGN** - feasibility probe pending |
+| `03-controlled-repair` | Controlled repair of a wrong model candidate | **scripted stub (CONTROLLED)** | none | **REHEARSED, PASS, REPRODUCIBLE** (2026-10-14) |
 
 The status column is the truth. A scenario is only "validated" after the checks in its own `SUCCESS CRITERIA` were measured
 on a recorded run; nothing here is validated by having been written down.
