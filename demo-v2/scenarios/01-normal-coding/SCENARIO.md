@@ -16,8 +16,8 @@ The bug: `DefaultDriverService.delete(Long)` sets `deleted = true` on the entity
 `qwen3-coder:30b`: Open Folder 152 ms, Start Run acknowledged 102 ms, the run reached the human change review, the review was approved in the GUI (51 ms), Kriya resumed and
 the run ended `success`, elapsed 2:06 (1 unit, 1 attempt, 6 model requests, 11 gate results, 80 evidence records, commit COMMITTED). `verify_demo.sh --phase post`: 0 failed (exactly one
 file changed, one line added, independent offline tests 53/0, Kriya state recorded). Evidence: `handover/DEMO-V2/evidence/scenario-01-rehearsal-1/` (results.json, screenshots).
-**This is one run of a stochastic model, not a reliability claim** (`BACKEND SOLVER READINESS: FAIL`, `SOLVER REPEATABILITY: NOT ESTABLISHED`). The clean-reset rehearsal at the end of Demo V2 is a second, independent run.
-Also measured with no model: the fixture materialises from its pinned commit with the expected target hash, and the offline build passes 53 tests in about 13 s.
+A second, independent run from a clean reset on the final Demo V2 HEAD (`20dde1d`, work area created fresh, operator approval re-granted, 205 s) also passed every check (`handover/DEMO-V2/evidence/scenario-01-rehearsal-2-clean-reset/`).
+**Two runs of a stochastic model are not a reliability claim** (`BACKEND SOLVER READINESS: FAIL`, `SOLVER REPEATABILITY: NOT ESTABLISHED`). Also measured with no model: the fixture materialises from its pinned commit with the expected target hash, and the offline build passes 53 tests in about 13 s.
 
 ## PRECONDITIONS
 - Product checkout contains tag `kriya-v1.2.0-pre-modularization` with a clean tracked tree; `.venv` built (`kriya` on `.venv/bin`).

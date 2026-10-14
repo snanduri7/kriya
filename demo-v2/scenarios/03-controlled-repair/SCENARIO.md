@@ -14,7 +14,7 @@ The fixture is a three-line pricing function: `apply_discount(200, 25)` must be 
 ## STATUS
 **REHEARSED, PASS, REPRODUCIBLE (2026-10-14, product `5cf7676`+ on `demo/v2`).** Run from the desktop app against the scripted stub: Attempt 1 failed (gates 2 passed / 2 failed, first failed gate `tests`, recovery decision `retry`), Attempt 2 was a
 `repair_with_full_file` that passed (7 passed / 0 failed), the change was approved by a person in the GUI, and the run ended `success` in 0:32 with 9 model requests, all answered by the stub, 123 evidence records, sealed and VERIFIED.
-The same script replayed twice through the CLI gave the identical 9-exchange sequence both times, and `verify_demo.sh --phase post` reported 0 failed each time. Evidence: `handover/DEMO-V2/evidence/scenario-03-rehearsal-1/`.
+The same script replayed twice through the CLI gave the identical 9-exchange sequence both times, and `verify_demo.sh --phase post` reported 0 failed each time. A third run from a clean reset on the final Demo V2 HEAD (`20dde1d`, fresh work area, stub restarted at position 0) gave the same outcome and the same 9-exchange sequence (`handover/DEMO-V2/evidence/scenario-03-rehearsal-2-clean-reset/`). Evidence: `handover/DEMO-V2/evidence/scenario-03-rehearsal-1/`.
 
 > **LABEL (mandatory in the GUI notes, presenter notes and any recording): this is a CONTROLLED / SCRIPTED scenario.**
 > The model responses come from a deterministic stub that replays a fixed script. It is NOT live-model behaviour and must never be presented as evidence of how a real model behaves or fails.
