@@ -60,7 +60,7 @@ Automated rehearsal of steps 1-5 (LIVE, real model): `demo-v2/scripts/rehearse_g
 1. Start the desktop app; Open Folder: `$DEMO_V2_WORK/scenario-01/workspace`.
 2. Confirm in Run Setup that the model routing is the one in the rendered configuration and the models are reported available.
 3. Enter the contents of `goal.md` as the goal and Start Run.
-4. Watch the run (timeline, plan, units, attempts). When the change review appears, read the proposed diff and approve or reject it in the GUI.
+4. Watch the run (timeline, plan, units, attempts). When the change review appears, read what it shows (the file, `+1 -0`, the reviewer text and the validation; the diff TEXT is hidden by Kriya's default content-visibility policy, `evidence.attempt_recorder.content_visibility`, measured in both rehearsals) and approve or reject it in the GUI.
 5. After the run: open Evidence; then `demo-v2/scripts/verify_demo.sh --scenario 01 --phase post`.
 
 ## EXPECTED EVENTS

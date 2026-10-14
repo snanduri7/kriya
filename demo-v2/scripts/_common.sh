@@ -32,6 +32,30 @@ scenario_dir() {
 
 sha256_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 
+# One digest for a whole directory tree: the sha256 of the sorted "<file sha256>  <relative path>" lines. An empty directory digests to the sha256 of the empty string.
+dir_digest() { ( cd "$1" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s  %s\n' "$(shasum -a 256 "$f" | awk '{print $1}')" "$f"; done ) | shasum -a 256 | awk '{print $1}'; }
+
+# ---- demo services (everything a scenario can leave running) ----
+SEARXNG_CONTAINER="kriya-searxng-demo"   # the optional live-acquisition search endpoint (scenario 02); never needed for the owner rehearsal
+DEMO_PORTS="18766 18767"                 # 18766: scenario 02 recording proxy (scenario02_run.sh); 18767: scenario 03 scripted stub
+
+searxng_running() { command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$SEARXNG_CONTAINER"; }
+stop_searxng() { if searxng_running; then docker stop "$SEARXNG_CONTAINER" >/dev/null && echo "stopped container $SEARXNG_CONTAINER"; fi; return 0; }
+# Pids listening on a demo port. Only a process whose command line is the demo stub/proxy is ever stopped; anything else is reported and refused, never killed.
+stop_demo_listeners() {
+  local port pid cmd
+  for port in $DEMO_PORTS; do
+    for pid in $(lsof -ti ":$port" 2>/dev/null || true); do
+      cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+      case "$cmd" in
+        *stub_model_server.py*) kill "$pid" 2>/dev/null || true; echo "stopped demo stub/proxy on port $port (pid $pid)" ;;
+        *) die "port $port is held by another process (pid $pid): $cmd - stop it yourself; the demo never kills processes it did not start" ;;
+      esac
+    done
+  done
+  return 0
+}
+
 # The scenario's materialised work area. Always under DEMO_V2_WORK, never inside the repository.
 scenario_work() { echo "$DEMO_V2_WORK/scenario-$1"; }
 

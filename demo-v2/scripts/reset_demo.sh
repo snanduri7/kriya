@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Return ONE scenario to its pristine starting point inside the work area. Never writes to a fixture source or to the repository.
-# Usage: reset_demo.sh --scenario 01|03      (02: no reset, see scenario02_run.sh)
+# Return ONE scenario (or all of them) to its pristine starting point inside the work area. Never writes to a fixture source or to the repository. Idempotent: running it twice leaves the same state.
+# Usage: reset_demo.sh --scenario 01|02|03|all     (or: reset_demo.sh all)
+#   all : resets 01, 02 and 03 through their own implementations below, then stops every demo service (scripted stub, recording proxy, the optional search container)
+#         and revokes the operator approvals. Nothing is left running; nothing is started.
+# 02 : a fresh workspace from the fixture and a fresh copy of the PRESERVED GOVERNED ACQUISITION SNAPSHOT as the skills directory (its digest is checked). The per-run directories of
+#      scripts/scenario02_run.sh (c1-*, c2-*, final-*) are scratch evidence copies and are left alone: they do not affect the next run.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -8,19 +12,29 @@ SCENARIO=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --scenario) SCENARIO="${2:-}"; shift 2 ;;
-    -h|--help) sed -n 2,4p "${BASH_SOURCE[0]}"; exit 0 ;;
+    all) SCENARIO="all"; shift ;;
+    -h|--help) sed -n 2,8p "${BASH_SOURCE[0]}"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 [ -n "$SCENARIO" ] || die "--scenario is required"
 assert_work_outside_repo
 ensure_work_area
+
+if [ "$SCENARIO" = "all" ]; then
+  # Fail before changing anything if scenario 01's fixture source is missing (it is the only fixture not vendored in the repository).
+  load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
+  [ -d "${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}/.git" ] || die "scenario 01's fixture source ${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT} is not a git repository (set DEMO_V2_BASELINE_SRC)"
+  for s in 01 02 03; do "${BASH_SOURCE[0]}" --scenario "$s"; done
+  echo "=== services ==="
+  stop_demo_listeners
+  stop_searxng
+  echo "=== reset complete (all scenarios); no demo service is running ==="
+  exit 0
+fi
+
 SC_DIR="$(scenario_dir "$SCENARIO")"
-case "$SCENARIO" in
-  01|03) ;;
-  02) die "scenario 02 has no reset: every scripts/scenario02_run.sh run is a fresh work area (see scenarios/02-knowledge-skill/SCENARIO.md)" ;;
-  *) die "unknown scenario $SCENARIO" ;;
-esac
+case "$SCENARIO" in 01|02|03) ;; *) die "unknown scenario $SCENARIO" ;; esac
 
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"
@@ -41,11 +55,11 @@ if [ "$SCENARIO" = "01" ]; then
   WS_SHA="$(git -C "$WS" rev-parse HEAD)"
   [ "$WS_SHA" = "$FIXTURE_COMMIT" ] || die "workspace HEAD is $WS_SHA, expected $FIXTURE_COMMIT"
 else
-  load_env_file "$DEMO_V2_DIR/fixtures/controlled-repair/fixture.env"
+  if [ "$SCENARIO" = "03" ]; then load_env_file "$DEMO_V2_DIR/fixtures/controlled-repair/fixture.env"; else load_env_file "$DEMO_V2_DIR/fixtures/knowledge-skill/fixture.env"; fi
   cp -R "$DEMO_V2_DIR/$FIXTURE_DIR" "$WS"
   git -C "$WS" init -q -b main
   git -C "$WS" add -A
-  git -C "$WS" -c user.email=demo@kriya.local -c user.name="Kriya demo" commit -q -m "fixture: controlled-repair-pricing"
+  git -C "$WS" -c user.email=demo@kriya.local -c user.name="Kriya demo" commit -q -m "fixture: $FIXTURE_ID"
   WS_SHA="$(git -C "$WS" rev-parse HEAD)"
 fi
 [ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after creation"
@@ -65,8 +79,22 @@ else
 fi
 
 # Kriya's own state and memory for this scenario (never inside the target repository).
-rm -rf "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WS/.kriya"
+rm -rf "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WORK/gui" "$WS/.kriya"
 mkdir -p "$WORK/state" "$WORK/memory" "$WORK/evidence" "$WORK/skills-empty"
+
+if [ "$SCENARIO" = "02" ]; then
+  # The skills directory is a fresh COPY of the preserved snapshot, never the snapshot itself: the one thing a run writes there (the skill-gap acknowledgement flag in each skill.yaml)
+  # must not reach the preserved evidence. The digest proves the copy is the snapshot the measured runs used.
+  SNAP="$REPO_ROOT/$SNAPSHOT_DIR"
+  [ -d "$SNAP" ] || die "the preserved snapshot $SNAPSHOT_DIR is missing from this checkout"
+  [ "$(dir_digest "$SNAP")" = "$SNAPSHOT_DIGEST" ] || die "the preserved snapshot in the repository does not have its recorded digest ($SNAPSHOT_DIGEST): it was edited or the checkout is damaged"
+  rm -rf "$WORK/skills"
+  cp -R "$SNAP" "$WORK/skills"
+  [ "$(dir_digest "$WORK/skills")" = "$SNAPSHOT_DIGEST" ] || die "the skills copy does not match the snapshot digest"
+  printf 'PRESERVED GOVERNED ACQUISITION SNAPSHOT\nThe skills in ./skills were acquired on 2026-10-14 by a governed live lookup (every prompt approved and recorded) in an EARLIER run of this scenario.\nThey were NOT acquired during your run. Digest: %s\n' "$SNAPSHOT_DIGEST" > "$WORK/SNAPSHOT-LABEL.txt"
+  stop_searxng
+  echo "skills:      $WORK/skills (copy of the preserved snapshot, digest $SNAPSHOT_DIGEST)"
+fi
 
 echo "workspace:   $WS"
 echo "commit:      $WS_SHA"

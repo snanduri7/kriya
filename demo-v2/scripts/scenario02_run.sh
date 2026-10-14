@@ -22,6 +22,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$RUN_ID" ] && [ -n "$MODE" ] || die "--run-id and --mode are required"
 case "$RUN_ID" in *[!A-Za-z0-9._-]*|'') die "run id may only contain letters, digits, . _ -" ;; esac
+case "$RUN_ID" in workspace|skills|state|memory|evidence|config|gui|skills-empty) die "run id '$RUN_ID' is reserved for the owner-rehearsal state under scenario-02/" ;; esac
 case "$MODE" in noskill|skill|acquire) ;; *) die "--mode must be noskill, skill or acquire" ;; esac
 [ "$MODE" != "skill" ] || { [ -d "$SKILLS_FROM" ] || die "--mode skill needs --skills-from DIR (an acquired-skills directory)"; }
 [ "$MODE" = "skill" ] || [ -z "$SKILLS_FROM" ] || die "--skills-from is only valid with --mode skill"
@@ -46,7 +47,7 @@ printf 'kriya.yaml\n.kriya/\n' >> "$WS/.git/info/exclude"
 [ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean"
 
 if [ "$MODE" = "skill" ]; then cp -R "$SKILLS_FROM"/. "$RUN/skills/"; fi
-skills_digest() { ( cd "$RUN/skills" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s  %s\n' "$(shasum -a 256 "$f" | awk '{print $1}')" "$f"; done ) | shasum -a 256 | awk '{print $1}'; }
+skills_digest() { dir_digest "$RUN/skills"; }
 echo "skills before: $(skills_digest) ($(find "$RUN/skills" -type f | wc -l | tr -d ' ') files)" | tee "$EV/skills-digest-before.txt"
 
 # one rendered configuration per run: the offline template for noskill/skill (lookup OFF, no search endpoint), the acquisition template for acquire; chat traffic goes through the proxy

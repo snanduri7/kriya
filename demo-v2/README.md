@@ -7,6 +7,8 @@ frozen-runtime packages under `~/kriya-live-demo/` (kept there for provenance on
 `BACKEND SOLVER READINESS: FAIL`, `SOLVER REPEATABILITY: NOT ESTABLISHED`. Demo V2 does not qualify the solver and does not
 claim production readiness.
 
+**Owner rehearsal:** start with `OWNER_RUNBOOK.md` (one prepare command, copy/paste steps for A, B and C, one reset command).
+
 ## Scenarios
 
 | ID | Title | Model | Network | Status |

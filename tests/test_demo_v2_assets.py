@@ -134,13 +134,13 @@ def test_verify_refuses_a_work_area_inside_the_repository(tmp_path: Path) -> Non
     assert not inside.exists()
 
 
-def test_the_unspecified_scenario_refuses_to_prepare_or_reset() -> None:
-    for script, extra in (("prepare_demo.sh", []), ("reset_demo.sh", [])):
-        for scenario in ("02",):
-            result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", scenario, *extra],
-                                    capture_output=True, text=True, check=False, timeout=60)
-            assert result.returncode != 0, (script, scenario)
-            assert "scenario02_run.sh" in result.stderr
+def test_an_unknown_scenario_refuses_to_prepare_or_reset(tmp_path: Path) -> None:
+    # a temp work area: scenario 02 is a real, resettable scenario now, so nothing here may default to the owner's work area
+    for script in ("prepare_demo.sh", "reset_demo.sh"):
+        result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", "04"], capture_output=True, text=True, check=False, timeout=60,
+                                env={**os.environ, "DEMO_V2_WORK": str(tmp_path / "work")})
+        assert result.returncode != 0, script
+        assert "unknown scenario" in result.stderr
 
 
 def _verify_with_work(work: Path):

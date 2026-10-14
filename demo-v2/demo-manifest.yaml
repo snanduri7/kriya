@@ -60,4 +60,6 @@ scripts:
   verify: scripts/verify_demo.sh
   stub_ctl: scripts/stub_ctl.sh   # start/stop the scenario 03 scripted stub
   scenario02_run: scripts/scenario02_run.sh   # scenario 02: ONE terminal run of the isolated task (noskill | skill | acquire), real local model behind a recording proxy
+  launch_gui: scripts/launch_gui.sh   # the owner launcher: the PRODUCT desktop app for one scenario, with its own state directory
+  capture_skills_page: scripts/capture_skills_page.sh   # scenario 02: screenshots of the populated Skills page for a scenario02_run.sh run
   rehearse_gui: scripts/rehearse_gui.sh   # drives the evidence-packaged app: 01 LIVE (real model), 03 CONTROLLED (scripted stub)

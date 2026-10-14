@@ -34,8 +34,10 @@ Live local model for acquisition-time generation and for the offline run. Stocha
 Acquisition step: outbound public lookup, approved interactively in the terminal. Offline-use step: public lookup disabled or unreachable.
 
 ## RESET
-To be defined with the selected technology. Requirement: removes the acquired skill and its provenance, restores an empty workspace,
-and leaves a record that the skill was absent before acquisition (step 1).
+Owner rehearsal (preserved snapshot): `scripts/prepare_demo.sh --scenario 02 [--check-build]` (or `--scenario all`) builds a fresh workspace from `fixtures/knowledge-skill`, copies the PRESERVED GOVERNED ACQUISITION SNAPSHOT
+(`fixture.env` SNAPSHOT_DIR, digest checked) into `$DEMO_V2_WORK/scenario-02/skills`, renders `config/offline.template.yaml` (lookup OFF, no search endpoint, direct to the model server) and places it as the workspace `kriya.yaml`.
+Then the operator step `( cd "$DEMO_V2_WORK/scenario-02/workspace" && kriya authority approve )` and `scripts/verify_demo.sh --scenario 02 --phase pre`. `scripts/reset_demo.sh --scenario 02` returns it to that state (idempotent).
+The measured sequence (acquisition from EMPTY state, no-skill baseline) uses `scripts/scenario02_run.sh` with a fresh run directory per run; those directories are scratch evidence copies and are never reset. See `OWNER_RUNBOOK.md`.
 
 ## RUN
 The accepted sequence. Accepted only if ALL TEN are measured:

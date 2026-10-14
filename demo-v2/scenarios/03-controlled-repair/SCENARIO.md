@@ -56,7 +56,7 @@ Automated: `demo-v2/scripts/rehearse_gui.sh --scenario 03` (scripted folder choo
 1. Start the desktop app; Open Folder: `$DEMO_V2_WORK/scenario-03/workspace`. (Not yet confirmed: whether Run Setup's model-routing table also shows `scripted-stub`; the Attempts view does.)
 2. Enter the contents of `goal.md` and Start Run.
 3. Watch Attempt 1: gates run and the candidate is rejected; open Attempts and the Why panel (first failed gate, recorded diagnosis, "What Kriya did next": retry).
-4. Attempt 2 is a repair; gates pass; the change review appears. Read the diff and approve it.
+4. Attempt 2 is a repair; gates pass; the change review appears. Read what it shows (file, `+1 -1`, reviewer text, validation; the diff text is hidden by the default content-visibility policy) and approve it.
 
 ## EXPECTED EVENTS
 Planner (one unit) -> Developer attempt 1 (wrong candidate) -> gates run; full regression compares with the pre-run baseline and `test_no_discount` (passed before, fails now: `assert 0.0 == 80`) is newly failing -> attempt 1 failed ->
