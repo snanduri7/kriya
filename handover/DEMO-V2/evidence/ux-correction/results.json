@@ -1,0 +1,234 @@
+{
+ "open_folder_ms": 201,
+ "landing": {
+  "page": "project",
+  "current": "Project",
+  "heading": "ws",
+  "hasGoal": true,
+  "compactReady": "✓ Ready",
+  "detailsOpen": false
+ },
+ "layout_1280x800": {
+  "innerWidth": 1280,
+  "innerHeight": 800,
+  "start": {
+   "top": 235,
+   "bottom": 271,
+   "left": 1010,
+   "right": 1126
+  },
+  "goal": {
+   "top": 131,
+   "bottom": 227,
+   "left": 246,
+   "right": 1126
+  },
+  "startFullyVisible": true,
+  "goalFullyVisible": true,
+  "mainScrollTop": 0,
+  "mainScrollable": false,
+  "pageScrollable": false,
+  "runStripShown": false,
+  "railLabels": [
+   "⌂Project",
+   "☰Runs",
+   "✦Skills",
+   "⚒Tools",
+   "⚙Settings"
+  ]
+ },
+ "layout_1400x900": {
+  "innerWidth": 1400,
+  "innerHeight": 900,
+  "start": {
+   "top": 235,
+   "bottom": 271,
+   "left": 1070,
+   "right": 1186
+  },
+  "goal": {
+   "top": 131,
+   "bottom": 227,
+   "left": 306,
+   "right": 1186
+  },
+  "startFullyVisible": true,
+  "goalFullyVisible": true,
+  "mainScrollTop": 0,
+  "mainScrollable": false,
+  "pageScrollable": false,
+  "runStripShown": false,
+  "railLabels": [
+   "⌂Project",
+   "☰Runs",
+   "✦Skills",
+   "⚒Tools",
+   "⚙Settings"
+  ]
+ },
+ "layout_1280x720": {
+  "innerWidth": 1280,
+  "innerHeight": 720,
+  "start": {
+   "top": 235,
+   "bottom": 271,
+   "left": 1010,
+   "right": 1126
+  },
+  "goal": {
+   "top": 131,
+   "bottom": 227,
+   "left": 246,
+   "right": 1126
+  },
+  "startFullyVisible": true,
+  "goalFullyVisible": true,
+  "mainScrollTop": 0,
+  "mainScrollable": false,
+  "pageScrollable": false,
+  "runStripShown": false,
+  "railLabels": [
+   "⌂Project",
+   "☰Runs",
+   "✦Skills",
+   "⚒Tools",
+   "⚙Settings"
+  ]
+ },
+ "layout_1100x700": {
+  "innerWidth": 1100,
+  "innerHeight": 700,
+  "start": {
+   "top": 235,
+   "bottom": 271,
+   "left": 920,
+   "right": 1036
+  },
+  "goal": {
+   "top": 131,
+   "bottom": 227,
+   "left": 156,
+   "right": 1036
+  },
+  "startFullyVisible": true,
+  "goalFullyVisible": true,
+  "mainScrollTop": 0,
+  "mainScrollable": false,
+  "pageScrollable": false,
+  "runStripShown": false,
+  "railLabels": [
+   "⌂Project",
+   "☰Runs",
+   "✦Skills",
+   "⚒Tools",
+   "⚙Settings"
+  ]
+ },
+ "layout_1536x960": {
+  "innerWidth": 1536,
+  "innerHeight": 960,
+  "start": {
+   "top": 235,
+   "bottom": 271,
+   "left": 1138,
+   "right": 1254
+  },
+  "goal": {
+   "top": 131,
+   "bottom": 227,
+   "left": 374,
+   "right": 1254
+  },
+  "startFullyVisible": true,
+  "goalFullyVisible": true,
+  "mainScrollTop": 0,
+  "mainScrollable": false,
+  "pageScrollable": false,
+  "runStripShown": false,
+  "railLabels": [
+   "⌂Project",
+   "☰Runs",
+   "✦Skills",
+   "⚒Tools",
+   "⚙Settings"
+  ]
+ },
+ "runs_empty_text": "Select a run\nChoose a run from the list to see what changed and how it was validated. To start new work, go to the Project page.\nGo to Project | Run history\nRefresh runs New Run\nNo runs yet.\nNothing has been recorded for this project. Work starts on the Project page.\nGo to Project Check for history again",
+ "start_enabled": {
+  "enabled": true,
+  "shortcutHint": true
+ },
+ "start_click_to_current_run_ms": {
+  "ms": 122,
+  "state": "STARTING",
+  "composerGone": true
+ },
+ "wait_editing": true,
+ "states_until_review": [
+  "STARTING",
+  "PLANNING",
+  "EDITING",
+  "VALIDATING"
+ ],
+ "approval_panel": {
+  "text": "ACTION REQUIRED\nKriya wants to change your project\nKriya paused this run for your decision. Nothing is applied to your folder until you approve.\nKRIYA WANTS TO MODIFY\nsrc/clamp.py +1 −1\n1 file, +1 −1 · candidate 0ac24e20c6 · review ra-b5e26d5c3e5e422caa68639c\nVALIDATION\n✓ Tests passed\nReason (the reviewer's text, as Kriya recorded it)\nHuman-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.\nDiff hidden by Kriya content-visibility policy. The file list, line counts and digests above are Kriya's own metadata; Validation still shows the recorded gate results. Showing stored content is an operator setting of Kriya (evidence.attempt_recorder.content_visibility); this app has no control for it.\nReview changes\nReview validation\nReject\nApprove & Continue",
+  "focusable": -1,
+  "actionRequiredFlag": true,
+  "buttons": [
+   "Review changes",
+   "Review validation",
+   "Reject",
+   "Approve & Continue"
+  ],
+  "runState": "WAITING_FOR_APPROVAL",
+  "stripShown": false
+ },
+ "strip_on_skills": {
+  "text": "ACTION REQUIRED\nChange approval waiting\n· Add a clamp(value, low, high) function with tests.\n· 0:06\nReview",
+  "attention": true,
+  "state": "WAITING_FOR_APPROVAL",
+  "firstChildTop": 51
+ },
+ "strip_on_tools": "ACTION REQUIRED\nChange approval waiting\n· Add a clamp(value, low, high) function with tests.\n· 0:07\nReview",
+ "back_via_review": {
+  "ok": true,
+  "page": "project",
+  "focused": true
+ },
+ "approve_click": {
+  "text": "Approve these 1 file change?\nKriya will continue its verification and, if it passes, apply the change to your folder.\nDiff hidden by Kriya content-visibility policy.\nYou have not seen the diff text: you would be approving from the file list, the line counts, the digests and the reviewer's text above.\nApprove without viewing diff\nCancel",
+  "focusedCancel": true
+ },
+ "approve_confirm": {
+  "state": "WAITING_FOR_APPROVAL"
+ },
+ "states_after_approval_until_finished": {
+  "seen": [
+   "WAITING_FOR_APPROVAL",
+   "VALIDATING"
+  ],
+  "outcome": "success"
+ },
+ "completed": "✓\nRun completed\nRun succeeded\nelapsed 0:10\nGoal\nAdd a clamp(value, low, high) function with tests.\n✓ Planning\n(done)\n✓ Editing\n(done)\n✓ Validating\n(done)\n✓ Finished\n(done)\nCHANGED\nsrc/clamp.py +3 −0\nVALIDATION\n✓ Tests passed\n\nthe change was approved by you · commit NO_COMMIT\n\nSource: Kriya RunRecord (the run's own lifecycle authority).\n\nTechnical status\nView Changes\nView Evidence\nView Details\nNew Goal",
+ "completed_buttons": [
+  "Copy",
+  "View Changes",
+  "View Evidence",
+  "View Details",
+  "New Goal"
+ ],
+ "runs_history_text": "Run history\nRefresh runs New Run\nAny status\nSuccess\nFailure\nUnfinished\nStatus not recorded\nAny time\nToday\nLast 7 days\nLast 30 days\n2026-10-14\nAdd a clamp(value, low, high) function with tests.\nsuccess · 1 observed attempt(s) · 10s\n1 run(s) loaded (all)\n0 run(s) in this state store belong to other workspaces; 0 have no recorded workspace and are not listed.",
+ "run_document_tabs": [
+  "Overview",
+  "Changes",
+  "Validation",
+  "Details"
+ ],
+ "details_tabs": [
+  "Context",
+  "Plan",
+  "Attempts",
+  "Evidence"
+ ],
+ "new_goal": true
+}
