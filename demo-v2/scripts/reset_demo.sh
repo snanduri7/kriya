@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Return ONE scenario to its pristine starting point inside the work area. Never writes to a fixture source or to the repository.
-# Usage: reset_demo.sh --scenario 01|02|03
+# Usage: reset_demo.sh --scenario 01|03      (02 is PROVISIONAL: nothing to reset yet)
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -15,33 +15,39 @@ done
 [ -n "$SCENARIO" ] || die "--scenario is required"
 assert_work_outside_repo
 SC_DIR="$(scenario_dir "$SCENARIO")"
-
 case "$SCENARIO" in
-  01) ;;
+  01|03) ;;
   02) die "scenario 02 is PROVISIONAL (no technology selected, see scenarios/02-knowledge-skill/SCENARIO.md); there is no reset to run" ;;
-  03) die "scenario 03 is at DESIGN stage (see scenarios/03-controlled-repair/SCENARIO.md); there is no reset to run" ;;
   *) die "unknown scenario $SCENARIO" ;;
 esac
 
-load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
-SRC="${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}"
 WORK="$(scenario_work "$SCENARIO")"
 WS="$WORK/workspace"
-
 echo "=== demo-v2 reset: scenario $SCENARIO ==="
-[ -d "$SRC/.git" ] || die "fixture source $SRC is not a git repository (set DEMO_V2_BASELINE_SRC)"
-git -C "$SRC" cat-file -e "$FIXTURE_COMMIT^{commit}" 2>/dev/null || die "fixture source does not contain commit $FIXTURE_COMMIT"
-
+[ "$SCENARIO" = "03" ] && "$DEMO_V2_DIR/scripts/stub_ctl.sh" stop
 rm -rf "$WS"
 mkdir -p "$WORK"
-git clone -q --no-hardlinks "$SRC" "$WS"
-git -C "$WS" checkout -q "$FIXTURE_COMMIT"
-# A clone's HEAD is detached at the pinned commit; give Kriya a normal branch at the same commit.
-git -C "$WS" checkout -q -B demo-baseline "$FIXTURE_COMMIT"
 
-WS_SHA="$(git -C "$WS" rev-parse HEAD)"
-[ "$WS_SHA" = "$FIXTURE_COMMIT" ] || die "workspace HEAD is $WS_SHA, expected $FIXTURE_COMMIT"
-[ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after clone"
+if [ "$SCENARIO" = "01" ]; then
+  load_env_file "$DEMO_V2_DIR/fixtures/brownfield-spring/fixture.env"
+  SRC="${DEMO_V2_BASELINE_SRC:-$FIXTURE_SOURCE_DEFAULT}"
+  [ -d "$SRC/.git" ] || die "fixture source $SRC is not a git repository (set DEMO_V2_BASELINE_SRC)"
+  git -C "$SRC" cat-file -e "$FIXTURE_COMMIT^{commit}" 2>/dev/null || die "fixture source does not contain commit $FIXTURE_COMMIT"
+  git clone -q --no-hardlinks "$SRC" "$WS"
+  git -C "$WS" checkout -q "$FIXTURE_COMMIT"
+  # A clone's HEAD is detached at the pinned commit; give Kriya a normal branch at the same commit.
+  git -C "$WS" checkout -q -B demo-baseline "$FIXTURE_COMMIT"
+  WS_SHA="$(git -C "$WS" rev-parse HEAD)"
+  [ "$WS_SHA" = "$FIXTURE_COMMIT" ] || die "workspace HEAD is $WS_SHA, expected $FIXTURE_COMMIT"
+else
+  load_env_file "$DEMO_V2_DIR/fixtures/controlled-repair/fixture.env"
+  cp -R "$DEMO_V2_DIR/$FIXTURE_DIR" "$WS"
+  git -C "$WS" init -q -b main
+  git -C "$WS" add -A
+  git -C "$WS" -c user.email=demo@kriya.local -c user.name="Kriya demo" commit -q -m "fixture: controlled-repair-pricing"
+  WS_SHA="$(git -C "$WS" rev-parse HEAD)"
+fi
+[ -z "$(git -C "$WS" status --short)" ] || die "workspace is not clean after creation"
 TARGET_HASH="$(sha256_of "$WS/$FIXTURE_TARGET_FILE")"
 [ "$TARGET_HASH" = "$FIXTURE_TARGET_SHA256" ] || die "target file hash $TARGET_HASH != expected $FIXTURE_TARGET_SHA256"
 

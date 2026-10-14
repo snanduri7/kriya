@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Scenario 01 GUI rehearsal: drives the evidence-packaged desktop app through the whole flow with the scripted folder chooser and a REAL local model.
-# This is a LIVE run: it calls the configured model and takes minutes. It writes only inside the work area (screenshots, results.json, a copy of the app's log).
+# GUI rehearsal (scenarios 01 and 03): drives the evidence-packaged desktop app through the whole flow with the scripted folder chooser.
+# 01 is a LIVE run (real local model, minutes). 03 uses the scripted stub (CONTROLLED / SCRIPTED: no model, seconds). It writes only inside the work area (screenshots, results.json, a copy of the app's log).
 # Preconditions (checked): verify_demo.sh --phase pre passes, i.e. the workspace is prepared AND an operator approved its configuration.
-# Usage: rehearse_gui.sh --scenario 01 [--app PATH/Kriya.app]
+# Usage: rehearse_gui.sh --scenario 01|03 [--app PATH/Kriya.app]
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -15,7 +15,7 @@ while [ $# -gt 0 ]; do
     *) die "unknown argument: $1" ;;
   esac
 done
-[ "$SCENARIO" = "01" ] || die "only scenario 01 has a GUI rehearsal driver (02 is PROVISIONAL, 03 is DESIGN)"
+case "$SCENARIO" in 01|03) ;; *) die "only scenarios 01 and 03 have a GUI rehearsal driver (02 is PROVISIONAL)" ;; esac
 assert_work_outside_repo
 SC_DIR="$(scenario_dir "$SCENARIO")"
 WORK="$(scenario_work "$SCENARIO")"
@@ -26,10 +26,10 @@ command -v node >/dev/null || die "node is required to generate the capture step
 "$DEMO_V2_DIR/scripts/verify_demo.sh" --scenario "$SCENARIO" --phase pre || die "pre-flight verification failed: not starting a live run"
 
 GUI="$WORK/gui"; mkdir -p "$GUI/userdata" "$GUI/captures"
-node "$SC_DIR/gui/make_capture.mjs" "$SC_DIR/goal.md" "$GUI/capture.json"
+node "$DEMO_V2_DIR/scripts/gui/make_capture.mjs" "$SC_DIR/goal.md" "$GUI/capture.json"
 printf '{"kriyaExecutable": "%s", "editor": "vscode"}\n' "$REPO_ROOT/.venv/bin/kriya" > "$GUI/userdata/kriya-ui-settings.json"
 
-echo "=== LIVE GUI rehearsal: scenario $SCENARIO (real model; this takes minutes) ==="
+if [ "$SCENARIO" = "01" ]; then echo "=== LIVE GUI rehearsal: scenario 01 (real model; this takes minutes) ==="; else echo "=== GUI rehearsal: scenario 03 (CONTROLLED / SCRIPTED stub, no model) ==="; fi
 echo "app:        $APP"
 echo "workspace:  $WS"
 echo "state:      $WORK/state"

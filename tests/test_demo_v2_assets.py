@@ -134,10 +134,10 @@ def test_verify_refuses_a_work_area_inside_the_repository(tmp_path: Path) -> Non
     assert not inside.exists()
 
 
-def test_unspecified_scenarios_refuse_to_prepare_or_reset() -> None:
+def test_the_unspecified_scenario_refuses_to_prepare_or_reset() -> None:
     for script, extra in (("prepare_demo.sh", []), ("reset_demo.sh", [])):
-        for scenario in ("02", "03"):
+        for scenario in ("02",):
             result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", scenario, *extra],
                                     capture_output=True, text=True, check=False, timeout=60)
             assert result.returncode != 0, (script, scenario)
-            assert "PROVISIONAL" in result.stderr or "DESIGN" in result.stderr
+            assert "PROVISIONAL" in result.stderr

@@ -1,0 +1,71 @@
+{
+ "controlled": true,
+ "notice": "CONTROLLED DETERMINISTIC MODEL-RESPONSE SCENARIO: these answers are scripted, not produced by a model now.",
+ "recorded_from": {
+  "model": "qwen3-coder:30b (primary) / qwen3.6:35b-a3b-q4_K_M (fallback)",
+  "date": "2026-10-14",
+  "note": "one real run on the controlled-repair fixture through the recording proxy; only the first Developer answer was scripted (the wrong candidate)"
+ },
+ "steps": [
+  {
+   "role": "system:You are Kriya's authoritative structured Planner. Return exa",
+   "label": "recorded verbatim",
+   "content": "{\n  \"global_invariants\": [\n    {\n      \"id\": \"gi1\",\n      \"statement\": \"The function apply_discount must compute the discounted price correctly by reducing the original price by the given percentage, not by simply subtracting the percentage value from the price.\"\n    }\n  ],\n  \"subtasks\": [\n    {\n      \"id\": \"s1\",\n      \"description\": \"Modify the apply_discount function in pricing.py to correctly calculate the discounted price\",\n      \"execution_method\": \"model\",\n      \"execution_role\": \"implementation\",\n      \"depends_on\": [],\n      \"planned_files\": [\n        {\n          \"path\": \"pricing.py\",\n          \"action\": \"modify\",\n          \"environment_requirements\": [\"python\"],\n          \"requires_capabilities\": [],\n          \"preserved_references\": []\n        }\n      ],\n      \"provides\": [\"pricing_module\"],\n      \"requires\": [],\n      \"relevant_global_invariant_ids\": [\"gi1\"],\n      \"verification\": [\n        {\n          \"type\": \"tool\",\n          \"description\": \"Verify that the apply_discount function correctly calculates discounted prices using compile verification\",\n          \"tool_name\": \"compile\",\n          \"verifier_kind\": \"compile\",\n          \"requires_runtime_execution\": false\n        }\n      ],\n      \"acceptance_criteria_ids\": [\"ac1\"],\n      \"requirement_ids\": [\"REQ-1\"]\n    },\n    {\n      \"id\": \"s2\",\n      \"description\": \"Run the existing tests to ensure they pass after modifying the apply_discount function\",\n      \"execution_method\": \"model\",\n      \"execution_role\": \"verification\",\n      \"depends_on\": [\"s1\"],\n      \"planned_files\": [],\n      \"provides\": [],\n      \"requires\": [\"pricing_module\"],\n      \"relevant_global_invariant_ids\": [\"gi1\"],\n      \"verification\": [\n        {\n          \"type\": \"tool\",\n          \"description\": \"Execute test suite to confirm that existing tests pass with the corrected apply_discount implementation\",\n          \"tool_name\": \"test\",\n          \"verifier_kind\": \"test\",\n          \"requires_runtime_execution\": false\n        }\n      ],\n      \"acceptance_criteria_ids\": [\"ac1\"],\n      \"requirement_ids\": [\"REQ-2\"]\n    }\n  ],\n  \"acceptance_criteria\": [\n    {\n      \"id\": \"ac1\",\n      \"description\": \"The apply_discount function returns the correct discounted price where discount is calculated as price * (1 - percent/100)\",\n      \"method\": \"judgment\"\n    }\n  ],\n  \"extension_points\": [],\n  \"refactor_baseline\": null\n}"
+  },
+  {
+   "role": "developer",
+   "label": "SCRIPTED: plausible but wrong candidate (returns the discount amount, not the discounted price)",
+   "content": "<<<KRIYA:FILE path=\"pricing.py\">>>\n\"\"\"Price helpers for the demo shop.\"\"\"\n\n\ndef apply_discount(price, percent):\n    \"\"\"Return `price` reduced by `percent` percent (0-100), e.g. 25% off 200 is 150.\"\"\"\n    return price * percent / 100\n<<<KRIYA:END_FILE>>>\n"
+  },
+  {
+   "role": "system:You are the Kriya Run Verification Judge. You decide whether",
+   "label": "recorded verbatim",
+   "content": "{\n  \"should_run\": false,\n  \"execution_mode\": \"finite_command\",\n  \"run_commands\": null,\n  \"managed_service\": null,\n  \"command_source\": \"inferred\",\n  \"input_channel\": \"none\",\n  \"success_criteria\": \"\",\n  \"reasoning\": \"The goal only requires a compile-time verification that the apply_discount function works correctly, and the tests are already passing. No runtime behavior needs to be observed since the correctness is verified at compile time and the existing test suite already validates the function's behavior.\"\n}"
+  },
+  {
+   "role": "system:You are the Kriya Goal Spec Compliance Checker. Classify eac",
+   "label": "recorded verbatim",
+   "content": "{\n  \"compliant\": false,\n  \"reasoning\": \"The goal requires modifying the apply_discount function to correctly calculate the discounted price, but the provided code implements an incorrect calculation that returns the discount amount instead of the final discounted price.\",\n  \"missing_requirements\": [\n    \"apply_discount function must correctly calculate the discounted price\"\n  ],\n  \"likely_files\": [\n    \"pricing.py\"\n  ]\n}"
+  },
+  {
+   "role": "reviewer",
+   "label": "recorded verbatim",
+   "content": "## Summary of Findings\n\nThe function `apply_discount` in `pricing.py` currently computes the discount amount instead of the final discounted price. The correct implementation should return `price * (1 - percent / 100)` to represent the price after applying the percentage discount.\n\n## Code Review Details\n\n| File        | Line | Issue Description                                                                                   | Severity |\n|-------------|------|-----------------------------------------------------------------------------------------------------|----------|\n| pricing.py  | 6    | Function returns discount amount instead of final discounted price. Should compute `price * (1 - percent / 100)` | Major    |\n\n## How to Run the Application\n\nThe provided code is a Python module (`pricing.py`) and does not contain a main application entry point or executable logic. To test the `apply_discount` function, one would typically:\n\n1. Import the function in a Python interpreter or test script:\n   ```bash\n   python -c \"from pricing import apply_discount; print(apply_discount(200, 25))\"\n   ```\n2. Or run it as part of a larger application that uses this module.\n\nNo specific compilation or startup steps are required for the provided file alone. The function can be directly tested using standard Python evaluation methods.\n\n## Recommendation\n\nThe `apply_discount` function must be modified to correctly calculate the discounted price. The current implementation returns `price * percent / 100`, which is the discount amount, not the final price after applying that discount. The corrected version should return `price * (1 - percent / 100)`.\n\n```python\ndef apply_discount(price, percent):\n    \"\"\"Return `price` reduced by `percent` percent (0-100), e.g. 25% off 200 is 150.\"\"\"\n    return price * (1 - percent / 100)\n```\n\nThis change ensures that for an input of `apply_discount(200, 25)`, the output will be `150` as expected, rather than `50`."
+  },
+  {
+   "role": "system:You are the Kriya File List Planner. Your task is to identif",
+   "label": "recorded verbatim",
+   "content": "{\"files\": [\"pricing.py\"]}"
+  },
+  {
+   "role": "developer",
+   "label": "recorded verbatim",
+   "content": "The current implementation `price * percent / 100` calculates the discount amount, not the final price. To get the discounted price, we need to subtract the discount amount from the original price: `price - (price * percent / 100)`, which simplifies to `price * (1 - percent / 100)`. This matches the requirement that 25% off 200 is 150.\n\n<<<KRIYA:FILE path=\"pricing.py\">>>\n\"\"\"Price helpers for the demo shop.\"\"\"\n\n\ndef apply_discount(price, percent):\n    \"\"\"Return `price` reduced by `percent` percent (0-100), e.g. 25% off 200 is 150.\"\"\"\n    return price * (1 - percent / 100)\n<<<KRIYA:END_FILE>>>"
+  },
+  {
+   "role": "system:You are the Kriya Run Verification Judge. You decide whether",
+   "label": "recorded verbatim",
+   "content": "{\n  \"should_run\": false,\n  \"execution_mode\": \"finite_command\",\n  \"run_commands\": null,\n  \"managed_service\": null,\n  \"command_source\": \"inferred\",\n  \"input_channel\": \"none\",\n  \"success_criteria\": \"\",\n  \"reasoning\": \"The goal only requires a compile-time verification that the apply_discount function works correctly, and explicitly states 'Keep the function name and signature, and do not change the tests.' Since existing tests are already passing and the change is purely functional without altering behavior or adding new interfaces, runtime verification is unnecessary.\"\n}"
+  },
+  {
+   "role": "system:You are the Kriya Goal Spec Compliance Checker. Classify eac",
+   "label": "recorded verbatim",
+   "content": "{\n    \"compliant\": true,\n    \"reasoning\": \"The goal does not contain any concrete, literally-named requirements such as specific field names, function names, or literal values that need to be verified in the code. The implementation obligation is satisfied by the provided code.\",\n    \"missing_requirements\": [],\n    \"likely_files\": [\"pricing.py\"]\n}"
+  },
+  {
+   "role": "reviewer",
+   "label": "recorded verbatim",
+   "content": "## Summary of Findings\n\nThe provided code for the `apply_discount` function in `pricing.py` correctly implements the required logic to calculate a discounted price. The function returns the price reduced by the given percentage, which aligns with the goal's requirement (e.g., 25% off 200 returns 150). No issues were found that would prevent this implementation from meeting the specified acceptance criteria.\n\n## Code Review Details\n\n| Issue | Severity | Description |\n|-------|----------|-------------|\n| N/A | N/A | No issues identified. The function is correctly implemented according to the goal and acceptance criteria. |\n\n## Compliance Check\n\n- **Goal Compliance**: \u2705 The `apply_discount` function now correctly calculates the discounted price as `price * (1 - percent / 100)`, returning the final price after applying the discount.\n- **Function Signature Preservation**: \u2705 The function name and signature remain unchanged.\n- **Test Compatibility**: \u2705 The implementation does not alter test behavior, as per the requirement.\n\n## How to Run the Application\n\nThe provided code is a standalone Python module (`pricing.py`) that defines a single function. To verify its functionality:\n\n1. Ensure Python 3.x is installed.\n2. Save the content of `pricing.py` to a file named `pricing.py`.\n3. Optionally, create a test script or use an interactive Python shell to call the function:\n   ```python\n   from pricing import apply_discount\n\n   # Example usage\n   result = apply_discount(200, 25)\n   print(result)  # Should output 150.0\n   ```\n\nNo additional compilation or setup steps are required for this module."
+  },
+  {
+   "role": "system:You are a senior software engineer. Extract durable, project",
+   "label": "recorded verbatim",
+   "content": "{\n  \"category\": \"Rules\",\n  \"value\": \"When implementing percentage-based discounts, ensure the formula correctly handles a zero percent by returning the original price unchanged rather than zero.\",\n  \"quote\": \"assert apply_discount(80, 0) == 80\"\n}"
+  },
+  {
+   "role": "system:You are the Kriya Goal Spec Compliance Checker. Classify eac",
+   "label": "recorded verbatim",
+   "content": "{\n  \"compliant\": true,\n  \"reasoning\": \"The function `apply_discount(price, percent)` is present with the correct name and signature, and implements the correct logic for calculating a price reduced by a percentage.\",\n  \"missing_requirements\": [],\n  \"likely_files\": [\"pricing.py\"],\n  \"requirement_verdicts\": [\n    {\n      \"id\": \"REQ-1\",\n      \"verdict\": \"satisfied\",\n      \"evidence\": \"pricing.py contains apply_discount function with correct logic: price * (1 - percent / 100)\"\n    },\n    {\n      \"id\": \"REQ-2\",\n      \"verdict\": \"satisfied\",\n      \"evidence\": \"pricing.py contains apply_discount function with same name and signature, tests unchanged\"\n    }\n  ]\n}"
+  }
+ ]
+}

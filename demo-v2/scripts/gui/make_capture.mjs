@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Writes the GUI rehearsal steps for scenario 01: node make_capture.mjs <goal.md> <out.json>.
+/** Writes the GUI rehearsal steps for a scenario (01 and 03 share them): node scripts/gui/make_capture.mjs <goal.md> <out.json>.
  *  Adapted from ui/standalone/make-capture-review.mjs (the product's own live review smoke). It drives the evidence-packaged app THROUGH the human review: Start Run ->
  *  (model candidate, gates) -> Approval required -> read the change and the validation -> Approve -> Kriya resumes -> the durable outcome, then visits the Skills and Tools pages.
  *  Every step guards on what is actually on screen, so a run that never reaches a review is recorded as exactly that, never forced. The scripted chooser replaces ONLY the native folder dialog. */

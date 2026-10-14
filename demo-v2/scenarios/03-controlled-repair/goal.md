@@ -1,0 +1,1 @@
+Fix `apply_discount(price, percent)` in `pricing.py`: it must return the price reduced by `percent` percent (for example 25% off 200 is 150), not the price minus the percent. Keep the function name and signature, and do not change the tests.

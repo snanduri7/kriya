@@ -1,0 +1,59 @@
+# Scenario 03 - Kriya configuration template (placeholders: @WORK@, @STUB_PORT@). CONTROLLED / SCRIPTED: every model endpoint below, INCLUDING the fallback chain, is the
+# localhost scripted stub. The packaged default fallback chain points at a real model server, so llm_chain is set explicitly here: without it the retry would be answered by
+# a real model and the scenario would not be controlled (measured: that is exactly what happened before this was set).
+workflow_controller:
+  enabled: true
+  mode: enforce
+
+autonomy:
+  mode: "human-in-the-loop"
+  web_lookup_enabled: false
+  web_lookup_auto_approve: false
+  run_verification_enabled: true
+  self_correction_loop_enabled: false
+  generation_time_budget_seconds: 900
+
+search:
+  base_url: ""
+
+skills:
+  load_global: false
+  load_cwd: false
+
+paths:
+  skills: "@WORK@/skills-empty"
+  state: "@WORK@/state"
+  memory: "@WORK@/memory"
+
+llm:
+  provider: "openai"
+  model: "scripted-stub"
+  api_key: "local-key"
+  base_url: "http://127.0.0.1:@STUB_PORT@/v1"
+  temperature: 0.7
+  reviewer_temperature: 0.7
+  max_tokens: 16384
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
+  extra_body:
+    options:
+      num_ctx: 32768
+      top_p: 0.8
+      top_k: 20
+
+llm_chain:
+  - model: "scripted-stub"
+    base_url: "http://127.0.0.1:@STUB_PORT@/v1"
+    api_key: "local-key"
+    reasoning: false
+    context_window: 32768
+    temperature: 0.2
+
+embedding:
+  model: "stub-embedding"
+  base_url: "http://127.0.0.1:@STUB_PORT@/v1"

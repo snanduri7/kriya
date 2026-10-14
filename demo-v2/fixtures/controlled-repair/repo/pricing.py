@@ -1,0 +1,6 @@
+"""Price helpers for the demo shop."""
+
+
+def apply_discount(price, percent):
+    """Return `price` reduced by `percent` percent (0-100), e.g. 25% off 200 is 150."""
+    return price - percent
