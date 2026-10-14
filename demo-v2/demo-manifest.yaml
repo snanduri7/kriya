@@ -55,4 +55,5 @@ scripts:
   reset: scripts/reset_demo.sh
   verify: scripts/verify_demo.sh
   stub_ctl: scripts/stub_ctl.sh   # start/stop the scenario 03 scripted stub
+  scenario02_run: scripts/scenario02_run.sh   # scenario 02: ONE terminal run of the isolated task (noskill | skill | acquire), real local model behind a recording proxy
   rehearse_gui: scripts/rehearse_gui.sh   # drives the evidence-packaged app: 01 LIVE (real model), 03 CONTROLLED (scripted stub)

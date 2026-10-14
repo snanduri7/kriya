@@ -1,3 +1,3 @@
 # outline
 
-A tiny project. It will gain `outline.py` (a function-name outliner built on py-tree-sitter).
+A tiny project: `outline.py` (to be implemented) and its tests in `test_outline.py`.
