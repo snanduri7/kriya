@@ -48,3 +48,44 @@ Renderer ──▶ `execution.preflight` (existing, uncached) refreshes readines
 Unchanged: which fields need approval, digest calculation (`compute_value_digest`, `compute_set_digest`, artifact digest), SEC-009 decision logic, artifact format and location, approval lifetime, trust model. New: two KUP operations, one typed IPC channel, a review fingerprint used only for comparison, one extracted function shared by the CLI and KUP.
 
 (Results, tests, review record and screenshots are appended below as the work completes.)
+
+## 4. What was built
+
+* Backend: `kriya/kup/authority_ops.py` (`configuration.approval_status`, `configuration.approve`); `authority_approval.grant_local_approval()` (one write path, now also used by `kriya authority approve`) and `review_fingerprint()`; `serve.py` lists the two operations in `NO_CONFIGURATION_OPERATIONS` (they load no service configuration, as `kriya authority` is reachable while a configuration is denied). New closed error codes `APPROVAL_STALE`, `APPROVAL_UNAVAILABLE`.
+* Contract: `ui/kup/schema` (payloads, `KupRequest` entries, `ApproveConfigurationRequest/Result`), regenerated TS/Ajv/Java (`check:generated` current, `java:check` OK). The `protected_fields` items are `additionalProperties: false`, so **the contract itself refuses an answer that carries a value** (tested: the renderer shows a typed error, never the value).
+* Host: IPC channel `kriya:host:config:approve`, `config_approval_host.ts` (closed grammar `{workspace, fingerprint}`, open-workspace check, in-flight guard, passes Kriya's answer through). `configuration.approve` is refused on the generic query channel (as `workspace.create`); `kriya_argv` has no one-shot form for it.
+* Renderer: `ConfigApproval.tsx` (ACTION REQUIRED card, review dialog), `GoalComposer.tsx` (other blockers stay visible under "Also needs attention"), `ExecutionApi.approveConfiguration` (always re-reads the preflight; `preflightStale` while it is in flight). Wording: the terminal instruction is gone from the Project page; it remains only (a) as a fallback for a host with no approval port and (b) in Kriya's own blocker message shown in diagnostics.
+
+## 5. Verification (this session, HEAD after commit 0b92510 + review fixes)
+
+| Check | Result |
+|---|---|
+| Backend `tests/test_kup_config_approval.py` (equivalence with the CLI in both directions, TOCTOU, stale-after-change, restart/durability, redaction, grammar, unavailable conditions, store faults, service path) | 36 pass; 9 mutants (no fingerprint compare, constant fingerprint, coverage always true, grammar admits values, no trust-file refusal, value leak, CLI no longer shares the write, exemption removed, idempotence) all killed |
+| Existing authority/KUP: `test_sec009*`, `test_authority_cli_refusal`, `test_kup_*` (incl. error-code and vocabulary tripwires, updated for the two new codes/operations) | pass (790 in the wide targeted run; the one failure is the owner's vim swap file, see below) |
+| Real KUP + host + real CLI + launched run (`ui/standalone/test/config_approval_real.test.ts`) | 11 pass: GUI approval is CURRENT for `kriya authority inspect`, honoured by a launched run, stored in the operator HOME outside the folder with no secret; reverse direction; race refused with nothing written; drift; restart; idempotence; typed errors |
+| Host unit `config_approval_host.test.ts` | 8 pass |
+| Renderer `config_approval.test.tsx` (A-M of the spec + extras) | 23 pass; 11 UI + 7 host mutants all killed (3 survivors on first pass were real test gaps; tests added) |
+| Full suites | ui/shared 591 pass (568 before), ui/standalone 367 pass 1 skipped (348 before), ui/kup 66 pass, test-host 48 pass |
+| typecheck, eslint, `check:shared-deps`, `check:generated`, `java:check`, ruff, pylint | all clean |
+| Electron smoke (`demo-v2/scripts/config_approval_smoke.sh`, controlled body, scratch HOME, no model) | journey Open Folder -> ACTION REQUIRED -> Review -> Approve -> Ready (goal kept, Start Run on) -> Start Run -> COMPLETED; Start Run bottom edge 396 px at 1280x800, 1400x900, 1100x700; no secret in the page; after the app exited the real `kriya authority inspect` reported the approval CURRENT, the artifact held no secret, nothing was written into the project |
+
+## 6. Observations (not changed here)
+
+* **Pre-existing:** `kriya authority inspect|approve` print `llm.base_url` in clear including URL credentials (`describe_pending` redacts only `env` and `api_key`). The GUI sends no values at all, so it is unaffected. Recorded for the owner; a display-redaction fix is a CLI change outside this task.
+* The review fingerprint is process-local: restarting the Kriya service between Review and Approve refuses the approval as stale and the person reviews again (safe direction, tested).
+* No Revoke UI (the CLI `kriya authority revoke` remains; `reset_demo.sh` revokes).
+
+## 7. Independent review (fresh reviewer, read-only, commits 89ca45b + 0b92510)
+
+Verdicts as reported: **Security PASS (conditional)**, **UX FAIL (not yet)**; no BLOCKING finding. The reviewer verified: one shared write path (`grant_local_approval`), request shape enforced three times (host grammar, service allowlist, `serve.ARGUMENTS`), query channel refusal, double workspace gate, resolve+compare+write under one lock hold, no value/path/digest to the renderer, child environment without `KRIYA_TRUST_FILE`/`KRIYA_AUTHORITY_HOME`, Electron hardening, CLI refactor behaviour-neutral, no approve-on-Enter.
+
+| # | Sev | Finding | Disposition |
+|---|---|---|---|
+| 1 | IMPORTANT | The human confirmation is a renderer click; there is no main-process (native dialog) confirmation, so a compromised renderer could call status -> approve -> start. The fingerprint binds to configuration drift, not to a human review. | **OWNER DECISION, not implemented.** This is the same trust model as the existing change-approval path (renderer click -> typed IPC -> Kriya), and a hostile renderer already controls Start Run. A native `dialog.showMessageBox` inside `ConfigApprovalHost` would add a second confirmation to every approval; it is a small, separable hardening if the owner wants it. The earlier sentence "renderer cannot approve what it did not review" is corrected: it holds against configuration drift (TOCTOU), not against a compromised renderer. |
+| 2 | IMPORTANT | Names-only review: the person approves without seeing values; the CLI shows redacted values. | **Partly fixed.** Each setting now shows where it came from ("set by this project's kriya.yaml") in the main view, and the dialog says that a name does not describe behaviour and to read the kriya.yaml first. A safe value projection needs authoritative per-field display metadata that does not exist (stop condition 5): deferred. |
+| 3 | IMPORTANT | Dead end if the configuration was approved elsewhere after the card appeared: "Close" did not re-read readiness. | **Fixed + test** (closing the review re-reads the preflight; mutation-checked: removing it fails the test). |
+| 4 | IMPORTANT | Jargon; no statement of what approving permits or who the operator is. | **Fixed (wording):** the dialog now says the settings come from configuration files, that approving lets Kriya use them (model server address, tools/programs they name), that the person is the operator and should approve only if they trust it. |
+| 5 | COSMETIC | Evidence 03 still showed the stale "Approve the configuration above to start." | Fixed in 0b92510; screenshots re-captured on the final build. |
+| 6 | COSMETIC | For an `unavailable` status the card still says Review & Approve / "Needs your approval". | Recorded, not changed (the dialog explains why it cannot be done here). |
+| 7 | COSMETIC | A mid-review restart of the Kriya service shows "Configuration changed...". | Recorded; safe direction, wording follows the spec. |
+| 8 | COSMETIC | Doc uncommitted at review time. | Committed with this update. |

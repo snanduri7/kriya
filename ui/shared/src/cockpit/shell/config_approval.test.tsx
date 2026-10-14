@@ -87,12 +87,14 @@ describe('B/C. the review shows protected setting NAMES and never a value', () =
   it('lists every protected setting by name, the project, the fingerprint and the scope sentence; technical details are one disclosure down', async () => {
     const host = await open();
     const d = await reviewAndApprove();
-    for (const f of FIELDS) expect(await within(d).findByText(f, { selector: 'li' })).toBeInTheDocument();
+    for (const f of FIELDS) expect(await within(d).findByText(f, { selector: 'li > span.mono' })).toBeInTheDocument();
     expect(d).toHaveTextContent('Project: workspace');
     expect(d).toHaveTextContent('Kriya requires approval for operator-controlled configuration used by this project.');
     expect(screen.getByTestId('approval-scope')).toHaveTextContent('This approval applies only to the current protected configuration. If those settings change, Kriya will require approval again.');
     expect(d).toHaveTextContent(/Configuration fingerprint: [0-9a-f]{12}/);
     expect(d).toHaveTextContent('Only the names of the settings are shown');
+    expect(screen.getByTestId('approval-meaning')).toHaveTextContent(/come from configuration files.*You are the operator: approve only if you trust this configuration/);
+    expect(within(d).getAllByText("· set by this project's kriya.yaml")).toHaveLength(FIELDS.length); // where each setting came from, in the main view
     const technical = within(d).getByText('Technical details').closest('details')!;
     expect(technical).not.toHaveAttribute('open');
     expect(technical).toHaveTextContent(host.exec!.approvalStatus(WS).fingerprint!);
@@ -130,7 +132,7 @@ describe('D/E. Cancel approves nothing; Approve sends one typed request carrying
   it('Enter inside the review does not approve (no default-keyboard approval)', async () => {
     const host = await open();
     const d = await reviewAndApprove();
-    await within(d).findByText('autonomy.mode', { selector: 'li' });
+    await within(d).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.keyDown(d, { key: 'Enter' });
     fireEvent.keyPress(d, { key: 'Enter', charCode: 13 });
     expect(host.exec!.approvals).toHaveLength(0);
@@ -138,7 +140,7 @@ describe('D/E. Cancel approves nothing; Approve sends one typed request carrying
   it('Approve Configuration is off until Kriya\'s status is read, then asks for exactly {workspace, fingerprint} - once', async () => {
     const host = await open();
     const d = await reviewAndApprove();
-    await within(d).findByText('autonomy.mode', { selector: 'li' });
+    await within(d).findByText('autonomy.mode', { selector: 'li > span.mono' });
     const fingerprint = host.exec!.approvalStatus(WS).fingerprint;
     fireEvent.click(approveButton());
     fireEvent.click(screen.queryByRole('button', { name: 'Approving…' }) ?? approveButton()); // a second click while in flight reaches nothing
@@ -155,7 +157,7 @@ describe('F/G/H. after approval readiness is read again, the goal survives and S
     typeGoal();
     const before = calls(host, 'execution.preflight');
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(calls(host, 'execution.preflight')).toBeGreaterThan(before)); // readiness came from Kriya, not from the approval answer
@@ -179,7 +181,7 @@ describe('F/G/H. after approval readiness is read again, the goal survives and S
       return real(request);
     });
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(host.exec!.approvals).toHaveLength(1));
     expect(await screen.findByText(/Checking that this project is ready/)).toBeInTheDocument();
@@ -201,7 +203,7 @@ describe('F2. Kriya\'s next readiness answer, not the approval answer, decides w
       return real(request);
     });
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(host.exec!.approvals).toHaveLength(1));
     expect(await screen.findByText(/Checking that this project is ready/)).toBeInTheDocument();
@@ -225,7 +227,7 @@ describe('I. another blocker is never hidden', () => {
     expect(also).toHaveTextContent('TOOL_UNAVAILABLE');
     expect(also).not.toHaveTextContent('CONFIG_AUTHORITY_REFUSED');
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(host.exec!.approvals).toHaveLength(1));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Configuration approval' })).toBeNull());
@@ -242,14 +244,14 @@ describe('J. a configuration that changed while it was being reviewed is not app
     const host = await open();
     typeGoal();
     const d = await reviewAndApprove();
-    await within(d).findByText('autonomy.mode', { selector: 'li' });
+    await within(d).findByText('autonomy.mode', { selector: 'li > span.mono' });
     const reviewed = host.exec!.approvalStatus(WS).fingerprint;
     host.exec!.changeConfiguration([...FIELDS, 'execution_policy.network']); // the race: the configuration changes after Review, before Approve
     fireEvent.click(approveButton());
     expect(await within(await dialog()).findByText('Configuration changed while you were reviewing it. Review the updated configuration before approving.')).toBeInTheDocument();
     expect(host.exec!.approvals).toEqual([{ workspace: WS, fingerprint: reviewed }]);
     expect(host.exec!.approvalStatus(WS).status).toBe('required'); // NOT approved
-    expect(await within(await dialog()).findByText('execution_policy.network', { selector: 'li' })).toBeInTheDocument(); // the reload shows the updated configuration
+    expect(await within(await dialog()).findByText('execution_policy.network', { selector: 'li > span.mono' })).toBeInTheDocument(); // the reload shows the updated configuration
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(host.exec!.approvals).toHaveLength(1); // nothing was approved on the person's behalf
     fireEvent.click(approveButton());
@@ -260,12 +262,31 @@ describe('J. a configuration that changed while it was being reviewed is not app
   });
 });
 
+describe('F3. an approval that happened elsewhere does not strand the page', () => {
+  it('if the configuration was approved after the card appeared (e.g. in a terminal), the review says so and closing it re-reads readiness so Start Run turns on', async () => {
+    const host = spyOnQueries(await open());
+    await card();
+    typeGoal();
+    const fingerprint = host.exec!.approvalStatus(WS).fingerprint!;
+    await host.exec!.port.approveConfiguration!({ workspace: WS, fingerprint }); // approved by another client
+    const before = calls(host, 'execution.preflight');
+    const d = await reviewAndApprove();
+    expect(await within(d).findByText(/This configuration is already approved/)).toBeInTheDocument();
+    expect(approveButton()).toBeDisabled();
+    fireEvent.click(within(d).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(calls(host, 'execution.preflight')).toBeGreaterThan(before));
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    expect(screen.queryByRole('region', { name: 'Configuration approval' })).toBeNull();
+    expect(goalBox().value).toBe(GOAL);
+  });
+});
+
 describe('K. an approval does not outlive the configuration it was given for', () => {
   it('after a protected setting changes, the next readiness check returns the page to "Configuration approval required"', async () => {
     const host = await open();
     typeGoal();
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(startButton()).toBeEnabled());
     host.exec!.changeConfiguration();
@@ -278,7 +299,7 @@ describe('K. an approval does not outlive the configuration it was given for', (
   it('a revocation (as `kriya authority revoke`) is seen the same way', async () => {
     const host = await open();
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Configuration approval' })).toBeNull());
     host.exec!.revokeConfigurationApproval();
@@ -291,7 +312,7 @@ describe('L. durability: the approval lives in Kriya, not in the window', () => 
   it('a brand-new window over the same backend shows the project ready without asking again', async () => {
     const host = await open();
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     await waitFor(() => expect(host.exec!.approvals).toHaveLength(1));
     cleanup(); // the window is closed
@@ -315,7 +336,7 @@ describe('typed failures are shown, never swallowed', () => {
   it('a store that cannot be written reports Kriya\'s code and reason and leaves the project unapproved', async () => {
     await open({ configuration: { approveFault: { code: 'APPROVAL_UNAVAILABLE', message: 'The approval could not be saved: Permission denied', reason: 'store_unwritable' } } });
     await reviewAndApprove();
-    await within(await dialog()).findByText('autonomy.mode', { selector: 'li' });
+    await within(await dialog()).findByText('autonomy.mode', { selector: 'li > span.mono' });
     fireEvent.click(approveButton());
     const failure = await screen.findByText('The configuration was not approved');
     expect(failure.closest('[role="alert"]')).toHaveTextContent('APPROVAL_UNAVAILABLE: store_unwritable');
@@ -333,7 +354,7 @@ describe('typed failures are shown, never swallowed', () => {
     });
     mount(host);
     await reviewAndApprove();
-    await screen.findByText('autonomy.mode', { selector: 'li' });
+    await screen.findByText('autonomy.mode', { selector: 'li > span.mono' });
     expect(approveButton()).toBeDisabled();
     expect(host.exec!.approvals).toHaveLength(0);
   });
@@ -362,7 +383,7 @@ describe('M. the renderer holds no authority and touches no authority file', () 
     const ui = approvalSource;
     const core = executionSource;
     expect(ui + core).not.toMatch(/from 'node:|from 'fs'|child_process|require\(/);
-    expect(ui).not.toMatch(/~\/\.kriya|\/authority\/|KRIYA_AUTHORITY_HOME|KRIYA_TRUST_FILE|localStorage|sessionStorage|\.yaml/);
+    expect(ui).not.toMatch(/~\/\.kriya|\/authority\/|KRIYA_AUTHORITY_HOME|KRIYA_TRUST_FILE|localStorage|sessionStorage|readFile|writeFile/);
     expect(ui.match(/ex\.approveConfiguration\(/g)).toHaveLength(1);
     expect(ui).toMatch(/provider\.configurationApprovalStatus\(/);
     expect(ui).not.toMatch(/\bfetch\(|XMLHttpRequest|ipcRenderer|window\.kriyaHost/);

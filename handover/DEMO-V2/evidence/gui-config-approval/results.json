@@ -29,7 +29,7 @@
  },
  "review_open": {
   "found": true,
-  "text": "Configuration approval\nProject:\nws\n/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-cfg-smoke.2fN7RD/ws\n\nKriya requires approval for operator-controlled configuration used by this project.\n\nPROTECTED SETTINGS\nllm.base_url\nmcp.hostile-mcp\nOnly the names of the settings are shown. Their values are not displayed.\nConfiguration fingerprint: 2678c80e997a\n\nThis approval applies only to the current protected configuration. If those settings change, Kriya will require approval again.\n\nTechnical details\nApprove Configuration\nCancel",
+  "text": "Configuration approval\nProject:\nws\n/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-cfg-smoke.yUgRwm/ws\n\nKriya requires approval for operator-controlled configuration used by this project.\n\nThese settings come from configuration files, not from Kriya's defaults. Approving lets Kriya use them for runs in this project, including the model server address and any tools or programs they name. You are the operator: approve only if you trust this configuration.\n\nPROTECTED SETTINGS\nllm.base_url · set by this project's kriya.yaml\nmcp.hostile-mcp · set by this project's kriya.yaml\nOnly the names of the settings are shown; their values are not displayed. A name does not describe what a setting does, so open the project's kriya.yaml in your editor if you want to read the values first.\nConfiguration fingerprint: b686e3169cc5\n\nThis approval applies only to the current protected configuration. If those settings change, Kriya will require approval again.\n\nTechnical details\nApprove Configuration\nCancel",
   "focusOnCancel": true,
   "approveEnabled": true
  },
@@ -45,7 +45,7 @@
   "goalKept": true,
   "startEnabled": true,
   "approvalCardGone": true,
-  "headerBadge": "ws\n/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-cfg-smoke.2fN7RD/ws\n✓ Ready"
+  "headerBadge": "ws\n/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-cfg-smoke.yUgRwm/ws\n✓ Ready"
  },
  "start_click": true,
  "finished": {

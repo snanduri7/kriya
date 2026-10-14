@@ -21,6 +21,15 @@ export function useApprovalStatus(workspace: string | null, nonce: number, enabl
     unavailable<ConfigurationApprovalStatus>('unknown_run', 'No workspace is open.'));
 }
 
+/** Where Kriya says a protected setting came from, in plain words (the raw source name stays in Technical details). */
+const SOURCE_WORDS: Record<string, string> = {
+  auto_discovered_cwd: 'set by this project\'s kriya.yaml',
+  auto_discovered_install_dir: 'set by the Kriya installation\'s kriya.yaml',
+  explicit_config_path_inside_workspace: 'set by a configuration file inside this project',
+  explicit_config_path_outside_workspace: 'set by an explicitly named configuration file',
+  runtime_profile_override: 'implied by the configured runtime profile',
+};
+
 const short = (fingerprint: string | null) => (fingerprint === null ? '' : fingerprint.replace(/^sha256:/, '').slice(0, 12));
 
 /**
@@ -59,6 +68,7 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
         <h2>Configuration approval</h2>
         <div>Project: <strong>{name}</strong>{workspace ? <> <span className="muted mono small" title={workspace}>{workspace}</span></> : null}</div>
         <p>Kriya requires approval for operator-controlled configuration used by this project.</p>
+        <p className="muted small" data-testid="approval-meaning">These settings come from configuration files, not from Kriya&apos;s defaults. Approving lets Kriya use them for runs in this project, including the model server address and any tools or programs they name. You are the operator: approve only if you trust this configuration.</p>
         {state.state === 'loading' ? <p className="muted" role="status">Reading the configuration…</p> : null}
         {state.state !== 'loading' && state.state !== 'ready' ? (
           <div className="ck-state" role="alert"><strong>The configuration could not be read</strong>{state.state === 'error' ? `${state.message} (${state.code})` : 'Kriya did not answer.'}
@@ -73,8 +83,8 @@ function ReviewDialog({ onClose, onApproved }: { onClose(): void; onApproved(): 
             {status.protected_fields.length ? (
               <>
                 <h3 className="ck-action-sub">Protected settings</h3>
-                <ul aria-label="Protected settings" style={{ margin: '2px 0' }}>{status.protected_fields.map((f) => <li key={f.field} className="mono">{f.field}</li>)}</ul>
-                <div className="muted small">Only the names of the settings are shown. Their values are not displayed.</div>
+                <ul aria-label="Protected settings" style={{ margin: '2px 0' }}>{status.protected_fields.map((f) => <li key={f.field}><span className="mono">{f.field}</span> <span className="muted small">· {SOURCE_WORDS[f.source] ?? f.source}</span></li>)}</ul>
+                <div className="muted small">Only the names of the settings are shown; their values are not displayed. A name does not describe what a setting does, so open the project&apos;s kriya.yaml in your editor if you want to read the values first.</div>
                 <div>Configuration fingerprint: <span className="mono" title={status.fingerprint ?? ''}>{short(status.fingerprint)}</span></div>
               </>
             ) : null}
@@ -130,7 +140,7 @@ export function ConfigApprovalCard({ onDetails, onApproved }: { onDetails(): voi
         <button type="button" className="ck-link" onClick={onDetails}>View configuration</button>
         <Badge tone="warn">Needs your approval</Badge>
       </div>
-      {open ? <ReviewDialog onClose={() => setOpen(false)} onApproved={() => { setOpen(false); setJustApproved(true); onApproved(); }} /> : null}
+      {open ? <ReviewDialog onClose={() => { setOpen(false); ex.refreshPreflight(); }} onApproved={() => { setOpen(false); setJustApproved(true); onApproved(); }} /> : null}
     </section>
   );
 }
