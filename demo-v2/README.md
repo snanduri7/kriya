@@ -31,6 +31,7 @@ demo-v2/
   scripts/prepare_demo.sh   materialise fixtures into the work area and render configuration
   scripts/reset_demo.sh     return one scenario to its pristine starting point
   scripts/verify_demo.sh    check deterministic prerequisites (pre) and outcomes (post)
+  scripts/rehearse_gui.sh   LIVE rehearsal of scenario 01 through the desktop app (real model; minutes); never run by the other scripts
   docs/                     asset inventory, extension contract, client boundary
 ```
 

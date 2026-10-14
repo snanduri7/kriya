@@ -46,3 +46,4 @@ scripts:
   prepare: scripts/prepare_demo.sh
   reset: scripts/reset_demo.sh
   verify: scripts/verify_demo.sh
+  rehearse_gui: scripts/rehearse_gui.sh   # LIVE: drives the evidence-packaged app with a real model; scenario 01 only

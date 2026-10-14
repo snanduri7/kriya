@@ -51,6 +51,8 @@ demo-v2/scripts/verify_demo.sh  --scenario 01 --phase pre       # 3. must report
 `--check-build` additionally runs the fixture's own offline compile and tests (no model): measured on `1064b9e`, 53 passed in about 13 s.
 
 ## RUN
+Automated rehearsal of steps 1-5 (LIVE, real model): `demo-v2/scripts/rehearse_gui.sh --scenario 01` (needs `cd ui/standalone && npm run package:mac:evidence`). By hand:
+
 1. Start the desktop app; Open Folder: `$DEMO_V2_WORK/scenario-01/workspace`.
 2. Confirm in Run Setup that the model routing is the one in the rendered configuration and the models are reported available.
 3. Enter the contents of `goal.md` as the goal and Start Run.
