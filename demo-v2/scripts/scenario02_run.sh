@@ -79,7 +79,7 @@ echo "generate/driver exit code: $RC (3 = an unrecognised prompt stopped the run
 # evidence: state after the run (each is recorded, none is interpreted here)
 echo "skills after:  $(skills_digest) ($(find "$RUN/skills" -type f | wc -l | tr -d ' ') files)" | tee "$EV/skills-digest-after.txt"
 git -C "$WS" status --short > "$EV/workspace-status.txt"; git -C "$WS" diff > "$EV/workspace.diff" || true
-cp "$WS/outline.py" "$EV/outline.final.py" 2>/dev/null || true
+cp "$WS/outline.py" "$EV/outline.final.py.txt" 2>/dev/null || true
 ( cd "$WS" && PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -m pytest -q -p no:cacheprovider --tb=short ) > "$EV/independent-pytest.txt" 2>&1 || true
 docker ps --format '{{.Names}}' > "$EV/docker-ps.txt" 2>&1 || true
 echo "search prompts in governance log: $(grep -c 'Send this search' "$EV/governance.jsonl" 2>/dev/null || true)" | tee "$EV/lookup-prompt-count.txt"
