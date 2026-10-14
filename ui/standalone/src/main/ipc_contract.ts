@@ -27,6 +27,9 @@ export const IPC_CHANNELS = {
   // Deliberately NOT part of the generic query channel (`configuration.approve` is refused there, like `workspace.create`); the renderer can never name a setting,
   // a value, a path or a digest to trust. See config_approval_host.ts.
   approveConfiguration: 'kriya:host:config:approve',
+  // Project Setup: ONE typed action ({workspace}) that asks Kriya to create its recommended kriya.yaml in the open folder. A mutation, so (like workspace.create and
+  // configuration.approve) it is refused on the generic query channel. The request carries no setting, model, path or content. See project_setup_host.ts.
+  initializeProject: 'kriya:host:project:initialize',
   // End-user experience: New Project. Two typed steps; the renderer never names where a project is created (an opaque token for a folder the person chose
   // in the NATIVE chooser stands for the parent) and Kriya (`workspace.create`) makes the folder. See project_host.ts.
   chooseProjectParent: 'kriya:host:project:choose-parent',
@@ -89,6 +92,7 @@ export type KupRequest =
   | { operation: 'workspace.create'; parent: string; name: string }
   | { operation: 'configuration.approval_status'; workspace: string }
   | { operation: 'configuration.approve'; workspace: string; fingerprint: string }
+  | { operation: 'project.initialize'; workspace: string }
   | { operation: 'change_approval.review'; workspace: string; launch_id: string; review_id: string }
   | { operation: 'execution.context'; workspace: string }
   | { operation: 'execution.model_probe'; workspace: string }
@@ -210,6 +214,9 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
     case 'configuration.approve':
       // Never reachable from the renderer's generic query channel: an approval is a security decision with its own typed channel (config_approval_host.ts).
       return { ok: false, message: 'configuration.approve is not available through the query channel' };
+    case 'project.initialize':
+      // Never reachable from the renderer's generic query channel: creating a configuration file is a mutation with its own typed channel (project_setup_host.ts).
+      return { ok: false, message: 'project.initialize is not available through the query channel' };
     case 'configuration.approval_status':
     case 'workspace.status':
     case 'workspace.describe':
@@ -301,6 +308,14 @@ export function validateDecideApproval(v: unknown): ValidationResult<DecideAppro
   if (typeof v.candidate_digest !== 'string' || !CANDIDATE_DIGEST_RE.test(v.candidate_digest)) return { ok: false, message: 'candidate_digest is malformed' };
   if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
   return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, candidate_digest: v.candidate_digest, decision: v.decision } };
+}
+
+export interface InitializeProjectRequest { workspace: string }
+/** Project Setup: exactly {workspace}. There is no field for a setting, a model, a path or file content. */
+export function validateInitializeProject(v: unknown): ValidationResult<InitializeProjectRequest> {
+  if (!isObj(v) || Object.keys(v).join() !== 'workspace') return { ok: false, message: 'initializeProject takes exactly workspace' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  return { ok: true, value: { workspace: w.value } };
 }
 
 export const FINGERPRINT_RE = /^sha256:[0-9a-f]{64}$/;

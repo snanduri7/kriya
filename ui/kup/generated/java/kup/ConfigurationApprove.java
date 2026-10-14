@@ -21,7 +21,7 @@ public class ConfigurationApprove {
     private String approvalDigest;
     private List<String> approvedFields;
     private String identity;
-    private Outcome outcome;
+    private ConfigurationApproveOutcome outcome;
     private String scope;
     private String workspace;
 
@@ -41,9 +41,9 @@ public class ConfigurationApprove {
     public void setIdentity(String value) { this.identity = value; }
 
     @JsonProperty("outcome")
-    public Outcome getOutcome() { return outcome; }
+    public ConfigurationApproveOutcome getOutcome() { return outcome; }
     @JsonProperty("outcome")
-    public void setOutcome(Outcome value) { this.outcome = value; }
+    public void setOutcome(ConfigurationApproveOutcome value) { this.outcome = value; }
 
     @JsonProperty("scope")
     public String getScope() { return scope; }

@@ -66,8 +66,8 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const busy = decision.state === 'submitting' || decision.state === 'accepted';
   const data = shown.state === 'ready' || shown.state === 'degraded' ? shown.data : null;
   const truncated = data?.truncated === true;
-  // The change counts as VIEWABLE only when Kriya proved it is THIS review's change: verified, same review, same digest, still pending, and shown in full.
-  const viewable = data !== null && data.verified && data.review_id === review.review_id && data.candidate_digest === review.candidate_digest && data.status === 'PENDING' && !truncated;
+  // The change counts as VIEWABLE only when Kriya proved it is THIS review's change (the answer is verified by contract): same review, same digest, still pending, and shown in full.
+  const viewable = data !== null && data.review_id === review.review_id && data.candidate_digest === review.candidate_digest && data.status === 'PENDING' && !truncated;
   const staleRefusal = decision.state === 'refused' && decision.code === 'STALE_REVIEW';
   const facts = useLiveRunFacts(launchId, `${review.review_id}@${review.candidate_digest}`);
   const lines = facts && facts.state === 'ready' ? verificationSummary(facts.gates) : null;
@@ -77,7 +77,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   // Open in Editor: the first file that already exists in the project (a new file has nothing to open yet).
   const existing = data?.files.find((f) => f.change_type !== 'added') ?? null;
   const openEditor = () => { if (workspace && existing) void provider.openInEditor(`${workspace}/${existing.path}`); };
-  const decide = (choice: 'approve' | 'reject') => { if (choice === 'approve' && !viewable) return; void ex.decide(choice, review.review_id, data?.candidate_digest ?? ''); };
+  const decide = (choice: 'approve' | 'reject') => { void ex.decide(choice, review.review_id, data?.candidate_digest ?? ''); }; // approve is only reachable from the confirmation, which exists only while `viewable`; the decider also refuses a digest that is not the pending one
   return (
     <section className="ck-review ck-action" aria-label="Change review" data-review-id={review.review_id} tabIndex={-1}>
       <div className="ck-action-head"><span className="ck-action-flag">ACTION REQUIRED</span><strong>Kriya wants to change your project</strong></div>

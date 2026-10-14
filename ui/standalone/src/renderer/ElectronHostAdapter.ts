@@ -1,4 +1,4 @@
-import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, ApproveConfigurationRequest, ApproveConfigurationResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
+import type { ExecutionHostPort, ExecutionState, HostAdapter, HostInfo, HostSettings, KupEnvelope, KupRequest, MenuCommand, DecideApprovalRequest, DecideApprovalResult, ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, StartRunRequest, StartRunResult, OpenInIdeRequest, OpenInIdeResult, WorkspaceChoice, WorkspaceHost, ProjectParentChoice, ProjectCreateResult, NotifyRequest, NotifyResult } from '@kriya-ui/shared';
 
 export interface KriyaHostBridge {
   query(request: unknown): Promise<unknown>;
@@ -18,6 +18,7 @@ export interface KriyaHostBridge {
   executionState(): Promise<unknown>;
   decideApproval(request: unknown): Promise<unknown>;
   approveConfiguration(request: unknown): Promise<unknown>;
+  initializeProject(request: unknown): Promise<unknown>;
   notifyRun(request: unknown): Promise<unknown>;
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
   measureMode: boolean;
@@ -43,6 +44,7 @@ export class ElectronHostAdapter implements HostAdapter {
       state: () => bridge.executionState() as Promise<ExecutionState>,
       decideApproval: (request: DecideApprovalRequest) => bridge.decideApproval(request) as Promise<DecideApprovalResult>,
       approveConfiguration: (request: ApproveConfigurationRequest) => bridge.approveConfiguration(request) as Promise<ApproveConfigurationResult>,
+      initializeProject: (request: InitializeProjectRequest) => bridge.initializeProject(request) as Promise<InitializeProjectResult>,
       notify: (request: NotifyRequest) => bridge.notifyRun(request) as Promise<NotifyResult>,
     };
   }

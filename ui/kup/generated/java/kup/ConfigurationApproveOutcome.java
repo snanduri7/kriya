@@ -5,7 +5,7 @@ package kup;
 import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
-public enum Outcome {
+public enum ConfigurationApproveOutcome {
     ALREADY_APPROVED, APPROVED;
 
     @JsonValue
@@ -18,9 +18,9 @@ public enum Outcome {
     }
 
     @JsonCreator
-    public static Outcome forValue(String value) throws IOException {
+    public static ConfigurationApproveOutcome forValue(String value) throws IOException {
         if (value.equals("already_approved")) return ALREADY_APPROVED;
         if (value.equals("approved")) return APPROVED;
-        throw new IOException("Cannot deserialize Outcome");
+        throw new IOException("Cannot deserialize ConfigurationApproveOutcome");
     }
 }

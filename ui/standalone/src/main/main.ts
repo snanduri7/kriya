@@ -24,6 +24,7 @@ import { KriyaServiceHolder } from './kriya_service';
 import { WorkspaceRegistry } from './workspace_host';
 import { ApprovalHost } from './approval_host';
 import { ConfigApprovalHost, confirmationDialog, isApproveResponse } from './config_approval_host';
+import { ProjectSetupHost } from './project_setup_host';
 import { ProjectHost } from './project_host';
 import { NotificationHost } from './notification_host';
 import { ExecutionHost } from './execution_host';
@@ -68,6 +69,7 @@ let workspaces: WorkspaceRegistry;
 let execution: ExecutionHost;
 let approvals: ApprovalHost;
 let configApprovals: ConfigApprovalHost;
+let projectSetup: ProjectSetupHost;
 let projects: ProjectHost;
 let notifications: NotificationHost;
 const liveNotifications = new Set<Notification>(); // a shown notification is kept until it is clicked or closed (otherwise it can be collected before the person sees it)
@@ -263,6 +265,10 @@ function registerIpc() {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return configApprovals.approve(raw);
   });
+  ipcMain.handle(IPC_CHANNELS.initializeProject, async (event, raw: unknown) => {
+    if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
+    return projectSetup.initialize(raw);
+  });
   ipcMain.handle(IPC_CHANNELS.notifyRun, (event, raw: unknown) => {
     if (!fromOwnedRenderer(event)) throw new Error('unexpected sender');
     return notifications.notify(raw);
@@ -336,6 +342,10 @@ app.whenReady().then(async () => {
     approve: (workspace, fingerprint) => kupQuery({ operation: 'configuration.approve', workspace, fingerprint }),
     confirm: confirmConfigurationApproval,
     currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
+  });
+  projectSetup = new ProjectSetupHost({
+    initialize: (workspace) => kupQuery({ operation: 'project.initialize', workspace }),
+    currentWorkspace: () => workspaces.current(), runActive: () => execution.active(), log: dev?.traceLine,
   });
   approvals = new ApprovalHost({
     run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,

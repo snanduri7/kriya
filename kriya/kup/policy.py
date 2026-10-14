@@ -47,6 +47,7 @@ OPERATIONS = (
     "tools.approval_state",  # what the durable invocation-approval store can say about one tool without starting it (never APPROVED)
     "configuration.approval_status",  # which operator-controlled settings of a folder need approval, and whether a current approval covers them; names only, never values
     "configuration.approve",  # record the approval for exactly the configuration the person reviewed (a typed {workspace, fingerprint}); the same write the CLI makes
+    "project.initialize",  # Project Setup: create the recommended kriya.yaml in a folder that has none (a typed {workspace}; approves nothing, never overwrites)
     "change_approval.review",  # the EXACT proposed change a pending (or decided) review asks the person to approve, verified against the review's digests; approval-scoped
     "snapshot.acquire",
     "snapshot.list",

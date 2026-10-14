@@ -255,6 +255,12 @@
         },
         {
           "type": "object",
+          "required": ["operation", "workspace"],
+          "properties": { "operation": { "const": "project.initialize" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "required": ["operation", "workspace", "launch_id", "review_id"],
           "properties": { "operation": { "const": "change_approval.review" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "launch_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$" }, "review_id": { "type": "string", "pattern": "^ra-[0-9a-f]{24}$", "description": "The review identity Kriya gave in launch.status (pending_approval.review_id)." } },
           "additionalProperties": false
@@ -1129,6 +1135,24 @@
       "type": "object",
       "required": ["workspace", "fingerprint"],
       "properties": { "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint." } },
+      "additionalProperties": false
+    },
+    "InitializeProjectRequest": {
+      "description": "Project Setup from the desktop: exactly the open folder. The request carries no setting, model, path or file content: Kriya writes its own recommended profile.",
+      "type": "object",
+      "required": ["workspace"],
+      "properties": { "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." } },
+      "additionalProperties": false
+    },
+    "InitializeProjectResult": {
+      "description": "Kriya's answer to Project Setup, passed through. initialized=true means Kriya created the configuration file in the open folder (nothing was approved). initialized=false carries a closed code from Kriya (INVALID_REQUEST with reason already_configured, WORKSPACE_UNAVAILABLE with reason unwritable, ...) or a host refusal (WORKSPACE_NOT_OPEN, RUN_ACTIVE, SETUP_IN_FLIGHT).",
+      "type": "object",
+      "required": ["initialized", "outcome", "code", "message", "reason", "summary"],
+      "properties": {
+        "initialized": { "type": "boolean" }, "outcome": { "type": ["string", "null"] }, "code": { "type": ["string", "null"] },
+        "message": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] },
+        "summary": { "type": ["object", "null"], "description": "What the created profile sets, in words (model, fallback models, workflow, changes, web lookup)." }
+      },
       "additionalProperties": false
     },
     "ApproveConfigurationResult": {

@@ -61,6 +61,7 @@ export function buildKriyaArgv(request: KupRequest): string[] {
     case 'configuration.approval_status':
     case 'configuration.approve':
     case 'change_approval.review':
+    case 'project.initialize':
     case 'execution.context':
     case 'execution.model_probe':
     case 'skills.list':

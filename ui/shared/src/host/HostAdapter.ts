@@ -1,4 +1,4 @@
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -80,6 +80,8 @@ export interface ExecutionHostPort {
   /** Configuration approval: the host forwards ONE typed request ({workspace, fingerprint of the configuration the person reviewed}) to Kriya's `configuration.approve` and reports Kriya's answer.
    * It never approves "whatever is current", never carries a setting, value or path, and holds no authority: Kriya re-resolves the configuration and refuses (APPROVAL_STALE) if it changed. Absent on a host with no execution backend. */
   approveConfiguration?(request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult>;
+  /** Project Setup: the host forwards ONE typed request ({workspace}) to Kriya's `project.initialize`, which creates Kriya's own recommended kriya.yaml in the open folder (never overwriting, approving nothing). No setting, model, path or content can be named. Absent on a host with no execution backend. */
+  initializeProject?(request: InitializeProjectRequest): Promise<InitializeProjectResult>;
   /** Ask the host for a native notification (approval waiting / run finished / run ended without success). Absent on a host with none. */
   notify?(request: NotifyRequest): Promise<NotifyResult>;
 }

@@ -200,6 +200,16 @@
       },
       "additionalProperties": true
     },
+    "ProjectInitialize": {
+      "description": "data of `project.initialize`: Kriya created its recommended configuration file in a folder that had none. It approves nothing: the protected settings it introduces need the ordinary configuration approval.",
+      "type": "object",
+      "required": ["workspace", "outcome", "file", "profile", "summary", "next"],
+      "properties": {
+        "workspace": { "type": "string" }, "outcome": { "const": "created" }, "file": { "type": "string" }, "profile": { "type": "string" },
+        "summary": { "type": "object", "additionalProperties": true }, "next": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
     "ChangeApprovalReview": {
       "description": "data of `change_approval.review`: the EXACT proposed change a review asks the person to approve, served only after Kriya re-proved it against the review's digests (per-file diff digests, candidate digest, identity). Approval-scoped: it is not the evidence store and does not depend on content_visibility. `truncated` true means the change is larger than one response can carry: the host must NOT offer approval.",
       "type": "object",

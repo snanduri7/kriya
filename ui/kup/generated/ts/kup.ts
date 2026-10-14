@@ -67,6 +67,7 @@ export interface Envelope {
     | 'tools.approval_state'
     | 'configuration.approval_status'
     | 'configuration.approve'
+    | 'project.initialize'
     | 'change_approval.review'
     | 'snapshot.acquire'
     | 'snapshot.list'
@@ -921,6 +922,51 @@ export interface ChangeApprovalReview {
   }[];
 }
 
+// ---- ProjectInitialize (workspace.schema.json#/$defs/ProjectInitialize) ----
+/**
+ * data of `project.initialize`: Kriya created its recommended configuration file in a folder that had none. It approves nothing: the protected settings it introduces need the ordinary configuration approval.
+ */
+export interface ProjectInitialize {
+  workspace: string;
+  outcome: 'created';
+  file: string;
+  profile: string;
+  summary: {
+    [k: string]: unknown;
+  };
+  next: string;
+  [k: string]: unknown;
+}
+
+// ---- InitializeProjectRequest (host-contract.schema.json#/$defs/InitializeProjectRequest) ----
+/**
+ * Project Setup from the desktop: exactly the open folder. The request carries no setting, model, path or file content: Kriya writes its own recommended profile.
+ */
+export interface InitializeProjectRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+}
+
+// ---- InitializeProjectResult (host-contract.schema.json#/$defs/InitializeProjectResult) ----
+/**
+ * Kriya's answer to Project Setup, passed through. initialized=true means Kriya created the configuration file in the open folder (nothing was approved). initialized=false carries a closed code from Kriya (INVALID_REQUEST with reason already_configured, WORKSPACE_UNAVAILABLE with reason unwritable, ...) or a host refusal (WORKSPACE_NOT_OPEN, RUN_ACTIVE, SETUP_IN_FLIGHT).
+ */
+export interface InitializeProjectResult {
+  initialized: boolean;
+  outcome: string | null;
+  code: string | null;
+  message: string | null;
+  reason: string | null;
+  /**
+   * What the created profile sets, in words (model, fallback models, workflow, changes, web lookup).
+   */
+  summary: {
+    [k: string]: unknown;
+  } | null;
+}
+
 // ---- ApplicationOutcome (history.schema.json#/$defs/ApplicationOutcome) ----
 /**
  * Did Kriya execute the application it built? EXECUTED carries the recorded command, exit code and bounded, secret-scrubbed output; `succeeded` is true only when the gate recorded success AND the last step exited 0 without timing out. NOT_APPLICABLE: no runtime execution was recorded (Kriya has no authoritative start instruction, so none is offered). UNKNOWN: the record is unreadable.
@@ -1574,6 +1620,13 @@ export type KupRequest =
     }
   | {
       operation: 'configuration.approval_status';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+    }
+  | {
+      operation: 'project.initialize';
       /**
        * Absolute path without control characters.
        */

@@ -401,6 +401,7 @@ export class FixtureHost implements HostAdapter {
         const answer = this.exec.changeReview(request);
         return 'data' in answer ? this.env('change_approval.review', answer.data, this.live, null) : this.err('change_approval.review', answer.code, answer.message, answer.extra);
       }
+      case 'project.initialize': return this.err('project.initialize', 'INVALID_REQUEST', 'project.initialize is not available through the query channel');
       case 'configuration.approve': return this.err('configuration.approve', 'INVALID_REQUEST', 'configuration.approve is not available through the query channel');
       case 'execution.context': {
         if (!this.folder(request.workspace)) return this.err('execution.context', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });

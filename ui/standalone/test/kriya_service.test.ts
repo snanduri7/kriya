@@ -63,10 +63,11 @@ describe('allowlist (nothing but typed KUP requests reaches the child)', () => {
   });
   it('the table covers exactly the operations the host validator accepts', () => {
     const accepted = ['change_approval.review', 'capabilities', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'launch.status', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content', 'configuration.approval_status'];
-    // workspace.create and configuration.approve are in the SERVICE table (the host's own token-gated flows send them) but are NEVER accepted from the renderer's query channel.
-    expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create', 'configuration.approve'].sort());
+    // workspace.create, configuration.approve and project.initialize are in the SERVICE table (the host's own token-gated flows send them) but are NEVER accepted from the renderer's query channel.
+    expect(Object.keys(SERVICE_ARGUMENTS).sort()).toEqual([...accepted, 'workspace.create', 'configuration.approve', 'project.initialize'].sort());
     expect(validateKupRequest({ operation: 'workspace.create', parent: '/tmp', name: 'x' }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'configuration.approve', workspace: '/tmp', fingerprint: 'sha256:' + 'a'.repeat(64) }).ok).toBe(false);
+    expect(validateKupRequest({ operation: 'project.initialize', workspace: '/tmp' }).ok).toBe(false);
     expect(validateKupRequest({ operation: 'configuration.approval_status', workspace: '/tmp' }).ok).toBe(true);
     expect(validateKupRequest({ operation: 'change_approval.review', workspace: '/tmp', launch_id: '20261010T101010-abcdef01', review_id: 'ra-' + 'a'.repeat(24) }).ok).toBe(true);
     expect(validateKupRequest({ operation: 'change_approval.review', workspace: '/tmp', launch_id: '20261010T101010-abcdef01', review_id: '../x' }).ok).toBe(false);

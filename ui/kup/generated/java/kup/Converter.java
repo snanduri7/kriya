@@ -32,6 +32,9 @@
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
 //     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
 //     ChangeApprovalReview data = Converter.ChangeApprovalReviewFromJsonString(jsonString);
+//     ProjectInitialize data = Converter.ProjectInitializeFromJsonString(jsonString);
+//     InitializeProjectRequest data = Converter.InitializeProjectRequestFromJsonString(jsonString);
+//     InitializeProjectResult data = Converter.InitializeProjectResultFromJsonString(jsonString);
 //     ApplicationOutcome data = Converter.ApplicationOutcomeFromJsonString(jsonString);
 //     ExecutionContext data = Converter.ExecutionContextFromJsonString(jsonString);
 //     ExecutionModelProbe data = Converter.ExecutionModelProbeFromJsonString(jsonString);
@@ -280,6 +283,30 @@ public class Converter {
 
     public static String ChangeApprovalReviewToJsonString(ChangeApprovalReview obj) throws JsonProcessingException {
         return getChangeApprovalReviewObjectWriter().writeValueAsString(obj);
+    }
+
+    public static ProjectInitialize ProjectInitializeFromJsonString(String json) throws IOException {
+        return getProjectInitializeObjectReader().readValue(json);
+    }
+
+    public static String ProjectInitializeToJsonString(ProjectInitialize obj) throws JsonProcessingException {
+        return getProjectInitializeObjectWriter().writeValueAsString(obj);
+    }
+
+    public static InitializeProjectRequest InitializeProjectRequestFromJsonString(String json) throws IOException {
+        return getInitializeProjectRequestObjectReader().readValue(json);
+    }
+
+    public static String InitializeProjectRequestToJsonString(InitializeProjectRequest obj) throws JsonProcessingException {
+        return getInitializeProjectRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static InitializeProjectResult InitializeProjectResultFromJsonString(String json) throws IOException {
+        return getInitializeProjectResultObjectReader().readValue(json);
+    }
+
+    public static String InitializeProjectResultToJsonString(InitializeProjectResult obj) throws JsonProcessingException {
+        return getInitializeProjectResultObjectWriter().writeValueAsString(obj);
     }
 
     public static ApplicationOutcome ApplicationOutcomeFromJsonString(String json) throws IOException {
@@ -1156,6 +1183,99 @@ public class Converter {
     private static ObjectWriter getChangeApprovalReviewObjectWriter() {
         if (ChangeApprovalReviewWriter == null) instantiateChangeApprovalReviewMapper();
         return ChangeApprovalReviewWriter;
+    }
+
+    private static ObjectReader ProjectInitializeReader;
+    private static ObjectWriter ProjectInitializeWriter;
+
+    private static void instantiateProjectInitializeMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        ProjectInitializeReader = mapper.readerFor(ProjectInitialize.class);
+        ProjectInitializeWriter = mapper.writerFor(ProjectInitialize.class);
+    }
+
+    private static ObjectReader getProjectInitializeObjectReader() {
+        if (ProjectInitializeReader == null) instantiateProjectInitializeMapper();
+        return ProjectInitializeReader;
+    }
+
+    private static ObjectWriter getProjectInitializeObjectWriter() {
+        if (ProjectInitializeWriter == null) instantiateProjectInitializeMapper();
+        return ProjectInitializeWriter;
+    }
+
+    private static ObjectReader InitializeProjectRequestReader;
+    private static ObjectWriter InitializeProjectRequestWriter;
+
+    private static void instantiateInitializeProjectRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        InitializeProjectRequestReader = mapper.readerFor(InitializeProjectRequest.class);
+        InitializeProjectRequestWriter = mapper.writerFor(InitializeProjectRequest.class);
+    }
+
+    private static ObjectReader getInitializeProjectRequestObjectReader() {
+        if (InitializeProjectRequestReader == null) instantiateInitializeProjectRequestMapper();
+        return InitializeProjectRequestReader;
+    }
+
+    private static ObjectWriter getInitializeProjectRequestObjectWriter() {
+        if (InitializeProjectRequestWriter == null) instantiateInitializeProjectRequestMapper();
+        return InitializeProjectRequestWriter;
+    }
+
+    private static ObjectReader InitializeProjectResultReader;
+    private static ObjectWriter InitializeProjectResultWriter;
+
+    private static void instantiateInitializeProjectResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        InitializeProjectResultReader = mapper.readerFor(InitializeProjectResult.class);
+        InitializeProjectResultWriter = mapper.writerFor(InitializeProjectResult.class);
+    }
+
+    private static ObjectReader getInitializeProjectResultObjectReader() {
+        if (InitializeProjectResultReader == null) instantiateInitializeProjectResultMapper();
+        return InitializeProjectResultReader;
+    }
+
+    private static ObjectWriter getInitializeProjectResultObjectWriter() {
+        if (InitializeProjectResultWriter == null) instantiateInitializeProjectResultMapper();
+        return InitializeProjectResultWriter;
     }
 
     private static ObjectReader ApplicationOutcomeReader;

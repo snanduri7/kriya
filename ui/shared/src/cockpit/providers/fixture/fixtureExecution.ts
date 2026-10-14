@@ -7,7 +7,7 @@
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
 
 export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review';
 
@@ -42,9 +42,13 @@ export interface FixtureExecutionOptions {
     approveFault?: { code: string; message: string; reason?: string };
     /** The host offers no way to record an approval (a browser test host): the page falls back to saying so. */
     noApprovalPort?: boolean;
+    /** A folder with NO configuration file yet (Project Setup is offered): `fields` stays empty until Setup creates the file, then these protected settings appear (and need approval). */
+    unconfigured?: { fieldsAfterSetup: readonly string[]; fault?: { code: string; message: string; reason?: string } };
+    /** The host offers no way to create a configuration (a browser test host). */
+    noSetupPort?: boolean;
   };
   /** How the scripted change review behaves (DEV/TEST ONLY): Kriya cannot serve the exact change (`unavailable`: no stored diff / `unverified`: the stored diff does not match its digests), or the change is larger than one response (`truncated`). */
-  review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean };
+  review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean; /** The review answers with a candidate digest that is NOT the pending review's (a host or store out of step). */ digestMismatch?: boolean };
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
 }
@@ -83,6 +87,9 @@ export class FixtureExecution {
   readonly port: ExecutionHostPort;
   /** Every configuration approval request the host received, and every status read (for assertions). */
   readonly approvals: ApproveConfigurationRequest[] = [];
+  /** Every Project Setup request the host received. */
+  readonly setups: InitializeProjectRequest[] = [];
+  private setupDone = false;
   /** Every `change_approval.review` read the fixture answered (a request that never reaches Kriya is not here). */
   readonly reviewReads: Array<{ launch_id: string; review_id: string }> = [];
   /** The scripted answers of the host's NATIVE confirmation, consumed in order (true = Approve Configuration, false = Cancel); once empty the fixture host approves. Test hook. */
@@ -113,6 +120,7 @@ export class FixtureExecution {
       state: async (): Promise<ExecutionState> => this.hostState(),
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
       ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.confirmThenApprove(request) }),
+      ...(options.configuration?.noSetupPort ? {} : { initializeProject: async (request: InitializeProjectRequest): Promise<InitializeProjectResult> => this.initializeProjectNow(request) }),
       notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
     };
   }
@@ -146,6 +154,18 @@ export class FixtureExecution {
       fingerprint: fp, scope: 'This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, Kriya asks for approval again.',
       values_shown: false, note: 'Only the names of the settings are shown. Their values are not sent to the application.',
     } as ConfigurationApprovalStatus;
+  }
+  /** Project Setup, scripted: the same refusals Kriya makes, otherwise the recommended profile is created and the folder's protected settings appear (and need approval). */
+  private initializeProjectNow(request: InitializeProjectRequest): InitializeProjectResult {
+    this.setups.push(request);
+    const no = (code: string, message: string, reason: string | null = null): InitializeProjectResult => ({ initialized: false, outcome: null, code, message, reason, summary: null });
+    const world = this.options.configuration?.unconfigured;
+    if (!world || this.setupDone) return no('INVALID_REQUEST', 'this folder already has kriya.yaml; Project Setup never overwrites a configuration', 'already_configured');
+    if (world.fault) return no(world.fault.code, world.fault.message, world.fault.reason ?? null);
+    this.setupDone = true;
+    this.configFields = [...world.fieldsAfterSetup];
+    this.configRevision += 1;
+    return { initialized: true, outcome: 'created', code: null, message: null, reason: null, summary: { model: 'fixture-model:7b', fallback_models: ['fixture-fallback:3b'], workflow: 'enforce', changes: 'held for your approval', web_lookup: 'off' } };
   }
   /** The real host asks the person (native confirmation) BEFORE Kriya is asked; Cancel is a normal decision (`declined`), Kriya never hears of it and nothing is written. */
   private confirmThenApprove(request: ApproveConfigurationRequest): ApproveConfigurationResult {
@@ -201,7 +221,7 @@ export class FixtureExecution {
     const body = sequence === 1 ? ['def clamp(value, low, high):', '    return max(low, min(value, high))', ''] : ['def clamp(value, low, high):', '    return min(max(value, low), high)', ''];
     const truncated = this.options.review?.truncated === true;
     return { data: {
-      launch_id: LAUNCH_ID, review_id: request.review_id, status: current ? (this.reviewSuperseded ? 'EXPIRED' : this.reviewStatus) : 'EXPIRED', candidate_digest: this.digestFor(sequence), verified: true,
+      launch_id: LAUNCH_ID, review_id: request.review_id, status: current ? (this.reviewSuperseded ? 'EXPIRED' : this.reviewStatus) : 'EXPIRED', candidate_digest: this.options.review?.digestMismatch ? 'sha256:' + 'ee'.repeat(32) : this.digestFor(sequence), verified: true,
       reason: REVIEW_REASON, policy_note: 'Human-in-the-loop review policy', review_summary: 'The change implements the goal and keeps the public signature.', reason_truncated: false, truncated,
       files: [{ path: 'src/clamp.py', diff_sha256: 'sha256:' + 'c3'.repeat(32), change_type: 'added', additions: body.length, deletions: 0, truncated,
         hunks: [{ header: `@@ -0,0 +1,${body.length} @@`, old_start: 0, old_lines: 0, new_start: 1, new_lines: body.length, lines: (truncated ? body.slice(0, 1) : body).map((text, i) => ({ kind: 'add', text, old_line: null, new_line: i + 1 })) }] }],
@@ -228,6 +248,8 @@ export class FixtureExecution {
   }
 
   /** `execution.preflight` for a folder: ready unless the folder is scripted with a blocker. */
+  /** A folder has a configuration file once its protected settings come from one (a scripted world with fields) or Project Setup created it. */
+  private hasConfigFile(): boolean { return this.setupDone || (this.configScripted() && this.options.configuration?.unconfigured === undefined && this.configFields.length > 0); }
   preflight(workspace: string, stateDirectory: string, blocked: { code: string; message: string } | null): Json {
     const facts = this.options.facts ?? {};
     const scripted = this.configScripted();
@@ -237,7 +259,7 @@ export class FixtureExecution {
     return {
       ready: blockers.length === 0, blockers,
       workspace: { path: workspace, identity: 'ab'.repeat(32), name: workspace.slice(workspace.lastIndexOf('/') + 1) },
-      configuration: { status: facts.configFailed ? 'failed' : authority === 'refused' ? 'refused' : 'loaded', source: facts.configFailed ? 'unreadable' : 'packaged_default', file: null, directory: workspace, discovery: 'Configuration is discovered from the process working directory, which is this folder.', fingerprint: facts.configFailed ? null : 'cd'.repeat(32), authority: { status: facts.configFailed ? 'failed' : authority, fields: [] } },
+      configuration: { status: facts.configFailed ? 'failed' : authority === 'refused' ? 'refused' : 'loaded', source: facts.configFailed ? 'unreadable' : this.hasConfigFile() ? 'auto_discovered_cwd' : 'packaged_default', file: this.hasConfigFile() ? `${workspace}/kriya.yaml` : null, directory: workspace, discovery: 'Configuration is discovered from the process working directory, which is this folder.', fingerprint: facts.configFailed ? null : 'cd'.repeat(32), authority: { status: facts.configFailed ? 'failed' : authority, fields: [] } },
       state: { directory: facts.stateDirectory === undefined ? stateDirectory : facts.stateDirectory, source: 'env', cockpit_directory: stateDirectory, observable_by_cockpit: facts.observable ?? true },
       model: facts.configFailed ? null : { provider: 'openai', model: 'fixture-model:7b', endpoint: 'http://localhost:11434/v1', context_window: 32768, fallback_chain: ['fixture-fallback:3b'], role_overrides: {} },
       recovery: { status: 'CLEAN', run_active: false },

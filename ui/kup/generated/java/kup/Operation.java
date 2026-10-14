@@ -6,7 +6,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.annotation.*;
 
 public enum Operation {
-    CAPABILITIES, CHANGE_APPROVAL_REVIEW, CONFIGURATION_APPROVAL_STATUS, CONFIGURATION_APPROVE, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, SKILLS_DESCRIBE, SKILLS_LIST, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, TOOLS_APPROVAL_STATE, TOOLS_DESCRIBE, TOOLS_LIST, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
+    CAPABILITIES, CHANGE_APPROVAL_REVIEW, CONFIGURATION_APPROVAL_STATUS, CONFIGURATION_APPROVE, EVIDENCE_CALL_CONTENT, EVIDENCE_CHANGE_CONTENT, EVIDENCE_MANIFEST, EVIDENCE_RECORDS, EVIDENCE_VERIFY, EXECUTION_CONTEXT, EXECUTION_MODEL_PROBE, EXECUTION_PREFLIGHT, HISTORY_DETAIL, HISTORY_LIST, HISTORY_PROMPT, LAUNCH_STATUS, PROJECT_INITIALIZE, SKILLS_DESCRIBE, SKILLS_LIST, SNAPSHOT_ACQUIRE, SNAPSHOT_LIST, SNAPSHOT_PRUNE, SNAPSHOT_VERIFY, TOOLS_APPROVAL_STATE, TOOLS_DESCRIBE, TOOLS_LIST, WORKSPACE_CREATE, WORKSPACE_DESCRIBE, WORKSPACE_STATUS;
 
     @JsonValue
     public String toValue() {
@@ -27,6 +27,7 @@ public enum Operation {
             case HISTORY_LIST: return "history.list";
             case HISTORY_PROMPT: return "history.prompt";
             case LAUNCH_STATUS: return "launch.status";
+            case PROJECT_INITIALIZE: return "project.initialize";
             case SKILLS_DESCRIBE: return "skills.describe";
             case SKILLS_LIST: return "skills.list";
             case SNAPSHOT_ACQUIRE: return "snapshot.acquire";
@@ -61,6 +62,7 @@ public enum Operation {
         if (value.equals("history.list")) return HISTORY_LIST;
         if (value.equals("history.prompt")) return HISTORY_PROMPT;
         if (value.equals("launch.status")) return LAUNCH_STATUS;
+        if (value.equals("project.initialize")) return PROJECT_INITIALIZE;
         if (value.equals("skills.describe")) return SKILLS_DESCRIBE;
         if (value.equals("skills.list")) return SKILLS_LIST;
         if (value.equals("snapshot.acquire")) return SNAPSHOT_ACQUIRE;

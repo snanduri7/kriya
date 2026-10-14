@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, useWorkspacePath, type ModuleDefinition } from '../../core';
 import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
+import { ProjectSetupCard } from './ProjectSetup';
 import { GoalComposer } from './GoalComposer';
 import { PreflightSummary, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
 import { RecentRuns } from './RecentRuns';
@@ -29,6 +30,8 @@ function ProjectHome() {
   const showDetails = () => setDetailsOpen(true);
   // The only thing between the person and Start Run is an approval they can give here.
   const actionOnly = ex.canApproveConfiguration && summary.state === 'blocked' && summary.blockers.length > 0 && summary.blockers.every((b) => b.code === CONFIG_APPROVAL_BLOCKER);
+  // State A: a folder with no configuration file. Setup is recommended, never required (the folder is already runnable on the defaults).
+  const unconfigured = !ex.run && ex.canInitializeProject && pre !== null && pre.configuration.file === null && pre.configuration.status !== 'failed' && f.name !== undefined;
   return (
     <div className="ck-project">
       <div className="ck-project-head">
@@ -37,6 +40,7 @@ function ProjectHome() {
         <span className="grow" />
         {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : actionOnly ? <Badge tone="warn">Action required</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
       </div>
+      {unconfigured ? <ProjectSetupCard model={pre.model?.model ?? null} fallbacks={pre.model?.fallback_chain ?? []} onCreated={recheck} /> : null}
       {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
       <RecentRuns />
       <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>

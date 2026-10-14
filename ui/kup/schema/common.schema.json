@@ -264,6 +264,7 @@
             "tools.approval_state",
             "configuration.approval_status",
             "configuration.approve",
+            "project.initialize",
             "change_approval.review",
             "snapshot.acquire",
             "snapshot.list",

@@ -23,6 +23,7 @@ const api = {
   executionState: () => ipcRenderer.invoke(IPC_CHANNELS.executionState),
   decideApproval: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideApproval, request),
   approveConfiguration: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.approveConfiguration, request),
+  initializeProject: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.initializeProject, request),
   notifyRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.notifyRun, request),
   /** The ONLY inbound channel: a fixed command name from the application menu. The event object and any payload are dropped, never forwarded. */
   onMenuCommand: (listener: (command: MenuCommand) => void) => {

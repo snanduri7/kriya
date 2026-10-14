@@ -175,6 +175,34 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(host.exec!.decisions[0]!.decision).toBe('reject');
   });
 
+  it('a change whose digest is not the pending review\'s is not shown as approvable: Kriya answered about a different candidate', async () => {
+    const { host, bar } = await reachReview({ execution: { outcome: 'review', review: { digestMismatch: true } } });
+    const unable = await within(bar).findByTestId('unable-to-display');
+    expect(unable).toBeInTheDocument();
+    expect(within(bar).queryByRole('button', { name: /Approve/ })).toBeNull();
+    expect(host.exec!.decisions).toEqual([]);
+  });
+
+  it('a review that is no longer pending when its change is loaded (superseded or expired) is not approvable', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', execution: { outcome: 'review' } } });
+    const real = mounted.host.query.bind(mounted.host);
+    vi.spyOn(mounted.host, 'query').mockImplementation(async (request) => { if (request.operation === 'change_approval.review') await gate; return real(request); });
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    goTo('Project');
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
+    await screen.findAllByText(/^✓ Ready/);
+    fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
+    const bar = await banner();
+    for (let i = 0; i < 3; i += 1) act(() => mounted.host.exec!.advance());
+    await within(bar).findByRole('region', { name: 'Change review' });
+    act(() => mounted.host.exec!.supersedeReview()); // the candidate was replaced before the change finished loading
+    release();
+    expect(await within(bar).findByTestId('unable-to-display')).toBeInTheDocument();
+    expect(within(bar).queryByRole('button', { name: /Approve/ })).toBeNull();
+  });
+
   it('"Approve without viewing diff" exists nowhere: not in the source, not in any state of the review', async () => {
     const { bar } = await reachReview();
     await diff();

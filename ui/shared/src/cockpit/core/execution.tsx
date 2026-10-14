@@ -12,7 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionHostPort } from '../../host/HostAdapter';
-import type { ApproveConfigurationResult, DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
+import type { ApproveConfigurationResult, InitializeProjectResult, DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
 import type { SelectionStore } from './selectionStore';
@@ -90,6 +90,10 @@ export interface ExecutionApi {
   /** Ask Kriya to record the approval for the configuration the person reviewed (its fingerprint, as Kriya gave it). Kriya re-resolves and refuses a changed
    * configuration; the preflight is ALWAYS asked again afterwards - readiness is never concluded from this answer. The typed goal is untouched. */
   approveConfiguration(fingerprint: string): Promise<ApproveConfigurationResult>;
+  /** Whether this host can create the project's configuration (Project Setup). */
+  canInitializeProject: boolean;
+  /** Project Setup: asks the host to have Kriya create its recommended configuration in the open folder. Readiness and the folder's facts are always read again afterwards. */
+  initializeProject(): Promise<InitializeProjectResult>;
   /** A Start Run request is in flight (preflight round trip + launch): the button is disabled and a second click is not sent. */
   starting: boolean;
   refusal: StartRefusal | null;
@@ -327,6 +331,20 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
     return result;
   }, [port, workspace, refreshPreflight]);
 
+  const canInitializeProject = port?.initializeProject !== undefined;
+  const initializeProject = useCallback(async (): Promise<InitializeProjectResult> => {
+    if (!port?.initializeProject || workspace === null) return { initialized: false, outcome: null, code: 'EXECUTION_UNAVAILABLE', message: 'This host cannot set a project up.', reason: null, summary: null };
+    let result: InitializeProjectResult;
+    try {
+      result = await port.initializeProject({ workspace });
+    } catch (error) {
+      result = { initialized: false, outcome: null, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), reason: null, summary: null };
+    }
+    refreshPreflight(); // whatever the answer, readiness is read from Kriya again
+    void refreshWorkspaceRef.current(); // the folder's own facts (it now has a configuration file)
+    return result;
+  }, [port, workspace, refreshPreflight]);
+
   const start = useCallback(async () => {
     if (!port || workspace === null || startingRef.current) return;
     if (runRef.current && runRef.current.stage !== 'finished') return;
@@ -441,7 +459,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const locked = starting || (run !== null && run.stage !== 'finished');
   // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
   const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
-    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
+    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }
