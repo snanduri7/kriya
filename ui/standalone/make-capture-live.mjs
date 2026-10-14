@@ -10,13 +10,13 @@ const W = `const W=(f,ms=${MAX_MS})=>new Promise((r)=>{const i=setInterval(()=>{
 const nav = (n) => `document.querySelector('nav[aria-label=Destinations] button[aria-label=${n}]').click();`;
 const tab = (n) => `[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='${n}').click();`;
 const goalSet = (text) => `const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,${JSON.stringify(text)});ta.dispatchEvent(new Event('input',{bubbles:true}));`;
-const banner = `document.querySelector('[aria-label="Active run"]')`;
+const banner = `document.querySelector('[aria-label="Current run"]')`;
 const startBtn = `[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')`;
 const GOAL = 'Update greet(name) so it returns "Hello, <name>!" while preserving the public function signature and keeping the project tests passing.';
 const steps = []; const add = (s) => steps.push(s);
 add({ wait: 800, file: '01-welcome.png', width: 1536, height: 960 });
 add({ name: 'open_folder_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'),60000);return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 600 });
-add({ js: `(()=>{${nav('Workspace')}})()`, wait: 800 });
+add({ js: `(()=>{${nav('Project')}})()`, wait: 800 });
 add({ name: 'preflight_text', js: `(async()=>{${W}await W(()=>document.body.innerText.includes('Configuration digest'),60000);return document.querySelector('#ck-goal').closest('section').innerText})()`, wait: 400, file: '02-workspace-goal-preflight.png' });
 add({ name: 'workspace_text_before', js: `(()=>document.body.innerText)()`, wait: 100 });
 add({ js: `(()=>{${goalSet(GOAL)}})()`, wait: 500, file: '03-goal-entered.png' });

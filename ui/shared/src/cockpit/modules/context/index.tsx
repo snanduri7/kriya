@@ -125,7 +125,7 @@ function Context() {
 
 export const contextModule: ModuleDefinition = {
   id: 'context',
-  placement: { page: 'runs', surface: 'center-tab', label: 'Context', order: 20 },
+  placement: { page: 'runs', surface: 'center-tab', label: 'Context', order: 20, group: 'details' },
   requiredCapabilities: ['evidence'], optionalCapabilities: ['evidence_content'], selectionDependencies: ['runId', 'attempt', 'eventSeq'],
   whenUnavailable: 'explain',
   render: Context,

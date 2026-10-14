@@ -1,10 +1,6 @@
-import { useState } from 'react';
-import { Badge, KeyValue, Panel, hasData, useExecution, useWorkspacePath, type Availability, type PreflightState } from '../../core';
-import type { ExecutionModelProbe, ExecutionPreflight } from '../../../model/kup';
-import { useRunSetup } from './runSetup';
-import { ModelRouting, SkillsSummary, ToolsSummary } from './SetupSections';
+import { Badge, KeyValue, hasData, useExecution, type Availability, type PreflightState } from '../../core';
+import type { ExecutionContext, ExecutionModelProbe, ExecutionPreflight } from '../../../model/kup';
 
-const GOAL_MAX = 16000;
 const SOURCES: Record<string, string> = {
   packaged_default: 'Packaged defaults (this folder has no kriya.yaml)',
   auto_discovered_cwd: 'kriya.yaml in this folder',
@@ -31,7 +27,7 @@ const BLOCKER_FIX: Record<string, string> = {
 
 const AUTHORITY_TONE = { no_findings: 'ok', approved: 'warn', refused: 'bad', failed: 'bad' } as const;
 
-interface Row { label: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'neutral'; status: string; detail?: string }
+export interface Row { label: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'neutral'; status: string; detail?: string }
 
 /** The model-server row from the probe: only what the probe measured. */
 function modelRow(probe: Availability<ExecutionModelProbe>): Row {
@@ -51,7 +47,7 @@ function modelRow(probe: Availability<ExecutionModelProbe>): Row {
   return { label: 'Model server', tone: 'ok', status: 'Answering; configured models are served', detail: `${probe.data.endpoints.map((e) => e.endpoint).join(', ')} (checked now)` };
 }
 
-function checklist(pre: ExecutionPreflight, probe: Availability<ExecutionModelProbe>): Row[] {
+export function checklist(pre: ExecutionPreflight, probe: Availability<ExecutionModelProbe>): Row[] {
   const c = pre.configuration;
   const git = pre.toolchains.tools.find((t) => t.tool === 'git');
   const rows: Row[] = [
@@ -91,7 +87,7 @@ export function PreflightSummary({ data }: { data: ExecutionPreflight }) {
   );
 }
 
-function preflightBody(state: PreflightState) {
+export function preflightBody(state: PreflightState) {
   switch (state.state) {
     case 'unavailable': return <p className="muted" role="status">{state.reason}</p>;
     case 'idle':
@@ -102,7 +98,7 @@ function preflightBody(state: PreflightState) {
   }
 }
 
-function ReadinessChecklist({ pre, probe }: { pre: ExecutionPreflight; probe: Availability<ExecutionModelProbe> }) {
+export function ReadinessChecklist({ pre, probe }: { pre: ExecutionPreflight; probe: Availability<ExecutionModelProbe> }) {
   const rows = checklist(pre, probe);
   const warn = rows.find((r) => r.tone === 'bad' && pre.ready);
   return (
@@ -124,63 +120,28 @@ function ReadinessChecklist({ pre, probe }: { pre: ExecutionPreflight; probe: Av
   );
 }
 
-/** Goal entry, Kriya's readiness, what the run would have (Skills, tools, model routing), and Start Run. Not a chat: one engineering goal starts one Kriya run. */
-export function RunPanel() {
-  const ex = useExecution();
-  const workspace = useWorkspacePath();
-  const [nonce, setNonce] = useState(0);
-  const { context, probe } = useRunSetup(workspace, nonce, ex.locked);
+
+/** Whether a run can start from here, said in one place. `blocked` is Kriya's own preflight (`ready: false` and its blocker codes); `warnings` are checklist rows that are red while Kriya still allows a start. */
+export interface ReadinessSummary {
+  state: 'checking' | 'ready' | 'ready_with_warning' | 'blocked' | 'error' | 'unavailable';
+  blockers: ReadonlyArray<{ code: string; message: string }>;
+  warnings: string[];
+  model: string | null;
+  skills: number | null;
+  tools: number | null;
+}
+export { BLOCKER_FIX };
+
+export function summarizeReadiness(ex: ReturnType<typeof useExecution>, probe: Availability<ExecutionModelProbe>, context: Availability<ExecutionContext>): ReadinessSummary {
   const pre = ex.preflight.state === 'ready' ? ex.preflight.data : null;
-  const blockers = pre ? pre.blockers : [];
-  const empty = ex.goal.trim().length === 0;
-  const canStart = ex.available && pre !== null && pre.ready && !empty && !ex.locked && ex.goal.length <= GOAL_MAX;
-  const recheck = () => { setNonce((n) => n + 1); ex.refreshPreflight(); };
-  const skillCount = hasData(context) && context.data.skills ? context.data.skills.total : null;
-  const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
-  const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
-  return (
-    <Panel title="Start a run">
-      {!ex.available ? <p className="muted" role="status">This host cannot start a run.</p> : (
-        <>
-          <label htmlFor="ck-goal" className="ck-label">Engineering goal</label>
-          <textarea id="ck-goal" className="ck-goal" rows={5} value={ex.goal} maxLength={GOAL_MAX} disabled={ex.locked}
-            placeholder="Describe the engineering task, e.g. “Add a clamp(value, low, high) function with tests.”"
-            onChange={(e) => ex.setGoal(e.target.value)} aria-describedby="ck-goal-help" />
-          <div id="ck-goal-help" className="muted small">One goal starts one Kriya run through its normal planning, generation and verification. {ex.goal.length}/{GOAL_MAX}</div>
-          {pre ? <ReadinessChecklist pre={pre} probe={probe} /> : preflightBody(ex.preflight)}
-          {blockers.length ? (
-            <div className="ck-state" role="alert">
-              <strong>Kriya will not start a run here yet</strong>
-              <ul>{blockers.map((b) => <li key={b.code}>{b.message} <span className="muted small">({b.code})</span>{BLOCKER_FIX[b.code] ? <div className="muted small">{BLOCKER_FIX[b.code]}</div> : null}</li>)}</ul>
-              <button type="button" onClick={recheck}>Check again</button>
-            </div>
-          ) : (pre ? <p><button type="button" className="ck-quiet" onClick={recheck}>Check again</button></p> : null)}
-          <details className="ck-setup">
-            <summary>Skills{skillCount === null ? '' : ` · ${skillCount}${unverified ? ` (${unverified} unverified)` : ''}`}</summary>
-            <SkillsSummary context={context} />
-          </details>
-          <details className="ck-setup">
-            <summary>Tools and capabilities{mcp === null ? '' : ` · ${mcp} MCP server${mcp === 1 ? '' : 's'}`}</summary>
-            <ToolsSummary context={context} />
-          </details>
-          <details className="ck-setup">
-            <summary>Model routing</summary>
-            <ModelRouting context={context} probe={probe} />
-          </details>
-          {pre ? <details className="ck-setup"><summary>Run configuration details</summary><PreflightSummary data={pre} /></details> : null}
-          {ex.refusal ? (
-            <div className="ck-state" role="alert">
-              <strong>The run was not started</strong>
-              {ex.refusal.message} <span className="muted small">({ex.refusal.code})</span>
-            </div>
-          ) : null}
-          <p>
-            <button type="button" className="ck-primary" disabled={!canStart || ex.starting} onClick={() => void ex.start()}>{ex.starting ? 'Starting…' : 'Start Run'}</button>{' '}
-            {ex.locked && !ex.starting ? <span className="muted small">A run is in progress.</span> : null}
-            {!ex.locked && empty ? <span className="muted small">Enter a goal to start.</span> : null}
-          </p>
-        </>
-      )}
-    </Panel>
-  );
+  const skills = hasData(context) && context.data.skills ? context.data.skills.total : null;
+  const tools = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length + context.data.tools.plugins.enabled.length : null;
+  const model = pre?.model?.model ?? null;
+  const none = { blockers: [], warnings: [], model, skills, tools };
+  if (!ex.available) return { ...none, state: 'unavailable' };
+  if (ex.preflight.state === 'error') return { ...none, state: 'error', blockers: [{ code: ex.preflight.error.code, message: ex.preflight.error.message }] };
+  if (!pre) return { ...none, state: 'checking' };
+  if (!pre.ready) return { ...none, state: 'blocked', blockers: pre.blockers };
+  const warnings = checklist(pre, probe).filter((r) => r.tone === 'bad').map((r) => `${r.label}: ${r.status}`);
+  return { ...none, state: warnings.length ? 'ready_with_warning' : 'ready', warnings };
 }

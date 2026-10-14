@@ -11,6 +11,7 @@ describe('M4 modules follow the shared selection', () => {
     const timeline = await screen.findByRole('tree', { name: 'Execution timeline' });
     fireEvent.click(await within(timeline).findByRole('button', { name: 'Attempt 2' }));
     expect(store.getState().attempt).toBe('2');
+    fireEvent.click(screen.getByRole('tab', { name: 'Details' })); // Context, Plan, Attempts and Evidence are one level down
     fireEvent.click(screen.getByRole('tab', { name: 'Context' }));
     expect(await screen.findByText(/Model invocations · attempt 2/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Attempts' }));

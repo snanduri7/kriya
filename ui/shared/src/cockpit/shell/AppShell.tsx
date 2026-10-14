@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CockpitProviders, NavigationContext, createSelectionStore, useCapabilities, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
+import { CockpitProviders, NavigationContext, PROJECT_PAGE, createSelectionStore, useCapabilities, useShellSelection, useWorkspace, type ModuleRegistry, type PollIntervals, type SelectionStore, type UIProvider } from '../core';
 import type { Selection } from '../../state/selection';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ExecutionInspector } from './ExecutionInspector';
@@ -26,16 +26,18 @@ export interface AppShellProps {
   viewportWidth?: number;
   /** Tests only: how often a started run is polled. */
   pollIntervals?: PollIntervals;
+  /** Tests and screenshots only: the page shown until the person chooses one (production always lands on the first page, Project). */
+  initialPage?: string;
 }
 
 /**
  * Composition and layout only. It knows pages, surfaces and capabilities, never a feature: which modules exist, what they show and
  * what they interpret is the registry's business. Adding or removing a module changes the registry input, not this file.
  */
-export function AppShell({ provider, registry, selection, initialSelection, viewportWidth, pollIntervals }: AppShellProps) {
+export function AppShell({ provider, registry, selection, initialSelection, viewportWidth, pollIntervals, initialPage }: AppShellProps) {
   const store = useMemo(() => selection ?? createSelectionStore(initialSelection), [selection, initialSelection]);
   const services = useMemo(() => ({ provider, selection: store, registry, pollIntervals }), [provider, store, registry, pollIntervals]);
-  return <CockpitProviders services={services}><Shell registry={registry} viewportWidth={viewportWidth} /></CockpitProviders>;
+  return <CockpitProviders services={services}><Shell registry={registry} viewportWidth={viewportWidth} initialPage={initialPage} /></CockpitProviders>;
 }
 
 function useWidth(override?: number): number {
@@ -49,13 +51,17 @@ function useWidth(override?: number): number {
   return override ?? width;
 }
 
-function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewportWidth?: number }) {
+function Shell({ registry, viewportWidth, initialPage }: { registry: ModuleRegistry; viewportWidth?: number; initialPage?: string }) {
   const folder = useWorkspace();
   const folderOpen = folder.current !== null;
   const caps = useCapabilities();
   const width = useWidth(viewportWidth);
   const pages = useMemo(() => registry.visiblePages(caps), [registry, caps]);
-  const [pageId, setPageId] = useState<string | null>(null);
+  // The chosen page belongs to the folder it was chosen in: Open Folder (or switching folders) lands on the first page, Project, whatever page the previous folder was on.
+  const openPath = folder.current?.path ?? null;
+  const [chosen, setChosen] = useState<{ folder: string | null; id: string | null }>({ folder: null, id: null });
+  const pageId = chosen.folder === openPath ? chosen.id : initialPage ?? null;
+  const setPageId = useCallback((id: string) => setChosen({ folder: openPath, id }), [openPath]);
   const page = pages.find((p) => p.id === pageId) ?? pages[0];
   const [secondaryW, setSecondaryW] = useState(SECONDARY.initial);
   const [inspectorW, setInspectorW] = useState(INSPECTOR.initial);
@@ -77,7 +83,9 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
   const single = resolve('page');
   const workspace = page?.layout === 'run';
   const hasSecondary = workspace && secondary.length > 0;
-  const hasInspector = workspace && inspector.length > 0;
+  // With no run selected there is nothing for the side panel or the bottom drawer to show: they appear with the first selected run instead of as empty "No run selected" panes.
+  const runSelected = useShellSelection('runId') !== null;
+  const hasInspector = workspace && inspector.length > 0 && runSelected;
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!(e.ctrlKey || e.metaKey) || !/^[1-9]$/.test(e.key)) return;
@@ -85,17 +93,17 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
     if (target) { e.preventDefault(); setPageId(target.id); }
   };
 
-  const toggles: ToolbarToggles = { secondary: hasSecondary && showSecondary, inspector: hasInspector && showInspector, drawer: false };
+  const toggles: ToolbarToggles = { secondary: hasSecondary && showSecondary, inspector: hasInspector && showInspector };
   const classes = ['ck-body'];
   if (!workspace) classes.push('single');
   if (workspace && !(hasSecondary && showSecondary)) classes.push('no-secondary');
   if (workspace && !(hasInspector && showInspector)) classes.push('no-inspector');
 
-  const navigate = useCallback((id: string) => { if (pages.some((p) => p.id === id)) setPageId(id); }, [pages]);
+  const navigate = useCallback((id: string) => { if (pages.some((p) => p.id === id)) setPageId(id); }, [pages, setPageId]);
   return (
     <NavigationContext.Provider value={navigate}>
     <div className="ck ck-shell" ref={root} onKeyDown={onKeyDown} data-width={width} data-page={folderOpen ? page?.id ?? '' : 'welcome'}>
-      <GlobalToolbar bare={!folderOpen} showSecondaryToggle={hasSecondary} open={toggles} onToggle={(which) => {
+      <GlobalToolbar bare={!folderOpen} runStrip={page?.id !== PROJECT_PAGE} showSecondaryToggle={hasSecondary} showInspectorToggle={hasInspector} open={toggles} onToggle={(which) => {
         if (which === 'secondary') setSecondaryOpen(!showSecondary);
         if (which === 'inspector') setInspectorOpen(!showInspector);
       }} />
@@ -120,7 +128,7 @@ function Shell({ registry, viewportWidth }: { registry: ModuleRegistry; viewport
         )}
       </div>
       )}
-      {folderOpen && workspace ? <EvidenceDrawer modules={drawer} /> : null}
+      {folderOpen && workspace && runSelected ? <EvidenceDrawer modules={drawer} /> : null}
       <NewProjectDialog />
     </div>
     </NavigationContext.Provider>

@@ -10,32 +10,34 @@ const body = () => document.querySelector('.ck-body') as HTMLElement;
 const ready = async () => { await screen.findByRole('navigation', { name: 'Destinations' }); await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 }).catch(() => undefined); };
 
 describe('AppShell layout and navigation', () => {
-  it('shows the Runs / Workspace / Settings destinations once capabilities load, and switches with the rail and Ctrl+number', async () => {
+  it('shows the Project / Runs / Skills / Tools / Settings destinations once capabilities load, lands on Project, and switches with the rail and Ctrl+number', async () => {
     renderShell();
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });
-    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Workspace', 'Skills', 'Tools', 'Settings']));
-    expect(within(rail).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
-    fireEvent.click(within(rail).getByRole('button', { name: 'Workspace' }));
-    expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument();
+    await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Project', 'Runs', 'Skills', 'Tools', 'Settings']));
+    expect(within(rail).getByRole('button', { name: 'Project' })).toHaveAttribute('aria-current', 'page'); // Open Folder lands on Project, never on run history
+    expect(await screen.findByText('What do you want Kriya to do?')).toBeInTheDocument();
+    expect(screen.queryByText('No run selected')).toBeNull();
+    fireEvent.click(within(rail).getByRole('button', { name: 'Runs' }));
+    expect(await screen.findByRole('main', { name: 'Run workspace' })).toBeInTheDocument();
     fireEvent.keyDown(rail, { key: '3', ctrlKey: true }); // destinations are numbered by position: 3 is Skills, 5 is Settings
     expect(await screen.findByRole('heading', { name: 'Skills' })).toBeInTheDocument();
     fireEvent.keyDown(rail, { key: '5', ctrlKey: true });
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     fireEvent.keyDown(rail, { key: '1', metaKey: true });
-    expect(await screen.findByRole('heading', { name: 'Runs' })).toBeInTheDocument();
+    expect(await screen.findByText('What do you want Kriya to do?')).toBeInTheDocument();
   });
 
-  it('numbers destinations by their position in the rail (owner decision 2026-10-14): 1 Runs, 2 Workspace, 3 Skills, 4 Tools, 5 Settings; a number past the last does nothing', async () => {
+  it('numbers destinations by their position in the rail: 1 Project, 2 Runs, 3 Skills, 4 Tools, 5 Settings; a number past the last does nothing', async () => {
     renderShell();
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });
     await waitFor(() => expect(within(rail).getAllByRole('button')).toHaveLength(5));
-    for (const [key, heading] of [['2', 'Workspace'], ['3', 'Skills'], ['4', 'Tools'], ['5', 'Settings'], ['1', 'Runs']] as const) {
+    for (const [key, name] of [['2', 'Runs'], ['3', 'Skills'], ['4', 'Tools'], ['5', 'Settings'], ['1', 'Project']] as const) {
       fireEvent.keyDown(rail, { key, ctrlKey: true });
-      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
-      expect(within(rail).getByRole('button', { name: heading })).toHaveAttribute('aria-current', 'page');
+      await waitFor(() => expect(within(rail).getByRole('button', { name })).toHaveAttribute('aria-current', 'page'));
+      expect(document.querySelector('.ck-shell')?.getAttribute('data-page')).toBe(name.toLowerCase());
     }
     fireEvent.keyDown(rail, { key: '6', ctrlKey: true });
-    expect(within(rail).getByRole('button', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
+    expect(within(rail).getByRole('button', { name: 'Project' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('hides destinations whose capabilities are absent: no rail slot, no "coming soon"', async () => {
@@ -45,30 +47,30 @@ describe('AppShell layout and navigation', () => {
   });
 
   it('the inspector is collapsed by definition at <=1180px and open above it; the user can override both ways', async () => {
-    const small = renderShell({ width: INSPECTOR_COLLAPSE_AT });
+    const small = renderShell({ width: INSPECTOR_COLLAPSE_AT, runId: GF });
     await screen.findByRole('navigation', { name: 'Destinations' });
     await waitFor(() => expect(body().className).toContain('no-inspector'));
     expect(screen.queryByRole('complementary', { name: 'Execution inspector' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Side panel' }));
     expect(await screen.findByRole('complementary', { name: 'Execution inspector' })).toBeInTheDocument();
-    expect(small.store.getState().runId).toBeNull();
+    expect(small.store.getState().runId).toBe(GF);
   });
 
   it('wide: inspector open; the toggles collapse and restore the secondary pane and the inspector', async () => {
-    renderShell({ width: 1440 });
+    renderShell({ width: 1440, runId: GF });
     await screen.findByRole('complementary', { name: 'Execution inspector' });
     await screen.findByRole('complementary', { name: 'Secondary pane' });
-    fireEvent.click(screen.getByRole('button', { name: 'Inspector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Side panel' }));
     expect(screen.queryByRole('complementary', { name: 'Execution inspector' })).toBeNull();
     expect(body().className).toContain('no-inspector');
-    fireEvent.click(screen.getByRole('button', { name: 'Runs pane' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run list' }));
     expect(screen.queryByRole('complementary', { name: 'Secondary pane' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Runs pane' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run list' }));
     expect(await screen.findByRole('complementary', { name: 'Secondary pane' })).toBeInTheDocument();
   });
 
   it('panes resize by keyboard within their designed range', async () => {
-    renderShell();
+    renderShell({ runId: GF });
     const handle = await screen.findByRole('separator', { name: 'Resize runs pane' });
     expect(handle).toHaveAttribute('aria-valuenow', '280');
     fireEvent.keyDown(handle, { key: 'ArrowRight', shiftKey: true });
@@ -98,9 +100,14 @@ describe('AppShell mounts modules through the registry and the shared selection'
     fireEvent.click(await screen.findByRole('button', { name: /Create a utility library/ }));
     await waitFor(() => expect(store.getState().runId).toBe(GF));
     const tabs = await screen.findByRole('tablist', { name: 'Run documents' });
-    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Context', 'Plan', 'Changes', 'Validation', 'Attempts', 'Evidence']);
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Validation', 'Details']); // first level: what happened and whether it is valid; the rest is one level down
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Validation' }));
     expect(store.getState().centralTab).toBe('validation');
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Details' }));
+    const deeper = await screen.findByRole('tablist', { name: 'Details' });
+    expect(within(deeper).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Context', 'Plan', 'Attempts', 'Evidence']);
+    expect(store.getState().centralTab).toBe('context');
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Validation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     expect(store.getState().drawerOpen).toBe(true);
     fireEvent.click(screen.getByRole('tab', { name: 'Raw Events' }));

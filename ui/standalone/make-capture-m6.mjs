@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const W = `const W=(f,ms=90000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});`;
 const nav = (n) => `document.querySelector('nav[aria-label=Destinations] button[aria-label=${n}]').click();`;
 const goalSet = (text) => `const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,${JSON.stringify(text)});ta.dispatchEvent(new Event('input',{bubbles:true}));`;
-const banner = `document.querySelector('[aria-label="Active run"]')`;
+const banner = `document.querySelector('[aria-label="Current run"]')`;
 const timing = `JSON.parse(${banner}.dataset.timing)`;
 const startBtn = `[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')`;
 const ready = `W(()=>document.body.innerText.includes('Configuration digest'))`; // the preflight rendered
@@ -17,7 +17,7 @@ const add = (s) => steps.push(s);
 add({ wait: 800, file: '01-welcome.png', width: 1600, height: 1000 });
 // 1. Open Folder (the scripted chooser stands in for the native dialog ONLY; everything after is the production path) -> an EMPTY folder
 add({ name: 'open_empty_to_workspace_ms', js: `(async()=>{${W}const t0=performance.now();[...document.querySelectorAll('main[aria-label=Welcome] button')].find(x=>/^Open Folder/.test(x.textContent.trim())).click();const ok=await W(()=>document.querySelector('nav[aria-label=Destinations]'));return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500 });
-add({ name: 'preflight_ready_ms', js: `(async()=>{${W}${nav('Workspace')}const t0=performance.now();const ok=await ${ready};return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500, file: '02-goal-preflight-empty-folder.png' });
+add({ name: 'preflight_ready_ms', js: `(async()=>{${W}${nav('Project')}const t0=performance.now();const ok=await ${ready};return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 500, file: '02-goal-preflight-empty-folder.png' });
 add({ js: `(()=>{${goalSet('Create a utility library with a clamp(value, low, high) function and unit tests.')}})()`, wait: 500, file: '03-goal-entered.png' });
 // 2. Start Run: click -> acknowledgement (banner), then the run being observed
 add({ name: 'start_click_to_banner_ms', js: `(async()=>{${W}const t0=performance.now();${startBtn}.click();const ok=await W(()=>${banner});return ok?Math.round(performance.now()-t0):'TIMEOUT'})()`, wait: 200, file: '04-launching.png' });
@@ -29,7 +29,7 @@ add({ js: `(()=>{${nav('Runs')}})()`, wait: 700, file: '08-runs-after-terminal.p
 add({ name: 'terminal_to_timeline_ms', js: `(async()=>{${W}const ok=await W(()=>document.querySelector('[aria-label="Execution timeline"] li'));return ok})()`, wait: 600, file: '09-finished-run-inspected.png' });
 // 3. an existing project (a Git repository): the SAME flow, a scripted failure
 add({ name: 'open_existing_menu', js: `(async()=>{${W}document.querySelector('button[aria-label="Switch workspace"]').click();await W(()=>document.querySelector('[role=menu]'));[...document.querySelectorAll('[role=menuitem]')].find(b=>b.textContent.startsWith('Open Folder')).click();const ok=await W(()=>document.querySelector('button[aria-label="Switch workspace"]').textContent.includes('existing'));return ok})()`, wait: 600 });
-add({ js: `(async()=>{${W}${nav('Workspace')}await ${ready};${goalSet('Add input validation to the importer. [controlled:failure]')}})()`, wait: 700, file: '10-goal-preflight-existing-project.png' });
+add({ js: `(async()=>{${W}${nav('Project')}await ${ready};${goalSet('Add input validation to the importer. [controlled:failure]')}})()`, wait: 700, file: '10-goal-preflight-existing-project.png' });
 add({ js: `(async()=>{${W}${startBtn}.click();await W(()=>${banner}.dataset.stage==='finished')})()`, wait: 1200, file: '11-terminal-failure.png' });
 // 4. a run whose process is killed: nothing is sealed, so it is NOT a success; Kriya then refuses a new run until the workspace is recovered
 add({ js: `(async()=>{${W}[...document.querySelectorAll('button')].find(b=>b.textContent==='Dismiss').click();${goalSet('Refactor the parser. [controlled:die]')}await W(()=>${startBtn}&&!${startBtn}.disabled);${startBtn}.click();await W(()=>${banner}.dataset.stage==='finished')})()`, wait: 1500, file: '12-terminal-interrupted.png' });

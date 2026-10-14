@@ -16,11 +16,12 @@ const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigati
 async function openPanel(fixture: FixtureHostOptions = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
-  goTo('Workspace');
-  const readiness = await screen.findByRole('region', { name: 'Readiness' });
+  goTo('Project');
+  await screen.findAllByText(/^✓ Ready|Cannot start/);
+  const readiness = await screen.findByRole('region', { name: 'Readiness' }); // under Project details: the compact summary is what sits above Start Run
   return { ...mounted, readiness };
 }
-const section = (summary: RegExp) => screen.getByText(summary).closest('details') as HTMLElement;
+const section = (summary: RegExp) => screen.getByText(summary, { selector: 'summary' }).closest('details') as HTMLElement;
 const row = (readiness: HTMLElement, label: string) => within(readiness).getByText(label).closest('li') as HTMLElement;
 
 describe('readiness', () => {
@@ -65,7 +66,7 @@ describe('readiness', () => {
     await waitFor(() => expect(probes()).toBe(1));
     fireEvent.change(screen.getByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Do it' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start Run' }));
-    await screen.findByRole('status', { name: 'Active run' });
+    await screen.findByRole('region', { name: 'Current run' });
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
     await new Promise((r) => setTimeout(r, 200));
     expect(probes()).toBe(1);
@@ -85,7 +86,7 @@ describe('readiness', () => {
   ])('a blocker (%s) shows Kriya\'s message, its code and which authority acts next', async (workspace, code, fix) => {
     await openPanel({ workspace });
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Kriya will not start a run here yet');
+    expect(alert).toHaveTextContent('Cannot start a run');
     expect(alert).toHaveTextContent(code);
     expect(alert).toHaveTextContent(fix);
     expect(alert).toHaveTextContent('The last run left the folder mid-change. Recover it with `kriya runs recover` in a terminal, then check again.'); // the authority-next guidance (not just Kriya\'s own message)
@@ -227,10 +228,11 @@ describe('stale answers never overwrite a newer workspace', () => {
     const slow = host.hold((r) => (r.operation === 'execution.context' || r.operation === 'execution.model_probe') && (r as { workspace?: string }).workspace === '/fixture/workspace');
     render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={createSelectionStore({ ...initialSelection })} viewportWidth={1440} pollIntervals={FAST_POLL} />);
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     host.menu('openFolder'); // B opens while A's context and probe are still held
     await waitFor(() => expect(host.workspaceCalls).toContain('remember:/fixture/empty'));
-    goTo('Workspace');
+    goTo('Project');
+    await screen.findAllByText(/^✓ Ready/);
     const readiness = await screen.findByRole('region', { name: 'Readiness' });
     await waitFor(() => expect(within(row(readiness, 'Model server')).getByText('Not reachable')).toBeInTheDocument());
     await within(section(/^Skills/)).findByText('No Skills were discovered for this folder.');

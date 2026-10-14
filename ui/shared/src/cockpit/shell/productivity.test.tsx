@@ -9,7 +9,7 @@ describe('Copy', () => {
   it('copies the workspace path from the Workspace page and says it worked', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.click(await screen.findByRole('button', { name: 'Copy workspace path' }));
     await waitFor(() => expect(host.copied).toEqual(['/fixture/workspace']));
     expect(await screen.findByText('Copied')).toBeInTheDocument();
@@ -20,12 +20,12 @@ describe('Copy', () => {
     host.query = async (request) => { const env = await original(request); return request.operation === 'workspace.describe' && env.data ? ({ ...env, data: { ...(env.data as object), requested: '/fixture/link-to-workspace' } } as typeof env) : env; };
     fireEvent.click(await screen.findByRole('button', { name: 'Open workspace' }));
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.click(await screen.findByRole('button', { name: 'Copy workspace path' }));
     await waitFor(() => expect(host.copied).toEqual(['/fixture/workspace']));
   });
   it('copies a run\'s ID from Overview', async () => {
-    const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
+    const { host } = renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
     fireEvent.click((await screen.findAllByRole('button', { name: /success/ }))[0]!);
     fireEvent.click(await screen.findByRole('button', { name: 'Copy run ID' }));
@@ -36,18 +36,18 @@ describe('Copy', () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     host.copyToClipboard = async () => { throw new Error('denied'); };
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.click(await screen.findByRole('button', { name: 'Copy workspace path' }));
     expect(await screen.findByText('Could not copy')).toBeInTheDocument();
   });
   const finishRun = async (outcome: 'failure' | 'success') => {
     const m = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', execution: { outcome } } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Do it' } });
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
-    const bar = await screen.findByRole('status', { name: 'Active run' });
+    const bar = await screen.findByRole('region', { name: 'Current run' });
     act(() => m.host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', outcome));
     return { ...m, bar };
@@ -70,7 +70,7 @@ describe('Reveal in Finder', () => {
   it('asks the host to reveal the folder IT has open (no path is sent) and reports a refusal', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.click(await screen.findByRole('button', { name: 'Reveal in Finder' }));
     await waitFor(() => expect(host.workspaceCalls).toContain('reveal'));
     host.workspace.revealWorkspace = async () => ({ revealed: false, reason: 'the folder is no longer there' });
@@ -81,7 +81,7 @@ describe('Reveal in Finder', () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     (host.workspace as { revealWorkspace?: unknown }).revealWorkspace = undefined;
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     await screen.findByRole('button', { name: 'Copy workspace path' });
     expect(screen.queryByRole('button', { name: 'Reveal in Finder' })).toBeNull();
   });

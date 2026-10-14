@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const W = `const W=(f,ms=120000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},50);setTimeout(()=>{clearInterval(i);r(false)},ms)});`;
 const nav = (n) => `document.querySelector('nav[aria-label=Destinations] button[aria-label=${n}]').click();`;
-const tab = (n) => `{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='${n}');if(t)t.click();}`;
+const DEEP = ['Context', 'Plan', 'Attempts', 'Evidence'];
+const tab = (n) => `{const find=(x)=>[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()===x);${DEEP.includes(n) ? "const d=find('Details');if(d)d.click();" : ''}const t=find('${n}');if(t)t.click();}`;
 const goalSet = (text) => `const ta=document.querySelector('#ck-goal');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(ta,${JSON.stringify(text)});ta.dispatchEvent(new Event('input',{bubbles:true}));`;
-const banner = `document.querySelector('[aria-label="Active run"]')`;
+const banner = `document.querySelector('[aria-label="Current run"]')`;
 const startBtn = `[...document.querySelectorAll('button')].find(b=>b.textContent==='Start Run')`;
 const mark = (name) => `window.__marks.push(['${name}', window.__lag.length]);`;
 const stats = `const pct=(a,p)=>a.length?a.slice().sort((x,y)=>x-y)[Math.min(a.length-1,Math.floor(a.length*p))]:null;const seg=(s,e)=>{const a=window.__lag.slice(s,e);return {samples:a.length,median:pct(a,.5),p95:pct(a,.95),p99:pct(a,.99),max:a.length?Math.max(...a):null,over100ms:a.filter(x=>x>100).length}};`;
@@ -26,7 +27,7 @@ for (let round = 0; round < 3; round += 1) {
   for (const dest of ['Runs', 'Workspace', 'Settings', 'Runs']) add({ js: `(()=>{${nav(dest)}})()`, wait: 700 });
 }
 add({ name: 'navigation_marks', js: `(()=>{${mark('navigation_end')}return 'nav done'})()`, wait: 100 });
-add({ js: `(()=>{${nav('Workspace')}})()`, wait: 800 });
+add({ js: `(()=>{${nav('Project')}})()`, wait: 800 });
 add({ js: `(()=>{${goalSet('Add a clamp(value, low, high) function with tests.')}})()`, wait: 600 });
 add({ name: 'start_run', js: `(async()=>{${W}${mark('run_begin')}${startBtn}.click();return await W(()=>${banner},60000)})()`, wait: 300 });
 add({ name: 'run_to_terminal', js: `(async()=>{${W}const ok=await W(()=>${banner}&&${banner}.dataset.stage==='finished',300000);${mark('run_end')}return ok?${banner}.dataset.outcome:'TIMEOUT'})()`, wait: 1500 });

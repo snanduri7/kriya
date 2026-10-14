@@ -3,10 +3,10 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { WorkspaceNotice } from './WelcomeScreen';
 import { ActiveRunBanner } from './ActiveRunBanner';
 
-export interface ToolbarToggles { secondary: boolean; inspector: boolean; drawer: boolean }
+export interface ToolbarToggles { secondary: boolean; inspector: boolean }
 
 /** The global toolbar. It names the open workspace (never its path: that belongs to the Workspace page) and offers the same Open Folder action as the menu. */
-export function GlobalToolbar({ showSecondaryToggle, open, onToggle, bare = false }: { showSecondaryToggle: boolean; open: ToolbarToggles; onToggle(which: keyof ToolbarToggles): void; bare?: boolean }) {
+export function GlobalToolbar({ showSecondaryToggle, showInspectorToggle, open, onToggle, bare = false, runStrip = true }: { showSecondaryToggle: boolean; showInspectorToggle: boolean; open: ToolbarToggles; onToggle(which: keyof ToolbarToggles): void; bare?: boolean; /** The compact active-run strip (hidden on the Project page, where the run is the page). */ runStrip?: boolean }) {
   const provider = useProvider();
   return (
     <div>
@@ -15,13 +15,12 @@ export function GlobalToolbar({ showSecondaryToggle, open, onToggle, bare = fals
         <span className="ck-mark">Kriya</span>
         <WorkspaceSwitcher />
         <span className="grow" />
-        {!bare && showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>Runs pane</button> : null}
-        {!bare ? <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Inspector</button> : null}
-        {!bare ? <button type="button" aria-pressed={open.drawer} onClick={() => onToggle('drawer')}>Drawer</button> : null}
+        {!bare && showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>Run list</button> : null}
+        {!bare && showInspectorToggle ? <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Side panel</button> : null}
         {provider.kind === 'fixture' ? <Badge tone="warn">fixture</Badge> : null}
       </header>
       {bare ? null : <WorkspaceNotice />}
-      {bare ? null : <ActiveRunBanner />}
+      {bare || !runStrip ? null : <ActiveRunBanner />}
     </div>
   );
 }

@@ -92,7 +92,7 @@ function Attempts() {
 
 export const attemptsModule: ModuleDefinition = {
   id: 'attempts',
-  placement: { page: 'runs', surface: 'center-tab', label: 'Attempts', order: 60 },
+  placement: { page: 'runs', surface: 'center-tab', label: 'Attempts', order: 60, group: 'details' },
   requiredCapabilities: ['evidence'], optionalCapabilities: [], selectionDependencies: ['runId', 'attempt', 'compareAttempt'],
   whenUnavailable: 'explain',
   render: Attempts,

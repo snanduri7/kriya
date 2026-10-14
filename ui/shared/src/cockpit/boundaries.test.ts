@@ -58,12 +58,20 @@ describe('module boundaries', () => {
     // EVERY non-test file in shell/ (not a hand-picked list), so a new shell component cannot start interpreting records unnoticed (review P3-5).
     const layout = files.filter(([p]) => p.startsWith('./shell/') && /\.tsx?$/.test(p) && !/\.test\./.test(p)).map(([p]) => p.slice('./shell/'.length).replace(/\.tsx?$/, ''));
     expect(layout.length).toBeGreaterThan(10);
-    for (const expected of ['AppShell', 'ActiveRunBanner', 'ApprovalReview']) expect(layout).toContain(expected);
+    for (const expected of ['AppShell', 'ActiveRunBanner']) expect(layout).toContain(expected);
     const kinds = /candidate\.change|gate\.result|attempt\.(opened|closed|concluded)|model\.(request|response|result)|run_events|evidence_records|developer\.parse|unit\.(opened|closed)|run\.closed|retry\.|fallback\.decision/;
     for (const name of layout) {
       const entry = files.find(([p]) => p.replace(/\.tsx?$/, '') === `./shell/${name}`);
       expect(entry, name).toBeDefined();
       expect(kinds.test(entry![1].replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), `${name} interprets evidence`).toBe(false);
+    }
+  });
+
+  it('the approval panel and the current-run surface (moved out of shell/ so the Project page can host them) interpret no recorder record kind either: they restate recorded facts only through the core selectors', () => {
+    const kinds = /candidate\.change|gate\.result|attempt\.(opened|closed|concluded)|model\.(request|response|result)|run_events|evidence_records|developer\.parse|unit\.(opened|closed)|run\.closed|retry\.|fallback\.decision/;
+    for (const path of ['./core/ApprovalReview.tsx', './modules/workspace/CurrentRun.tsx', './modules/workspace/index.tsx', './modules/workspace/GoalComposer.tsx', './modules/workspace/RecentRuns.tsx']) {
+      expect(sources[path], path).toBeDefined();
+      expect(kinds.test(sources[path]!.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), `${path} interprets evidence`).toBe(false);
     }
   });
 

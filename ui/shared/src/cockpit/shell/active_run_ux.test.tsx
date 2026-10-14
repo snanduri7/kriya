@@ -1,4 +1,4 @@
-/** Daily-use active-run UX: native notifications from Kriya's durable state, Return to run, and the approval-waiting indicator. */
+/** Daily-use active-run UX: native notifications from Kriya's durable state, the compact run strip on every other page, Return to Run, and ACTION REQUIRED. */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { notificationFor, type RunView } from '../core';
@@ -6,14 +6,14 @@ import { LAUNCH_ID } from '../providers/fixture/fixtureExecution';
 import { renderWorkspaceShell } from '../testing/harness';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
-const banner = () => screen.findByRole('status', { name: 'Active run' });
+const banner = () => screen.findByRole('region', { name: 'Current run' });
 
 async function start(execution: Record<string, unknown>, fixture: Record<string, unknown> = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', execution, ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
-  goTo('Workspace');
+  goTo('Project');
   fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Add clamp with tests.' } });
-  await screen.findByRole('region', { name: 'Readiness' });
+  await screen.findAllByText(/^✓ Ready/);
   fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
   return { ...mounted, bar: await banner() };
 }
@@ -52,7 +52,7 @@ describe('notifications over a whole run', () => {
     await waitFor(() => expect(host.exec!.notifications).toEqual([{ kind: 'approval_required', launch_id: LAUNCH_ID }]));
     await new Promise((r) => setTimeout(r, 150));
     expect(host.exec!.notifications).toHaveLength(1);
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     fireEvent.click(await within(bar).findByRole('button', { name: /Approve without viewing diff|Confirm approval/ }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
@@ -68,7 +68,7 @@ describe('notifications over a whole run', () => {
   it('rejection: the approval notification was asked, the rejection itself is silent', async () => {
     const { host, bar } = await reachReview();
     await waitFor(() => expect(host.exec!.notifications).toHaveLength(1));
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'));
@@ -89,33 +89,59 @@ describe('notifications over a whole run', () => {
   });
 });
 
-describe('Return to run and the approval indicator', () => {
-  it('while a run is active, "Return to run" selects the live run and opens the run documents from any page or historical selection', async () => {
-    const { host, bar, store } = await start({ outcome: 'success' });
+const strip = () => screen.findByRole('status', { name: 'Active run' });
+const onPage = () => document.querySelector('.ck-shell')?.getAttribute('data-page');
+
+describe('the compact run strip: findable from every page, Return to Run, and the ACTION REQUIRED state', () => {
+  it('the strip is on Runs, Skills, Tools and Settings while a run is active, and absent on the Project page (where the run is the page)', async () => {
+    const { bar } = await start({ outcome: 'success' });
+    expect(onPage()).toBe('project');
+    expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull();
+    expect(bar).toHaveAttribute('data-state');
+    for (const page of ['Runs', 'Skills', 'Tools', 'Settings']) {
+      goTo(page);
+      const s = await strip();
+      expect(within(s).getByText('Run active')).toBeInTheDocument();
+      expect(within(s).getByRole('button', { name: 'Return to Run' })).toBeInTheDocument();
+    }
+    goTo('Project');
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull());
+  });
+  it('while a run is active, "Return to Run" selects the live run and returns to the Project page from any page or historical selection', async () => {
+    const { host, store } = await start({ outcome: 'success' });
     goTo('Runs');
     const history = await screen.findAllByRole('button', { name: /success|failure/ });
     fireEvent.click(history[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     expect(store.getState().liveLaunchId).toBeNull();
     goTo('Settings');
-    fireEvent.click(within(bar).getByRole('button', { name: 'Return to run' }));
+    fireEvent.click(within(await strip()).getByRole('button', { name: 'Return to Run' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     expect(store.getState().runId).toBe(LAUNCH_ID);
-    expect(screen.getByRole('navigation', { name: 'Destinations' })).toBeInTheDocument();
     expect(host.exec!.active()).toBe(true);
-    await waitFor(() => expect(document.querySelector('.ck-shell')?.getAttribute('data-page')).toBe('runs')); // the run documents page is showing
+    await waitFor(() => expect(onPage()).toBe('project'));
+    expect(await banner()).toBeInTheDocument();
   });
-  it('"1 approval waiting · Go to review" appears only while a review is pending and focuses that exact review', async () => {
-    const { bar } = await reachReview();
+  it('a pending review turns the strip into ACTION REQUIRED, whose Review button returns to that exact review and focuses it', async () => {
+    await reachReview();
     goTo('Runs');
-    const button = within(bar).getByRole('button', { name: '1 approval waiting · Go to review' });
-    fireEvent.click(button);
-    await waitFor(() => expect(within(bar).getByRole('region', { name: 'Change review' })).toHaveFocus());
+    const s = await strip();
+    expect(within(s).getByText('ACTION REQUIRED')).toBeInTheDocument();
+    expect(within(s).getByText('Change approval waiting')).toBeInTheDocument();
+    expect(s).toHaveClass('ck-attention');
+    expect(within(s).queryByRole('button', { name: 'Return to Run' })).toBeNull();
+    expect(within(s).queryByRole('button', { name: /Approve|Reject/ })).toBeNull(); // the decision is taken in one place only: the Project page
+    fireEvent.click(within(s).getByRole('button', { name: 'Review' }));
+    await waitFor(() => expect(onPage()).toBe('project'));
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Current run' })).getByRole('region', { name: 'Change review' })).toHaveFocus());
   });
-  it('no approval indicator without a pending review', async () => {
-    const { bar } = await start({ outcome: 'success' });
-    expect(within(bar).queryByRole('button', { name: /approval waiting/ })).toBeNull();
-    expect(within(bar).getByRole('button', { name: 'Return to run' })).toBeInTheDocument();
+  it('no ACTION REQUIRED without a pending review', async () => {
+    await start({ outcome: 'success' });
+    goTo('Skills');
+    const s = await strip();
+    expect(within(s).queryByText('ACTION REQUIRED')).toBeNull();
+    expect(within(s).queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(within(s).getByRole('button', { name: 'Return to Run' })).toBeInTheDocument();
   });
   it('a clicked notification (the fixed showRun command) returns to the current run', async () => {
     const { host, store } = await reachReview();
@@ -123,6 +149,7 @@ describe('Return to run and the approval indicator', () => {
     act(() => host.menu('showRun'));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     await waitFor(() => expect(screen.getByRole('region', { name: 'Change review' })).toHaveFocus());
+    expect(onPage()).toBe('project');
   });
   it('showRun after the run finished opens its recorded run; with no run it does nothing', async () => {
     const { host, bar, store } = await start({ outcome: 'success' });
@@ -132,30 +159,40 @@ describe('Return to run and the approval indicator', () => {
     goTo('Settings');
     act(() => host.menu('showRun'));
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
-    fireEvent.click(within(bar).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(onPage()).toBe('project'));
+    fireEvent.click(within(await banner()).getByRole('button', { name: 'New Goal' }));
     const before = store.getState();
     act(() => host.menu('showRun'));
     expect(store.getState()).toEqual(before);
   });
   it('the Runs list pins an "Active run" row while a run is active (with the approval hint), selecting the live run; it disappears with the run', async () => {
-    const { host, bar, store } = await reachReview();
+    const { host, store } = await reachReview();
     goTo('Runs');
     const row = await screen.findByRole('button', { name: 'Active run - return to it' });
     expect(row).toHaveTextContent('approval waiting');
     fireEvent.click(row);
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Active run - return to it' })).toHaveAttribute('aria-selected', 'true'));
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(await strip()).getByRole('button', { name: 'Review' }));
+    const bar = await banner();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'));
+    goTo('Runs');
     expect(screen.queryByRole('button', { name: 'Active run - return to it' })).toBeNull();
   });
-  it('the Return and indicator buttons are gone once the run is over', async () => {
+  it('once the run is over the strip offers View Result and Dismiss instead of Return to Run, and the Project page offers New Goal', async () => {
     const { host, bar } = await start({ outcome: 'success' });
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
-    expect(within(bar).queryByRole('button', { name: 'Return to run' })).toBeNull();
-    expect(within(bar).queryByRole('button', { name: /approval waiting/ })).toBeNull();
+    expect(within(bar).queryByRole('button', { name: 'Return to Run' })).toBeNull();
+    expect(within(bar).getByRole('button', { name: 'New Goal' })).toBeInTheDocument();
+    goTo('Skills');
+    const s = await strip();
+    expect(within(s).getByText('Run completed')).toBeInTheDocument();
+    expect(within(s).queryByRole('button', { name: 'Return to Run' })).toBeNull();
+    fireEvent.click(within(s).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull());
   });
 });

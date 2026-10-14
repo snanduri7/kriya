@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const W = `const W=(f,ms=60000)=>new Promise((r)=>{const i=setInterval(()=>{let v=false;try{v=f()}catch(e){}if(v){clearInterval(i);r(true)}},20);setTimeout(()=>{clearInterval(i);r(false)},ms)});const T=async(f,ms)=>{const t=performance.now();const ok=await W(f,ms);return ok?Math.round(performance.now()-t):'TIMEOUT'};`;
 const nav = (n) => `document.querySelector('nav[aria-label=Destinations] button[aria-label=${n}]').click();`;
-const tab = (n) => `{const t=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()==='${n}');if(t)t.click();}`;
+const DEEP = ['Context', 'Plan', 'Attempts', 'Evidence'];
+const tab = (n) => `{const find=(x)=>[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()===x);${DEEP.includes(n) ? "const d=find('Details');if(d)d.click();" : ''}const t=find('${n}');if(t)t.click();}`;
 const panel = `document.querySelector('[role=tabpanel]')`;
 const rows = `document.querySelectorAll('.ck-list button').length`;
 const stats = `const pct=(a,p)=>a.length?a.slice().sort((x,y)=>x-y)[Math.min(a.length-1,Math.floor(a.length*p))]:null;const seg=(s,e)=>{const a=window.__lag.slice(s,e);return {samples:a.length,median:pct(a,.5),p95:pct(a,.95),p99:pct(a,.99),max:a.length?Math.max(...a):null,over100ms:a.filter(x=>x>100).length,over500ms:a.filter(x=>x>500).length}};`;

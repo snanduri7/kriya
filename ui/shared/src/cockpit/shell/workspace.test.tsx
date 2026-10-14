@@ -108,8 +108,8 @@ describe('Kriya, not the UI, says what the folder is - empty, existing, non-Git 
     renderWorkspaceShell({ fixture: { workspace: null, choices: [path] } });
     await openFromWelcome();
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
-    const panel = (await screen.findByRole('heading', { name: 'Workspace' })).closest('section')!;
+    goTo('Project');
+    const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
     const text = panel.textContent ?? '';
     for (const p of patterns) expect(text).toMatch(p);
     expect(text).toContain(path); // the exact path belongs to this page
@@ -124,8 +124,8 @@ describe('Kriya, not the UI, says what the folder is - empty, existing, non-Git 
       void host;
       await openFromWelcome();
       await screen.findByRole('navigation', { name: 'Destinations' });
-      goTo('Workspace');
-      const panel = (await screen.findByRole('heading', { name: 'Workspace' })).closest('section')!;
+      goTo('Project');
+      const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
       labels.push([...panel.querySelectorAll('dt')].map((d) => d.textContent ?? ''));
       document.body.innerHTML = '';
     }
@@ -205,7 +205,7 @@ describe('switching workspace', () => {
     act(() => store.dispatch({ type: 'selectRun', runId: 'fx-greenfield-success' }));
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Open Folder…/ }));
-    expect(await screen.findByText('No run is recorded for this workspace')).toBeInTheDocument();
+    expect(await screen.findByText('No runs yet.')).toBeInTheDocument(); // the Project page's recent runs say so quietly
     expect(store.getState().runId).toBeNull();
     expect(screen.queryByText(/Greenfield: |Create a utility library/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Switch workspace' }).textContent).toContain('empty');
@@ -231,12 +231,12 @@ describe('switching workspace', () => {
   });
 });
 
-describe('the Workspace page lives in the registry like any module', () => {
+describe('the Project page lives in the registry like any module', () => {
   it('shows the pinned snapshot beside Kriya\'s facts, and the identity as a prefix with the whole value on hover', async () => {
     renderWorkspaceShell({ fixture: { choices: [] } });
     await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
-    goTo('Workspace');
-    const panel = (await screen.findByRole('heading', { name: 'Workspace' })).closest('section')!;
+    goTo('Project');
+    const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
     expect(panel.textContent).toMatch(/Pinned snapshot\s*2026/);
     expect(panel.querySelector('[title^="abababab"]')).not.toBeNull();
   });

@@ -8,6 +8,11 @@ export * from './evidence';
 export * from './evidenceClient';
 export * from './modules';
 export * from './navigation';
+export * from './runPhase';
+export * from './runFacts';
+export * from './elapsed';
+export * from './runFactsHooks';
+export { ApprovalReview } from './ApprovalReview';
 export * from './provider';
 export type { EvidenceCallContent, EvidenceChangeContent } from '../../model/kup';
 export * from './records';
@@ -19,4 +24,4 @@ export { CockpitProviders, ModuleScope, useCapabilities, useDispatch, useModuleS
 export * from '../design';
 export * from './deep';
 export * from './describe';
-export { ExecutionProvider, useExecution, deriveOutcome, notificationFor, progressCounts, activeReview, createDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type DecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
+export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, createDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type DecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';

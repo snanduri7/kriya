@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { sanitizeText } from '../../render/sanitize';
-import { Badge, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, shortDigest, useCapabilities, useDispatch, useExecution, useNavigate, useRunEvidence, type PendingReview } from '../core';
+import { Badge } from '../design';
+import { useCapabilities, useDispatch, useRunEvidence } from './context';
+import { useExecution, type PendingReview } from './execution';
+import { RUN_DOCUMENTS_PAGE, useNavigate } from './navigation';
+import { shortDigest } from './records';
+import { describeGate } from './runFacts';
+import { useLiveRunFacts } from './runFactsHooks';
+import { OPEN_TARGETS } from './selectors';
 
 const REFUSAL_HELP: Record<string, string> = {
   STALE_REVIEW: 'The change under review is no longer the one you were shown. Review it again before deciding.',
@@ -13,10 +20,11 @@ const REFUSAL_HELP: Record<string, string> = {
 };
 
 /**
- * The human review of a change Kriya paused a run for (GUI final). It holds NO authority and shows nothing it invented: the files, the sizes, the digest and the
- * reviewer's text are Kriya's own record of the pending review, verbatim. The diff and the validation results are NOT re-implemented here - the buttons open the
- * existing Changes and Validation modules on this run's live evidence. Approve and Reject send one typed decision carrying the identities Kriya gave the review;
- * Kriya checks them against its durable state, records the decision, and only then does the waiting run continue.
+ * ACTION REQUIRED: the human review of a change Kriya paused a run for (GUI final). It holds NO authority and shows nothing it invented: the files, the sizes, the digest and the
+ * reviewer's text are Kriya's own record of the pending review, verbatim; the validation line restates the recorded gates of this run's live evidence. The diff itself is NOT
+ * re-implemented here - the buttons open the existing Changes and Validation documents. Approve & Continue and Reject send one typed decision carrying the identities Kriya gave
+ * the review; Kriya checks them against its durable state, records the decision, and only then does the waiting run continue. Approving always goes through a confirmation that
+ * opens on the safe choice, and says plainly when the diff text was not shown to the person.
  */
 export function ApprovalReview({ review, launchId }: { review: PendingReview; launchId: string }) {
   const ex = useExecution();
@@ -34,24 +42,31 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   // loading, unreadable, digest-only capture - is "not viewable", so the explicit "Approve without viewing diff" confirmation applies (fail closed; review P2-3).
   const evidenceReady = evidence.state === 'ready' || evidence.state === 'degraded';
   const capture = evidenceReady ? evidence.data.manifest.manifest?.capture : undefined;
-  const hidden = policyHidden || !evidenceReady || capture === undefined || capture === 'digest_only';
-  const hiddenReason = policyHidden ? 'policy' : !evidenceReady ? 'not_loaded' : 'digest_only';
+  const hiddenReason = policyHidden ? 'policy' : !evidenceReady ? 'not_loaded' : capture === undefined || capture === 'digest_only' ? 'digest_only' : null;
+  const hidden = hiddenReason !== null;
   const busy = decision.state === 'submitting' || decision.state === 'accepted';
   const open = (tab: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => { dispatch({ type: 'selectLiveRun', launchId }); dispatch({ type: 'centralTab', tab }); go(RUN_DOCUMENTS_PAGE); };
   const added = review.files.reduce((n, f) => n + f.lines_added, 0);
   const removed = review.files.reduce((n, f) => n + f.lines_removed, 0);
+  // The validation line is its own read of this live run's gates; it never selects the run, so it cannot change what counts as "the diff was loaded" above.
+  const facts = useLiveRunFacts(launchId, `${review.review_id}@${review.candidate_digest}`);
+  const gates = facts && facts.state === 'ready' ? facts.gates : null;
   return (
-    <section className="ck-review" aria-label="Change review" data-review-id={review.review_id} tabIndex={-1}>
-      <div><strong>Review the proposed change.</strong> Kriya paused this run for your decision; nothing is applied to your folder until you approve.</div>
-      <ul aria-label="Files in this change" style={{ margin: '4px 0' }}>
-        {review.files.map((f) => <li key={f.filepath}><span className="mono">{f.filepath}</span> <span className="muted small">+{f.lines_added} −{f.lines_removed} · diff {shortDigest(f.diff_sha256)}</span></li>)}
+    <section className="ck-review ck-action" aria-label="Change review" data-review-id={review.review_id} tabIndex={-1}>
+      <div className="ck-action-head"><span className="ck-action-flag">ACTION REQUIRED</span><strong>Kriya wants to change your project</strong></div>
+      <div>Kriya paused this run for your decision. Nothing is applied to your folder until you approve.</div>
+      <h4 className="ck-action-sub">Kriya wants to modify</h4>
+      <ul aria-label="Files in this change" style={{ margin: '2px 0' }}>
+        {review.files.map((f) => <li key={f.filepath}><span className="mono">{f.filepath}</span> <span className="muted small">+{f.lines_added} −{f.lines_removed}</span></li>)}
       </ul>
       <div className="muted small">{review.files.length} file{review.files.length === 1 ? '' : 's'}, +{added} −{removed} · candidate {shortDigest(review.candidate_digest)} · review {review.review_id}</div>
+      <h4 className="ck-action-sub">Validation</h4>
+      <div className="ck-badges" aria-label="Validation so far">{gates === null ? <span className="muted">{facts && facts.state === 'unavailable' ? `Gate results could not be read here (${facts.detail}). Use Review validation.` : 'Reading this run\'s recorded gates…'}</span> : gates.length === 0 ? <span className="muted">No gate result is recorded yet.</span> : gates.map((g) => <Badge key={g.type} tone={g.passed === true ? 'ok' : g.passed === false ? 'bad' : 'neutral'}>{g.passed === true ? '✓ ' : g.passed === false ? '✕ ' : ''}{describeGate(g)}</Badge>)}</div>
       <details open>
-        <summary>Reviewer text (as Kriya recorded it{review.reason_truncated ? '; shortened by Kriya' : ''})</summary>
-        <pre className="mono small" style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', margin: '4px 0' }}>{sanitizeText(review.reason)}</pre>
+        <summary>Reason (the reviewer&apos;s text, as Kriya recorded it{review.reason_truncated ? '; shortened by Kriya' : ''})</summary>
+        <pre className="mono small" style={{ whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto', margin: '4px 0' }}>{sanitizeText(review.reason)}</pre>
       </details>
-      {!policyHidden && hiddenReason !== 'digest_only' ? (
+      {hiddenReason === null || hiddenReason === 'not_loaded' ? (
         <div className="muted small" role="note">Open Changes to read the exact authorized diff and Validation to see the gate results - both read this run&apos;s live evidence.</div>
       ) : hiddenReason === 'policy' ? (
         <div role="note">
@@ -72,8 +87,8 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         {decision.state === 'accepted' ? <Badge tone="info">{decision.decision === 'approve' ? 'Approval sent' : 'Rejection sent'}</Badge> : null}
         {!busy && !confirming ? (
           <>
-            <button type="button" onClick={() => setConfirming(true)}>Approve changes</button>
-            <button type="button" onClick={() => { void ex.decide('reject', review.review_id); }}>Reject changes</button>
+            <button type="button" onClick={() => { void ex.decide('reject', review.review_id); }}>Reject</button>
+            <button type="button" className="ck-primary ck-cta" onClick={() => setConfirming(true)}>Approve &amp; Continue</button>
           </>
         ) : null}
       </div>

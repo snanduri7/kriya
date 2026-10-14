@@ -8,16 +8,16 @@ import { renderWorkspaceShell } from '../testing/harness';
 import { LAUNCH_ID, REVIEW_DIGEST, REVIEW_ID, REVIEW_REASON } from '../providers/fixture/fixtureExecution';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
-const banner = () => screen.findByRole('status', { name: 'Active run' });
+const banner = () => screen.findByRole('region', { name: 'Current run' });
 const GOAL = 'Add a clamp(value, low, high) function with tests.';
 
 /** Open the Workspace page, start the run and move the scripted launch to the frame where Kriya waits on the review. */
 async function reachReview(fixture: Record<string, unknown> = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', execution: { outcome: 'review' }, ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
-  goTo('Workspace');
+  goTo('Project');
   fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-  await screen.findByRole('region', { name: 'Readiness' });
+  await screen.findAllByText(/^✓ Ready/);
   fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
   const bar = await banner();
   for (let i = 0; i < 3; i += 1) act(() => mounted.host.exec!.advance());
@@ -25,22 +25,32 @@ async function reachReview(fixture: Record<string, unknown> = {}) {
   return { ...mounted, bar };
 }
 
+/** From any other page the compact strip says ACTION REQUIRED and its Review button returns to the Project page's current run (where the one review lives). */
+async function backToReview() {
+  const strip = await screen.findByRole('status', { name: 'Active run' });
+  expect(within(strip).getByText('ACTION REQUIRED')).toBeInTheDocument();
+  fireEvent.click(within(strip).getByRole('button', { name: 'Review' }));
+  const bar = await banner();
+  return { bar, review: await within(bar).findByRole('region', { name: 'Change review' }) };
+}
+
 describe('the review of a change', () => {
   it('shows "Approval required" with Kriya\'s reviewer text VERBATIM, the files and their sizes, and sends nothing until a button is pressed', async () => {
     const { host, bar } = await reachReview();
-    expect(within(bar).getAllByText('Approval required').length).toBeGreaterThan(0);
+    expect(within(bar).getAllByText('ACTION REQUIRED').length).toBeGreaterThan(0); // unmistakable: a flag, not only colour
+    expect(within(bar).getByText('Waiting for your approval')).toBeInTheDocument();
     const review = within(bar).getByRole('region', { name: 'Change review' });
     expect(within(review).getByText('src/clamp.py')).toBeInTheDocument();
     expect(within(within(review).getByRole('list', { name: 'Files in this change' })).getByText(/\+3 −0/)).toBeInTheDocument();
     expect(review.querySelector('pre')?.textContent).toBe(REVIEW_REASON);
-    expect(within(review).getByRole('button', { name: 'Approve changes' })).toBeEnabled();
-    expect(within(review).getByRole('button', { name: 'Reject changes' })).toBeEnabled();
+    expect(within(review).getByRole('button', { name: 'Approve & Continue' })).toBeEnabled();
+    expect(within(review).getByRole('button', { name: 'Reject' })).toBeEnabled();
     expect(host.exec!.decisions).toEqual([]);
   });
 
   it('Approve asks for confirmation, then sends ONE typed decision carrying exactly the identities Kriya gave the review; the run then continues and ends from Kriya\'s records', async () => {
     const { host, bar } = await reachReview();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     expect(host.exec!.decisions).toEqual([]); // not yet: confirmation first
     const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Approve without viewing diff' }));
@@ -60,7 +70,7 @@ describe('the review of a change', () => {
 
   it('Reject sends one decision and the durable outcome is the recorded human rejection - no retry is started', async () => {
     const { host, bar } = await reachReview();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]!.decision).toBe('reject');
     act(() => host.exec!.finish());
@@ -72,27 +82,27 @@ describe('the review of a change', () => {
 
   it('a double click sends exactly one decision; the buttons are gone while it is in flight', async () => {
     const { host, bar } = await reachReview();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     const confirm = within(bar).getByRole('button', { name: 'Approve without viewing diff' });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
     await waitFor(() => expect(host.exec!.decisions.length).toBeGreaterThan(0));
     expect(host.exec!.decisions).toHaveLength(1);
     await within(bar).findByText(/Your approval is recorded by Kriya/);
-    expect(within(bar).queryByRole('button', { name: 'Approve changes' })).toBeNull();
-    expect(within(bar).queryByRole('button', { name: 'Reject changes' })).toBeNull();
+    expect(within(bar).queryByRole('button', { name: 'Approve & Continue' })).toBeNull();
+    expect(within(bar).queryByRole('button', { name: 'Reject' })).toBeNull();
   });
 
   it('a decision for a review that was superseded fails closed: Kriya\'s refusal is shown verbatim and the run keeps waiting', async () => {
     const { host, bar } = await reachReview();
     act(() => host.exec!.supersedeReview());
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     const alert = await within(bar).findByRole('alert');
     expect(alert).toHaveTextContent('Kriya did not accept the decision');
     expect(alert).toHaveTextContent('STALE_REVIEW');
     expect(alert).toHaveTextContent('Review it again before deciding');
     expect(bar).not.toHaveAttribute('data-outcome', 'rejected');
-    expect(within(bar).getByRole('button', { name: 'Approve changes' })).toBeEnabled(); // nothing was recorded; the person can decide again
+    expect(within(bar).getByRole('button', { name: 'Approve & Continue' })).toBeEnabled(); // nothing was recorded; the person can decide again
   });
 
   it('when Kriya raises a NEW review for the same launch, the live evidence is read again for it (review P2-1) - the diff shown is never the earlier candidate\'s', async () => {
@@ -104,8 +114,9 @@ describe('the review of a change', () => {
     await waitFor(() => expect(manifests()).toBeGreaterThan(0));
     const before = manifests();
     act(() => host.exec!.replaceReview());
-    await waitFor(() => expect(within(bar).getByRole('region', { name: 'Change review' })).not.toHaveAttribute('data-review-id', REVIEW_ID));
     await waitFor(() => expect(manifests()).toBeGreaterThan(before)); // fails if the evidence key ignores the review identity
+    const back = await backToReview();
+    expect(back.review).not.toHaveAttribute('data-review-id', REVIEW_ID); // and the Project page shows the NEW review
   });
 
   it('Review changes opens the existing Changes module on the run\'s LIVE evidence (no second diff implementation) and Review validation opens Validation', async () => {
@@ -116,7 +127,8 @@ describe('the review of a change', () => {
     expect(store.getState().centralTab).toBe('changes');
     const doc = await screen.findByRole('region', { name: 'Changes' });
     expect((await within(doc).findAllByText(/new file: no baseline exists/)).length).toBeGreaterThan(0);
-    fireEvent.click(within(bar).getByRole('button', { name: 'Review validation' }));
+    const back = await backToReview(); // the review panel is on the Project page; the strip brings the person back to it
+    fireEvent.click(within(back.bar).getByRole('button', { name: 'Review validation' }));
     await waitFor(() => expect(store.getState().centralTab).toBe('validation'));
     expect(await screen.findByRole('region', { name: 'Validation' })).toBeInTheDocument();
   });
@@ -142,7 +154,7 @@ describe('the review of a change', () => {
     render(<AppShell provider={new HostProvider(first.host, 'fixture')} registry={createCockpitRegistry()} selection={createSelectionStore({ ...initialSelection })} viewportWidth={1440} pollIntervals={FAST_POLL} />);
     const bar = await banner();
     expect(await within(bar).findByRole('region', { name: 'Change review' })).toBeInTheDocument();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(first.host.exec!.decisions).toHaveLength(1));
   });
 });
@@ -229,12 +241,14 @@ describe('the decision is about the review that was displayed', () => {
     expect(states).toEqual([expect.objectContaining({ state: 'refused', code: 'STALE_REVIEW' })]);
   });
   it('the review of a live-selected run claims no stored status (it has no trace row yet) and the confirmation says when the diff text was not seen', async () => {
-    const { host, bar, store } = await reachReview({ evidenceContent: false });
-    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    const first = await reachReview({ evidenceContent: false });
+    const { host, store } = first;
+    fireEvent.click(within(first.bar).getByRole('button', { name: 'Review changes' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
     expect(await screen.findAllByText(/status not recorded/)).not.toHaveLength(0);
     expect(screen.queryByText('RUNNING')).toBeNull();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    const { bar } = await backToReview();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     expect(within(bar).getAllByText(/Diff hidden by Kriya content-visibility policy\./).length).toBeGreaterThan(1); // in the review AND in the confirmation
     expect(within(bar).getByText(/You have not seen the diff text/)).toBeInTheDocument();
     expect(host.exec!.decisions).toEqual([]);
@@ -244,7 +258,7 @@ describe('the decision is about the review that was displayed', () => {
 describe('content visibility and the approval (owner final rule)', () => {
   it('with the diff hidden, approving needs the explicit "Approve without viewing diff" - the generic confirmation does not exist, and nothing is sent before it is pressed', async () => {
     const { host, bar } = await reachReview({ evidenceContent: false });
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     expect(within(bar).queryByRole('button', { name: 'Confirm approval' })).toBeNull();
     expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
     expect(host.exec!.decisions).toEqual([]);
@@ -259,7 +273,7 @@ describe('content visibility and the approval (owner final rule)', () => {
     expect(within(review).queryByText(/Diff hidden/)).toBeNull();
     expect(within(review).getByText(/exact authorized diff/)).toBeInTheDocument();
     // Before the diff has been opened, the confirmation is the honest "not seen" one: the generic confirmation exists only once this review's own evidence is loaded
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
     expect(within(bar).getByText(/The diff has not been loaded for this review\./)).toBeInTheDocument();
     fireEvent.click(within(bar).getByRole('button', { name: 'Cancel' }));
@@ -271,18 +285,22 @@ describe('content visibility and the approval (owner final rule)', () => {
     const diff = await within(doc).findByLabelText('Unified diff'); // the exact authorized diff, from Kriya's recorded bytes
     expect(diff.querySelectorAll('[data-diff-row]').length).toBeGreaterThan(0);
     expect(within(doc).queryByText(/Content not authorized/)).toBeNull();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
-    await waitFor(() => expect(within(bar).getByRole('button', { name: 'Confirm approval' })).toBeInTheDocument());
-    expect(within(bar).queryByRole('button', { name: 'Approve without viewing diff' })).toBeNull();
+    const back = await backToReview(); // once the diff has been opened (this review's own evidence is loaded) the ordinary confirmation applies
+    fireEvent.click(within(back.bar).getByRole('button', { name: 'Approve & Continue' }));
+    await waitFor(() => expect(within(back.bar).getByRole('button', { name: 'Confirm approval' })).toBeInTheDocument());
+    expect(within(back.bar).queryByRole('button', { name: 'Approve without viewing diff' })).toBeNull();
     expect(host.exec!.decisions).toEqual([]);
   });
 
   it('a digest-only capture can never show the ordinary confirmation: the review says the diff cannot be shown and approving needs the explicit confirmation (review P2-3)', async () => {
-    const { host, bar, store } = await reachReview({ evidenceContent: true, capture: 'digest_only' });
-    fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
+    const first = await reachReview({ evidenceContent: true, capture: 'digest_only' });
+    const { host, store } = first;
+    fireEvent.click(within(first.bar).getByRole('button', { name: 'Review changes' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
+    await screen.findByRole('region', { name: 'Changes' });
+    const { bar } = await backToReview();
     await waitFor(() => expect(within(bar).getByText(/This run recorded digests of the change, not its content/)).toBeInTheDocument());
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     expect(within(bar).queryByRole('button', { name: 'Confirm approval' })).toBeNull();
     expect(within(bar).getByRole('button', { name: 'Approve without viewing diff' })).toBeInTheDocument();
     expect(host.exec!.decisions).toEqual([]);
@@ -300,7 +318,7 @@ describe('content visibility and the approval (owner final rule)', () => {
 describe('keyboard use of the approval (hardening, Phase J)', () => {
   it('the confirmation opens with focus on Cancel (a stray Enter never approves), Escape cancels it, and nothing is sent', async () => {
     const { host, bar } = await reachReview();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
     const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -312,7 +330,7 @@ describe('keyboard use of the approval (hardening, Phase J)', () => {
     const { bar } = await reachReview();
     const review = within(bar).getByRole('region', { name: 'Change review' });
     const names = within(review).getAllByRole('button').map((b) => b.textContent?.trim());
-    expect(names).toEqual(['Review changes', 'Review validation', 'Approve changes', 'Reject changes']);
+    expect(names).toEqual(['Review changes', 'Review validation', 'Reject', 'Approve & Continue']);
     for (const el of Array.from(review.querySelectorAll('[tabindex]'))) expect(Number(el.getAttribute('tabindex'))).toBeLessThanOrEqual(0);
     for (const b of within(review).getAllByRole('button')) expect(b).toHaveAttribute('type', 'button');
   });

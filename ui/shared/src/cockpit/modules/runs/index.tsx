@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AvailabilityView, RUN_DOCUMENTS_PAGE, ofKind, useDispatch, useExecution, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { AvailabilityView, PROJECT_PAGE, RUN_DOCUMENTS_PAGE, ofKind, useDispatch, useExecution, useNavigate, useModuleSelection, useProvider, useRunEvidence, useSession, useWorkspacePath, type ModuleDefinition } from '../../core';
 import { NO_FILTER, filterRuns, isFiltering, type RangeFilter, type RunFilter, type StatusFilter } from './filter';
 import type { HistoryList, RunSummary } from '../../../model/kup';
 
@@ -73,10 +73,10 @@ function RunsList() {
   return (
     <div>
       <div className="ck-runs-head">
-        <h2 style={{ fontSize: 14, margin: 0 }}>Runs</h2>
+        <h2 style={{ fontSize: 14, margin: 0 }}>Run history</h2>
         <span>
           <button type="button" title="Acquire a new consistent snapshot of the history store" onClick={() => { setAsOf(Date.now()); void session.acquire(); }} disabled={snapshotId === null && session.status.state === 'loading'}>Refresh runs</button>{' '}
-          {workspace ? <button type="button" className="ck-primary" onClick={() => go('workspace')}>New Run</button> : null}
+          {workspace ? <button type="button" onClick={() => go(PROJECT_PAGE)}>New Run</button> : null}
         </span>
       </div>
       {active ? (
@@ -99,8 +99,15 @@ function RunsList() {
           {filtering ? <button type="button" className="ck-quiet" onClick={() => setFilter(NO_FILTER)}>Clear filters</button> : null}
         </div>
       ) : null}
-      {snapshotId === null ? <AvailabilityView value={session.status}>{() => null}</AvailabilityView> : null}
-      {session.status.state !== 'ready' && session.status.state !== 'loading' ? <button type="button" onClick={() => void session.acquire()}>Acquire snapshot</button> : null}
+      {snapshotId === null && session.status.state === 'unavailable' && session.status.reason === 'store_absent' ? (
+        <div className="ck-state" data-testid="no-history">
+          <strong>No runs yet.</strong>
+          Nothing has been recorded for this project. Work starts on the Project page.
+          <div><button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button>{' '}<button type="button" className="ck-quiet" title="Ask Kriya for a new consistent snapshot of its history" onClick={() => void session.acquire()}>Check for history again</button></div>
+        </div>
+      ) : null}
+      {snapshotId === null && !(session.status.state === 'unavailable' && session.status.reason === 'store_absent') ? <AvailabilityView value={session.status}>{() => null}</AvailabilityView> : null}
+      {session.status.state !== 'ready' && session.status.state !== 'loading' && !(session.status.state === 'unavailable' && session.status.reason === 'store_absent') ? <button type="button" onClick={() => void session.acquire()}>Acquire snapshot</button> : null}
       {snapshotId !== null && current === null ? <div className="ck-state muted" role="status">Loading…</div> : null}
       {current?.error ? <div className="ck-state" role="alert"><strong>Runs could not be read</strong>{current.error}</div> : null}
       {groups.map(([group, runs]) => (
@@ -126,7 +133,7 @@ function RunsList() {
         </div>
       ) : null}
       {current && filtering && filtered.runs.length === 0 && current.runs.length > 0 ? <div className="ck-state"><strong>No loaded run matches these filters</strong><button type="button" onClick={() => setFilter(NO_FILTER)}>Clear filters</button></div> : null}
-      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No run is recorded for this workspace</strong>Kriya found no run whose evidence names this folder. Start one with New Run.</div> : null}
+      {current && workspace && current.runs.length === 0 && !current.error ? <div className="ck-state"><strong>No runs yet.</strong>Kriya found no run whose evidence names this project. <button type="button" className="ck-primary" onClick={() => go(PROJECT_PAGE)}>Go to Project</button></div> : null}
       {current?.scope ? <div className="muted small" data-testid="run-scope">{scopeNote(current.scope)}</div> : null}
       {current?.next ? <button type="button" disabled={current.busy} onClick={more}>{current.busy ? 'Loading…' : 'Load more runs'}</button> : null}
     </div>

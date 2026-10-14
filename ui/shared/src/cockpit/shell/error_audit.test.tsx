@@ -12,7 +12,7 @@ import { AppShell } from './AppShell';
 import type { KupEnvelope, KupRequest } from '../../model/kup';
 
 const TRACEBACK = 'Traceback (most recent call last):\n  File "/x/kriya/cli.py", line 9, in main\nModuleNotFoundError: No module named \'kriya\'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1248:15)';
-const mount = (host: FixtureHost) => { cleanup(); render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={createSelectionStore({ ...initialSelection })} viewportWidth={1440} pollIntervals={FAST_POLL} />); };
+const mount = (host: FixtureHost) => { cleanup(); render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={createSelectionStore({ ...initialSelection })} viewportWidth={1440} pollIntervals={FAST_POLL} initialPage="runs" />); };
 const hostError = (operation: string, code: string, message: string, detail?: string) => ({ schema_version: 1, operation, request_id: 'x', observed_at: 't', source: null, consistency: null, data: null, error: { code, message, ...(detail ? { detail } : {}) } }) as unknown as KupEnvelope;
 
 describe('technical detail never reaches the message', () => {

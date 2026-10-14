@@ -23,7 +23,7 @@ add({ name: 'open', js: `(async()=>{${W}[...document.querySelectorAll('main[aria
 for (const [w, h] of SIZES) {
   const f = (label) => (SHOT.has(w) ? { file: `${label}-${w}.png` } : {});
   add({ wait: 350, width: w, height: h });
-  add({ name: `audit_workspace@${w}`, js: `(async()=>{${W}${nav('Workspace')}${settle}window.__audit_fn('workspace@${w}');return 'ok'})()`, wait: 150, ...f('workspace') });
+  add({ name: `audit_workspace@${w}`, js: `(async()=>{${W}${nav('Project')}${settle}window.__audit_fn('workspace@${w}');return 'ok'})()`, wait: 150, ...f('workspace') });
   add({ name: `audit_runs@${w}`, js: `(async()=>{${W}${nav('Runs')}${run('Implement the whole thing')}await W(()=>/recorded outcome/i.test((document.querySelector('[role=tabpanel]')||{innerText:''}).innerText),60000);${settle}window.__audit_fn('runs-overview@${w}');return 'ok'})()`, wait: 150, ...f('runs-overview') });
   for (const t of ['Validation', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence']) {
     add({ name: `audit_${t.toLowerCase()}@${w}`, js: `(async()=>{${W}${tab(t)}${settle}${t === 'Changes' ? `const f=document.querySelector('[role=tabpanel] ul button');if(f){f.click();await S(350)}` : ''}window.__audit_fn('${t.toLowerCase()}@${w}');return 'ok'})()`, wait: 150, ...f(t.toLowerCase()) });

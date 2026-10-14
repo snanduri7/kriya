@@ -8,25 +8,27 @@ import { renderWorkspaceShell } from '../testing/harness';
 import { LAUNCH_ID } from '../providers/fixture/fixtureExecution';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
-const banner = () => screen.findByRole('status', { name: 'Active run' });
+const banner = () => screen.findByRole('region', { name: 'Current run' });
 const goalBox = () => screen.findByRole('textbox', { name: 'Engineering goal' });
 const startButton = () => screen.getByRole('button', { name: /^Start Run$|^Starting…$/ });
+/** The Project page's "Project details" disclosure holds the full readiness; the tests that read it open it like a person would. */
+const openDetails = async () => { const summary = await screen.findByText('Project details'); if (!summary.closest('details')!.open) fireEvent.click(summary); };
 const GOAL = 'Add a clamp(value, low, high) function with tests.';
 
 async function openRunPanel(fixture = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
-  goTo('Workspace');
+  goTo('Project');
   return mounted;
 }
 async function typeGoal(text = GOAL) { fireEvent.change(await goalBox(), { target: { value: text } }); }
 const asked = (host: { calls: Array<{ operation: string }> }, op: string) => host.calls.filter((c) => c.operation === op);
 
 describe('New Run entry', () => {
-  it('Runs offers New Run, which takes the person to the goal entry on the Workspace page - for an empty folder and an existing project alike', async () => {
+  it('Runs offers New Run, which takes the person to the goal entry on the Project page - for an empty folder and an existing project alike', async () => {
     for (const folder of ['/fixture/empty', '/fixture/workspace']) {
       document.body.innerHTML = '';
-      renderWorkspaceShell({ fixture: { workspace: folder } });
+      renderWorkspaceShell({ page: 'runs', fixture: { workspace: folder } });
       await screen.findByRole('navigation', { name: 'Destinations' });
       fireEvent.click(await screen.findByRole('button', { name: 'New Run' }));
       expect(await screen.findByRole('textbox', { name: 'Engineering goal' })).toBeInTheDocument();
@@ -41,16 +43,19 @@ describe('New Run entry', () => {
 });
 
 describe('goal and preflight', () => {
-  it('shows Kriya\'s preflight in its own words and keeps Start Run off until there is a goal', async () => {
+  it('shows Kriya\'s preflight in its own words (under Project details) and keeps Start Run off until there is a goal', async () => {
     await openRunPanel();
-    const panel = (await screen.findByText('Engineering goal')).closest('section') as HTMLElement;
+    await screen.findAllByText(/^✓ Ready/);
+    await openDetails();
+    const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-project') as HTMLElement;
     expect((await within(panel).findAllByText('Packaged defaults (this folder has no kriya.yaml)')).length).toBeGreaterThan(0); // checklist + details
     expect(within(panel).getAllByText(/No findings: this folder's configuration sets nothing only an operator may set/).length).toBeGreaterThan(0);
     expect(within(panel).getAllByText('/fixture/state').length).toBeGreaterThan(0);
-    expect(within(panel).getAllByText('fixture-model:7b').length).toBeGreaterThan(0); // the run-configuration details and the routing table both name it
+    expect(within(panel).getAllByText('fixture-model:7b').length).toBeGreaterThan(0); // the run-configuration details, the routing table and the compact line name it
     expect(within(panel).getByText(/fallback fixture-fallback:3b/)).toBeInTheDocument();
     expect(within(panel).getAllByText(/held for your review in this window and applied only if you approve it/i).length).toBeGreaterThan(0);
     expect(startButton()).toBeDisabled();
+    expect(screen.getByText('Enter a goal to start.')).toBeInTheDocument(); // a disabled Start Run says why
     await typeGoal();
     await waitFor(() => expect(startButton()).toBeEnabled());
   });
@@ -58,7 +63,7 @@ describe('goal and preflight', () => {
   it('a whitespace-only goal cannot be started', async () => {
     await openRunPanel();
     await typeGoal('   \n  ');
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     expect(startButton()).toBeDisabled();
   });
 
@@ -67,9 +72,10 @@ describe('goal and preflight', () => {
     for (const folder of ['/fixture/empty', '/fixture/workspace']) {
       const { unmount } = (() => { const m = renderWorkspaceShell({ fixture: { workspace: folder } }); return { unmount: () => m }; })();
       await screen.findByRole('navigation', { name: 'Destinations' });
-      goTo('Workspace');
-      const panel = (await screen.findByText('Engineering goal')).closest('section') as HTMLElement;
-      await within(panel).findByRole('region', { name: 'Readiness' });
+      goTo('Project');
+      const panel = (await screen.findByRole('heading', { level: 1 })).closest('.ck-project') as HTMLElement;
+      await within(panel).findAllByText(/^✓ Ready/);
+      await openDetails();
       texts.push(within(panel).getAllByRole('term').map((t) => t.textContent ?? ''));
       expect(within(panel).getByRole('button', { name: 'Start Run' })).toBeInTheDocument();
       expect(screen.queryByText(/greenfield|brownfield/i)).toBeNull();
@@ -82,7 +88,7 @@ describe('goal and preflight', () => {
   it('a blocker from Kriya is shown with its code and Start Run stays off; nothing is sent to the host', async () => {
     const { host } = await openRunPanel({ workspace: '/fixture/blocked' });
     await typeGoal();
-    expect(await screen.findByText(/Kriya will not start a run here yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Cannot start a run/)).toBeInTheDocument();
     expect(screen.getByText(/RECOVERY_REQUIRED/)).toBeInTheDocument();
     expect(startButton()).toBeDisabled();
     expect(host.exec!.starts).toEqual([]);
@@ -90,7 +96,7 @@ describe('goal and preflight', () => {
 
   it('a host that cannot execute says so and offers no Start Run', async () => {
     await openRunPanel({ execution: false });
-    expect(await screen.findByText('This host cannot start a run.')).toBeInTheDocument();
+    expect(await screen.findByText('This host cannot start a run.')).toBeInTheDocument(); // said once, not repeated in the details
     expect(screen.queryByRole('button', { name: 'Start Run' })).toBeNull();
   });
 });
@@ -99,7 +105,7 @@ describe('Start Run', () => {
   it('sends exactly {workspace, goal} - no options, no command text', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     await banner();
     expect(host.exec!.starts).toEqual([{ workspace: '/fixture/workspace', goal: GOAL }]);
@@ -108,30 +114,31 @@ describe('Start Run', () => {
   it('suppresses a double submission: two clicks in the same tick reach the host once', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     const button = startButton();
     await act(async () => { fireEvent.click(button); fireEvent.click(button); });
     await banner();
     expect(host.exec!.starts).toHaveLength(1);
   });
 
-  it('while the launch is in progress the goal and the button are locked, and the banner says Kriya has not recorded it yet', async () => {
+  it('while the launch is in progress the page becomes the run (no goal box, no second Start Run) and says Kriya has not recorded it yet', async () => {
     await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     expect(bar).toHaveAttribute('data-stage', 'starting');
     expect(within(bar).getByText(/Waiting for Kriya to record the launch/)).toBeInTheDocument();
-    expect(await goalBox()).toBeDisabled();
-    expect(startButton()).toBeDisabled();
+    // the goal composer is replaced by the run itself: no goal box, no second Start Run, and no control Kriya has no host operation for
+    expect(screen.queryByRole('textbox', { name: 'Engineering goal' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^(Start Run|Starting…)$/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^(Stop|Pause|Resume|Retry|Rerun|Cancel)/ })).toBeNull();
   });
 
-  it('shows only what Kriya\'s records say as they appear: counts by recorded kind, the latest record, DERIVED liveness - and no invented stages', async () => {
+  it('shows only what Kriya\'s records say as they appear: counts by recorded kind, the latest record, DERIVED liveness - and a coarse phase that follows the records, with no invented stage or number', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.advance());
@@ -140,6 +147,7 @@ describe('Start Run', () => {
     act(() => host.exec!.advance());
     await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'running'));
     await waitFor(() => expect(within(bar).getByText(/3 evidence records/)).toBeInTheDocument());
+    expect(bar).toHaveAttribute('data-state', 'EDITING');
     expect(within(bar).getByText(/Units opened 1/)).toBeInTheDocument();
     expect(within(bar).getByText(/Attempts opened 1/)).toBeInTheDocument();
     expect(within(bar).getByText(/latest: attempt\.opened/)).toBeInTheDocument();
@@ -148,7 +156,10 @@ describe('Start Run', () => {
     act(() => host.exec!.advance());
     await waitFor(() => expect(within(bar).getByText(/7 evidence records/)).toBeInTheDocument());
     expect(within(bar).getByText(/Model requests 1/)).toBeInTheDocument();
-    expect(within(bar).queryByText(/planning|architect|verification|review/i)).toBeNull();
+    // the coarse phase follows the records: attempt 1 open and the Developer working is Editing; a recorded gate is Validating
+    expect(bar).toHaveAttribute('data-state', 'VALIDATING');
+    expect(within(bar).getByRole('list', { name: 'Progress' }).textContent).toMatch(/Planning.*Editing.*Validating.*Finished/);
+    expect(within(bar).queryByText(/\d+\s*%|of \d+ tests|step \d+ of/i)).toBeNull(); // no invented percentage, count or step number
     // Records are read incrementally from the last seq, never from the top again.
     const reads = asked(host, 'evidence.records') as Array<{ operation: string; from_seq?: number }>;
     expect(reads.map((r) => r.from_seq)).toEqual(expect.arrayContaining([1, 4]));
@@ -157,7 +168,7 @@ describe('Start Run', () => {
   it('the durable success: the outcome is Kriya\'s RunRecord, polling stops, the cockpit refreshes and shows the finished run in Runs', async () => {
     const { host, store } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -183,7 +194,7 @@ describe('Start Run', () => {
     const realAcquire = provider.acquireSnapshot.bind(provider);
     (provider as unknown as { acquireSnapshot: typeof realAcquire }).acquireSnapshot = async (w) => { await new Promise((r) => setTimeout(r, 150)); return realAcquire(w); };
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -195,7 +206,7 @@ describe('Start Run', () => {
   it('when a run ends the open folder is described again, so the Workspace facts are not the pre-run ones (and the folder stays open)', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     const before = asked(host, 'workspace.describe').length;
     fireEvent.click(startButton());
     const bar = await banner();
@@ -209,7 +220,7 @@ describe('Start Run', () => {
   it('when a run ends the preflight is asked of Kriya again (the folder may no longer be startable)', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     const before = asked(host, 'execution.preflight').length;
     fireEvent.click(startButton());
     const bar = await banner();
@@ -221,12 +232,12 @@ describe('Start Run', () => {
   it('a durable failure is shown as a failure, with Kriya\'s failure category', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'failure' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'failure'));
-    expect(within(bar).getByText('Run failed')).toBeInTheDocument();
+    expect(within(bar).getByRole('heading', { name: 'Run failed' })).toBeInTheDocument();
     expect(within(bar).getByText(/failure category quality_gate_failed/)).toBeInTheDocument();
     expect(within(bar).getByText(/Kriya reported:/)).toBeInTheDocument(); // Kriya's own recorded error text, not an inferred cause
     expect(within(bar).getByText(/Failed to create an isolated generation sandbox \(fixture\)/)).toBeInTheDocument();
@@ -235,7 +246,7 @@ describe('Start Run', () => {
   it('a process that dies without sealing is NOT a success: the host reports the exit, Kriya\'s records say the run did not finish', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'died' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => { host.exec!.advance(); host.exec!.advance(); });
@@ -250,7 +261,7 @@ describe('Start Run', () => {
   it('a change review Kriya could not hold open is shown as "Approval required" with Kriya\'s recorded reason and details, says nothing was approved, and offers no Approve button', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'approval_required' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -276,7 +287,7 @@ describe('Start Run', () => {
   it('a run that SUCCEEDED is a success even if a decision was noted earlier; declined decisions are shown as informational, nothing approved (reviewer P1-1)', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'success_with_declined' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -290,7 +301,7 @@ describe('Start Run', () => {
   it('a launch stuck in STARTING after its process died ends as "did not finish" (no endless polling, workspace unlocked)', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'stuck_starting' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => { host.exec!.advance(); });
@@ -303,7 +314,7 @@ describe('Start Run', () => {
   it('an "interrupted" reading that straddled the process\'s own final write is never concluded: the next poll shows the sealed success (stale-read race)', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'success_after_stale_read' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => { host.exec!.advance(); host.exec!.advance(); });
@@ -316,7 +327,7 @@ describe('Start Run', () => {
   it('a launch Kriya refused is "Refused before a run started" with Kriya\'s reason', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'refused' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -327,7 +338,7 @@ describe('Start Run', () => {
   it('a process that exits before Kriya recorded any launch is "No run was recorded" - never a success, never a hang', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'never_recorded' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
@@ -339,7 +350,7 @@ describe('Start Run', () => {
   it('a conclusion awaiting its second confirming poll belongs to ONE launch: the next launch ending the same way is confirmed by ITS OWN two polls (review P3-2)', async () => {
     const { host } = await openRunPanel({ execution: { outcome: 'never_recorded' } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     const polls = () => host.calls.filter((c) => c.operation === 'launch.status').length;
     const endOnce = async () => {
       fireEvent.click(startButton());
@@ -351,31 +362,31 @@ describe('Start Run', () => {
       return polls() - before;
     };
     expect(await endOnce()).toBeGreaterThanOrEqual(2); // silence is confirmed by two consecutive polls
-    fireEvent.click(within(await banner()).getByRole('button', { name: /Dismiss/ }));
+    fireEvent.click(within(await banner()).getByRole('button', { name: 'New Goal' }));
     expect(await endOnce()).toBeGreaterThanOrEqual(2); // the second launch is not "pre-confirmed" by the first one's leftover signature
   });
 
   it('a refusal by the host is shown with its typed code and starts nothing', async () => {
     await openRunPanel({ execution: { refuseStart: { code: 'PREFLIGHT_BLOCKED', message: 'another Kriya run already owns this folder' } } });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     expect(await screen.findByText(/The run was not started/)).toBeInTheDocument();
     expect(screen.getByText(/PREFLIGHT_BLOCKED/)).toBeInTheDocument();
-    expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Current run' })).toBeNull();
     expect(startButton()).toBeEnabled();
   });
 
   it('the finished banner can be dismissed and a second run can then be started', async () => {
     const { host } = await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     const bar = await banner();
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-stage', 'finished'));
-    fireEvent.click(within(bar).getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull();
+    fireEvent.click(within(bar).getByRole('button', { name: 'New Goal' }));
+    expect(screen.queryByRole('region', { name: 'Current run' })).toBeNull();
     expect(startButton()).toBeEnabled();
   });
 });
@@ -384,7 +395,7 @@ describe('workspace during a run', () => {
   it('the switcher is disabled while the run is in progress and the menu\'s Open Folder is refused without showing the chooser', async () => {
     const { host } = await openRunPanel({ choices: ['/fixture/dirty'] });
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     await banner();
     const switcher = screen.getByRole('button', { name: 'Switch workspace' });
@@ -400,7 +411,7 @@ describe('workspace during a run', () => {
   it('historical runs stay inspectable during a run (reads are not blocked)', async () => {
     await openRunPanel();
     await typeGoal();
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(startButton());
     await banner();
     goTo('Runs');

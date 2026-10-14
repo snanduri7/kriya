@@ -122,9 +122,8 @@ describe('New Project from the welcome screen', () => {
   it('is refused while a run owns the workspace: the chooser is not shown and the reason is stated', async () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', projectParents: ['/fixture/parent'], execution: { outcome: 'success' } } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name: 'Workspace' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Do a thing' } });
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
     await waitFor(() => expect(host.exec!.active()).toBe(true));
     // the toolbar menu is disabled while a run is active; the menu command (Cmd+N) still reaches the provider, which the host refuses

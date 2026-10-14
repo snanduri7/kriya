@@ -14,15 +14,17 @@ import { AppShell } from './AppShell';
 import type { KupEnvelope, KupRequest } from '../../model/kup';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
-const banner = () => screen.findByRole('status', { name: 'Active run' });
+const banner = () => screen.findByRole('region', { name: 'Current run' });
+/** From another page the compact strip's Review button returns to the Project page's current run, where the one review lives. */
+const backToRun = async () => { fireEvent.click(within(await screen.findByRole('status', { name: 'Active run' })).getByRole('button', { name: 'Review' })); return banner(); };
 const GOAL = 'Add a clamp(value, low, high) function with tests.';
 
 async function startRun(fixture: FixtureHostOptions = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', ...fixture } });
   await screen.findByRole('navigation', { name: 'Destinations' });
-  goTo('Workspace');
+  goTo('Project');
   fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-  await screen.findByRole('region', { name: 'Readiness' });
+  await screen.findAllByText(/^✓ Ready/);
   fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
   return { ...mounted, bar: await banner() };
 }
@@ -68,37 +70,39 @@ describe('a run that dies while its review is pending', () => {
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'not_recorded'), { timeout: 6000 });
     expect(within(bar).getByText('The run could not be followed')).toBeInTheDocument();
     expect(within(bar).getAllByText(/EVIDENCE_STORE_UNREADABLE/).length).toBeGreaterThan(0);
-    expect(within(bar).getByRole('button', { name: /Dismiss/ })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: 'New Goal' })).toBeInTheDocument();
     expect(within(bar).queryByText(/Run succeeded/)).toBeNull();
   });
 });
 
 describe('looking at another run never moves the active run or its decision', () => {
   it('selecting a historical run while a review waits leaves the banner, the review and the decision target untouched; the live run can be returned to', async () => {
-    const { host, bar, store } = await toReview();
+    const { host, store } = await toReview();
     goTo('Runs');
     const history = await screen.findAllByRole('button', { name: /success|failure|Unfinished/ });
     fireEvent.click(history[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBeNull());
     expect(store.getState().liveLaunchId).toBeNull();
+    const bar = await backToRun();
     expect(within(bar).getByRole('region', { name: 'Change review' })).toBeInTheDocument(); // the review is unaffected
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]).toMatchObject({ launch_id: LAUNCH_ID, decision: 'reject' }); // the ACTIVE launch, not the selected historical run
     expect(host.exec!.decisions[0]!.review_id).not.toBe(store.getState().runId);
   });
 
   it('"Review changes" returns to the live run from any selection, and finishing the run selects the finished (trace) run, ending the live selection', async () => {
-    const { host, bar, store } = await toReview();
+    const { host, store } = await toReview();
     goTo('Runs');
     fireEvent.click((await screen.findAllByRole('button', { name: /success|failure|Unfinished/ }))[0]!);
     await waitFor(() => expect(store.getState().runId).not.toBe(LAUNCH_ID));
+    const bar = await backToRun();
     fireEvent.click(within(bar).getByRole('button', { name: 'Review changes' }));
     await waitFor(() => expect(store.getState().liveLaunchId).toBe(LAUNCH_ID));
-    fireEvent.click(within(bar).getByRole('button', { name: 'Reject changes' }));
+    fireEvent.click(within(await backToRun()).getByRole('button', { name: 'Reject' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
-    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'), { timeout: 4000 });
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Current run' })).toHaveAttribute('data-outcome', 'rejected'), { timeout: 4000 }); // a fresh lookup: the page was left and re-entered
     await waitFor(() => expect(store.getState().liveLaunchId).toBeNull());
   });
 });
@@ -109,9 +113,9 @@ describe('after a terminal outcome', () => {
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'), { timeout: 4000 });
     host.menu('openFolder');
-    await waitFor(() => expect(screen.queryByRole('status', { name: 'Active run' })).toBeNull(), { timeout: 4000 });
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Current run' })).toBeNull(), { timeout: 4000 });
     expect(store.getState().runId).toBeNull();
-    goTo('Workspace');
+    goTo('Project');
     expect(await screen.findByRole('textbox', { name: 'Engineering goal' })).toHaveValue('');
   });
 });
@@ -136,7 +140,7 @@ class GatedHost extends FixtureHost {
 const mountOver = (host: GatedHost) => {
   cleanup();
   const store = createSelectionStore({ ...initialSelection });
-  render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={store} viewportWidth={1440} pollIntervals={FAST_POLL} />);
+  render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={store} viewportWidth={1440} pollIntervals={FAST_POLL} initialPage="runs" />);
   return store;
 };
 
@@ -147,11 +151,11 @@ describe('stale responses never overwrite a newer selection', () => {
     mountOver(host);
     await screen.findByRole('navigation', { name: 'Destinations' });
     host.menu('openFolder'); // switch to the empty folder while A's list is still outstanding
-    await screen.findByText(/No run is recorded for this workspace/, undefined, { timeout: 4000 }); // B is open while A's list is still held
+    await screen.findByText(/No runs yet\./, undefined, { timeout: 4000 }); // B is open while A's list is still held
     act(() => gate.release());
     await new Promise((r) => setTimeout(r, 120));
     expect(screen.queryAllByRole('button', { name: /success|failure/ })).toHaveLength(0); // A's runs never appear under B
-    expect(screen.getByText(/No run is recorded for this workspace/)).toBeInTheDocument();
+    expect(screen.getByText(/No runs yet\./)).toBeInTheDocument();
   });
 
   it('a read child that fails is a typed, visible error and Refresh recovers it - the cockpit never shows stale rows as current', async () => {
@@ -232,11 +236,11 @@ describe('the other order of arrival: a LATE OLD answer never overwrites a NEWER
     const page2 = host.hold((r) => r.operation === 'history.list' && Boolean((r as { cursor?: string }).cursor));
     fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
     host.menu('openFolder'); // switch to the empty folder while A's second page is outstanding
-    await screen.findByText(/No run is recorded for this workspace/, undefined, { timeout: 6000 });
+    await screen.findByText(/No runs yet\./, undefined, { timeout: 6000 });
     act(() => page2.release());
     await new Promise((r) => setTimeout(r, 250));
     expect(screen.queryAllByRole('button', { name: /Historic|success|failure/ })).toHaveLength(0);
-    expect(screen.getByText(/No run is recorded for this workspace/)).toBeInTheDocument();
+    expect(screen.getByText(/No runs yet\./)).toBeInTheDocument();
   });
 
   it('a launch.status answer that lands after the execution provider is gone triggers no refresh and does not re-select a run (both for a run that wrote evidence and for one that ended with none)', async () => {
@@ -247,9 +251,9 @@ describe('the other order of arrival: a LATE OLD answer never overwrites a NEWER
     const host = new GatedHost({ workspace: '/fixture/workspace', execution: { outcome } });
     const store = mountOver(host);
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: GOAL } });
-    await screen.findByRole('region', { name: 'Readiness' });
+    await screen.findAllByText(/^✓ Ready/);
     fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
     await banner();
     const held = host.hold((r) => r.operation === 'launch.status'); // the NEXT poll waits on this read

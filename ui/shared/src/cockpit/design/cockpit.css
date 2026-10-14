@@ -11,11 +11,11 @@
 
 .ck-shell { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: 100%; }
 .ck-toolbar { min-height: 44px; }
-.ck-body { display: grid; min-height: 0; grid-template-columns: 56px var(--ck-secondary, 280px) 6px minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
-.ck-body.no-secondary { grid-template-columns: 56px 0 0 minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
-.ck-body.no-inspector { grid-template-columns: 56px var(--ck-secondary, 280px) 6px minmax(0, 1fr) 0 0; }
-.ck-body.no-secondary.no-inspector { grid-template-columns: 56px 0 0 minmax(0, 1fr) 0 0; }
-.ck-body.single { grid-template-columns: 56px 0 0 minmax(0, 1fr) 0 0; }
+.ck-body { display: grid; min-height: 0; grid-template-columns: var(--ck-rail, 92px) var(--ck-secondary, 280px) 6px minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
+.ck-body.no-secondary { grid-template-columns: var(--ck-rail, 92px) 0 0 minmax(0, 1fr) 6px var(--ck-inspector, 340px); }
+.ck-body.no-inspector { grid-template-columns: var(--ck-rail, 92px) var(--ck-secondary, 280px) 6px minmax(0, 1fr) 0 0; }
+.ck-body.no-secondary.no-inspector { grid-template-columns: var(--ck-rail, 92px) 0 0 minmax(0, 1fr) 0 0; }
+.ck-body.single { grid-template-columns: var(--ck-rail, 92px) 0 0 minmax(0, 1fr) 0 0; }
 .ck-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--ck-line); background: var(--ck-panel); }
 .ck-toolbar .grow { flex: 1; } .ck-mark { font-weight: 700; letter-spacing: .02em; }
 .ck-rail { display: flex; flex-direction: column; gap: 4px; padding: 8px 4px; background: var(--ck-panel); border-right: 1px solid var(--ck-line); }
@@ -100,3 +100,46 @@
 
 .ck-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; } .ck-filters .ck-filter { flex: 1 1 140px; min-width: 0; }
 .ck-active-row { margin: 6px 0; } .ck-active-row button { width: 100%; text-align: left; border-color: var(--ck-accent); background: var(--ck-accent-bg); }
+
+/* Demo V2 UX correction: Project Home, labelled navigation, current run, compact run strip, ACTION REQUIRED */
+.ck-rail button { flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 18px; min-height: 52px; }
+.ck-rail-label { font-size: 12px; line-height: 1.1; }
+.ck-rail button[aria-current="page"] { border-color: var(--ck-accent); }
+
+.ck-project { width: 100%; max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; padding: 6px 0 24px; }
+.ck-project-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ck-project-head h1 { margin: 0; font-size: 22px; } .ck-project-head .grow { flex: 1; }
+.ck-composer h2, .ck-current h2 { margin: 0; font-size: 17px; }
+.ck-composer { display: flex; flex-direction: column; gap: 8px; }
+.ck-composer .ck-goal { font-size: 14px; min-height: 96px; }
+.ck-composer-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .ck-composer-foot .grow { flex: 1; }
+.ck-cta { font-size: 14px; font-weight: 600; padding: 7px 18px; min-height: 36px; background: var(--ck-accent); color: #07101c; border-color: var(--ck-accent); }
+.ck-cta:hover:not(:disabled) { filter: brightness(1.1); }
+.ck-cta:disabled { background: var(--ck-raised); color: var(--ck-muted); border-color: var(--ck-line); }
+.ck-start::before { content: "\25B6\00a0"; }
+.ck-kbd { font: inherit; font-size: 12px; color: var(--ck-muted); border: 1px solid var(--ck-line); border-radius: 4px; padding: 1px 6px; }
+.ck-link { background: transparent; border: 0; color: var(--ck-accent); padding: 0 4px; min-height: 0; text-decoration: underline; }
+.ck-contextline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ck-blocker { border-style: solid; border-color: var(--ck-bad); }
+.ck-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ck-current { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--ck-line); border-radius: 8px; padding: 12px 14px; background: var(--ck-panel); }
+.ck-current-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ck-current-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ck-dot.info { color: var(--ck-accent); } .ck-dot.ok { color: var(--ck-ok); } .ck-dot.warn { color: var(--ck-warn); } .ck-dot.bad { color: var(--ck-bad); }
+.ck-goalline { display: grid; grid-template-columns: 48px 1fr; gap: 8px; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 5.5em; overflow: auto; }
+.ck-detail { margin: 0; }
+.ck-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 18px; flex-wrap: wrap; }
+.ck-steps li[data-status="done"] { color: var(--ck-ok); } .ck-steps li[data-status="current"] { color: var(--ck-accent); font-weight: 600; } .ck-steps li[data-status="pending"] { color: var(--ck-muted); }
+.ck-outcome h3 { margin: 6px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-outcome ul { margin: 2px 0; padding-left: 18px; }
+.ck-current-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; } .ck-current-actions .grow { flex: 1; }
+.ck-tech { margin-top: 2px; } .ck-tech > summary { cursor: pointer; color: var(--ck-muted); }
+.ck-project h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); margin: 0 0 4px; }
+
+/* Anything that needs the person outranks ordinary content: a solid warning edge and a flag, never colour alone. */
+.ck-action { border: 2px solid var(--ck-warn); border-radius: 8px; padding: 12px 14px; background: #2a2208; display: flex; flex-direction: column; gap: 6px; }
+.ck-action-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
+.ck-action-flag { display: inline-block; font-weight: 800; letter-spacing: .06em; font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--ck-warn); color: #1a1400; }
+.ck-action-sub { margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ck-muted); }
+.ck-runbar.ck-attention { border: 2px solid var(--ck-warn); background: #2a2208; border-style: solid; }

@@ -15,7 +15,7 @@ import { bigScenario, manyRuns } from './testing/bigScenario';
 const mount = (host: FixtureHost, selection = {}) => {
   cleanup();
   const store = createSelectionStore({ ...initialSelection, ...selection });
-  render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={store} viewportWidth={1440} pollIntervals={FAST_POLL} />);
+  render(<AppShell provider={new HostProvider(host, 'fixture')} registry={createCockpitRegistry()} selection={store} viewportWidth={1440} pollIntervals={FAST_POLL} initialPage="runs" />);
   return store;
 };
 

@@ -9,7 +9,7 @@ const body = () => document.querySelector('.ck-body') as HTMLElement;
 describe('widths: 1536 / 1360 / 1180 / 1100', () => {
   it.each([[1536, false], [1360, false], [1180, true], [1100, true]])('%ipx: inspector collapsed by default = %s, main workspace and rail always present', async (width, collapsed) => {
     cleanup();
-    renderShell({ width });
+    renderShell({ width, runId: 'fx-greenfield-compile-retry' }); // the side panel exists once a run is selected
     await screen.findByRole('navigation', { name: 'Destinations' });
     await waitFor(() => expect(body().className.includes('no-inspector')).toBe(collapsed));
     expect(body().querySelector('.ck-center, main')).not.toBeNull();
@@ -17,7 +17,7 @@ describe('widths: 1536 / 1360 / 1180 / 1100', () => {
   });
 
   it('the main workspace keeps width priority: it is the one flexible track, side panes are bounded', () => {
-    expect(css).toMatch(/\.ck-body \{[^}]*grid-template-columns: 56px var\(--ck-secondary, 280px\) 6px minmax\(0, 1fr\) 6px var\(--ck-inspector, 340px\)/);
+    expect(css).toMatch(/\.ck-body \{[^}]*grid-template-columns: var\(--ck-rail, 92px\) var\(--ck-secondary, 280px\) 6px minmax\(0, 1fr\) 6px var\(--ck-inspector, 340px\)/);
     expect(css).toMatch(/\.ck-secondary, \.ck-center, \.ck-inspector \{[^}]*min-width: 0[^}]*overflow: auto/);
   });
 
@@ -29,7 +29,7 @@ describe('widths: 1536 / 1360 / 1180 / 1100', () => {
 });
 
 describe('accessibility', () => {
-  it('every icon-only navigation button has an accessible name and a tooltip', async () => {
+  it('every navigation button has an accessible name, a visible text label and a tooltip', async () => {
     renderShell({ width: 1440 });
     const rail = await screen.findByRole('navigation', { name: 'Destinations' });
     const buttons = within(rail).getAllByRole('button');
@@ -37,6 +37,8 @@ describe('accessibility', () => {
     for (const b of buttons) {
       expect(b.getAttribute('aria-label'), b.outerHTML).toMatch(/\S/);
       expect(b.getAttribute('title'), b.outerHTML).toMatch(/\S/);
+      expect(b.textContent?.replace(b.querySelector('.ck-rail-icon')?.textContent ?? '', '').trim(), b.outerHTML).toBe(b.getAttribute('aria-label')); // the label is on screen, not only in a tooltip
+      expect(b.textContent, b.outerHTML).not.toMatch(/[▶■]/); // no play or stop glyph is ever navigation
     }
   });
 

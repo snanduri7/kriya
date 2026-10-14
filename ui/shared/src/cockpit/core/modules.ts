@@ -19,6 +19,8 @@ export interface Placement {
   /** Tab / rail / drawer label. */
   label: string;
   order: number;
+  /** A center tab with `group: 'details'` is listed under the Details tab, one level below Overview / Changes / Validation. */
+  group?: 'details';
 }
 
 export interface ModuleDefinition {
@@ -40,7 +42,7 @@ export interface PageDefinition {
   label: string;
   order: number;
   layout: 'run' | 'single';
-  /** A single glyph for the rail; the label shows on hover/focus (title) and is the accessible name. */
+  /** A neutral glyph shown beside the label in the rail (never a play or stop symbol: those mean actions). The label is always visible and is the accessible name. */
   icon?: string;
 }
 

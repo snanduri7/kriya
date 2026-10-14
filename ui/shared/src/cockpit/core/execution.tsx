@@ -17,7 +17,7 @@ import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
 import type { SelectionStore } from './selectionStore';
 
-export interface BriefRecord { seq: number; kind: string; unit: string | null; attempt: number | null; role: string | null; at: string }
+export interface BriefRecord { seq: number; kind: string; unit: string | null; attempt: number | null; role: string | null; /** The recorder's own phase field, verbatim (null when the record carries none). */ phase: string | null; at: string }
 export interface RunProgress {
   /** The highest evidence seq read so far (0 = none). */
   lastSeq: number;
@@ -227,10 +227,18 @@ export function createDecider(deps: { port: ExecutionHostPort; run(): RunView | 
   };
 }
 
+/** Add one page of verified evidence records to the tallies: counts per recorded kind, the highest seq, and the newest few records. Pure; the run-phase mapping reads only this. */
+export function foldRecords(progress: RunProgress, raw: ReadonlyArray<Record<string, unknown>>): RunProgress {
+  const records = raw.map(brief).filter((b) => Number.isFinite(b.seq));
+  const kinds = { ...progress.kinds };
+  for (const r of records) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1;
+  return { lastSeq: records.length ? Math.max(progress.lastSeq, ...records.map((r) => r.seq)) : progress.lastSeq, kinds, recent: [...progress.recent, ...records].slice(-RECENT_MAX), error: null };
+}
+
 function brief(record: Record<string, unknown>): BriefRecord {
   const text = (v: unknown) => (typeof v === 'string' ? v : null);
   const num = (v: unknown) => (typeof v === 'number' ? v : null);
-  return { seq: Number(record.seq), kind: String(record.kind), unit: text(record.unit_id), attempt: num(record.attempt_number), role: text(record.role), at: String(record.t_wall ?? '') };
+  return { seq: Number(record.seq), kind: String(record.kind), unit: text(record.unit_id), attempt: num(record.attempt_number), role: text(record.role), phase: text(record.phase), at: String(record.t_wall ?? '') };
 }
 
 export function ExecutionProvider({ provider, selection, acquire, intervals = DEFAULT_INTERVALS, children }: { provider: UIProvider; selection: SelectionStore; /** The session's snapshot acquisition (the ordinary refresh path). */ acquire(workspace: string): Promise<void>; intervals?: PollIntervals; children: ReactNode }) {
@@ -338,10 +346,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         const page = await provider.evidenceRecords(evidenceRunId, { fromSeq: progress.lastSeq + 1, limit: PAGE });
         if (!live) return;
         if (page.ok) {
-          const records = (page.data.records as unknown as Array<Record<string, unknown>>).map(brief).filter((b) => Number.isFinite(b.seq));
-          const kinds = { ...progress.kinds };
-          for (const r of records) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1;
-          progress = { lastSeq: records.length ? Math.max(progress.lastSeq, ...records.map((r) => r.seq)) : progress.lastSeq, kinds, recent: [...progress.recent, ...records].slice(-RECENT_MAX), error: null };
+          progress = foldRecords(progress, page.data.records as unknown as Array<Record<string, unknown>>);
           more = Boolean(page.data.next_cursor);
         } else {
           progress = { ...progress, error: `${page.error.code}: ${page.error.message}` };

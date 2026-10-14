@@ -1,101 +1,62 @@
-import { useEffect, useState } from 'react';
-import { Badge, CopyText, KeyValue, Panel, useProvider, useSession, useWorkspace, type ModuleDefinition } from '../../core';
-import { RunPanel } from './RunPanel';
-import type { WorkspaceDescribe } from '../../../model/kup';
+import { useState } from 'react';
+import { Badge, CopyText, KeyValue, Panel, hasData, useExecution, useWorkspace, useWorkspacePath, type ModuleDefinition } from '../../core';
+import { CurrentRun } from './CurrentRun';
+import { GoalComposer } from './GoalComposer';
+import { PreflightSummary, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
+import { RecentRuns } from './RecentRuns';
+import { useRunSetup } from './runSetup';
+import { ModelRouting, SkillsSummary, ToolsSummary } from './SetupSections';
+import { RevealButton, SnapshotPicker, workspaceRows } from './WorkspaceFacts';
 
-type Checkout = WorkspaceDescribe['checkout'];
-
-/** Kriya's own words for what Git reported. No folder is classified: an empty folder, a plain project, a checkout and a modified checkout use these same fields. */
-function repository(c: Checkout): string {
-  switch (c.state) {
-    case 'checkout_root': return 'Git checkout';
-    case 'inside_repository': return `Inside a Git repository${c.root ? ` rooted at ${c.root}` : ''} (its facts are not applied to this folder)`;
-    case 'not_a_repository': return 'Not a Git repository';
-    case 'git_unavailable': return `Git did not answer${c.reason ? `: ${c.reason}` : ''}`;
-    default: return String(c.state);
-  }
-}
-
-const branchLine = (c: Checkout): string => (c.state !== 'checkout_root' ? 'Not recorded' : c.detached ? 'Detached HEAD' : c.branch ?? 'Not recorded');
-const revisionLine = (c: Checkout): string => (c.state !== 'checkout_root' ? 'Not recorded' : c.head ?? 'No commit yet');
-const treeLine = (c: Checkout): string => {
-  if (c.state !== 'checkout_root' || c.dirty === null) return `Not recorded${c.reason ? ` (${c.reason})` : ''}`;
-  if (!c.dirty) return 'No changes reported by Git';
-  const n = c.changed_entries ?? 0;
-  return `${n}${c.changed_truncated ? '+' : ''} changed or untracked ${n === 1 ? 'entry' : 'entries'} reported by Git`;
-};
-const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR (operator environment)', config: 'paths.state (configuration)', default: 'Kriya default (~/.kriya/state)' };
-
-/** The published snapshots Kriya lists, to pin another one. Choosing re-verifies its digest before anything is read and clears the selection. */
-function SnapshotPicker() {
-  const provider = useProvider();
-  const session = useSession();
-  const [list, setList] = useState<Array<{ snapshot_id: string; acquisition_completed_at: string; rows: number }> | null>(null);
-  useEffect(() => {
-    let live = true;
-    void provider.listSnapshots().then((r) => { if (live && r.ok) setList(r.data.snapshots as unknown as Array<{ snapshot_id: string; acquisition_completed_at: string; rows: number }>); });
-    return () => { live = false; };
-  }, [provider, session.snapshotId]);
-  if (!session.snapshotId) return <span>none pinned</span>;
-  if (!list || list.length < 2) return <span className="mono">{session.snapshotId}</span>;
-  return (
-    <select aria-label="Pinned snapshot" value={session.snapshotId} onChange={(e) => session.choose(e.target.value)}>
-      {list.map((snap) => <option key={snap.snapshot_id} value={snap.snapshot_id}>{snap.snapshot_id} · acquired {snap.acquisition_completed_at.slice(0, 19).replace('T', ' ')} · {snap.rows} rows</option>)}
-    </select>
-  );
-}
-
-/** Shows the open workspace's folder in Finder. The host reveals the folder IT has open; no path is sent. Absent when the host cannot. */
-function RevealButton() {
-  const provider = useProvider();
-  const [note, setNote] = useState<string | null>(null);
-  if (!provider.desktop?.revealWorkspace) return null;
-  const reveal = () => provider.desktop!.revealWorkspace!();
-  return (
-    <>
-      <button type="button" className="ck-quiet" onClick={() => void reveal().then((r) => setNote(r.revealed ? null : `Could not reveal: ${r.reason ?? 'unknown reason'}`), (e: unknown) => setNote(`Could not reveal: ${e instanceof Error ? e.message : String(e)}`))}>Reveal in Finder</button>
-      {note ? <span className="muted small" role="status">{note}</span> : null}
-    </>
-  );
-}
-
-/** The open workspace as Kriya describes it. Not a file explorer: facts only, each with the words Kriya used. */
-function Workspace() {
+/** Project Home: the open folder's name and state, the goal and Start Run, or - once a run has started - that run; recent runs; and everything else, one disclosure down. */
+function ProjectHome() {
   const ws = useWorkspace();
+  const ex = useExecution();
+  const workspace = useWorkspacePath();
+  const [nonce, setNonce] = useState(0);
+  const { context, probe } = useRunSetup(workspace, nonce, ex.locked);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const open = ws.current;
-  if (!open) return <Panel title="Workspace"><div className="ck-state"><strong>No workspace is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div></Panel>;
+  if (!open) return <div className="ck-state"><strong>No project is open</strong>Open a folder from the toolbar or File &gt; Open Folder.</div>;
   const f = open.facts;
+  const pre = ex.preflight.state === 'ready' ? ex.preflight.data : null;
+  const summary = summarizeReadiness(ex, probe, context);
+  const recheck = () => { setNonce((n) => n + 1); ex.refreshPreflight(); };
+  const skillCount = hasData(context) && context.data.skills ? context.data.skills.total : null;
+  const unverified = hasData(context) && context.data.skills ? context.data.skills.items.filter((k) => !k.verified).length : 0;
+  const mcp = hasData(context) && context.data.tools ? context.data.tools.mcp_servers.length : null;
+  const showDetails = () => setDetailsOpen(true);
   return (
-    <>
-    <RunPanel />
-    <Panel title="Workspace">
-      <KeyValue items={[
-        ['Name', f.name],
-        ['Path', <span key="p"><span className="mono">{f.workspace}</span> <CopyText text={f.workspace} what="workspace path" /> <RevealButton /></span>],
-        ...(f.requested !== f.workspace ? [['Chosen as', <span key="r" className="mono">{f.requested}</span>] as const] : []),
-        ['Identity', <span key="i" className="mono" title={f.identity}>{f.identity.slice(0, 16)}…</span>],
-        ['Repository', repository(f.checkout)],
-        ['Branch', branchLine(f.checkout)],
-        ['Revision', <span key="h" className="mono">{revisionLine(f.checkout)}</span>],
-        ['Working tree', treeLine(f.checkout)],
-        ['Recovery status', <Badge key="s" tone={f.recovery.status === 'CLEAN' ? 'ok' : 'warn'}>{f.recovery.status}</Badge>],
-        ['A run holds the workspace', f.recovery.run_active ? 'yes (RUN_ACTIVE)' : 'no'],
-        ['Kriya state', <span key="d" className="mono">{f.state.directory}</span>],
-        ['State chosen by', STATE_SOURCE[f.state.source] ?? f.state.source],
-        ['Trace database', f.state.trace_database_present ? 'present' : 'not present'],
-        ['Workspace .kriya directory', f.kriya_directory_present ? 'present' : 'not present'],
-        ['Pinned snapshot', <SnapshotPicker key="n" />],
-      ]} />
-      {f.configuration.file_in_workspace ? <p className="muted small" role="note">{f.configuration.note}</p> : null}
-      <p className="muted small">Opening a folder only reads it. Nothing was written to it and no run was started.</p>
-    </Panel>
-    </>
+    <div className="ck-project">
+      <div className="ck-project-head">
+        <h1>{f.name}</h1>
+        <span className="muted mono small" title={f.workspace}>{f.workspace}</span>
+        <span className="grow" />
+        {ex.run ? null : summary.state === 'ready' ? <Badge tone="ok">✓ Ready</Badge> : summary.state === 'blocked' || summary.state === 'error' ? <Badge tone="bad">Cannot start</Badge> : null}
+      </div>
+      {ex.run ? <CurrentRun /> : ex.available ? <GoalComposer summary={summary} onDetails={showDetails} onRecheck={recheck} /> : <section aria-label="Start a run"><h2>What do you want Kriya to do?</h2><p className="muted" role="status">This host cannot start a run.</p></section>}
+      <RecentRuns />
+      <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
+        <summary>Project details</summary>
+        {pre ? <ReadinessChecklist pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}
+        {ex.available ? <p><button type="button" className="ck-quiet" onClick={recheck}>Check again</button></p> : null}
+        <details className="ck-setup"><summary>Skills{skillCount === null ? '' : ` · ${skillCount}${unverified ? ` (${unverified} unverified)` : ''}`}</summary><SkillsSummary context={context} /></details>
+        <details className="ck-setup"><summary>Tools and capabilities{mcp === null ? '' : ` · ${mcp} MCP server${mcp === 1 ? '' : 's'}`}</summary><ToolsSummary context={context} /></details>
+        <details className="ck-setup"><summary>Model routing</summary><ModelRouting context={context} probe={probe} /></details>
+        {pre ? <details className="ck-setup"><summary>Run configuration details</summary><PreflightSummary data={pre} /></details> : null}
+        <Panel title="About this project">
+          <KeyValue items={workspaceRows(f, <SnapshotPicker />, <span key="p"><span className="mono">{f.workspace}</span> <CopyText text={f.workspace} what="workspace path" /> <RevealButton /></span>)} />
+          {f.configuration.file_in_workspace ? <p className="muted small" role="note">{f.configuration.note}</p> : null}
+          <p className="muted small">Opening a folder only reads it. Nothing was written to it and no run was started.</p>
+        </Panel>
+      </details>
+    </div>
   );
 }
 
 export const workspaceModule: ModuleDefinition = {
   id: 'workspace',
-  placement: { page: 'workspace', surface: 'page', label: 'Workspace', order: 10 },
+  placement: { page: 'project', surface: 'page', label: 'Project', order: 10 },
   requiredCapabilities: ['op:workspace.describe'], optionalCapabilities: [], selectionDependencies: [],
-  render: Workspace,
+  render: ProjectHome,
 };

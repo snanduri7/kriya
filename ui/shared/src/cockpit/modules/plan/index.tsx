@@ -75,7 +75,7 @@ function Plan() {
 
 export const planModule: ModuleDefinition = {
   id: 'plan',
-  placement: { page: 'runs', surface: 'center-tab', label: 'Plan', order: 30 },
+  placement: { page: 'runs', surface: 'center-tab', label: 'Plan', order: 30, group: 'details' },
   requiredCapabilities: ['evidence'], optionalCapabilities: [], selectionDependencies: ['runId', 'attempt'],
   whenUnavailable: 'explain',
   render: Plan,

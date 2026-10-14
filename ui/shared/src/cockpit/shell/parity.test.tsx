@@ -52,12 +52,12 @@ describe('Settings: editor', () => {
 
 describe('Runs: refresh and filter', () => {
   it('Refresh runs is the explicit acquisition request', async () => {
-    const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
+    const { host } = renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/workspace' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Refresh runs' }));
     await waitFor(() => expect(asked(host, 'snapshot.acquire')).toBe(1));
   });
   it('a long run list can be filtered by goal or status text, and clearing restores it', async () => {
-    renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
+    renderWorkspaceShell({ page: 'runs', fixture: { workspace: '/fixture/workspace' } });
     const box = await screen.findByRole('searchbox', { name: 'Filter runs' }, { timeout: 3000 });
     const all = document.querySelectorAll('.ck-list button').length;
     fireEvent.change(box, { target: { value: 'greenfield' } });
@@ -72,7 +72,7 @@ describe('Workspace: snapshot choice', () => {
     const other = '20261009T090000000000Z-f1c70000';
     const { host } = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', extraSnapshotIds: [other] } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    goTo('Workspace');
+    goTo('Project');
     const picker = await screen.findByRole('combobox', { name: 'Pinned snapshot' });
     expect(within(picker).getAllByRole('option')).toHaveLength(2);
     fireEvent.change(picker, { target: { value: other } });
