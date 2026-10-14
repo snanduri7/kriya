@@ -7,9 +7,9 @@ import { renderShell, renderWorkspaceShell } from '../testing/harness';
 const body = () => document.querySelector('.ck-body') as HTMLElement;
 
 describe('widths: 1536 / 1360 / 1180 / 1100', () => {
-  it.each([[1536, false], [1360, false], [1180, true], [1100, true]])('%ipx: inspector collapsed by default = %s, main workspace and rail always present', async (width, collapsed) => {
+  it.each([[1536, true], [1360, true], [1180, true], [1100, true]])('%ipx: the technical timeline is closed by default (the normal layer is the result) = %s, main workspace and rail always present', async (width, collapsed) => {
     cleanup();
-    renderShell({ width, runId: 'fx-greenfield-compile-retry' }); // the side panel exists once a run is selected
+    renderShell({ width, runId: 'fx-greenfield-compile-retry', inspectorOpen: null }); // the technical timeline exists once a run is selected; the PRODUCT default is closed
     await screen.findByRole('navigation', { name: 'Destinations' });
     await waitFor(() => expect(body().className.includes('no-inspector')).toBe(collapsed));
     expect(body().querySelector('.ck-center, main')).not.toBeNull();

@@ -22,6 +22,8 @@ export interface AppShellProps {
   /** Tests and hosts may seed or share the selection; otherwise the shell owns a fresh store. */
   selection?: SelectionStore;
   initialSelection?: Selection;
+  /** Whether the technical timeline (Timeline, WHY) is open when the page first shows. Product default: closed - the normal layer is the result, not the record stream. */
+  initialInspectorOpen?: boolean;
   /** Overrides the measured viewport width (tests, screenshots). */
   viewportWidth?: number;
   /** Tests only: how often a started run is polled. */
@@ -34,10 +36,10 @@ export interface AppShellProps {
  * Composition and layout only. It knows pages, surfaces and capabilities, never a feature: which modules exist, what they show and
  * what they interpret is the registry's business. Adding or removing a module changes the registry input, not this file.
  */
-export function AppShell({ provider, registry, selection, initialSelection, viewportWidth, pollIntervals, initialPage }: AppShellProps) {
+export function AppShell({ provider, registry, selection, initialSelection, viewportWidth, pollIntervals, initialPage, initialInspectorOpen }: AppShellProps) {
   const store = useMemo(() => selection ?? createSelectionStore(initialSelection), [selection, initialSelection]);
   const services = useMemo(() => ({ provider, selection: store, registry, pollIntervals }), [provider, store, registry, pollIntervals]);
-  return <CockpitProviders services={services}><Shell registry={registry} viewportWidth={viewportWidth} initialPage={initialPage} /></CockpitProviders>;
+  return <CockpitProviders services={services}><Shell registry={registry} viewportWidth={viewportWidth} initialPage={initialPage} initialInspectorOpen={initialInspectorOpen} /></CockpitProviders>;
 }
 
 function useWidth(override?: number): number {
@@ -51,7 +53,7 @@ function useWidth(override?: number): number {
   return override ?? width;
 }
 
-function Shell({ registry, viewportWidth, initialPage }: { registry: ModuleRegistry; viewportWidth?: number; initialPage?: string }) {
+function Shell({ registry, viewportWidth, initialPage, initialInspectorOpen }: { registry: ModuleRegistry; viewportWidth?: number; initialPage?: string; initialInspectorOpen?: boolean }) {
   const folder = useWorkspace();
   const folderOpen = folder.current !== null;
   const caps = useCapabilities();
@@ -67,12 +69,11 @@ function Shell({ registry, viewportWidth, initialPage }: { registry: ModuleRegis
   const [inspectorW, setInspectorW] = useState(INSPECTOR.initial);
   // null = follow the designed default for this width; true/false = the user's explicit choice.
   const [secondaryOpen, setSecondaryOpen] = useState<boolean | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState<boolean | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState<boolean | null>(initialInspectorOpen ?? null);
   const root = useRef<HTMLDivElement>(null);
 
-  const small = width <= INSPECTOR_COLLAPSE_AT;
   const showSecondary = secondaryOpen ?? true;
-  const showInspector = inspectorOpen ?? !small;
+  const showInspector = inspectorOpen ?? false; // the technical timeline is opt-in at every width: the normal layer is the result, not the record stream
 
   const resolve = useCallback((surface: Parameters<ModuleRegistry['resolve']>[1]) => (page ? registry.resolve(page.id, surface, caps) : []), [registry, caps, page]);
   const secondary = resolve('secondary');

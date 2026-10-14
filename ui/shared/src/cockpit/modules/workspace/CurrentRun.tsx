@@ -1,8 +1,7 @@
-import { ApprovalReview, Badge, CopyText, FileDiff, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, ApprovalReview, Badge, CopyText, FileDiff, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
-const GROUP_MARK = { passed: '✓', failed: '✕', unknown: '•' } as const;
 const APPROVAL_KIND: Record<string, string> = {
   change_approval: 'a proposed change needs approval', knowledge_gap_acknowledgement: 'a knowledge gap needs acknowledgement', skill_gap_decision: 'a skill gap needs a decision',
   skill_conflict_decision: 'two skills may conflict', web_lookup_review: 'live-lookup references need review', web_lookup_query: 'a live-lookup search needs approval',
@@ -53,17 +52,9 @@ function Completed({ phase }: { phase: RunPhase }) {
       <h3>Verification</h3>
       {groups === null ? <p className="muted" role="status">{reading('results')}</p>
         : groups.groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p>
-        : <ul className="ck-verify" aria-label="Verification">{groups.groups.flatMap((g) => g.lines).map((l) => <li key={l.text} data-status={l.status}><span aria-hidden="true">{GROUP_MARK[l.status]}</span> {l.text}</li>)}</ul>}
+        : <VerificationLines lines={groups.groups.flatMap((g) => g.lines)} />}
 
-      {app && app.status === 'EXECUTED' ? (
-        <section aria-label="Application" data-testid="application-outcome">
-          <h3>Application</h3>
-          <p data-status={app.succeeded ? 'passed' : 'failed'}>{app.succeeded ? '✓ Ran successfully' : `✕ The application did not run successfully${app.timed_out ? ' (it did not finish in time)' : app.exit_code !== null && app.exit_code !== undefined ? ` (exit code ${app.exit_code})` : ''}`}</p>
-          {app.command ? <div className="muted small">Command <span className="mono">{app.command}</span></div> : null}
-          <pre className="mono ck-output" aria-label="Application output">{app.stdout?.text || app.stderr?.text || '(no output)'}</pre>
-          {app.stdout?.truncated || app.stderr?.truncated ? <p className="muted small">The output is longer than can be shown here.</p> : null}
-        </section>
-      ) : null}
+      {app ? <ApplicationResult app={app} /> : null}
 
       {groups && groups.technical.length ? (
         <details className="ck-tech">

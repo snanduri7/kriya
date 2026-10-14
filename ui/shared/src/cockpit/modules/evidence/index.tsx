@@ -101,7 +101,7 @@ function EvidenceTable() {
 
 export const evidenceModule: ModuleDefinition = {
   id: 'evidence',
-  placement: { page: 'runs', surface: 'center-tab', label: 'Evidence', order: 70, group: 'details' },
+  placement: { page: 'runs', surface: 'center-tab', label: 'Forensic Evidence', order: 70, group: 'details' },
   requiredCapabilities: ['evidence'], optionalCapabilities: [], selectionDependencies: ['runId', 'eventSeq', 'attempt'],
   whenUnavailable: 'explain',
   render: EvidenceTable,

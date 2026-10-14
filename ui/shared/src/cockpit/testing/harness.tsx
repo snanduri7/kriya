@@ -27,10 +27,10 @@ export async function gateIdOf(trace: string, type: string, provider: UIProvider
   return row.id;
 }
 
-export function renderShell(opts: { registry?: ModuleRegistry; runId?: string | null; selection?: Partial<Selection>; fixture?: FixtureHostOptions; width?: number; /** The page id to show first; default is the production landing (Project). */ page?: string } = {}): Mounted {
+export function renderShell(opts: { registry?: ModuleRegistry; runId?: string | null; selection?: Partial<Selection>; fixture?: FixtureHostOptions; width?: number; /** The technical timeline open at first (true unless a test is about the product default: pass null for that). */ inspectorOpen?: boolean | null; /** The page id to show first; default is the production landing (Project). */ page?: string } = {}): Mounted {
   const provider = createFixtureProvider(opts.fixture);
   const store = createSelectionStore({ ...initialSelection, runId: opts.runId ?? null, ...opts.selection });
-  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} initialPage={opts.page ?? (opts.runId ? 'runs' : undefined)} />);
+  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} initialPage={opts.page ?? (opts.runId ? 'runs' : undefined)} {...(opts.inspectorOpen === null ? {} : { initialInspectorOpen: opts.inspectorOpen ?? true })} />);
   return { provider, store };
 }
 
@@ -38,10 +38,10 @@ export function renderShell(opts: { registry?: ModuleRegistry; runId?: string | 
 /** Polling fast enough for a test to see every scripted frame. */
 export const FAST_POLL = { visibleMs: 15, slowMs: 15, hiddenMs: 15, slowAfterMs: 1_000_000 } as const;
 
-export function renderWorkspaceShell(opts: { fixture?: FixtureHostOptions; registry?: ModuleRegistry; width?: number; page?: string } = {}): Mounted & { host: FixtureHost } {
+export function renderWorkspaceShell(opts: { fixture?: FixtureHostOptions; registry?: ModuleRegistry; width?: number; page?: string; inspectorOpen?: boolean | null } = {}): Mounted & { host: FixtureHost } {
   const host = new FixtureHost(opts.fixture);
   const provider = new HostProvider(host, 'fixture');
   const store = createSelectionStore({ ...initialSelection });
-  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} pollIntervals={FAST_POLL} initialPage={opts.page} />);
+  render(<AppShell provider={provider} registry={opts.registry ?? createCockpitRegistry()} selection={store} viewportWidth={opts.width ?? 1440} pollIntervals={FAST_POLL} initialPage={opts.page} {...(opts.inspectorOpen === null ? {} : { initialInspectorOpen: opts.inspectorOpen ?? true })} />);
   return { provider, store, host };
 }

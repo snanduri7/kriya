@@ -245,7 +245,7 @@ describe('L/O. Runs is history; the existing diagnostics are one level deeper, n
     expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Overview', 'Changes', 'Verification', 'Details']);
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Details' }));
     const deeper = await screen.findByRole('tablist', { name: 'Details' });
-    for (const name of ['Plan', 'Attempts', 'Context', 'Evidence']) expect(within(deeper).getByRole('tab', { name })).toBeInTheDocument();
+    for (const name of ['Plan', 'Attempts', 'Context', 'Forensic Evidence']) expect(within(deeper).getByRole('tab', { name })).toBeInTheDocument();
     expect(await screen.findByRole('tree', { name: 'Execution timeline' })).toBeInTheDocument();
     fireEvent.click(within(deeper).getByRole('tab', { name: 'Attempts' }));
     expect(await screen.findByRole('table', { name: 'Attempts' })).toBeInTheDocument();

@@ -21,20 +21,22 @@ describe('Overview', () => {
   it('a pruned run still shows the run row and says the evidence is pruned', async () => {
     renderModule(overviewModule, { runId: 'fx-pruned' });
     expect(await screen.findByText('Evidence pruned by retention')).toBeInTheDocument();
-    expect(screen.getByText('An older run whose store retention removed')).toBeInTheDocument();
+    expect(screen.getAllByText('An older run whose store retention removed').length).toBeGreaterThan(0); // the title (the original request) and, under Technical status, the stored goal
   });
   it('opens with a plain summary - the outcome, the changed files and the recorded validation - before any identifier', async () => {
     renderModule(overviewModule, { runId: 'fx-brownfield-modify' });
-    const summary = (await screen.findByText('What happened')).closest('section') as HTMLElement;
-    expect(within(summary).getByText('Succeeded')).toBeInTheDocument();
+    const summary = await screen.findByRole('region', { name: 'Run result' });
+    expect(within(summary).getByRole('heading', { name: /Run completed/ })).toBeInTheDocument();
     expect(within(await within(summary).findByRole('list', { name: 'Changed files' })).getAllByRole('listitem').length).toBeGreaterThan(0);
     expect(summary.textContent).toMatch(/passed/);
+    expect(summary.textContent).not.toMatch(/sha256|seq \d|mirror\.|sealed_store|model call/); // meaning first: no mechanism on the result
     const run = screen.getByText('Run ID').closest('section') as HTMLElement;
-    expect(summary.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // the summary comes first, the identifiers after
+    expect(summary.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // the summary comes first, the identifiers after (Technical status)
+    expect(run.closest('details')!.open).toBe(false);
   });
   it('a failed run says Failed, never a summary of success; with no readable evidence it says where the facts come from instead of inventing them', async () => {
     renderModule(overviewModule, { runId: 'fx-pruned' });
-    const summary = (await screen.findByText('What happened')).closest('section') as HTMLElement;
+    const summary = await screen.findByRole('region', { name: 'Run result' });
     expect(summary.textContent).toMatch(/not readable here/);
     expect(within(summary).queryByRole('list', { name: 'Changed files' })).toBeNull();
   });

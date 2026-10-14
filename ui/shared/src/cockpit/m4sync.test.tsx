@@ -21,7 +21,7 @@ describe('M4 modules follow the shared selection', () => {
     expect(store.getState().attempt).toBe('1');
     fireEvent.click(screen.getByRole('tab', { name: 'Context' }));
     expect(await screen.findByText(/Model invocations · attempt 1/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Forensic Evidence' }));
     fireEvent.click(await screen.findByLabelText(/Only the selected attempt \(1\)/));
     const rows = within(await screen.findByRole('table', { name: 'Evidence records' })).getAllByRole('row').slice(1);
     expect(rows.length).toBeGreaterThan(0);

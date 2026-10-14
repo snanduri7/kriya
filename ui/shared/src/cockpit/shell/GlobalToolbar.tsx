@@ -15,8 +15,8 @@ export function GlobalToolbar({ showSecondaryToggle, showInspectorToggle, open, 
         <span className="ck-mark">Kriya</span>
         <WorkspaceSwitcher />
         <span className="grow" />
-        {!bare && showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>Run list</button> : null}
-        {!bare && showInspectorToggle ? <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Side panel</button> : null}
+        {!bare && showSecondaryToggle ? <button type="button" aria-pressed={open.secondary} onClick={() => onToggle('secondary')}>History</button> : null}
+        {!bare && showInspectorToggle ? <button type="button" aria-pressed={open.inspector} onClick={() => onToggle('inspector')}>Technical timeline</button> : null}
         {provider.kind === 'fixture' ? <Badge tone="warn">fixture</Badge> : null}
       </header>
       {bare ? null : <WorkspaceNotice />}

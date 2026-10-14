@@ -46,26 +46,26 @@ describe('AppShell layout and navigation', () => {
     await waitFor(() => expect(within(rail).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Runs', 'Skills', 'Tools', 'Settings']));
   });
 
-  it('the inspector is collapsed by definition at <=1180px and open above it; the user can override both ways', async () => {
-    const small = renderShell({ width: INSPECTOR_COLLAPSE_AT, runId: GF });
+  it('the technical timeline is closed by default at every width (the product default) and the person can open it', async () => {
+    const small = renderShell({ width: INSPECTOR_COLLAPSE_AT, runId: GF, inspectorOpen: null });
     await screen.findByRole('navigation', { name: 'Destinations' });
     await waitFor(() => expect(body().className).toContain('no-inspector'));
     expect(screen.queryByRole('complementary', { name: 'Execution inspector' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Side panel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Technical timeline' }));
     expect(await screen.findByRole('complementary', { name: 'Execution inspector' })).toBeInTheDocument();
     expect(small.store.getState().runId).toBe(GF);
   });
 
-  it('wide: inspector open; the toggles collapse and restore the secondary pane and the inspector', async () => {
+  it('wide: with the technical timeline open, the toggles collapse and restore the history pane and the timeline', async () => {
     renderShell({ width: 1440, runId: GF });
     await screen.findByRole('complementary', { name: 'Execution inspector' });
     await screen.findByRole('complementary', { name: 'Secondary pane' });
-    fireEvent.click(screen.getByRole('button', { name: 'Side panel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Technical timeline' }));
     expect(screen.queryByRole('complementary', { name: 'Execution inspector' })).toBeNull();
     expect(body().className).toContain('no-inspector');
-    fireEvent.click(screen.getByRole('button', { name: 'Run list' }));
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
     expect(screen.queryByRole('complementary', { name: 'Secondary pane' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Run list' }));
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
     expect(await screen.findByRole('complementary', { name: 'Secondary pane' })).toBeInTheDocument();
   });
 
@@ -105,7 +105,7 @@ describe('AppShell mounts modules through the registry and the shared selection'
     expect(store.getState().centralTab).toBe('validation');
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Details' }));
     const deeper = await screen.findByRole('tablist', { name: 'Details' });
-    expect(within(deeper).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Context', 'Plan', 'Attempts', 'Evidence']);
+    expect(within(deeper).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Context', 'Plan', 'Attempts', 'Forensic Evidence']);
     expect(store.getState().centralTab).toBe('context');
     fireEvent.click(within(tabs).getByRole('tab', { name: 'Verification' }));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));

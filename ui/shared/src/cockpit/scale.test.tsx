@@ -106,7 +106,7 @@ describe('one very large run', () => {
     const host = new FixtureHost({ workspace: '/fixture/workspace', scenarios: [big, ...manyRuns(8)] });
     const store = mount(host, { runId: 'big-1' });
     await screen.findByRole('tabpanel', undefined, { timeout: 20000 });
-    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
+    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Forensic Evidence', 'Overview'];
     const before = host.calls.filter((c) => c.operation.startsWith('evidence.')).length;
     for (let cycle = 0; cycle < 40; cycle += 1) for (const name of tabs) { const tab = screen.queryByRole('tab', { name }); if (tab) fireEvent.click(tab); }
     await new Promise((r) => setTimeout(r, 200));

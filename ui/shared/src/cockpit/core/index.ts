@@ -16,6 +16,7 @@ export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalRevi
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
 export { RunCardView } from './RunCardView';
+export { ApplicationResult, HumanTimeline, TrustList, VerificationLines } from './ResultParts';
 export * from './provider';
 export type { EvidenceCallContent, EvidenceChangeContent } from '../../model/kup';
 export * from './records';

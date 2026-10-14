@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AvailabilityView, Badge, KeyValue, Panel, attemptFor, firstFailedGate, gateRows, useDispatch, useModuleSelection, useRunEvidence, type GateRow, type ModuleDefinition } from '../../core';
+import { AvailabilityView, Badge, KeyValue, Panel, TrustList, VerificationLines, attemptFor, changeFacts, firstFailedGate, gateRows, hasData, useDispatch, useModuleSelection, useRunContext, useRunDetail, useRunEvidence, userEvidence, validationFacts, verificationGroups, type GateRow, type ModuleDefinition } from '../../core';
 
 /** Explicit DISPLAY mapping only: the recorded type is always shown beside the friendly label, and an unmapped type is shown as recorded. */
 const LABELS: Readonly<Record<string, string>> = {
@@ -49,11 +49,55 @@ function GateList({ gates, selected, onSelect }: { gates: readonly GateRow[]; se
   );
 }
 
+/** The user layer: how Kriya knows this works (build, tests, requested behavior, safety), and why the result can be trusted. Every statement is a recorded fact; the exact check names are one disclosure down. */
+function UserLayer() {
+  const evidence = useRunEvidence();
+  const run = useRunContext();
+  const detail = useRunDetail();
+  const dispatch = useDispatch();
+  const ctx = hasData(run) ? run.data : null;
+  if (!hasData(evidence)) return <p className="muted" role="status">The verification results come from this run&apos;s evidence, which is not readable here.</p>;
+  const gates = validationFacts(evidence.data.records);
+  const { groups } = verificationGroups(gates);
+  const events = hasData(detail) ? detail.data.run_events.data ?? [] : [];
+  const decision = events.find((e) => e.kind === 'approval.decision');
+  const outcome = decision && decision.details && typeof decision.details === 'object' ? (decision.details as Record<string, unknown>).outcome : null;
+  const trust = userEvidence({ displayGoal: ctx?.displayGoal ?? null, filesChanged: changeFacts(evidence.data.records).length, gates, approval: outcome === 'approved' ? 'approved' : outcome === 'rejected' ? 'rejected' : null,
+    evidence: { status: evidence.data.verify?.status ?? null, sealed: evidence.data.verify?.sealed ?? null } });
+  return (
+    <div className="ck-verification" style={{ display: 'grid', gap: 8 }}>
+      <section aria-label="How Kriya knows this works">
+        <h3>How Kriya knows this works</h3>
+        {groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p> : groups.map((g) => (
+          <div key={g.id}><div className="muted small ck-group-title">{g.title}</div><VerificationLines lines={g.lines} label={g.title} /></div>
+        ))}
+      </section>
+      <section aria-label="Why you can trust this result">
+        <h3>Why you can trust this result</h3>
+        <TrustList items={trust} />
+        <button type="button" className="ck-link" onClick={() => dispatch({ type: 'centralTab', tab: 'evidence' })}>View supporting evidence</button>
+      </section>
+    </div>
+  );
+}
+
 function Validation() {
   const evidence = useRunEvidence();
   const dispatch = useDispatch();
   const attempt = useModuleSelection('attempt');
   const gateId = useModuleSelection('gateId');
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <UserLayer />
+      <details className="ck-tech" data-testid="technical-verification">
+        <summary>Technical verification</summary>
+        <TechnicalChecks evidence={evidence} dispatch={dispatch} attempt={attempt} gateId={gateId} />
+      </details>
+    </div>
+  );
+}
+
+function TechnicalChecks({ evidence, dispatch, attempt, gateId }: { evidence: ReturnType<typeof useRunEvidence>; dispatch: ReturnType<typeof useDispatch>; attempt: string | null; gateId: string | null }) {
   return (
     <AvailabilityView value={evidence}>
       {(data) => {

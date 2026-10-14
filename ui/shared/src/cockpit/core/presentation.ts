@@ -7,7 +7,7 @@
  *    neutral "Engineering task", never a substring of a compiled prompt.
  *  - Mechanism names (gate types, record kinds, digests, sequence numbers) are not produced for the primary surface; the technical layer keeps the exact names.
  */
-import type { RunSummary } from '../../model/kup';
+import type { RunEvent, RunSummary } from '../../model/kup';
 import type { GateFact } from './runFacts';
 
 // ------------------------------------------------------------------ the run title
@@ -150,4 +150,71 @@ export function changeSummary(files: readonly ChangedFile[]): string {
   if (files.every((f) => f.changeType === 'added')) return `${noun} created`;
   if (files.every((f) => f.changeType === 'deleted')) return `${noun} removed`;
   return `${noun} changed`;
+}
+
+// ------------------------------------------------------------------ the human timeline
+
+export interface TimelineEntry { at: number; time: string; text: string; kind: 'info' | 'ok' | 'bad' }
+const details = (e: RunEvent): Record<string, unknown> => (e.details !== null && typeof e.details === 'object' && !Array.isArray(e.details) ? (e.details as Record<string, unknown>) : {});
+/** Local "HH:MM" of a recorded epoch-seconds timestamp (presentation only). */
+export const eventClock = (epochSeconds: number): string => new Date(epochSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+/**
+ * The normal-layer timeline: a deterministic mapping from Kriya's recorded RUN EVENTS to a few plain sentences. Only the kinds listed here appear; every other kind (egress,
+ * model identity, prompt composition, validation baselines, ...) stays in the technical timeline. Nothing is invented: no "plan created" line exists because no run event
+ * records one; the end line comes from the trace row's own status and is placed at the time of the last recorded event.
+ */
+export function humanTimeline(events: readonly RunEvent[], status: string | null | undefined): TimelineEntry[] {
+  const ordered = events.filter((e) => typeof e.created_at === 'number' && Number.isFinite(e.created_at)).sort((a, b) => a.created_at - b.created_at);
+  if (ordered.length === 0) return [];
+  const out: TimelineEntry[] = [];
+  const add = (e: RunEvent, text: string, kind: TimelineEntry['kind'] = 'info') => out.push({ at: e.created_at, time: eventClock(e.created_at), text, kind });
+  add(ordered[0]!, 'Run started');
+  for (const e of ordered) {
+    const d = details(e);
+    switch (e.kind) {
+      case 'attempt.started': add(e, (e.attempt ?? 1) > 1 ? 'Started another try' : 'Started working on the change'); break;
+      case 'generation.completed': { const n = typeof d.file_count === 'number' ? d.file_count : null; add(e, n === null ? 'Change prepared' : `Change prepared (${n} file${n === 1 ? '' : 's'})`); break; }
+      case 'candidate_gates.passed': add(e, d.passed === true ? 'Checks passed on the proposed change' : 'Checks failed on the proposed change', d.passed === true ? 'ok' : 'bad'); break;
+      case 'approval.decision': add(e, d.outcome === 'approved' ? 'Change approved' : d.outcome === 'rejected' ? 'Change rejected' : 'Approval decision recorded', d.outcome === 'approved' ? 'ok' : d.outcome === 'rejected' ? 'bad' : 'info'); break;
+      case 'terminal_regression.passed': add(e, d.passed === true ? 'Final verification passed' : 'Final verification failed', d.passed === true ? 'ok' : 'bad'); break;
+      case 'attempt.passed': if (d.applied === true) add(e, 'Change applied to your folder', 'ok'); break;
+      default: break;
+    }
+  }
+  const last = ordered[ordered.length - 1]!;
+  if (status === 'success') add(last, 'Run completed', 'ok');
+  else if (status === 'failure') add(last, 'Run failed', 'bad');
+  return out;
+}
+
+// ------------------------------------------------------------------ "why should I trust this result?"
+
+export type TrustState = 'ok' | 'bad' | 'unknown';
+export interface TrustItem { category: 'Goal' | 'Change' | 'Build' | 'Tests' | 'Behavior' | 'Safety' | 'Approval' | 'Final result'; text: string; state: TrustState }
+export interface TrustInput {
+  displayGoal: string | null;
+  filesChanged: number | null;
+  gates: readonly GateFact[];
+  /** The recorded `approval.decision` outcome of the run, when there was one. */
+  approval: 'approved' | 'rejected' | null;
+  /** The evidence store's verification result (VERIFIED, ...) and whether it is sealed; null when no store was read. */
+  evidence: { status: string | null; sealed: boolean | null } | null;
+}
+
+/** The user layer of evidence: eight categories, each a statement a recorded fact supports. A category with no recorded fact says so (unknown); it is never ticked. */
+export function userEvidence(input: TrustInput): TrustItem[] {
+  const items: TrustItem[] = [];
+  items.push(input.displayGoal !== null && input.displayGoal.trim() !== '' ? { category: 'Goal', text: 'Original request recorded', state: 'ok' } : { category: 'Goal', text: 'The original request is not recorded for this run', state: 'unknown' });
+  items.push(input.filesChanged !== null && input.filesChanged > 0 ? { category: 'Change', text: `${input.filesChanged} file${input.filesChanged === 1 ? '' : 's'} changed`, state: 'ok' } : { category: 'Change', text: 'No file change is recorded', state: 'unknown' });
+  const { groups } = verificationGroups(input.gates);
+  const category = { build: 'Build', tests: 'Tests', behavior: 'Behavior', safety: 'Safety' } as const;
+  for (const group of groups) for (const line of group.lines) items.push({ category: category[group.id], text: line.text, state: line.status === 'passed' ? 'ok' : line.status === 'failed' ? 'bad' : 'unknown' });
+  if (input.approval === 'approved') items.push({ category: 'Approval', text: 'You approved the proposed change', state: 'ok' });
+  else if (input.approval === 'rejected') items.push({ category: 'Approval', text: 'You rejected the proposed change', state: 'bad' });
+  const e = input.evidence;
+  items.push(e && e.status === 'VERIFIED' && e.sealed === true ? { category: 'Final result', text: 'Evidence integrity verified', state: 'ok' }
+    : e ? { category: 'Final result', text: `Evidence integrity: ${e.status ?? 'not verified'}${e.sealed === false ? ' (not sealed)' : ''}`, state: e.status === 'VERIFIED' ? 'unknown' : 'bad' }
+    : { category: 'Final result', text: 'No evidence store was read for this run', state: 'unknown' });
+  return items;
 }

@@ -91,3 +91,65 @@ describe('activityText and changeSummary', () => {
     expect(changeSummary([])).toBe('No file change is recorded');
   });
 });
+
+import { eventClock, humanTimeline, userEvidence } from './presentation';
+import type { RunEvent } from '../../model/kup';
+
+const ev = (kind: string, created_at: number, extra: Partial<RunEvent> = {}): RunEvent => ({ kind, created_at, ...extra }) as RunEvent;
+const T0 = 1_791_996_485; // the measured Scenario A run (22:28:05 local on the author's machine); only RELATIVE order and the shared formatter matter here
+
+describe('humanTimeline: a deterministic mapping from recorded run events; unknown kinds never appear', () => {
+  const events = [
+    ev('egress.authority', T0), ev('model.runtime', T0 + 1), ev('validation_baseline.policy', T0 + 2),
+    ev('attempt.started', T0 + 10, { attempt: 1 }), ev('developer.prompt_composition', T0 + 20),
+    ev('generation.completed', T0 + 26, { details: { file_count: 1 } }),
+    ev('candidate_gates.passed', T0 + 38, { details: { passed: true, terminal: false } }), ev('static_analysis.result', T0 + 38),
+    ev('approval.decision', T0 + 267, { details: { outcome: 'approved' } }),
+    ev('terminal_regression.passed', T0 + 275, { details: { passed: true, terminal: true } }),
+    ev('attempt.passed', T0 + 275, { details: { passed: true, applied: true } }), ev('model.role_metrics', T0 + 275),
+  ];
+  it('tells the run in a handful of plain sentences, in time order', () => {
+    expect(humanTimeline(events, 'success').map((e) => e.text)).toEqual([
+      'Run started', 'Started working on the change', 'Change prepared (1 file)', 'Checks passed on the proposed change', 'Change approved', 'Final verification passed', 'Change applied to your folder', 'Run completed',
+    ]);
+  });
+  it('shows no mechanism names and invents no "plan created" line', () => {
+    const text = humanTimeline(events, 'success').map((e) => e.text).join('\n');
+    expect(text).not.toMatch(/egress|model\.|baseline|prompt|static_analysis|role_metrics|plan/i);
+  });
+  it('uses the same clock formatter for every entry (presentation only) and marks outcomes', () => {
+    const tl = humanTimeline(events, 'success');
+    expect(tl[0]!.time).toBe(eventClock(T0));
+    expect(tl.find((e) => e.text === 'Change approved')!.kind).toBe('ok');
+  });
+  it('failed gates, a rejection and a failed run are stated as such; a retry is "another try"', () => {
+    const failed = humanTimeline([ev('attempt.started', T0, { attempt: 2 }), ev('candidate_gates.passed', T0 + 1, { details: { passed: false } }), ev('approval.decision', T0 + 2, { details: { outcome: 'rejected' } }), ev('terminal_regression.passed', T0 + 3, { details: { passed: false } })], 'failure');
+    expect(failed.map((e) => [e.text, e.kind])).toEqual([['Run started', 'info'], ['Started another try', 'info'], ['Checks failed on the proposed change', 'bad'], ['Change rejected', 'bad'], ['Final verification failed', 'bad'], ['Run failed', 'bad']]);
+  });
+  it('"applied" is only said when the record says applied; no end line for an unknown status; nothing for no events', () => {
+    expect(humanTimeline([ev('attempt.passed', T0, { details: { passed: true, applied: false } })], null).map((e) => e.text)).toEqual(['Run started']);
+    expect(humanTimeline([], 'success')).toEqual([]);
+  });
+});
+
+describe('userEvidence: why should I trust this result? Only recorded facts tick a box', () => {
+  const base = { displayGoal: 'Fix the bug', filesChanged: 1, gates: [gate('compile', true), gate('regression_test', true, { cases: 53, passed: 53 }), gate('goal_spec_compliance', true), gate('static_analysis', true)], approval: 'approved' as const, evidence: { status: 'VERIFIED', sealed: true } };
+  it('lists goal, change, build, tests, behavior, safety, approval and final result', () => {
+    expect(userEvidence(base).map((i) => `${i.category}: ${i.text} [${i.state}]`)).toEqual([
+      'Goal: Original request recorded [ok]', 'Change: 1 file changed [ok]', 'Build: Build passed [ok]', 'Tests: 53 / 53 tests passed [ok]', 'Behavior: Requested behavior verified [ok]',
+      'Safety: Safety checks passed [ok]', 'Approval: You approved the proposed change [ok]', 'Final result: Evidence integrity verified [ok]',
+    ]);
+  });
+  it('an unrecorded fact is never ticked', () => {
+    const items = userEvidence({ displayGoal: null, filesChanged: null, gates: [], approval: null, evidence: null });
+    expect(items.every((i) => i.state === 'unknown')).toBe(true);
+    expect(items.map((i) => i.category)).toEqual(['Goal', 'Change', 'Final result']);
+  });
+  it('a failed gate, a rejection and an unverified or unsealed store are shown as problems, not ticks', () => {
+    const items = userEvidence({ ...base, gates: [gate('compile', false)], approval: 'rejected', evidence: { status: 'CHAIN_BROKEN', sealed: false } });
+    expect(items.find((i) => i.category === 'Build')!.state).toBe('bad');
+    expect(items.find((i) => i.category === 'Approval')!.state).toBe('bad');
+    expect(items.find((i) => i.category === 'Final result')).toMatchObject({ state: 'bad' });
+    expect(userEvidence({ ...base, evidence: { status: 'VERIFIED', sealed: false } }).at(-1)!.state).toBe('unknown'); // verified chain but not sealed: not claimed as final
+  });
+});

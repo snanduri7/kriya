@@ -96,3 +96,31 @@ describe('Validation over recorded gate evidence', () => {
     expect(within(gates).getByText(/mirrored from the run record/)).toBeInTheDocument();
   });
 });
+
+describe('Verification: the user layer first, exact checks one disclosure down', () => {
+  it('compile pass + tests fail: states the failure in plain words, ticks nothing it cannot support, and keeps the exact recorded types under Technical verification', async () => {
+    renderModule(validationModule, { runId: 'fx-brownfield-regression', selection: { attempt: '1' } });
+    const how = await screen.findByRole('region', { name: 'How Kriya knows this works' });
+    expect(within(how).getByText('Build passed')).toBeInTheDocument();
+    expect(within(how).getByText(/^Tests failed/)).toBeInTheDocument();
+    const trust = screen.getByRole('region', { name: 'Why you can trust this result' });
+    const states = Array.from(trust.querySelectorAll('[data-state]')).map((r) => `${r.querySelector('dt')!.textContent}:${r.getAttribute('data-state')}`);
+    expect(states).toContain('Build:ok');
+    expect(states).toContain('Tests:bad');
+    const tech = screen.getByTestId('technical-verification') as HTMLDetailsElement;
+    expect(tech.open).toBe(false);
+    expect(within(tech).getByText('Tests (tests)')).toBeInTheDocument(); // the exact recorded type is still available
+    expect((how.compareDocumentPosition(tech) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true); // meaning first
+  });
+  it('the primary layer carries no mechanism names or ids', async () => {
+    renderModule(validationModule, { runId: 'fx-brownfield-regression', selection: { attempt: '1' } });
+    const how = await screen.findByRole('region', { name: 'How Kriya knows this works' });
+    const trust = screen.getByRole('region', { name: 'Why you can trust this result' });
+    for (const text of [how.textContent ?? '', trust.textContent ?? '']) expect(text).not.toMatch(/sha256|seq \d|mirror\.|sealed_store|model call|regression_test|goal_spec_compliance/);
+  });
+  it('"View supporting evidence" opens Forensic Evidence', async () => {
+    const { store } = renderModule(validationModule, { runId: 'fx-brownfield-regression', selection: { attempt: '1' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'View supporting evidence' }));
+    await waitFor(() => expect(store.getState().centralTab).toBe('evidence'));
+  });
+});

@@ -185,7 +185,7 @@ describe('rapid input', () => {
     await waitFor(() => expect(host.calls.some((c) => c.operation === 'evidence.verify')).toBe(true));
     await new Promise((r) => setTimeout(r, 200)); // the run's evidence has been read once; from here a tab switch must read NOTHING more
     const evidenceBefore = host.calls.filter((c) => c.operation.startsWith('evidence.')).length;
-    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Evidence', 'Overview'];
+    const tabs = ['Verification', 'Changes', 'Context', 'Plan', 'Attempts', 'Forensic Evidence', 'Overview'];
     for (let round = 0; round < 3; round += 1) for (const name of tabs) { const tab = screen.queryByRole('tab', { name }); if (tab) fireEvent.click(tab); }
     for (let i = 0; i < 4; i += 1) fireEvent.click(screen.getByRole('button', { name: 'Refresh runs' }));
     await new Promise((r) => setTimeout(r, 150));
