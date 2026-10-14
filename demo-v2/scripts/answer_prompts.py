@@ -16,7 +16,8 @@ import subprocess
 import sys
 import time
 
-PROMPT_END = re.compile(r"\[(?:y/N|Y/n)\]: ?$")
+# a yes/no prompt, or the one free-text prompt the scenario allowlists (the skill-gap prompt, whose blank answer declines to supply a reference)
+PROMPT_END = re.compile(r"(?:\[(?:y/N|Y/n)\]|\(leave blank to proceed anyway[^)]*\)): ?$")
 
 
 def main() -> int:

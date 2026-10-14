@@ -34,3 +34,6 @@ A. which skill(s) were selected; B. which acquired rules were supplied (the actu
 
 ## Freeze
 No product change (planner, developer prompts, validators, repair, scope rules, KnowledgeGuard, SkillService, ToolService, routing, model configuration). A newly found deterministic Kriya defect: STOP and report, do not fix.
+
+## Addendum 1 (2026-10-14, before any model verdict)
+The first launch of the candidate-1 no-skill baseline (`c1-noskill-aborted-driver-blocked`) was stopped by me: after the planner call (valid single-unit plan, 1 model exchange recorded) Kriya printed the `[Skill Gap Detected] ... (leave blank to proceed anyway ...)` prompt, which is not a `[y/N]` prompt, so my allowlist driver did not recognise it and the run waited for input. No Developer call was made, so the abort carries no information about the task. Harness fix: the driver now also recognises that one prompt and answers it blank (allowlist rule `skill-gap-blank`, recorded like every other decision), with tests. The clean baseline is re-launched as `c1-noskill-r2`. The aborted directory is kept unchanged.

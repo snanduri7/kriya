@@ -57,10 +57,11 @@ def test_no_prompt_means_no_answer_and_the_childs_exit_status_is_kept(tmp_path):
     assert result.returncode == 0 and records == []
 
 
-def test_the_allowlist_is_exactly_the_four_decisions_and_each_has_a_reason():
+def test_the_allowlist_is_exactly_the_five_decisions_and_each_has_a_reason():
     ids = [r["id"] for r in RULES["rules"]]
-    assert ids == ["knowledge-risk", "send-search", "use-references", "apply-changes"]
-    assert all(r["answer"] == "y" and r["why"].strip() for r in RULES["rules"])
+    assert ids == ["knowledge-risk", "send-search", "use-references", "apply-changes", "skill-gap-blank"]
+    assert all(r["answer"] == "y" and r["why"].strip() for r in RULES["rules"] if r["id"] != "skill-gap-blank")
+    assert [r["answer"] for r in RULES["rules"] if r["id"] == "skill-gap-blank"] == [""]  # declining to supply a reference is the only non-yes decision
     assert not any(r["match"] in (".*", "", ".+") for r in RULES["rules"]), "a catch-all rule would be a bulk yes"
 
 
@@ -75,3 +76,31 @@ def test_a_phrase_printed_earlier_does_not_approve_an_unrelated_prompt(tmp_path)
     assert result.returncode == 3 and "ANSWER=" not in result.stdout
     records = [json.loads(line) for line in log.read_text().splitlines()]
     assert records[0]["result"] == "UNRECOGNISED_PROMPT_RUN_STOPPED"
+
+
+SKILL_GAP_PROMPT = ("[Skill Gap Detected] Kriya doesn't have verified information for: no skill exists yet for: x.\n"
+                    "Provide a URL, file path, or paste reference text to strengthen it (leave blank to proceed anyway with best-effort generation): ")
+
+
+def _run_skill_gap(tmp_path, prompt, read=True):
+    # measured in the live no-skill baseline run (2026-10-14): the prompt is NOT a [y/N] prompt, and a driver that only watched for [y/N] left the run waiting for input
+    fake = tmp_path / "gap.py"
+    fake.write_text("import sys\nsys.stdout.write(%r)\nsys.stdout.flush()\n%s" % (prompt, "print('GOT=' + repr(sys.stdin.readline()))\n" if read else ""))
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(RULES))
+    log = tmp_path / "gov.jsonl"
+    result = subprocess.run([sys.executable, str(DRIVER), "--rules", str(rules_path), "--log", str(log), "--", sys.executable, str(fake)],
+                            capture_output=True, text=True, timeout=30, check=False)
+    return result, [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_the_skill_gap_prompt_is_answered_blank_and_recorded(tmp_path):
+    result, records = _run_skill_gap(tmp_path, SKILL_GAP_PROMPT)
+    assert result.returncode == 0 and "GOT='\\n'" in result.stdout, result.stdout
+    assert [(r["rule"], r["answer"]) for r in records] == [("skill-gap-blank", "")] and records[0]["why"]
+
+
+def test_a_look_alike_free_text_prompt_is_not_answered(tmp_path):
+    result, records = _run_skill_gap(tmp_path, "Provide a URL, file path, or paste reference text to strengthen it (type your password): ", read=False)
+    # no [y/N] and no recognised ending: the driver neither answers nor records a decision
+    assert result.returncode == 0 and records == []
