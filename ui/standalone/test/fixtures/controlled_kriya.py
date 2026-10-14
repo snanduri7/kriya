@@ -115,7 +115,6 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                          else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -1 +1 @@\n-old\n+new\n"} for c in scripted])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal.")
                 approved = asyncio.run(awaiting) if awaiting is not None else False
-                decided_at = time.time()
                 if approved and SCRIPT.get("post_approval_ms"):
                     time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()
