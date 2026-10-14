@@ -100,7 +100,6 @@ def test_catalog_reads_change_nothing_and_restore_the_working_directory(project)
     for operation, extra in (("skills.list", {}), ("skills.describe", {"skill_id": "alpha"}), ("tools.list", {}), ("tools.describe", {"tool_id": "mcp:x"}), ("tools.approval_state", {"tool_id": "mcp:x"})):
         _op(project, operation, **extra)
     assert _tree(project) == before and os.getcwd() == cwd
-    assert not (Path(os.environ[ia.ENV_HOME_OVERRIDE])).exists()
 
 
 def test_an_unloadable_configuration_is_a_typed_unavailable_answer_for_every_operation(project):
@@ -202,9 +201,19 @@ def test_serve_refuses_a_foreign_argument_on_a_catalog_operation():
     assert "refusal" in serve.parse_request(json.dumps({"id": "a", "schema_version": 1, "operation": "tools.list", "arguments": {"workspace": "/w", "tool_id": "x"}}).encode())
 
 
-def test_the_catalog_modules_import_no_process_network_or_mcp_runtime():
-    forbidden = {"subprocess", "socket", "urllib", "http", "asyncio", "kriya.mcp.mcp", "kriya.core.kernel", "kriya.tools.process"}
+def test_the_catalog_modules_do_not_directly_import_process_network_or_mcp_runtime_modules():
+    # DIRECT imports only: kriya/mcp/__init__.py imports kriya.mcp.mcp, so the transitive set is larger. Nothing starts at import; the no-start guarantee is proven at runtime (tests/test_tool_service.py).
+    forbidden = {"subprocess", "socket", "urllib.request", "http", "asyncio", "kriya.mcp.mcp", "kriya.core.kernel", "kriya.tools.process"}
     for relative in ("kriya/kup/catalog_ops.py", "kriya/skills/service.py", "kriya/tools/service.py"):
         tree = ast.parse((Path(__file__).resolve().parent.parent / relative).read_text(encoding="utf-8"))
         imports = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names} | {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
         assert not any(i == f or i.startswith(f + ".") for i in imports for f in forbidden), (relative, sorted(imports))
+
+
+def test_reading_tools_with_a_configured_server_creates_no_approval_store(project, monkeypatch):
+    _inject(monkeypatch, project, mcp={"files": _server()})
+    before = _tree(project)
+    for operation, extra in (("tools.list", {}), ("tools.describe", {"tool_id": "mcp:files"}), ("tools.approval_state", {"tool_id": "mcp:files"})):
+        assert _op(project, operation, **extra)["error"] is None
+    assert _tree(project) == before
+    assert not Path(os.environ[ia.ENV_HOME_OVERRIDE]).exists(), "reading approval state must not create the store directory"

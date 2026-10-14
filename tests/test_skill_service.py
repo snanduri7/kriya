@@ -268,3 +268,70 @@ def test_a_skill_in_the_install_directory_is_install_scoped_even_when_the_instal
     monkeypatch.setattr(skill_service, "get_global_skills_dir", lambda: str(install))
     d = SkillService(_cfg(install), str(workspace)).describe("a")
     assert (d.scope, d.origin) == ("install", "kriya_install")
+
+
+# ---- independent review findings ------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("record", [{"text": ["x"]}, {"text": {"a": 1}}, {"text": None, "source": "s"}, {"text": 1.5}])
+def test_a_provenance_record_with_a_non_string_text_never_breaks_the_listing(tmp_path, record):
+    skills = tmp_path / "skills"
+    _write_skill(skills, "a", rules=["r1"], provenance=[record])
+    _write_skill(skills, "b", rules=["r2"])
+    items, total = SkillService(_cfg(skills), str(tmp_path)).list()
+    assert [i.id for i in items] == ["a", "b"] and total == 2
+    assert items[0].provenance.tracked_rule_count == 0
+
+
+def test_one_skill_that_cannot_be_described_degrades_instead_of_aborting_the_list(tmp_path, monkeypatch):
+    skills = tmp_path / "skills"
+    _write_skill(skills, "good", rules=["r"])
+    _write_skill(skills, "bad", rules=["r"])
+    real = skill_service._provenance
+
+    def flaky(skill):
+        if skill.name == "bad":
+            raise RuntimeError("boom")
+        return real(skill)
+
+    monkeypatch.setattr(skill_service, "_provenance", flaky)
+    items, total = SkillService(_cfg(skills), str(tmp_path)).list()
+    by_id = {i.id: i for i in items}
+    assert total == 2 and by_id["good"].provenance.state == "NONE_RECORDED" and "provenance" not in by_id["good"].unknown_fields
+    assert by_id["bad"].provenance.state == "UNREADABLE_OR_EMPTY" and "provenance" in by_id["bad"].unknown_fields
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("human_file:/Users/someone/secret/notes.md", "human_file:notes.md"),
+    ("human_url:https://user:pa55@docs.example.org/a/b?token=SECRET#frag", "human_url:https://docs.example.org/a/b"),
+    ("https://user:pa55@docs.example.org/a?x=1", "https://docs.example.org/a"),
+    ("https://docs.example.org/a", "https://docs.example.org/a"),
+    ("web_lookup:artemis", "web_lookup:artemis"),
+])
+def test_a_recorded_source_never_carries_a_local_path_or_url_credentials(tmp_path, raw, expected):
+    skills = tmp_path / "skills"
+    _write_skill(skills, "a", rules=["r1"], provenance=[{"text": "r1", "verified": False, "source": raw, "added_at": "2026-10-01"}])
+    sources = SkillService(_cfg(skills), str(tmp_path)).describe("a").provenance.sources
+    assert [s.source for s in sources] == [expected]
+    blob = json.dumps(sources[0].source)
+    assert "pa55" not in blob and "SECRET" not in blob and "/Users/someone" not in blob
+
+
+def test_a_digest_that_would_belong_to_a_different_skill_is_reported_unknown(tmp_path):
+    # the engine resolves "My Skill" to the folder key `my-skill` first: the digest of the OTHER skill must never be shown for this one
+    skills = tmp_path / "skills"
+    _write_skill(skills, "foo", name="My Skill", rules=["alpha"])
+    _write_skill(skills, "my-skill", name="Other", rules=["beta"])
+    items, _ = SkillService(_cfg(skills), str(tmp_path)).list()
+    by_id = {i.id: i for i in items}
+    assert by_id["other"].digest is not None
+    assert by_id["my skill"].digest is None and "digest" in by_id["my skill"].unknown_fields
+
+
+def test_one_malformed_provenance_record_does_not_discard_the_skills_valid_records(tmp_path):
+    skills = tmp_path / "skills"
+    records = [{"text": ["unhashable"], "source": "https://bad.example.org"}, {"text": "r1", "verified": True, "source": "https://good.example.org/a", "added_at": "2026-10-01"}]
+    _write_skill(skills, "a", rules=["r1", "r2"], provenance=records)
+    d = SkillService(_cfg(skills), str(tmp_path)).describe("a")
+    assert "provenance" not in d.unknown_fields  # not degraded: the bad record alone was ignored
+    assert (d.provenance.state, d.provenance.tracked_rule_count, d.provenance.verified_tracked_count) == ("RECORDED", 1, 1)
+    assert [s.source for s in d.provenance.sources] == ["https://good.example.org/a"]

@@ -24,6 +24,7 @@ from kriya.mcp.invocation_approval import (
     MCPTrustPathInsideWorkspaceError,
     default_local_approval_path,
     load_approval_artifact,
+    workspace_identity,
 )
 
 KIND_MCP = "mcp_server"
@@ -100,16 +101,21 @@ def _server_approval(workspace_root: str, server: str) -> ApprovalState:
         path = default_local_approval_path(workspace_root)
     except MCPTrustPathInsideWorkspaceError:
         return ApprovalState(STATE_UNKNOWN, REASON_STORE_PATH_REFUSED, None)
-    except OSError:
+    except (OSError, ValueError):
         return ApprovalState(STATE_UNKNOWN, REASON_STORE_UNREADABLE, None)
     try:
         artifact = load_approval_artifact(path)
-    except (MCPApprovalArtifactError, OSError):
+        if artifact is not None and artifact.workspace_id != workspace_identity(workspace_root):
+            # a store whose own workspace id is not this workspace's is not this workspace's record: nothing in it can be counted
+            return ApprovalState(STATE_UNKNOWN, REASON_STORE_UNREADABLE, None)
+        matching = [] if artifact is None else [r for r in artifact.records if r.server_identity == server]
+        names = tuple(sorted({r.tool_name for r in matching if isinstance(r.tool_name, str)}))
+    except (MCPApprovalArtifactError, OSError, ValueError, TypeError, AttributeError):
+        # any unreadable, undecodable or malformed store is an explicit UNKNOWN (UnicodeDecodeError is a ValueError); it never escapes into the listing of every other tool
         return ApprovalState(STATE_UNKNOWN, REASON_STORE_UNREADABLE, None)
-    matching = [] if artifact is None else [r for r in artifact.records if r.server_identity == server]
     if not matching:
         return ApprovalState(STATE_NOT_APPROVED, REASON_NO_RECORDS, 0)
-    return ApprovalState(STATE_UNKNOWN, REASON_NEEDS_LIVE_IDENTITY, len(matching), tuple(sorted({r.tool_name for r in matching})))
+    return ApprovalState(STATE_UNKNOWN, REASON_NEEDS_LIVE_IDENTITY, len(matching), names)
 
 
 class ToolService:

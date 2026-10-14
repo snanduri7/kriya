@@ -62,3 +62,16 @@ def test_the_allowlist_is_exactly_the_four_decisions_and_each_has_a_reason():
     assert ids == ["knowledge-risk", "send-search", "use-references", "apply-changes"]
     assert all(r["answer"] == "y" and r["why"].strip() for r in RULES["rules"])
     assert not any(r["match"] in (".*", "", ".+") for r in RULES["rules"]), "a catch-all rule would be a bulk yes"
+
+
+def test_a_phrase_printed_earlier_does_not_approve_an_unrelated_prompt(tmp_path):
+    # review finding: matching the whole recent output let "Send this search?" in an earlier log line approve a later, different prompt
+    fake = tmp_path / "fake2.py"
+    fake.write_text("import sys\nsys.stdout.write('INFO: Send this search? was shown earlier\\nDelete all files in the workspace [y/N]: ')\nsys.stdout.flush()\nprint('ANSWER=' + sys.stdin.readline().strip())\n")
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(RULES))
+    log = tmp_path / "gov.jsonl"
+    result = subprocess.run([sys.executable, str(DRIVER), "--rules", str(rules_path), "--log", str(log), "--", sys.executable, str(fake)], capture_output=True, text=True, timeout=60, check=False)
+    assert result.returncode == 3 and "ANSWER=" not in result.stdout
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    assert records[0]["result"] == "UNRECOGNISED_PROMPT_RUN_STOPPED"

@@ -14,6 +14,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$SCENARIO" ] || die "--scenario is required"
 assert_work_outside_repo
+ensure_work_area
 SC_DIR="$(scenario_dir "$SCENARIO")"
 case "$SCENARIO" in
   01|03) ;;

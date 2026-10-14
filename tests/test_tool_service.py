@@ -204,3 +204,38 @@ def test_descriptor_serialises_to_plain_json(tmp_path):
         data = d.to_dict()
         assert json.loads(json.dumps(data)) == data
         assert isinstance(data["unknown_fields"], list) and isinstance(data["approval"]["recorded_tool_names"], list)
+
+
+# ---- independent review findings ------------------------------------------------------------------------------------------------
+
+def test_a_store_that_is_not_valid_utf8_is_unknown_not_an_exception(tmp_path):
+    ws = _workspace(tmp_path)
+    path = Path(ia.default_local_approval_path(os.path.realpath(ws)))
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff\xfe{not utf8")
+    service = ToolService(_cfg(tmp_path, mcp={"files": _server(), "other": _server()}), ws)
+    assert all(t.approval.state == "UNKNOWN" and t.approval.reason == "APPROVAL_STORE_UNREADABLE_OR_INVALID" for t in service.list())
+
+
+def test_records_with_a_non_string_tool_name_do_not_break_the_listing(tmp_path):
+    ws = _workspace(tmp_path)
+    root = os.path.realpath(ws)
+    path = Path(ia.default_local_approval_path(root))
+    path.parent.mkdir(parents=True)
+    record = {"server_identity": "files", "schema_digest": "s", "capability_profile_digest": "c", "binding_digest": "b", "approved_at": "t"}
+    path.write_text(json.dumps({"schema_version": 1, "workspace_id": ia.workspace_identity(root),
+                                "records": [{**record, "tool_name": "read_file"}, {**record, "tool_name": None, "binding_digest": "b2"}]}))
+    approval = ToolService(_cfg(tmp_path, mcp={"files": _server()}), ws).approval_state("mcp:files")
+    assert approval.state == "UNKNOWN"  # never an exception, never "approved"
+    assert approval.recorded_tool_names == ("read_file",)
+
+
+def test_a_store_written_for_another_workspace_is_not_counted_as_this_workspaces_records(tmp_path):
+    ws = _workspace(tmp_path)
+    root = os.path.realpath(ws)
+    path = Path(ia.default_local_approval_path(root))
+    path.parent.mkdir(parents=True)
+    other = ia.add_approval(ia.empty_artifact("0" * 64), MCPToolIdentity("files", "read_file", "sha256:" + "a" * 64), "b" * 64)
+    ia.save_approval_artifact(str(path), other)
+    approval = ToolService(_cfg(tmp_path, mcp={"files": _server()}), ws).approval_state("mcp:files")
+    assert (approval.state, approval.reason) == ("UNKNOWN", "APPROVAL_STORE_UNREADABLE_OR_INVALID")

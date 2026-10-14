@@ -14,8 +14,10 @@ directory it wants for the duration of the call (``kriya.kup.catalog_ops`` does,
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.skills.skill import Skill, SkillEngine, get_global_skills_dir, load_rule_provenance
@@ -108,6 +110,30 @@ def skill_id(skill: Skill) -> str:
     return skill.name.lower()
 
 
+def _safe_source(value: Any) -> Optional[str]:
+    """A recorded source as display text WITHOUT a local path or URL credentials. The engine records `human_file:<absolute path>` and `human_url:<url>` for sources a person
+    supplied: the path is reduced to its file name, a URL to scheme, host and path (no user info, query or fragment). Anything else is bounded text, unchanged."""
+    text = _clip(value)
+    if not text:
+        return None
+    prefix = ""
+    for candidate in ("human_file:", "human_url:"):
+        if text.startswith(candidate):
+            prefix, text = candidate, text[len(candidate):]
+            break
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text):
+        try:
+            parts = urlsplit(text)
+            host = parts.hostname or ""
+            netloc = f"{host}:{parts.port}" if parts.port else host
+            return prefix + urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+        except ValueError:
+            return prefix + "unparseable-url"
+    if prefix == "human_file:" or text.startswith(("/", "~", "file:")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return prefix + (re.split(r"[\\/]", text.rstrip("/\\"))[-1] or "file")
+    return prefix + text
+
+
 def _provenance(skill: Skill) -> ProvenanceSummary:
     source_path = skill.source_path
     if not source_path:
@@ -118,10 +144,11 @@ def _provenance(skill: Skill) -> ProvenanceSummary:
     seen: set = set()
     for record in load_rule_provenance(source_path):
         # The file is not authoritative: ignore anything that is not a record for a rule this skill currently has.
-        if not isinstance(record, dict) or record.get("text") not in rules or record["text"] in seen:
+        text = record.get("text") if isinstance(record, dict) else None
+        if not isinstance(text, str) or text not in rules or text in seen:
             continue
-        seen.add(record["text"])
-        label = _clip(record.get("source")) or "unspecified"
+        seen.add(text)
+        label = _safe_source(record.get("source")) or "unspecified"
         by_source.setdefault(label, []).append(record)
     if not seen:
         state = PROVENANCE_UNREADABLE_OR_EMPTY if path_exists else PROVENANCE_NONE_RECORDED
@@ -162,11 +189,19 @@ class SkillService:
         return engine
 
     def _describe(self, engine: SkillEngine, skill: Skill, install_dir: str) -> SkillDescriptor:
+        unknown = ["skill_version"]
         try:
-            digest: Optional[str] = "sha256:" + engine.manifest_for([skill.name])[0]["content_hash"]
+            # The engine resolves a name through a sanitised FOLDER key first, so a name can resolve to a different skill. Show a digest only for the very skill described.
+            digest: Optional[str] = "sha256:" + engine.manifest_for([skill.name])[0]["content_hash"] if engine.get_skill(skill.name) is skill else None
         except Exception:  # noqa: BLE001 - an unreadable skill is shown with an explicit unknown digest, not hidden
             digest = None
-        unknown = ["skill_version"] + (["digest"] if digest is None else [])
+        if digest is None:
+            unknown.append("digest")
+        try:
+            provenance = _provenance(skill)
+        except Exception:  # noqa: BLE001 - one skill's unreadable provenance degrades that skill to an explicit unknown; it never aborts the list
+            provenance = ProvenanceSummary(PROVENANCE_UNREADABLE_OR_EMPTY, 0, len(skill.rules), 0)
+            unknown.append("provenance")
         origin = ORIGIN_KRIYA_INSTALL if skill.source_path and path_relation(install_dir, skill.source_path) is PathRelation.WITHIN else ORIGIN_WORKSPACE_OR_CONFIGURED
         return SkillDescriptor(
             id=skill_id(skill), name=skill.name, description=_clip(skill.description) or "", category=skill.category, tags=tuple(skill.tags)[:20],
@@ -174,7 +209,7 @@ class SkillService:
             scope=_scope(skill, self._workspace, install_dir), verified=skill.verified, verified_at=skill.verified_at,
             verified_context=_clip(skill.verified_context), verification_gap_acknowledged=skill.verification_gap_acknowledged,
             rule_count=len(skill.rules), staged_rule_count=staged_rule_count(skill.source_path), example_count=len(skill.examples),
-            has_instructions=bool(skill.instructions.strip()), provenance=_provenance(skill), unknown_fields=tuple(unknown))
+            has_instructions=bool(skill.instructions.strip()), provenance=provenance, unknown_fields=tuple(unknown))
 
     def list(self) -> Tuple[List[SkillDescriptor], int]:
         """(descriptors in id order, capped at MAX_SKILLS; the true total). Ids are unique: of two skills sharing a name, the one ``describe`` resolves wins."""

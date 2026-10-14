@@ -68,7 +68,7 @@ Attempts view: two attempts for unit `s1`, #1 `create_full_file` failed, #2 `rep
 
 ## SUCCESS CRITERIA
 All of: `verify_demo.sh --phase post` reports 0 failed, i.e. exactly one file changed (`pricing.py`), an independent pytest run passes (3 passed), the stub log shows the whole script served with the Developer asked twice
-(a second Developer request exists only because Kriya rejected the first candidate), the script labels its first Developer answer as the scripted wrong candidate, and Kriya recorded state. The run's outcome in the GUI is success and the change was approved by a person.
+(evidence that a repair attempt was requested; the recorded cause, the rejected candidate and the failed gate, is read in the GUI Attempts and Why panels), the script labels its first Developer answer as the scripted wrong candidate, and Kriya recorded state. The run's outcome in the GUI is success and the change was approved by a person.
 
 ## FAILURE DIAGNOSIS
 - Stub log shorter than the script, or an unscripted exchange: the call path changed (a product change, a different Kriya) - re-record, do not edit the script by hand to fit.

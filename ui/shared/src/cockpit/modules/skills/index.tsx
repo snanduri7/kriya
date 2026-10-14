@@ -80,7 +80,7 @@ function SkillsTable({ list, selected, onSelect }: { list: SkillsList; selected:
       <thead><tr><th>Skill</th><th>Verified</th><th>Rules</th><th>Staged</th><th>Scope</th></tr></thead>
       <tbody>
         {list.items.map((s) => (
-          <tr key={s.id} aria-selected={s.id === selected}>
+          <tr key={s.id}>
             <td><button type="button" className="ck-quiet" aria-pressed={s.id === selected} aria-label={`Show ${s.name}`} onClick={() => onSelect(s.id)}><strong>{s.name}</strong></button><div className="muted small">{s.description}</div></td>
             <td><VerifiedBadge s={s} /></td>
             <td>{s.rule_count}</td>

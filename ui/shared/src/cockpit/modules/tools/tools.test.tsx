@@ -34,7 +34,8 @@ describe('Tools page', () => {
     expect(rows[0]).toHaveTextContent('unknown');
     expect(rows[1]).toHaveTextContent('not approved');
     expect(rows[2]).toHaveTextContent('not applicable');
-    expect(within(table).queryByText(/^approved$/i)).toBeNull();
+    // no cell may claim approval: any text that says "approved" must be negated ("not approved")
+    expect(within(table).queryAllByText(/approved/i).filter((el) => !/not approved/i.test(el.textContent ?? ''))).toEqual([]);
   });
 
   it('offers no way to start, add, remove, enable, test or approve anything', async () => {
@@ -60,7 +61,7 @@ describe('Tools page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show issues' }));
     const issues = await screen.findByRole('region', { name: 'Tool issues' });
     expect(issues).toHaveTextContent('ISSUES_API_TOKEN (names only; values are never shown)');
-    expect(issues).toHaveTextContent(/No approval is on file for this server/);
+    expect(issues).toHaveTextContent(/No approval record is on file for this server/);
   });
 
   it('the detail asks for the approval state with the tool id, and reads it only (describe + approval_state, never a path)', async () => {

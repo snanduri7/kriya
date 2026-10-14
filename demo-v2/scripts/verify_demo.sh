@@ -93,7 +93,7 @@ PY
       else pass "delete(Long) does not persist before the run (the bug is present)"; fi
     else
       SUMMARY="$( cd "$WS" && PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -m pytest -q -p no:cacheprovider 2>&1 | tail -1 || true )"
-      git -C "$WS" clean -fdxq -e kriya.yaml >/dev/null 2>&1 || true
+      git -C "$WS" clean -fdxq -e kriya.yaml -e .kriya >/dev/null 2>&1 || true
       case "$SUMMARY" in *"$FIXTURE_BASELINE_SUMMARY"*) pass "fixture baseline is '$FIXTURE_BASELINE_SUMMARY' (the bug is present)" ;; *) fail "fixture baseline is '$SUMMARY', expected '$FIXTURE_BASELINE_SUMMARY'" ;; esac
       check "the scripted stub is running on 127.0.0.1:$STUB_PORT (CONTROLLED / SCRIPTED)" "$DEMO_V2_DIR/scripts/stub_ctl.sh" status
       [ "$(wc -l < "$WORK/evidence/stub-exchanges.jsonl" 2>/dev/null | tr -d ' ')" = "0" ] && pass "the stub is at script position 0 (no exchange yet)" || fail "the stub already served exchanges: restart it (stub_ctl.sh start) before a run"
@@ -128,8 +128,9 @@ if [ "$SCENARIO" = "01" ]; then
 else
   SUMMARY="$( cd "$WS" && PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -m pytest -q -p no:cacheprovider 2>&1 | tail -1 || true )"
   case "$SUMMARY" in *"$FIXTURE_FINAL_SUMMARY"*) pass "independent pytest run: $SUMMARY" ;; *) fail "independent pytest run is '$SUMMARY', expected '$FIXTURE_FINAL_SUMMARY'" ;; esac
-  git -C "$WS" clean -fdxq -e kriya.yaml >/dev/null 2>&1 || true
-  # The repair path, proven from the stub's own exchange log: a SECOND Developer request exists only because Kriya rejected the first candidate. Nothing else could have asked for it.
+  git -C "$WS" clean -fdxq -e kriya.yaml -e .kriya >/dev/null 2>&1 || true
+  # Evidence that a repair attempt happened, from the stub's own exchange log: a SECOND Developer request. It does not say WHY Kriya asked again; the recorded cause (the rejected candidate, the failed gate)
+  # is in the run's evidence, read in the GUI Attempts and Why panels (see SCENARIO.md, EXPECTED EVIDENCE).
   STUB_REPORT="$("$KRIYA_PY" -I - "$WORK/evidence/stub-exchanges.jsonl" "$DEMO_V2_DIR/scenarios/03-controlled-repair/script/controlled_script.json" <<'PY' 2>&1 || true
 import json, sys
 log = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
@@ -142,10 +143,10 @@ print("RESULT=OK" if len(chats) == len(script["steps"]) and not unscripted and d
 PY
 )"
   case "$STUB_REPORT" in
-    *"RESULT=OK"*) pass "stub log: the whole scripted sequence was served and the Developer was asked twice ($STUB_REPORT)" ;;
+    *"RESULT=OK"*) pass "stub log: the whole scripted sequence was served and the Developer was asked twice, i.e. a repair attempt was requested ($STUB_REPORT)" ;;
     *) fail "stub log does not show the full scripted sequence with a repair attempt: $STUB_REPORT" ;;
   esac
-  grep -q "wrong candidate" "$DEMO_V2_DIR/scenarios/03-controlled-repair/script/controlled_script.json" && pass "the script labels its first Developer answer as the scripted wrong candidate" || fail "the script does not label the wrong candidate"
+  grep -q "wrong candidate" "$DEMO_V2_DIR/scenarios/03-controlled-repair/script/controlled_script.json" && pass "(static) the committed script labels its first Developer answer as the scripted wrong candidate" || fail "the committed script does not label the wrong candidate"
 fi
 check "Kriya recorded state for the run" test -n "$(ls -A "$WORK/state" 2>/dev/null)"
 finish

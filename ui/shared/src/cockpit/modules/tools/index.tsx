@@ -14,7 +14,7 @@ const KIND_TEXT: Record<ToolDescriptor['kind'], string> = { mcp_server: 'MCP ser
 /** Kriya's reason codes in plain language. The state itself is never softened: there is no "approved" here, and the page says why. */
 export function approvalText(a: Approval): string {
   switch (a.reason) {
-    case 'NO_RECORDS_FOR_SERVER': return 'No approval is on file for this server, so its tools cannot run until an operator approves them.';
+    case 'NO_RECORDS_FOR_SERVER': return 'No approval record is on file for this server in this workspace\'s approval store. Kriya will ask for approval before any of its tools run.';
     case 'RECORDS_NEED_LIVE_TOOL_IDENTITY':
       return `${a.records_on_file} approval record${a.records_on_file === 1 ? '' : 's'} on file${a.recorded_tool_names.length ? ` (${a.recorded_tool_names.join(', ')})` : ''}. Whether they still apply depends on each tool's current definition, which is only known by starting the server. Nothing was started.`;
     case 'APPROVAL_STORE_UNREADABLE_OR_INVALID': return 'The approval store could not be read or is invalid, so nothing can be said about approvals.';
@@ -75,7 +75,7 @@ function ToolsTable({ list, selected, onSelect }: { list: ToolsList; selected: s
       <thead><tr><th>Tool</th><th>Type</th><th>Capabilities</th><th>Approval</th></tr></thead>
       <tbody>
         {list.items.map((t) => (
-          <tr key={t.id} aria-selected={t.id === selected}>
+          <tr key={t.id}>
             <td><button type="button" className="ck-quiet" aria-pressed={t.id === selected} aria-label={`Show ${t.name}`} onClick={() => onSelect(t.id)}><strong>{t.name}</strong></button></td>
             <td className="small">{KIND_TEXT[t.kind]}</td>
             <td className="small">{t.declared_capabilities ? networkText(t.declared_capabilities) : '—'}</td>

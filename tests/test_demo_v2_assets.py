@@ -141,3 +141,31 @@ def test_the_unspecified_scenario_refuses_to_prepare_or_reset() -> None:
                                     capture_output=True, text=True, check=False, timeout=60)
             assert result.returncode != 0, (script, scenario)
             assert "STOPPED" in result.stderr
+
+
+def _verify_with_work(work: Path):
+    return subprocess.run(["bash", str(DEMO_V2 / "scripts" / "verify_demo.sh"), "--scenario", "01", "--phase", "pre"], capture_output=True, text=True, check=False, timeout=60,
+                          env={**os.environ, "DEMO_V2_WORK": str(work)})
+
+
+def test_a_work_area_inside_the_repository_is_refused_even_when_its_parent_does_not_exist_or_is_a_symlink(tmp_path: Path) -> None:
+    # review finding: with a missing parent the old check fell back to "/<name>" and accepted a path inside the repository
+    missing_parent = DEMO_V2.parent / "ui" / "demo-v2-missing-parent" / "work"
+    result = _verify_with_work(missing_parent)
+    assert result.returncode != 0 and "inside the repository" in result.stderr and not missing_parent.parent.exists()
+    link = tmp_path / "link"
+    link.symlink_to(DEMO_V2.parent / "ui")
+    result = _verify_with_work(link / "demo-v2-via-symlink")
+    assert result.returncode != 0 and "inside the repository" in result.stderr
+    assert not (DEMO_V2.parent / "ui" / "demo-v2-via-symlink").exists()
+
+
+def test_reset_and_prepare_refuse_a_non_empty_directory_demo_v2_did_not_create(tmp_path: Path) -> None:
+    work = tmp_path / "somebody-elses-files"
+    work.mkdir()
+    (work / "precious.txt").write_text("keep me")
+    for script in ("reset_demo.sh", "prepare_demo.sh"):
+        result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--scenario", "03"], capture_output=True, text=True, check=False, timeout=60,
+                                env={**os.environ, "DEMO_V2_WORK": str(work)})
+        assert result.returncode != 0 and "not empty and was not created by demo-v2" in result.stderr, script
+    assert (work / "precious.txt").read_text() == "keep me" and sorted(p.name for p in work.iterdir()) == ["precious.txt"]

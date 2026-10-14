@@ -49,7 +49,9 @@ def main() -> int:
         window = (window + text)[-4000:]
         if PROMPT_END.search(window):
             prompt = window.rstrip()
-            rule = next((r for r in rules if re.search(r["match"], prompt)), None)
+            # An allowlist rule is matched against the PROMPT LINE only (the last line), never against earlier output: a phrase printed above an unrelated prompt must not approve it.
+            prompt_line = prompt.splitlines()[-1] if prompt else ""
+            rule = next((r for r in rules if re.search(r["match"], prompt_line)), None)
             record = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "prompt": prompt[-700:]}
             if rule is None:
                 record.update(answer=None, rule=None, result="UNRECOGNISED_PROMPT_RUN_STOPPED")

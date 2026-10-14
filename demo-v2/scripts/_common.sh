@@ -35,11 +35,30 @@ sha256_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 # The scenario's materialised work area. Always under DEMO_V2_WORK, never inside the repository.
 scenario_work() { echo "$DEMO_V2_WORK/scenario-$1"; }
 
-# Refuses a work area that is inside the repository checkout (evidence and clones must never reach git).
+# Resolves PATH physically (symlinks followed) even when its tail does not exist yet: the nearest existing ancestor is resolved with `cd -P`, the rest is appended.
+physical_path() {
+  local path="$1" tail="" parent
+  while [ ! -d "$path" ]; do tail="/$(basename "$path")$tail"; parent="$(dirname "$path")"; [ "$parent" = "$path" ] && break; path="$parent"; done
+  echo "$(cd -P "$path" && pwd)$tail"
+}
+
+# Refuses a work area that is inside (or is) the repository checkout, however it is spelled: missing parents and symlinks are resolved first.
 assert_work_outside_repo() {
-  case "$(cd "$(dirname "$DEMO_V2_WORK")" 2>/dev/null && pwd)/$(basename "$DEMO_V2_WORK")" in
-    "$REPO_ROOT"|"$REPO_ROOT"/*) die "DEMO_V2_WORK ($DEMO_V2_WORK) is inside the repository" ;;
+  local work repo
+  work="$(physical_path "$DEMO_V2_WORK")"; repo="$(cd -P "$REPO_ROOT" && pwd)"
+  case "$work" in
+    "$repo"|"$repo"/*) die "DEMO_V2_WORK ($DEMO_V2_WORK) is inside the repository" ;;
   esac
+}
+
+# Every `rm -rf` in these scripts targets a path under the work area. Refuse to use an existing, non-empty directory that this tooling did not create (it carries a marker),
+# so a mistaken DEMO_V2_WORK can never name a directory with someone else's files in it.
+ensure_work_area() {
+  mkdir -p "$DEMO_V2_WORK"
+  if [ ! -f "$DEMO_V2_WORK/.demo-v2-work" ]; then
+    [ -z "$(ls -A "$DEMO_V2_WORK" 2>/dev/null)" ] || die "DEMO_V2_WORK ($DEMO_V2_WORK) is not empty and was not created by demo-v2; refusing to use it"
+    echo "created by demo-v2/scripts; safe to delete" > "$DEMO_V2_WORK/.demo-v2-work"
+  fi
 }
 
 # Prints the body of the first method whose declaration line matches the ERE $2 in file $1, ending at the first line that is

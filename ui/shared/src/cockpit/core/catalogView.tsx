@@ -7,7 +7,7 @@ export function whyNot<T>(a: Availability<T>, what: string): string | null {
     case 'error': return `${what} could not be read: ${a.message} (${a.code})`;
     case 'unavailable':
     case 'not_recorded': return a.detail;
-    default: return hasData(a) ? null : `${what} are not available.`;
+    default: return hasData(a) ? null : `${what} could not be shown.`;
   }
 }
 
