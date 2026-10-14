@@ -43,7 +43,11 @@ def parse_unified_diff(text: str, budget: int) -> Tuple[Dict[str, Any], int]:
     used = 0
     truncated = False
     old_no = new_no = 0
-    for raw in text.splitlines():
+    # split on "\n" ONLY: str.splitlines() also breaks on \x0b, \x0c, \x1c-\x1e, \x85 and U+2028/9, which would render the tail of a changed line as a separate context line
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    for raw in lines:
         match = _HUNK_RE.match(raw)
         if match:
             old_start, old_lines = int(match.group(1)), int(match.group(2)) if match.group(2) is not None else 1
@@ -82,6 +86,11 @@ def parse_unified_diff(text: str, budget: int) -> Tuple[Dict[str, Any], int]:
     elif hunks and all(h["new_lines"] == 0 for h in hunks) and additions == 0 and hunks[0]["new_start"] == 0:
         change_type = "deleted"
     return {"change_type": change_type, "additions": additions, "deletions": deletions, "hunks": hunks, "truncated": truncated}, used
+
+
+def has_unrendered_body(text: str) -> bool:
+    """Called for a file whose diff produced no hunk: True when the text still has content beyond its ---/+++ file header, i.e. something that cannot be displayed."""
+    return any(line.strip() and not line.startswith(("---", "+++")) for line in text.split("\n"))
 
 
 def _find_review(record: Dict[str, Any], review_id: str) -> Optional[Dict[str, Any]]:
@@ -140,6 +149,8 @@ def review(cfg: Any, request: Dict[str, Any], request_id: str) -> Dict[str, Any]
     budget = MAX_LINES_TOTAL
     for item in gate_files:
         view, used = parse_unified_diff(item["content"], budget)
+        if not view["hunks"] and has_unrendered_body(item["content"]):
+            raise SnapshotError(policy.REVIEW_DIFF_UNAVAILABLE, "a file of the proposed change cannot be displayed as a diff, so the change is not offered for approval", reason="unrenderable")
         budget -= used
         files.append({"path": item["filepath"], "diff_sha256": _sha(item["content"]), **view})
     reason = str(entry.get("reason") or "")

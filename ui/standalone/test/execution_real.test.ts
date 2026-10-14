@@ -343,6 +343,7 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     return new ApprovalHost({
       run: (o) => runKriya({ executable: o.executable, argv: o.argv, cwd: o.cwd, env: o.env, limits: o.limits }),
       prepare: () => ({ ok: true, executable: realKriya(), env: { ...env } }), currentWorkspace: () => ws,
+      reviewable: (workspace, launchId, reviewId) => read({ operation: 'change_approval.review', workspace, launch_id: launchId, review_id: reviewId }),
     });
   }
   async function untilPending(ws: string, id: string, ms = 60_000): Promise<Json> {
@@ -410,9 +411,13 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const id = (await h.start({ workspace: ws, goal: 'Add a clamp function with tests.' })).launch_id!;
     const pending = await untilPending(ws, id);
     const a = approvals(ws);
-    expect(await a.decide(decision(ws, id, pending, 'approve', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
-    expect(await a.decide(decision(ws, id, pending, 'approve', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
-    expect(await a.decide(decision(ws, '20200101T000000-00000000', pending, 'approve'))).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_FOUND' });
+    // Kriya's own authority layer, through the host: a REJECT is not gated by the host's reviewability check, so Kriya itself answers these
+    expect(await a.decide(decision(ws, id, pending, 'reject', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
+    expect(await a.decide(decision(ws, id, pending, 'reject', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'STALE_REVIEW' });
+    expect(await a.decide(decision(ws, '20200101T000000-00000000', pending, 'reject'))).toMatchObject({ accepted: false, code: 'LAUNCH_NOT_FOUND' });
+    // and an APPROVE for another candidate or review never gets that far: the host cannot prove that change, so it sends nothing
+    expect(await a.decide(decision(ws, id, pending, 'approve', { candidate_digest: 'sha256:' + '0'.repeat(64) }))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' });
+    expect(await a.decide(decision(ws, id, pending, 'approve', { review_id: 'ra-' + '0'.repeat(24) }))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' });
     expect(await a.decide(decision(other, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'WORKSPACE_NOT_OPEN' }); // not the open folder
     expect(await a.decide({ ...decision(ws, id, pending, 'approve'), extra: 'x' })).toMatchObject({ accepted: false, code: 'INVALID_REQUEST' });
     expect(await a.decide(decision(ws, id, pending, 'approve-always' as never))).toMatchObject({ accepted: false, code: 'INVALID_REQUEST' });
@@ -430,9 +435,10 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     const [first, second] = await Promise.all([a.decide(decision(ws, id, pending, 'approve')), a.decide(decision(ws, id, pending, 'reject'))]);
     expect([first.accepted, second.accepted].filter(Boolean)).toHaveLength(1); // exactly one decision was taken (the host serializes; Kriya would refuse the other anyway)
     await untilExited(h);
-    const late = await a.decide(decision(ws, id, pending, 'approve'));
+    const late = await a.decide(decision(ws, id, pending, 'reject')); // Kriya's own refusal (a reject is not gated by the host)
     expect(late).toMatchObject({ accepted: false });
     expect(['LAUNCH_ENDED', 'ALREADY_DECIDED']).toContain(late.code);
+    expect(await a.decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' }); // and a late APPROVE is not even sent: the review is no longer pending
     const d = (await status(ws, id)).data as Json;
     expect(d.launch.pending_approval.status).toBe(first.accepted ? 'APPROVED' : 'REJECTED');
   }, 120_000);
@@ -531,7 +537,8 @@ describe.skipIf(!available)('Start Run against real Kriya with a controlled work
     expect(d.launch.pending_approval).toMatchObject({ status: 'EXPIRED', decision: { decision: null } });
     expect(['interrupted', 'launch-ended']).toContain(d.launch.pending_approval.decision.source);
     expect(d.workspace_lock.held).toBe(false);
-    expect(await approvals(ws).decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'LAUNCH_ENDED' });
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'reject'))).toMatchObject({ accepted: false, code: 'LAUNCH_ENDED' }); // Kriya's own refusal
+    expect(await approvals(ws).decide(decision(ws, id, pending, 'approve'))).toMatchObject({ accepted: false, code: 'CHANGE_NOT_REVIEWABLE' }); // a late APPROVE is not even sent
     // the application's OWN quit path leaves the folder clean and startable again: no recovery is needed after a quit
     const after = (await read({ operation: 'execution.preflight', workspace: ws })).data as Json;
     expect(after.recovery).toMatchObject({ status: 'CLEAN', run_active: false });

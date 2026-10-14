@@ -349,6 +349,7 @@ app.whenReady().then(async () => {
   });
   approvals = new ApprovalHost({
     run: (options) => runKriya({ executable: options.executable, argv: options.argv, cwd: options.cwd, env: options.env, limits: options.limits }), prepare: prepareExecution,
+    reviewable: (workspace, launchId, reviewId) => kupQuery({ operation: 'change_approval.review', workspace, launch_id: launchId, review_id: reviewId }),
     currentWorkspace: () => workspaces.current(), log: dev?.traceLine,
   });
   workspaces = new WorkspaceRegistry({

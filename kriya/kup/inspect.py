@@ -179,6 +179,15 @@ def _has_enforce_column(conn: sqlite3.Connection) -> bool:
     return any(info[1] == "enforce_run_id" for info in conn.execute("PRAGMA table_info(runs)"))
 
 
+_WRAPPER_FIRST_LINE = re.compile(r"^\s*===\s[^\n]*===\s*$")
+
+
+def _is_wrapped(goal: str) -> bool:
+    """A goal that is a Kriya-compiled prompt (the unit-goal header, or any other `=== Title ===` section header as its first line: retry packages, milestone wrappers): never a person's request."""
+    first = goal.lstrip().split("\n", 1)[0]
+    return goal.lstrip().startswith(policy.COMPILED_GOAL_HEADER) or _WRAPPER_FIRST_LINE.match(first) is not None
+
+
 def _display_goal(conn: sqlite3.Connection, row: sqlite3.Row, has_enforce: bool, cache: Dict[str, Optional[str]]) -> Tuple[Optional[str], str]:
     """The ORIGINAL user request for a row, from structured fields only (never by reading prompt text):
 
@@ -191,11 +200,11 @@ def _display_goal(conn: sqlite3.Connection, row: sqlite3.Row, has_enforce: bool,
             found = conn.execute("SELECT goal FROM runs WHERE run_id = ?", (enforce_id,)).fetchone()
             cache[enforce_id] = found[0] if found and isinstance(found[0], str) and found[0].strip() else None
         goal = cache[enforce_id]
-        if goal is not None and not goal.lstrip().startswith(policy.COMPILED_GOAL_HEADER):
+        if goal is not None and not _is_wrapped(goal):
             return goal, policy.DISPLAY_GOAL_ENFORCE_ROW
         return None, policy.DISPLAY_GOAL_UNAVAILABLE
     own = row["goal"]
-    if isinstance(own, str) and own.strip() and not own.lstrip().startswith(policy.COMPILED_GOAL_HEADER):
+    if isinstance(own, str) and own.strip() and not _is_wrapped(own):
         return own, policy.DISPLAY_GOAL_OWN
     return None, policy.DISPLAY_GOAL_UNAVAILABLE
 

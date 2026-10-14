@@ -347,3 +347,38 @@ def test_split_reason_never_alters_the_text_and_has_a_none_for_no_reviewer_secti
 
     import kriya.workflow.workflow as workflow
     assert "REVIEW_SECTION_HEADER" in inspect.getsource(workflow) and "=== Automated Code Review ===" not in inspect.getsource(workflow)
+
+
+# ------------------------------------------------------------------ review findings: odd characters and diffs that cannot be shown
+
+def test_parser_splits_lines_on_newline_only_so_odd_separators_cannot_fake_a_context_line():
+    # a changed line containing U+2028, \x0b, \x0c, \x85 stays ONE added line (str.splitlines() would have split it)
+    odd = "tail\u2028more\x0bvt\x0cff\x85nel"
+    view, used = parse_unified_diff(f"--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+{odd}\n", 100)
+    assert used == 1 and view["additions"] == 1
+    assert [(line["kind"], line["text"]) for line in view["hunks"][0]["lines"]] == [("add", odd)]
+
+
+def test_a_file_whose_diff_has_content_but_no_hunk_is_not_offered_for_approval(ws):
+    seen = {}
+    weird = [{"filepath": "src/Weird.java", "content": "--- a/src/Weird.java\n+++ b/src/Weird.java\nBinary files differ\n"}]
+
+    def scenario(canonical, pending):
+        seen["env"] = _review(ws, pending["review_id"])
+        return _reject(canonical, pending)
+
+    _hold(ws, scenario, files=weird)
+    assert seen["env"]["data"] is None
+    assert seen["env"]["error"]["code"] == policy.REVIEW_DIFF_UNAVAILABLE and seen["env"]["error"]["reason"] == "unrenderable"
+
+
+def test_an_empty_new_file_is_shown_as_an_empty_change_not_refused(ws):
+    seen = {}
+
+    def scenario(canonical, pending):
+        seen["env"] = _review(ws, pending["review_id"])
+        return _reject(canonical, pending)
+
+    _hold(ws, scenario, files=[{"filepath": "src/Empty.java", "content": ""}])  # the gate's diff of an empty new file is empty text
+    assert seen["env"]["error"] is None
+    assert seen["env"]["data"]["files"][0]["hunks"] == [] and seen["env"]["data"]["files"][0]["path"] == "src/Empty.java"

@@ -58,6 +58,29 @@ def test_a_plain_run_shows_its_own_goal(tmp_path):
     assert (row["display_goal"], row["display_goal_source"]) == ("Add a clamp function with tests.", policy.DISPLAY_GOAL_OWN)
 
 
+OTHER_WRAPPERS = ["=== Retry Package ===\nprevious failure ...\n" + ORIGINAL, "  === Milestone 2 of 3 ===\n" + ORIGINAL, "=== Anything At All ===\n" + ORIGINAL]
+
+
+def _fresh(tmp_path, name, rows):
+    folder = tmp_path / name
+    folder.mkdir()
+    return _snapshot(folder, rows)
+
+
+@pytest.mark.parametrize("wrapped", OTHER_WRAPPERS)
+def test_any_section_header_wrapper_is_never_a_title_for_a_plain_row_or_a_linked_row(tmp_path, wrapped):
+    plain = _by_id(history_list(_fresh(tmp_path, "plain", [{"id": "p", "goal": wrapped}]), None, None))["p"]
+    assert plain["display_goal"] is None and plain["display_goal_source"] == policy.DISPLAY_GOAL_UNAVAILABLE
+    linked = _by_id(history_list(_fresh(tmp_path, "linked", [{"id": "u", "goal": COMPILED, "enforce": "e.enforce"}, {"id": "e.enforce", "goal": wrapped}]), None, None))["u"]
+    assert linked["display_goal"] is None
+
+
+@pytest.mark.parametrize("goal", ["Make the === operator strict in the parser", "Fix a === b comparison\nin two places", "=== improve logging in the parser"])
+def test_a_real_request_that_merely_mentions_equals_signs_is_still_a_title(tmp_path, goal):
+    row = _by_id(history_list(_fresh(tmp_path, "real", [{"id": "r", "goal": goal}]), None, None))["r"]
+    assert row["display_goal"] == goal and row["display_goal_source"] == policy.DISPLAY_GOAL_OWN
+
+
 @pytest.mark.parametrize("rows", [
     [{"id": "unit1", "goal": COMPILED, "enforce": "gone.enforce"}],                       # the link points at a row that is not there
     [{"id": "unit1", "goal": COMPILED}],                                                  # a compiled unit goal with no link at all

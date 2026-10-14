@@ -38,6 +38,7 @@ export function FileDiff({ file }: { file: ReviewFile }) {
             })}
           </div>
         ))}
+        {file.hunks.length === 0 ? <div className="muted small" role="note" data-testid="empty-change">This file has no content.</div> : null}
         {file.truncated ? <div className="muted small" role="note">This file is longer than can be shown here; the rest is not displayed.</div> : null}
       </pre>
     </section>
