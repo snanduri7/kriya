@@ -176,3 +176,11 @@ LIMITS = {
     "acquisition_deadline_seconds": ACQUISITION_DEADLINE_SECONDS,
     "busy_timeout_seconds": BUSY_TIMEOUT_SECONDS,
 }
+
+# display_goal (PRODUCT-UX-COMPLETION): the header Kriya's compiled unit prompt starts with. It is used ONLY as a discriminator to WITHHOLD a row's own goal
+# from display when that row is a compiled unit goal with no resolvable link to its original request; the original request is never extracted from it.
+# A test pins this equal to kriya.agents.contracts.AUTHORITATIVE_GOAL_SECTION_HEADER.
+COMPILED_GOAL_HEADER = "=== Authoritative Goal ==="
+DISPLAY_GOAL_OWN = "own"
+DISPLAY_GOAL_ENFORCE_ROW = "enforce_row"
+DISPLAY_GOAL_UNAVAILABLE = "unavailable"

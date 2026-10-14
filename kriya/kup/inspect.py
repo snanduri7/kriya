@@ -175,8 +175,40 @@ def _classify_read_error(error: sqlite3.Error, snapshot: Snapshot) -> SnapshotEr
     return SnapshotError(policy.READ_ONLY_UNAVAILABLE, f"{name}: {error}", policy.DB_STATE_UNREADABLE, snapshot_id=snapshot.snapshot_id)
 
 
-def _row_to_summary(row: sqlite3.Row) -> Dict[str, Any]:
-    return {k: row[k] for k in LIST_COLUMNS}
+def _has_enforce_column(conn: sqlite3.Connection) -> bool:
+    return any(info[1] == "enforce_run_id" for info in conn.execute("PRAGMA table_info(runs)"))
+
+
+def _display_goal(conn: sqlite3.Connection, row: sqlite3.Row, has_enforce: bool, cache: Dict[str, Optional[str]]) -> Tuple[Optional[str], str]:
+    """The ORIGINAL user request for a row, from structured fields only (never by reading prompt text):
+
+    * a row that names an enforce row through ``enforce_run_id`` (a unit of a run) takes that row's ``goal``, which the workflow stores as the original request;
+    * a row with no such link (the terminal ``<run>.enforce`` row, a plain run) takes its own ``goal``, unless that goal is a compiled unit goal (it starts with
+      the compiled-goal header) - then there is no authoritative request to show and the answer is "unavailable", never a guess."""
+    enforce_id = row["enforce_run_id"] if has_enforce else None
+    if enforce_id:
+        if enforce_id not in cache:
+            found = conn.execute("SELECT goal FROM runs WHERE run_id = ?", (enforce_id,)).fetchone()
+            cache[enforce_id] = found[0] if found and isinstance(found[0], str) and found[0].strip() else None
+        goal = cache[enforce_id]
+        if goal is not None and not goal.lstrip().startswith(policy.COMPILED_GOAL_HEADER):
+            return goal, policy.DISPLAY_GOAL_ENFORCE_ROW
+        return None, policy.DISPLAY_GOAL_UNAVAILABLE
+    own = row["goal"]
+    if isinstance(own, str) and own.strip() and not own.lstrip().startswith(policy.COMPILED_GOAL_HEADER):
+        return own, policy.DISPLAY_GOAL_OWN
+    return None, policy.DISPLAY_GOAL_UNAVAILABLE
+
+
+def _row_to_summary(row: sqlite3.Row, display: Optional[Tuple[Optional[str], str]] = None) -> Dict[str, Any]:
+    summary = {k: row[k] for k in LIST_COLUMNS}
+    if display is not None:
+        summary["display_goal"], summary["display_goal_source"] = display
+    return summary
+
+
+def _select_columns(has_enforce: bool, extra: Tuple[str, ...] = ()) -> str:
+    return ", ".join(LIST_COLUMNS + extra + (("enforce_run_id",) if has_enforce else ()))
 
 
 def history_list(snapshot: Snapshot, limit: Optional[int], cursor: Optional[str]) -> Dict[str, Any]:
@@ -190,7 +222,8 @@ def history_list(snapshot: Snapshot, limit: Optional[int], cursor: Optional[str]
         raise _classify_read_error(error, snapshot) from error
     try:
         conn.row_factory = sqlite3.Row
-        cols = ", ".join(LIST_COLUMNS)
+        has_enforce = _has_enforce_column(conn)
+        cols = _select_columns(has_enforce)
         if after is None:
             rows = conn.execute(f"SELECT {cols} FROM runs ORDER BY timestamp DESC, run_id DESC LIMIT ?", (n + 1,)).fetchall()
         else:
@@ -201,11 +234,12 @@ def history_list(snapshot: Snapshot, limit: Optional[int], cursor: Optional[str]
                 rows = conn.execute(
                     f"SELECT {cols} FROM runs WHERE (timestamp < ?) OR (timestamp = ? AND run_id < ?) OR (timestamp IS NULL) "
                     "ORDER BY timestamp DESC, run_id DESC LIMIT ?", (ts, ts, rid, n + 1)).fetchall()
+        goals: Dict[str, Optional[str]] = {}
+        page = [_row_to_summary(r, _display_goal(conn, r, has_enforce, goals)) for r in rows[:n]]
     except sqlite3.Error as error:
         raise _classify_read_error(error, snapshot) from error
     finally:
         conn.close()
-    page = [_row_to_summary(r) for r in rows[:n]]
     next_cursor = encode_cursor(snapshot.snapshot_id, page[-1]["timestamp"], page[-1]["run_id"]) if len(rows) > n and page else None
     return {"runs": page, "next_cursor": next_cursor}
 
@@ -230,14 +264,16 @@ def history_detail(snapshot: Snapshot, run_id: str) -> Dict[str, Any]:
     try:
         conn = connect_read_only(snapshot.db_path)
         conn.row_factory = sqlite3.Row
-        cols = ", ".join(LIST_COLUMNS + DETAIL_TEXT_COLUMNS)
+        has_enforce = _has_enforce_column(conn)
+        cols = _select_columns(has_enforce, DETAIL_TEXT_COLUMNS)
         row = conn.execute(f"SELECT {cols} FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        display = _display_goal(conn, row, has_enforce, {}) if row is not None else None
         conn.close()
     except sqlite3.Error as error:
         raise _classify_read_error(error, snapshot) from error
     if row is None:
         raise SnapshotError(policy.INVALID_REQUEST, f"no run {run_id} in snapshot {snapshot.snapshot_id}", run_id=run_id)
-    summary = _row_to_summary(row)
+    summary = _row_to_summary(row, display)
     fields = {}
     for col in DETAIL_TEXT_COLUMNS:
         raw = row[col]

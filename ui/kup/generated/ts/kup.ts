@@ -272,7 +272,18 @@ export interface RunSummary {
    * Exactly as stored in runs.timestamp; timezone unknown.
    */
   timestamp: string | null;
+  /**
+   * Verbatim stored runs.goal. For a unit row this is the COMPILED unit prompt, not the user's request: show display_goal instead.
+   */
   goal: string | null;
+  /**
+   * The ORIGINAL user request for display, resolved from structured fields only (the run's enforce row via enforce_run_id, or the row's own goal when it is not a compiled unit goal); null when no authoritative request is recorded. Never extracted from prompt text.
+   */
+  display_goal?: string | null;
+  /**
+   * Where display_goal came from.
+   */
+  display_goal_source?: 'own' | 'enforce_row' | 'unavailable';
   duration_sec: number | null;
   attempts: number | null;
   /**

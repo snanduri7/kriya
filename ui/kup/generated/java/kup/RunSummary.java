@@ -13,6 +13,8 @@ public class RunSummary {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private Long attempts;
+    private String displayGoal;
+    private DisplayGoalSource displayGoalSource;
     private Double durationsec;
     private String failureCategory;
     private String filesModified;
@@ -28,6 +30,24 @@ public class RunSummary {
     public Long getAttempts() { return attempts; }
     @JsonProperty("attempts")
     public void setAttempts(Long value) { this.attempts = value; }
+
+    /**
+     * The ORIGINAL user request for display, resolved from structured fields only (the run's
+     * enforce row via enforce_run_id, or the row's own goal when it is not a compiled unit
+     * goal); null when no authoritative request is recorded. Never extracted from prompt text.
+     */
+    @JsonProperty("display_goal")
+    public String getDisplayGoal() { return displayGoal; }
+    @JsonProperty("display_goal")
+    public void setDisplayGoal(String value) { this.displayGoal = value; }
+
+    /**
+     * Where display_goal came from.
+     */
+    @JsonProperty("display_goal_source")
+    public DisplayGoalSource getDisplayGoalSource() { return displayGoalSource; }
+    @JsonProperty("display_goal_source")
+    public void setDisplayGoalSource(DisplayGoalSource value) { this.displayGoalSource = value; }
 
     @JsonProperty("duration_sec")
     public Double getDurationsec() { return durationsec; }
@@ -47,6 +67,10 @@ public class RunSummary {
     @JsonProperty("files_modified")
     public void setFilesModified(String value) { this.filesModified = value; }
 
+    /**
+     * Verbatim stored runs.goal. For a unit row this is the COMPILED unit prompt, not the
+     * user's request: show display_goal instead.
+     */
     @JsonProperty("goal")
     public String getGoal() { return goal; }
     @JsonProperty("goal")
