@@ -337,13 +337,13 @@ async function confirmConfigurationApproval(workspace: string): Promise<boolean>
 }
 
 /**
- * The human commitment for a runtime-command approval: a native confirmation created HERE, in the main process, as a sheet on the application window. Its text is a constant
- * (runtime_command_host.ts): no command, directory, fingerprint or renderer string enters it. Cancel is the default and the Escape action; only `Run Commands` returns true.
+ * The human commitment for a runtime-command approval: a native confirmation created HERE, in the main process, as a sheet on the application window. Its text is the owner-approved
+ * sentences plus the first commands as KRIYA recorded and re-proved them (runtime_command_host.ts): no directory, fingerprint or renderer string enters it. Cancel is the default and the Escape action; only `Run Commands` returns true.
  * An evidence build driven by the capture driver answers from the same scripted queue as the configuration confirmation; an exhausted or absent queue means Cancel.
  */
-async function confirmRuntimeCommands(): Promise<boolean> {
+async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>): Promise<boolean> {
   if (dev?.captureActive) return dev.nextConfirmation();
-  const options = runtimeConfirmationDialog();
+  const options = runtimeConfirmationDialog(commands);
   const parent = ownedWindow && !ownedWindow.isDestroyed() ? ownedWindow : null;
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
   return isRunResponse(result.response);

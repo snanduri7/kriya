@@ -7,7 +7,7 @@
  * - for an APPROVE - re-proves the pending subject through Kriya (`runtime_command.review`) before anything else happens: still verified, the same review and fingerprint, still PENDING,
  * a non-empty recorded command set. If Kriya cannot prove it, there is NO confirmation and NOTHING is sent (a stale or altered subject is never put in front of the person).
  *
- * The human commitment is HERE, in the main process: after the proof and before Kriya is asked, `confirm` shows a native confirmation whose text is FIXED - it carries no command, no
+ * The human commitment is HERE, in the main process: after the proof and before Kriya is asked, `confirm` shows a native confirmation whose text is the owner-approved sentences plus the first commands as KRIYA proved them - it carries no
  * directory, no fingerprint, no environment value and no renderer-supplied string. The renderer review shows the commands; this confirmation is the commitment.
  *   - Native CANCEL is "no decision yet": nothing is sent, the review stays PENDING in Kriya (it waits for its own expiry), and the renderer returns to the review.
  *   - The renderer's REJECT is the explicit refusal: no confirmation, Kriya's decision action with reject.
@@ -27,11 +27,22 @@ export type DecideRuntimeCommandResult = DecideApprovalResult;
 export const CONFIRM_BUTTONS = ['Cancel', 'Run Commands'] as const;
 export const CONFIRM_RUN_INDEX = 1;
 export interface ConfirmationDialog { type: 'question'; title: string; message: string; detail: string; buttons: string[]; defaultId: number; cancelId: number; noLink: true }
-/** The whole text of the native confirmation. It is a constant: nothing the renderer or the review record holds can enter it. */
-export function confirmationDialog(): ConfirmationDialog {
+export const DIALOG_COMMANDS_MAX = 3;
+const DIALOG_COMMAND_CHARS = 100;
+/** One command for the native sheet: arguments joined, control and bidi characters removed, bounded. */
+export function dialogCommandLine(argv: readonly string[]): string {
+  // eslint-disable-next-line no-control-regex -- control and bidi-override characters are exactly what is removed
+  const line = argv.join(' ').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+  return line.length > DIALOG_COMMAND_CHARS ? `${line.slice(0, DIALOG_COMMAND_CHARS - 1)}…` : line;
+}
+/** The text of the native confirmation: the owner-approved sentences, then the first commands exactly as KRIYA recorded and re-proved them (never anything the renderer sent), so the person
+ * confirms what the application itself shows them, not only what the page claims. */
+export function confirmationDialog(commands: ReadonlyArray<readonly string[]> = []): ConfirmationDialog {
+  const shown = commands.slice(0, DIALOG_COMMANDS_MAX).map((c, i) => `${i + 1}. ${dialogCommandLine(c)}`);
+  const more = commands.length > DIALOG_COMMANDS_MAX ? [`…and ${commands.length - DIALOG_COMMANDS_MAX} more`] : [];
   return {
     type: 'question', title: 'Run Verification Commands', message: 'Allow Kriya to run the reviewed verification commands?',
-    detail: 'Kriya will run the commands you reviewed in its isolated worktree to verify the application.',
+    detail: ['Kriya will run the commands you reviewed in its isolated worktree to verify the application.', ...(shown.length ? ['', ...shown, ...more] : [])].join('\n'),
     buttons: [...CONFIRM_BUTTONS], defaultId: 0, cancelId: 0, noLink: true,
   };
 }
@@ -43,8 +54,8 @@ export interface RuntimeCommandDeps {
   prepare(): Prepared | null;
   /** Kriya's `runtime_command.review` envelope for one review (the exact recorded command set, re-proved against its fingerprint). */
   reviewable(workspace: string, launchId: string, reviewId: string): Promise<unknown>;
-  /** The native confirmation (main process). Resolves true only when the person pressed `Run Commands`. It is given no argument: its text is fixed. */
-  confirm(): Promise<boolean>;
+  /** The native confirmation (main process). Resolves true only when the person pressed `Run Commands`. It is given the command set Kriya's own envelope proved (never the renderer's). */
+  confirm(commands: ReadonlyArray<readonly string[]>): Promise<boolean>;
   currentWorkspace(): string | null;
   log?(line: string): void;
 }
@@ -53,6 +64,11 @@ const TIMEOUT_MS = 30_000;
 const refused = (code: string, message: string): DecideRuntimeCommandResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
 const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 function isObject(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
+
+/** The command set of an envelope that `commandsAreReviewable` accepted (empty otherwise). */
+export function reviewedCommands(envelope: unknown): ReadonlyArray<readonly string[]> {
+  return isObject(envelope) && isObject(envelope.data) && Array.isArray(envelope.data.commands) ? (envelope.data.commands as string[][]) : [];
+}
 
 /** True only for an answer that proves THIS review's exact command set: no error, verified, same review id and fingerprint, still PENDING, a non-empty well-formed command list. */
 export function commandsAreReviewable(envelope: unknown, reviewId: string, fingerprint: string): boolean {
@@ -83,15 +99,18 @@ export class RuntimeCommandHost {
     try {
       if (request.value.decision === 'approve') {
         let proved = false;
+        let commands: ReadonlyArray<readonly string[]> = [];
         try {
-          proved = commandsAreReviewable(await this.deps.reviewable(workspace, request.value.launch_id, request.value.review_id), request.value.review_id, request.value.command_fingerprint);
+          const envelope = await this.deps.reviewable(workspace, request.value.launch_id, request.value.review_id);
+          proved = commandsAreReviewable(envelope, request.value.review_id, request.value.command_fingerprint);
+          if (proved) commands = reviewedCommands(envelope);
         } catch (error) {
           this.deps.log?.(`runtime_command.review: ${error instanceof Error ? error.message : String(error)}`);
         }
         if (!proved) return refused('COMMAND_NOT_REVIEWABLE', 'Kriya could not confirm the exact commands that are waiting for your decision, so nothing was sent. Review the request again, or reject it.');
         let confirmed: boolean;
         try {
-          confirmed = await this.deps.confirm();
+          confirmed = await this.deps.confirm(commands);
         } catch (error) {
           this.deps.log?.(`runtime-command confirmation: ${error instanceof Error ? error.message : String(error)}`);
           return refused('HOST_ERROR', 'The confirmation could not be shown; nothing was sent');

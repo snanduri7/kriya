@@ -132,7 +132,7 @@ describe('New Project, notification and settings guards never throw and accept o
       if (r.shown) { expect(raw).toMatchObject({ launch_id: LID }); expect((NOTIFY_KINDS as readonly string[]).includes((raw as { kind: string }).kind)).toBe(true); }
     }
     expect(shown.length).toBeGreaterThan(0);
-    for (const text of shown) expect(text).toMatch(/^Kriya (needs your approval|run finished|run did not finish successfully)\|/);
+    for (const text of shown) expect(text).toMatch(/^Kriya (needs your approval|needs your permission|run finished|run did not finish successfully)\|/);
   });
   it('rendererMayWrite: no input combination lets the cockpit renderer write a host-owned setting', async () => {
     const { rendererMayWrite, validateSettingKey: key, validateSettingValue: val, HOST_OWNED_SETTINGS } = await import('../src/main/ipc_contract');

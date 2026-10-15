@@ -185,8 +185,8 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     expect(read(join(MAIN, 'preload.ts'))).toContain('decideRuntimeCommand: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideRuntimeCommand, request)');
     expect(read(join(MAIN, 'ipc_contract.ts'))).toContain("Object.keys(v).sort().join() !== 'command_fingerprint,decision,launch_id,review_id,workspace'");
     // the native text is fixed in main: the confirmation function takes no argument and builds the dialog from the constant
-    expect(mainTs).toContain('async function confirmRuntimeCommands(): Promise<boolean>');
-    expect(mainTs).toContain('const options = runtimeConfirmationDialog();');
+    expect(mainTs).toContain('async function confirmRuntimeCommands(commands: ReadonlyArray<readonly string[]>): Promise<boolean>');
+    expect(mainTs).toContain('const options = runtimeConfirmationDialog(commands);');
   });
   it('the launch id is minted in main and never accepted from the renderer', () => {
     expect(mainTs).toContain('mintLaunchId,');

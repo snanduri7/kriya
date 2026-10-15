@@ -3,7 +3,7 @@
  * WILL and WILL NOT send, and the order: validate -> open workspace -> re-prove the pending subject -> native confirmation -> Kriya. Controlled executors only.
  */
 import { describe, expect, it } from 'vitest';
-import { RuntimeCommandHost, commandsAreReviewable, confirmationDialog, isRunResponse, CONFIRM_BUTTONS, CONFIRM_RUN_INDEX, type RuntimeCommandDeps } from '../src/main/runtime_command_host';
+import { DIALOG_COMMANDS_MAX, RuntimeCommandHost, commandsAreReviewable, confirmationDialog, dialogCommandLine, isRunResponse, CONFIRM_BUTTONS, CONFIRM_RUN_INDEX, type RuntimeCommandDeps } from '../src/main/runtime_command_host';
 import type { ApprovalRun } from '../src/main/approval_host';
 import { buildRuntimeCommandDecisionArgv } from '../src/main/kriya_argv';
 import { IPC_CHANNELS } from '../src/main/ipc_contract';
@@ -24,7 +24,7 @@ function harness(over: Partial<RuntimeCommandDeps> = {}, answer: ApprovalRun | (
     run: async (options) => { order.push('run'); calls.push(options); return typeof answer === 'function' ? answer() : answer; },
     prepare: () => ({ ok: true, executable: '/opt/kriya/.venv/bin/kriya', env: { HOME: '/Users/x', PATH: '/usr/bin:/bin' } }),
     reviewable: async () => { order.push('prove'); return SUBJECT; },
-    confirm: async () => { order.push('confirm'); shown += 1; return true; },
+    confirm: async (_commands) => { order.push('confirm'); shown += 1; return true; },
     currentWorkspace: () => WS, ...over,
   };
   return { host: new RuntimeCommandHost(deps), calls, order, shown: () => shown };
@@ -42,8 +42,8 @@ describe('the runtime-command decision command line', () => {
   });
 });
 
-describe('the native confirmation text is a constant', () => {
-  it('is the owner-approved wording, Cancel first/default/escape, and carries nothing from a review', () => {
+describe('the native confirmation text: owner-approved sentences plus only what Kriya proved', () => {
+  it('is the owner-approved wording, Cancel first/default/escape, and with no commands carries nothing from a review', () => {
     const d = confirmationDialog();
     expect(d.title).toBe('Run Verification Commands');
     expect(d.message).toBe('Allow Kriya to run the reviewed verification commands?');
@@ -51,9 +51,28 @@ describe('the native confirmation text is a constant', () => {
     expect(d.buttons).toEqual(['Cancel', 'Run Commands']);
     expect([d.defaultId, d.cancelId]).toEqual([0, 0]);
     expect(CONFIRM_BUTTONS[CONFIRM_RUN_INDEX]).toBe('Run Commands');
-    expect(confirmationDialog.length).toBe(0); // takes no argument: nothing can enter the text
     expect(isRunResponse(1)).toBe(true);
     for (const r of [0, 2, -1]) expect(isRunResponse(r)).toBe(false);
+  });
+});
+
+describe('the native confirmation shows the first commands exactly as KRIYA proved them (independent review I2)', () => {
+  it('lists up to three, numbered, strips control/bidi characters, bounds long lines and counts the rest', () => {
+    const d = confirmationDialog([['mvn', '-q', 'package'], ['java', '-cp', 'target/classes', 'App'], ['echo', 'a\u202eb\u0000c'], ['x'], ['y']]);
+    expect(d.detail.split('\n')).toEqual(['Kriya will run the commands you reviewed in its isolated worktree to verify the application.', '', '1. mvn -q package', '2. java -cp target/classes App', '3. echo a b c', '…and 2 more']);
+    expect(d.detail).not.toMatch(/\u202e|\u0000/);
+    expect(dialogCommandLine(['x'.repeat(500)]).length).toBe(100);
+    expect(DIALOG_COMMANDS_MAX).toBe(3);
+    expect(d.title).toBe('Run Verification Commands');
+  });
+  it('the host hands the dialog the commands of KRIYA\'s envelope, never anything the renderer put in the request', async () => {
+    const seen: Array<ReadonlyArray<readonly string[]>> = [];
+    const { host } = harness({ confirm: async (commands) => { seen.push(commands); return false; } });
+    await host.decide(good());
+    expect(seen).toEqual([SUBJECT.data.commands]);
+    const forged = harness({ confirm: async (commands) => { seen.push(commands); return false; } });
+    await forged.host.decide(good({ commands: [['rm', '-rf', '/']] }));   // refused by the grammar before any dialog
+    expect(seen).toHaveLength(1);
   });
 });
 
