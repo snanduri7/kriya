@@ -1,4 +1,5 @@
-import { ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { useState } from 'react';
+import { ActivityDrawer, ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -119,6 +120,7 @@ export function CurrentRun() {
   const dispatch = useDispatch();
   const go = useNavigate();
   const run = ex.run;
+  const [activityOpen, setActivityOpen] = useState(false);
   const desktop = useProvider().desktop;
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
@@ -174,7 +176,9 @@ export function CurrentRun() {
       </details>
       {run.progress.error ? <div className="muted small" role="note">Live records could not be read: {run.progress.error}</div> : null}
       {run.statusError ? <div className="muted small" role="alert">Launch status unreadable: {run.statusError.code}: {run.statusError.message}</div> : null}
+      {activityOpen ? <ActivityDrawer launchId={run.launchId} onClose={() => setActivityOpen(false)} /> : null}
       <div className="ck-current-actions">
+        {!activityOpen ? <button type="button" className="ck-quiet" onClick={() => setActivityOpen(true)}>Show Activity</button> : null}
         {finished ? (
           <>
             {phase.state === 'COMPLETED' && openProject ? <button type="button" onClick={openProject}>Open Project</button> : null}

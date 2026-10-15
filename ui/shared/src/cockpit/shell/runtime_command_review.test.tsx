@@ -245,6 +245,31 @@ describe('a run that could not even start runtime verification says so in words 
   });
 });
 
+describe('Activity drawer: recorded facts, in words, for the run being followed', () => {
+  it('Show Activity opens it on Activity (default); it names the waiting subject, then the decision; Build and Tests list only recorded results; there is no Technical Log tab', async () => {
+    const { host, bar } = await reachRuntimeReview();
+    await commands();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Show Activity' }));
+    const drawer = await within(bar).findByTestId('activity-drawer');
+    expect(within(drawer).getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(drawer).queryByRole('tab', { name: /Technical Log/i })).toBeNull();
+    expect(within(drawer).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Activity', 'Build', 'Tests']);
+    const list = await within(drawer).findByTestId('activity-list');
+    await waitFor(() => expect(list.textContent).toContain('Waiting for permission to run commands'));
+    expect(list.textContent).toContain('Run started');
+    expect(list.textContent).not.toMatch(/Commands allowed|Planning|Preparing runtime|Running application/);
+    fireEvent.click(within(card(bar)).getByRole('button', { name: CONTINUE }));
+    await waitFor(() => expect(host.exec!.runtimeDecisions).toHaveLength(1));
+    await waitFor(() => expect(within(drawer).getByTestId('activity-list').textContent).toContain('Commands allowed'));
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Build' }));
+    expect(await within(drawer).findByLabelText('Build results')).toHaveTextContent('✓ Build passed');   // a RECORDED compile gate of the run's evidence
+    fireEvent.click(within(drawer).getByRole('tab', { name: 'Tests' }));
+    expect(await within(drawer).findByLabelText('Test results')).toHaveTextContent(/Tests passed/);
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Hide Activity' }));
+    expect(within(bar).queryByTestId('activity-drawer')).toBeNull();
+  });
+});
+
 describe('the pure rules', () => {
   const pending = (kind: 'change_approval' | 'runtime_command', status = 'PENDING') => ({ launch: { phase: 'RUNNING', pending_approval: { kind, status } }, liveness: 'live' }) as unknown as LaunchStatus;
   it('activeRuntimeCommandReview and activeReview never return each other\'s kind, nor a decided/expired/ended review', () => {

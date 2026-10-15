@@ -13,6 +13,8 @@ export * from './runFacts';
 export * from './elapsed';
 export * from './runFactsHooks';
 export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalReview';
+export { ActivityDrawer } from './ActivityDrawer';
+export { activityEntries, activityFromLaunch, activityFromRecords, resultsFromRecords, type ActivityEntry } from './activity';
 export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, displayArg } from './RuntimeCommandReview';
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
