@@ -1,4 +1,4 @@
-import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, overallRequestLine, withOverallRequest, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
+import { AvailabilityView, ApplicationResult, CopyText, HumanTimeline, KeyValue, Panel, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, primaryVerification, changeFacts, changeSummary, goalTitle, hasData, humanTimeline, ofKind, payloadOf, useRunContext, useRunDetail, useRunEvidence, validationFacts, verificationGroups, type ChangedFile, type ModuleDefinition } from '../../core';
 
 const OUTCOME = { success: { mark: '✓', words: 'Run completed' }, failure: { mark: '✕', words: 'Run failed' }, in_progress: { mark: '●', words: 'Run not finished' } } as const;
 
@@ -33,9 +33,10 @@ function Overview() {
               <h3>Verification</h3>
               {groups === null ? <p className="muted">The verification results come from this run&apos;s evidence, which is not readable here.</p>
                 : groups.groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p>
-                : <VerificationLines lines={withOverallRequest(groups.groups.flatMap((g) => g.lines), overallRequestLine(groups.technical))} />}
+                : <VerificationLines lines={primaryVerification(groups.technical)} />}
 
               {app ? <ApplicationResult app={app} /> : null}
+              {groups ? <FormalRequirementDisclosure status={formalRequirementStatus(groups.technical)} /> : null}
 
               <h3>What happened</h3>
               <HumanTimeline entries={humanTimeline(events, ctx.status)} />

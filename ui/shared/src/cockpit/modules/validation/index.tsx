@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AvailabilityView, Badge, KeyValue, Panel, TrustList, VerificationLines, overallRequestLine, attemptFor, changeFacts, firstFailedGate, gateRows, hasData, useDispatch, useModuleSelection, useRunContext, useRunDetail, useRunEvidence, userEvidence, validationFacts, verificationGroups, type GateRow, type ModuleDefinition } from '../../core';
+import { AvailabilityView, Badge, KeyValue, Panel, TrustList, VerificationLines, FormalRequirementDisclosure, formalRequirementStatus, attemptFor, changeFacts, firstFailedGate, gateRows, hasData, useDispatch, useModuleSelection, useRunContext, useRunDetail, useRunEvidence, userEvidence, validationFacts, verificationGroups, type GateRow, type ModuleDefinition } from '../../core';
 
 /** Explicit DISPLAY mapping only: the recorded type is always shown beside the friendly label, and an unmapped type is shown as recorded. */
 const LABELS: Readonly<Record<string, string>> = {
@@ -71,7 +71,7 @@ function UserLayer() {
         {groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p> : groups.map((g) => (
           <div key={g.id}><div className="muted small ck-group-title">{g.title}</div><VerificationLines lines={g.lines} label={g.title} /></div>
         ))}
-        {groups.length > 0 && overallRequestLine(gates) ? <VerificationLines lines={[overallRequestLine(gates)!]} label="Overall request" /> : null}
+        {groups.length > 0 ? <FormalRequirementDisclosure status={formalRequirementStatus(gates)} /> : null}
       </section>
       <section aria-label="Why you can trust this result">
         <h3>Why you can trust this result</h3>

@@ -175,9 +175,15 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     expect(changed.textContent).toMatch(/\+\d+ −\d+/);
     const verification = await within(run).findByLabelText('Verification', undefined, { timeout: 4000 });
     expect(verification.textContent).toMatch(/passed/);
-    // Demo V2 (owner decision on the requirement ledger): passed build/tests are not closure of the whole request; no recorded run-level verification means it says so, and never "Requested behavior verified".
-    expect(verification.textContent).toMatch(/Overall request: not fully verified/);
-    expect(verification.textContent).not.toMatch(/Requested behavior verified/);
+    // Demo V2 (owner decisions on the requirement ledger): passed build/tests are not closure of the whole request, and "Requested behavior verified" is never claimed without a recorded positive verification.
+    // The ledger fact is real but it is not a peer warning beside Build / Tests: it is under its own disclosure.
+    expect(verification.textContent).not.toMatch(/Overall request|ledger|Requested behavior verified/);
+    const formal = within(run).getByTestId('formal-requirements');
+    expect(formal.tagName).toBe('DETAILS');
+    expect((formal as HTMLDetailsElement).open).toBe(false);
+    expect(within(formal).getByText('Formal requirement verification')).toBeInTheDocument();
+    expect(formal.textContent).toMatch(/Requirement ledger: not fully verified/);
+    expect(formal.textContent).not.toMatch(/Requested behavior verified/);
     for (const name of ['View Changes', 'View Verification', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
     expect(within(run).getByText('✓ Your change was applied successfully.')).toBeInTheDocument(); // said in plain words, from the RunRecord's COMMITTED
     expect(run.querySelector('.ck-outcome')!.textContent).not.toMatch(/NO_COMMIT|commit COMMITTED|RunRecord/); // no raw code or internal source name on the outcome card itself (they are under Technical status)

@@ -3,7 +3,7 @@
  * review/decision timestamps. Every line is backed by a record; there is no line for "Planning", "Preparing runtime verification" or any milestone no record carries - a gap in the list is a
  * gap in the records, never filled in. Pure: the drawer reads, this maps.
  */
-import { gateRows } from './selectors';
+import { gateSteps } from './gateSteps';
 import { payloadOf, type EvidenceRecord } from './records';
 import { attemptRejections } from './retryFacts';
 import type { LaunchStatus } from '../../model/kup';
@@ -11,7 +11,6 @@ import type { LaunchStatus } from '../../model/kup';
 export type ActivityTone = 'info' | 'ok' | 'bad' | 'wait';
 export interface ActivityEntry { key: string; text: string; tone: ActivityTone; /** The record's own wall time (ISO), when it carries one. */ at: string | null; /** The record kind or launch field this line is backed by (shown only under technical details). */ source: string }
 
-const TEST_GATES = new Set(['test', 'tests', 'targeted_test', 'regression_test']);
 const wall = (r: EvidenceRecord): string | null => { const t = (r as { t_wall?: unknown }).t_wall; return typeof t === 'string' ? t : null; };
 
 /** The evidence records as activity lines, in record order. Repeated consecutive "creating files" records are one line. */
@@ -21,6 +20,7 @@ export function activityFromRecords(records: readonly EvidenceRecord[]): Activit
   const push = (r: EvidenceRecord, text: string, tone: ActivityTone, suffix = '') => out.push({ key: `r${r.seq}${suffix}`, text, tone, at: wall(r), source: r.kind });
   // The first failed gate of each attempt is the attempt's rejection (Demo V2): what it was rejected for, from the recorded gate type only; a delivery failure also says which earlier finding is still open.
   const rejectionAt = new Map(attemptRejections(records).map((x) => [x.seq, x]));
+  const stepAt = new Map(gateSteps(records).map((x) => [x.seq, x]));
   for (const r of [...records].sort((a, b) => a.seq - b.seq)) {
     const p = payloadOf(r);
     switch (r.kind) {
@@ -29,15 +29,17 @@ export function activityFromRecords(records: readonly EvidenceRecord[]): Activit
       case 'candidate.change': if (lastKind !== 'candidate.change') push(r, 'Creating project files', 'info'); break;
       case 'gate.result':
       case 'mirror.gate_outcome': {
-        const row = gateRows([r])[0];
-        if (!row || row.origin === 'terminal') break;
-        const ok = row.success;
-        if (row.type === 'compile') push(r, ok === true ? 'Build passed' : ok === false ? 'Build failed' : 'Building', ok === false ? 'bad' : ok === true ? 'ok' : 'info');
-        else if (TEST_GATES.has(row.type)) {
-          const cases = row.testSummary && typeof row.testSummary.cases === 'number' ? row.testSummary.cases : null;
-          push(r, ok === true ? (cases === 0 ? 'No tests ran' : cases !== null ? `Tests passed (${cases} test${cases === 1 ? '' : 's'})` : 'Tests passed') : ok === false ? 'Tests failed' : 'Running tests', ok === false ? 'bad' : ok === true && cases !== 0 ? 'ok' : 'info');
-        } else if (row.type === 'run_verification' || row.type === 'run_verification_hung') push(r, ok === true ? 'Runtime verification passed' : 'Runtime verification failed', ok === true ? 'ok' : 'bad');
-        const rejection = rejectionAt.get(r.seq);
+        // A gate is ONE line: its validator result and workflow outcome are one step (gateSteps); only the step's first record speaks, the rest are the same check.
+        const step = stepAt.get(r.seq);
+        if (!step || step.folded) break;
+        const ok = step.success;
+        if (step.family === 'build') push(r, ok === true ? 'Build passed' : ok === false ? 'Build failed' : 'Building', ok === false ? 'bad' : ok === true ? 'ok' : 'info');
+        else if (step.family === 'tests') {
+          const cases = step.testSummary && typeof step.testSummary.cases === 'number' ? step.testSummary.cases : null;
+          const noun = step.type === 'regression_test' ? 'Regression tests' : 'Tests';
+          push(r, ok === true ? (cases === 0 ? 'No tests ran' : cases !== null ? `${noun} passed (${cases} test${cases === 1 ? '' : 's'})` : `${noun} passed`) : ok === false ? `${noun} failed` : `Running ${noun.toLowerCase()}`, ok === false ? 'bad' : ok === true && cases !== 0 ? 'ok' : 'info');
+        } else if (step.type === 'run_verification' || step.type === 'run_verification_hung' || step.type === 'runtime_verification') push(r, ok === true ? 'Runtime verification passed' : ok === false ? 'Runtime verification failed' : 'Running the application', ok === true ? 'ok' : ok === false ? 'bad' : 'info');
+        const rejection = step.sources.map((s) => rejectionAt.get(s)).find((x) => x !== undefined);
         if (rejection) {
           push(r, `Attempt ${rejection.attempt} rejected`, 'bad', ':rejected');
           if (rejection.words) push(r, rejection.words, 'info', ':why');
@@ -89,10 +91,10 @@ export function activityEntries(records: readonly EvidenceRecord[], status: Laun
 export interface RecordedResult { key: string; text: string; ok: boolean | null; attempt: number | null }
 /** The recorded results of one gate family, newest last: what the Build and Tests tabs list. */
 export function resultsFromRecords(records: readonly EvidenceRecord[], family: 'build' | 'tests'): RecordedResult[] {
-  return gateRows(records).filter((g) => g.origin !== 'terminal' && (family === 'build' ? g.type === 'compile' : TEST_GATES.has(g.type))).map((g) => {
+  return gateSteps(records).filter((g) => !g.folded && g.family === (family === 'build' ? 'build' : 'tests')).map((g) => {
     const cases = g.testSummary && typeof g.testSummary.cases === 'number' ? g.testSummary.cases : null;
     const word = family === 'build' ? (g.success === true ? 'Build passed' : g.success === false ? 'Build failed' : 'Build: no result recorded')
-      : g.success === true ? (cases === 0 ? 'No tests ran' : cases !== null ? `Tests passed (${cases} test${cases === 1 ? '' : 's'})` : 'Tests passed') : g.success === false ? 'Tests failed' : 'Tests: no result recorded';
+      : g.success === true ? (cases === 0 ? 'No tests ran' : cases !== null ? `${g.type === 'regression_test' ? 'Regression tests' : 'Tests'} passed (${cases} test${cases === 1 ? '' : 's'})` : 'Tests passed') : g.success === false ? 'Tests failed' : 'Tests: no result recorded';
     return { key: `g${g.seq}`, text: word, ok: cases === 0 ? null : g.success, attempt: g.attempt };
   });
 }

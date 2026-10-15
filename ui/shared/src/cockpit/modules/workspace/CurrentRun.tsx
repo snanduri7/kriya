@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, overallRequestLine, verificationGroups, withOverallRequest, type ChangedFile, type RunPhase } from '../../core';
+import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, FormalRequirementDisclosure, TechnicalVerification, formalRequirementStatus, primaryVerification, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -63,16 +63,12 @@ function Completed({ phase }: { phase: RunPhase }) {
       <h3>Verification</h3>
       {groups === null ? <p className="muted" role="status">{reading('results')}</p>
         : groups.groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p>
-        : <VerificationLines lines={withOverallRequest(groups.groups.flatMap((g) => g.lines), overallRequestLine(groups.technical))} />}
+        : <VerificationLines lines={primaryVerification(groups.technical)} />}
 
       {app ? <ApplicationResult app={app} /> : null}
 
-      {groups && groups.technical.length ? (
-        <details className="ck-tech">
-          <summary>Technical verification</summary>
-          <ul aria-label="Technical verification">{groups.technical.map((g, i) => <li key={`${g.type}${i}`} className="mono small">{g.passed === true ? '✓' : g.passed === false ? '✕' : '•'} {g.type}</li>)}</ul>
-        </details>
-      ) : null}
+      {groups ? <FormalRequirementDisclosure status={formalRequirementStatus(groups.technical)} /> : null}
+      {groups ? <TechnicalVerification gates={groups.technical} /> : null}
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
       {phase.state === 'COMPLETED' && review && review.files.length ? (
         <details className="ck-tech"><summary>The approved change</summary>{review.files.map((f) => <FileDiff key={f.path} file={f} />)}</details>

@@ -59,14 +59,17 @@ export function runCard(run: Pick<RunSummary, 'display_goal' | 'status' | 'durat
 
 // ------------------------------------------------------------------ verification, in meaning
 
-export type GroupId = 'build' | 'tests' | 'behavior' | 'safety';
+export type GroupId = 'build' | 'tests' | 'runtime' | 'behavior' | 'safety';
 export type GroupStatus = 'passed' | 'failed' | 'unknown';
-export interface VerificationLine { text: string; status: GroupStatus; /** The exact recorded gate types behind this line (technical layer). */ gates: string[] }
+export interface VerificationLine { text: string; status: GroupStatus; /** The exact recorded gate types behind this line (technical layer). */ gates: string[]; /** Which line of the closed table this is (build, tests, runtime, planned, behavior, preserved, safety); absent on the free-standing lines. */ line?: string }
 export interface VerificationGroup { id: GroupId; title: string; status: GroupStatus; lines: VerificationLine[] }
 
 /** Recorded gate type -> the meaning group and the line it supports. A gate type NOT listed here is never shown in the groups: it stays under Technical verification. */
 const MAPPING: Record<string, { group: GroupId; line: string }> = {
   compile: { group: 'build', line: 'build' },
+  // The runtime check records its process facts (`runtime_verification`, a validator result) and the workflow's outcome (`run_verification`, which the grading model also speaks to). The line passes only
+  // when EVERY recorded side passed: the grader can withhold a pass, never create one.
+  runtime_verification: { group: 'runtime', line: 'runtime' }, run_verification: { group: 'runtime', line: 'runtime' }, run_verification_hung: { group: 'runtime', line: 'runtime' },
   test: { group: 'tests', line: 'tests' }, tests: { group: 'tests', line: 'tests' }, targeted_test: { group: 'tests', line: 'tests' }, regression_test: { group: 'tests', line: 'tests' },
   // `goal_spec_compliance` is a PER-UNIT model judgment about one planned step's files; it is never the whole goal's verdict. Only `original_requirements` - recorded by the terminal gate over the
   // ORIGINAL request, after every unit - may say the requested behavior was verified.
@@ -74,9 +77,9 @@ const MAPPING: Record<string, { group: GroupId; line: string }> = {
   preserved_references: { group: 'safety', line: 'preserved' },
   static_analysis: { group: 'safety', line: 'safety' }, semantic_safety: { group: 'safety', line: 'safety' }, stack_contract: { group: 'safety', line: 'safety' },
 };
-const GROUP_ORDER: GroupId[] = ['build', 'tests', 'behavior', 'safety'];
-const GROUP_TITLE: Record<GroupId, string> = { build: 'Build', tests: 'Tests', behavior: 'Requested behavior', safety: 'Regression and safety' };
-const LINE_ORDER = ['build', 'tests', 'planned', 'behavior', 'preserved', 'safety'];
+const GROUP_ORDER: GroupId[] = ['build', 'tests', 'runtime', 'behavior', 'safety'];
+const GROUP_TITLE: Record<GroupId, string> = { build: 'Build', tests: 'Tests', runtime: 'Runtime verification', behavior: 'Requested behavior', safety: 'Regression and safety' };
+const LINE_ORDER = ['build', 'tests', 'runtime', 'planned', 'behavior', 'preserved', 'safety'];
 
 /** The recorded test count behind a tests line, when the recorder persisted one. Zero cases is NOT a pass: nothing was verified by tests. */
 const countedTests = (gates: readonly GateFact[]) => gates.find((g) => g.tests !== null)?.tests ?? null;
@@ -95,6 +98,7 @@ function lineText(line: string, s: GroupStatus, gates: readonly GateFact[]): str
     if (s === 'passed') return counted === null ? 'Tests passed' : counted.passed !== null ? `${detail} passed` : `Tests passed (${detail})`;
     return s === 'failed' ? (counted !== null && counted.passed !== null ? `Tests failed (${detail} passed)` : 'Tests failed') : 'Tests: no result recorded';
   }
+  if (line === 'runtime') return s === 'passed' ? 'Runtime verification passed' : s === 'failed' ? 'Runtime verification failed' : 'Runtime verification: no result recorded';
   if (line === 'planned') return s === 'passed' ? 'Matches the planned change' : s === 'failed' ? 'Does not match the planned change' : 'Planned change: no result recorded';
   if (line === 'behavior') return s === 'passed' ? (gates.some((g) => g.type === 'original_requirements' && g.requirementsVerified === true) ? 'Requested behavior verified' : 'No unmet requirement recorded (not every requirement was independently verified)') : s === 'failed' ? 'Requested behavior not verified' : 'Requested behavior: no result recorded';
   if (line === 'preserved') return s === 'passed' ? 'Existing behavior preserved' : s === 'failed' ? 'Existing behavior not preserved' : 'Existing behavior: no result recorded';
@@ -120,7 +124,7 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
       // a passed run-level requirements gate that did not positively verify every requirement is not a "verified" claim (independent review B4)
       const notFullyVerified = l === 'behavior' && status(entry.gates) === 'passed' && !entry.gates.some((g) => g.type === 'original_requirements' && g.requirementsVerified === true);
       const s = (noTestsRan || notFullyVerified) && status(entry.gates) !== 'failed' ? 'unknown' : status(entry.gates);
-      return { text: lineText(l, status(entry.gates), entry.gates), status: s, gates: entry.gates.map((g) => g.type) };
+      return { text: lineText(l, status(entry.gates), entry.gates), status: s, gates: entry.gates.map((g) => g.type), line: l };
     });
     if (lines.length === 0) continue;
     groups.push({ id, title: GROUP_TITLE[id], status: lines.some((l) => l.status === 'failed') ? 'failed' : lines.every((l) => l.status === 'passed') ? 'passed' : 'unknown', lines });
@@ -128,12 +132,37 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
   return { groups, technical: [...gates], unmapped };
 }
 
-/** Demo V2 (owner decision on the requirement ledger): a successful build, test run and execution is not closure of the natural-language goal. On the COMPLETED screen of a run that has verification
- * results but no run-level requirements record, say so: the absence of a verified record is the fact, and "Requested behavior verified" is only ever shown for a recorded positive verification
- * (a recorded requirements gate keeps its own wording above). null when there is nothing to qualify or the run-level record exists. */
-export function overallRequestLine(gates: readonly GateFact[]): VerificationLine | null {
-  if (gates.length === 0 || gates.some((g) => g.type === 'original_requirements')) return null;
-  return { text: 'Overall request: not fully verified', status: 'unknown', gates: [] };
+// ------------------------------------------------------------------ engineering evidence vs. the formal requirement ledger
+
+/** The ledger-related statements are kept out of the primary result list. "What demonstrably happened" (build, tests, runtime, the application's output, the commit) answers whether the application
+ * worked; "which natural-language requirements has Kriya's formal ledger independently closed" is a different question (REQ-LEDGER-RUNTIME-CLOSURE-001), answered under its own disclosure. The two are
+ * never merged and neither is derived from the other: a pending ledger does not demote a passed build, and a passed build does not close the ledger. */
+export interface FormalRequirementStatus {
+  headline: string;
+  explanation: string;
+  /** Statements that are not engineering evidence: the model's own assessment of the planned change, and a run-level requirements gate that did not positively verify every requirement. */
+  notes: VerificationLine[];
+}
+
+/** The verification lines of the primary result: build, tests, runtime verification, safety - and "Requested behavior verified" ONLY when a recorded run-level verification says so (or a failure of it). */
+export function primaryVerification(gates: readonly GateFact[]): VerificationLine[] {
+  return verificationGroups(gates).groups.flatMap((g) => g.lines).filter((l) => !isFormalLine(l));
+}
+const isFormalLine = (l: VerificationLine): boolean => l.line === 'planned' || (l.line === 'behavior' && l.status === 'unknown');
+
+/** The formal requirement status of a run that has verification results. null when there is nothing to qualify (no results), when a recorded run-level requirements verification positively verified
+ * every requirement (its own wording is then in the primary list), or when that verification FAILED (the primary list already says "Requested behavior not verified"). */
+export function formalRequirementStatus(gates: readonly GateFact[]): FormalRequirementStatus | null {
+  if (gates.length === 0) return null;
+  const run = gates.filter((g) => g.type === 'original_requirements');
+  if (run.some((g) => g.passed === false || g.requirementsVerified === true)) return null;
+  const lines = verificationGroups(gates).groups.flatMap((g) => g.lines);
+  const allPassed = lines.filter((l) => !isFormalLine(l)).every((l) => l.status === 'passed');
+  return {
+    headline: 'Requirement ledger: not fully verified',
+    explanation: `${allPassed ? 'Kriya has direct evidence for the checks above. ' : ''}Some natural-language requirements of your request have not been independently closed by Kriya's formal requirement ledger.${allPassed ? ' This is separate from those checks and does not mean anything failed.' : ''}`,
+    notes: lines.filter(isFormalLine),
+  };
 }
 
 /** The recorded checks in one sentence for a compact place (the approval screen, history): only groups with a recorded result, nothing counted that was not recorded. */
@@ -218,7 +247,7 @@ export function humanTimeline(events: readonly RunEvent[], status: string | null
 // ------------------------------------------------------------------ "why should I trust this result?"
 
 export type TrustState = 'ok' | 'bad' | 'unknown';
-export interface TrustItem { category: 'Goal' | 'Change' | 'Build' | 'Tests' | 'Behavior' | 'Safety' | 'Approval' | 'Final result'; text: string; state: TrustState }
+export interface TrustItem { category: 'Goal' | 'Change' | 'Build' | 'Tests' | 'Runtime' | 'Behavior' | 'Safety' | 'Approval' | 'Final result'; text: string; state: TrustState }
 export interface TrustInput {
   displayGoal: string | null;
   filesChanged: number | null;
@@ -235,10 +264,10 @@ export function userEvidence(input: TrustInput): TrustItem[] {
   items.push(input.displayGoal !== null && input.displayGoal.trim() !== '' ? { category: 'Goal', text: 'Original request recorded', state: 'ok' } : { category: 'Goal', text: 'The original request is not recorded for this run', state: 'unknown' });
   items.push(input.filesChanged !== null && input.filesChanged > 0 ? { category: 'Change', text: `${input.filesChanged} file${input.filesChanged === 1 ? '' : 's'} changed`, state: 'ok' } : { category: 'Change', text: 'No file change is recorded', state: 'unknown' });
   const { groups } = verificationGroups(input.gates);
-  const category = { build: 'Build', tests: 'Tests', behavior: 'Behavior', safety: 'Safety' } as const;
+  const category = { build: 'Build', tests: 'Tests', runtime: 'Runtime', behavior: 'Behavior', safety: 'Safety' } as const;
   for (const group of groups) for (const line of group.lines) items.push({ category: category[group.id], text: line.text, state: line.status === 'passed' ? 'ok' : line.status === 'failed' ? 'bad' : 'unknown' });
-  const overall = groups.length > 0 ? overallRequestLine(input.gates) : null;
-  if (overall) items.push({ category: 'Behavior', text: overall.text, state: 'unknown' });
+  const formal = groups.length > 0 ? formalRequirementStatus(input.gates) : null;
+  if (formal) items.push({ category: 'Behavior', text: formal.headline, state: 'unknown' });
   if (input.approval === 'approved') items.push({ category: 'Approval', text: 'You approved the proposed change', state: 'ok' });
   else if (input.approval === 'rejected') items.push({ category: 'Approval', text: 'You rejected the proposed change', state: 'bad' });
   const e = input.evidence;
@@ -290,6 +319,3 @@ export function failureSummary(category: string | null | undefined, commitResult
   if (category === 'quality_gate_failed') return `The change did not pass Kriya's checks (build, tests or verification).${nothingApplied}`;
   return `Kriya could not complete the requested change.${nothingApplied}`;
 }
-
-/** The verification lines of the completed screen, with the overall-request qualification (overallRequestLine) appended when it applies. */
-export const withOverallRequest = (lines: VerificationLine[], overall: VerificationLine | null): VerificationLine[] => (overall === null ? lines : [...lines, overall]);

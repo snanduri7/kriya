@@ -123,7 +123,7 @@ describe('activityText and changeSummary', () => {
   });
 });
 
-import { eventClock, failureSummary, humanTimeline, overallRequestLine, userEvidence, withOverallRequest } from './presentation';
+import { eventClock, failureSummary, formalRequirementStatus, humanTimeline, primaryVerification, userEvidence } from './presentation';
 import type { RunEvent } from '../../model/kup';
 
 const ev = (kind: string, created_at: number, extra: Partial<RunEvent> = {}): RunEvent => ({ kind, created_at, ...extra }) as RunEvent;
@@ -198,30 +198,65 @@ describe('failureSummary: words for a failure, the raw record stays technical', 
   });
 });
 
-describe('overallRequestLine: a passed build is not closure of the whole request (owner decision)', () => {
-  const g = (type: string, passed: boolean | null = true) => gate(type, passed);
-  it('says "not fully verified" when verification results exist but no run-level requirements record does', () => {
-    expect(overallRequestLine([g('compile'), g('test')])).toEqual({ text: 'Overall request: not fully verified', status: 'unknown', gates: [] });
+describe('engineering evidence and the formal requirement ledger are separate questions (owner decision, post-live Demo 00)', () => {
+  const g = (type: string, passed: boolean | null = true, extra: Partial<GateFact> = {}) => ({ ...gate(type, passed), ...extra });
+  const demo00 = [g('compile'), g('tests', true, { tests: { cases: 1, passed: 1 } }), g('runtime_verification'), g('run_verification'), g('goal_spec_compliance')];
+  it('the primary list is build, tests and runtime verification - the formal ledger is not a peer line', () => {
+    expect(primaryVerification(demo00).map((l) => l.text)).toEqual(['Build passed', '1 / 1 tests passed', 'Runtime verification passed']);
+    expect(primaryVerification(demo00).map((l) => l.text).join('|')).not.toMatch(/Overall request|ledger|Requested behavior|planned change/);
   });
-  it('says nothing when there is nothing to qualify, or when the run-level record exists (it speaks for itself)', () => {
-    expect(overallRequestLine([])).toBeNull();
-    expect(overallRequestLine([g('compile'), g('original_requirements')])).toBeNull();
+  it('the formal requirement status says "not fully verified" without implying a failure, and keeps the model-assessed line out of the primary list', () => {
+    const formal = formalRequirementStatus(demo00)!;
+    expect(formal.headline).toBe('Requirement ledger: not fully verified');
+    expect(formal.explanation).toMatch(/direct evidence for the checks above/);
+    expect(formal.explanation).toMatch(/have not been independently closed by Kriya's formal requirement ledger/);
+    expect(formal.explanation).toMatch(/does not mean anything failed/);
+    expect(formal.explanation).not.toMatch(/everything is verified|may not work/i);
+    expect(formal.notes.map((l) => l.text)).toEqual(['Matches the planned change']);
   });
-  it('withOverallRequest appends it only when it applies', () => {
-    const line = { text: 'x', status: 'passed' as const, gates: [] };
-    expect(withOverallRequest([line], null)).toEqual([line]);
-    expect(withOverallRequest([line], overallRequestLine([g('compile')])).map((l) => l.text)).toEqual(['x', 'Overall request: not fully verified']);
+  it('a failed check never gets the reassurance: the disclosure states the ledger fact only', () => {
+    const formal = formalRequirementStatus([g('compile'), g('tests', false)])!;
+    expect(formal.explanation).not.toMatch(/direct evidence|does not mean anything failed/);
+    expect(formal.explanation).toMatch(/formal requirement ledger/);
+  });
+  it('runtime verification passes only when EVERY recorded side passed: a grader cannot create a pass, only withhold it', () => {
+    expect(primaryVerification([g('compile'), g('runtime_verification'), g('run_verification', false)]).map((l) => l.text)).toEqual(['Build passed', 'Runtime verification failed']);
+    expect(primaryVerification([g('runtime_verification', true), g('run_verification', null)]).map((l) => l.text)).toEqual(['Runtime verification: no result recorded']);
+    expect(primaryVerification([g('runtime_verification', false), g('run_verification', true)]).map((l) => l.text)).toEqual(['Runtime verification failed']); // a graded pass never outvotes a failed process
+    expect(primaryVerification([g('run_verification_hung', false)]).map((l) => l.text)).toEqual(['Runtime verification failed']);
+  });
+  it('says nothing when there is nothing to qualify', () => {
+    expect(formalRequirementStatus([])).toBeNull();
+  });
+  it('"Requested behavior verified" appears only for a recorded run-level verification that positively verified every requirement - and then the ledger disclosure is gone', () => {
+    const verified = [g('compile'), g('original_requirements', true, { requirementsVerified: true })];
+    expect(primaryVerification(verified).map((l) => l.text)).toContain('Requested behavior verified');
+    expect(formalRequirementStatus(verified)).toBeNull();
+    for (const gates of [demo00, [g('compile'), g('original_requirements', true)], [g('compile'), g('original_requirements', true, { requirementsVerified: false })]]) {
+      expect(primaryVerification(gates).map((l) => l.text).join('|')).not.toMatch(/Requested behavior verified/);
+      expect(verificationGroups(gates).groups.flatMap((x) => x.lines).map((l) => l.text).join('|')).not.toMatch(/Requested behavior verified/);
+    }
+  });
+  it('a passed run-level gate that did not verify every requirement is explained under the ledger, not ticked', () => {
+    const gates = [g('compile'), g('original_requirements', true)];
+    expect(primaryVerification(gates).map((l) => l.text)).toEqual(['Build passed']);
+    expect(formalRequirementStatus(gates)!.notes.map((l) => l.text)).toEqual(['No unmet requirement recorded (not every requirement was independently verified)']);
+  });
+  it('a FAILED run-level verification stays in the primary list as a failure', () => {
+    const gates = [g('compile'), g('original_requirements', false)];
+    expect(primaryVerification(gates).map((l) => l.text)).toContain('Requested behavior not verified');
+    expect(formalRequirementStatus(gates)).toBeNull();
   });
 });
 
-describe('the trust list qualifies a passed build the same way (owner decision on the requirement ledger)', () => {
+describe('the trust list carries the ledger fact as one unknown item, never a tick (owner decision on the requirement ledger)', () => {
   const input = (gates: GateFact[]) => ({ displayGoal: 'g', filesChanged: 1, gates, approval: null, evidence: null });
-  it('adds "Overall request: not fully verified" when there are results but no run-level requirements record', () => {
-    expect(userEvidence(input([gate('compile', true), gate('test', true)])).map((i) => i.text)).toContain('Overall request: not fully verified');
-    expect(userEvidence(input([gate('compile', true)])).find((i) => i.text === 'Overall request: not fully verified')?.state).toBe('unknown');
+  it('adds "Requirement ledger: not fully verified" when there are results but no positive run-level verification', () => {
+    expect(userEvidence(input([gate('compile', true), gate('test', true)])).map((i) => i.text)).toContain('Requirement ledger: not fully verified');
+    expect(userEvidence(input([gate('compile', true)])).find((i) => i.text === 'Requirement ledger: not fully verified')?.state).toBe('unknown');
   });
-  it('adds nothing with no verification results, and defers to a recorded run-level record', () => {
-    expect(userEvidence(input([])).map((i) => i.text).join('|')).not.toMatch(/Overall request/);
-    expect(userEvidence(input([gate('compile', true), gate('original_requirements', true)])).map((i) => i.text).join('|')).not.toMatch(/Overall request/);
+  it('adds nothing with no verification results, and defers to a positive run-level verification', () => {
+    expect(userEvidence(input([])).map((i) => i.text).join('|')).not.toMatch(/ledger/);
+    expect(userEvidence(input([gate('compile', true), { ...gate('original_requirements', true), requirementsVerified: true }])).map((i) => i.text).join('|')).not.toMatch(/ledger/);
   });
 });

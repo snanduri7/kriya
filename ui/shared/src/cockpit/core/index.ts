@@ -21,7 +21,8 @@ export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, disp
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
 export { RunCardView } from './RunCardView';
-export { ApplicationResult, HumanTimeline, TrustList, VerificationLines } from './ResultParts';
+export { ApplicationResult, CapturedOutput, FormalRequirementDisclosure, HumanTimeline, TechnicalVerification, TrustList, VerificationLines, OUTPUT_PREVIEW_LINES } from './ResultParts';
+export { gateSteps, familyOf, type GateStep } from './gateSteps';
 export * from './provider';
 export type { EvidenceCallContent, EvidenceChangeContent } from '../../model/kup';
 export * from './records';
