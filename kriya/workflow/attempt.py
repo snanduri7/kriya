@@ -227,6 +227,7 @@ from kriya.workflow.runtime_command_approval import (
     MAX_REVIEW_ROUNDS,
     RuntimeCommandSubject,
     approval_matches,
+    commands_authored_in_goal,
 )
 from kriya.workflow.runtime_command_approval import ask as ask_runtime_commands
 from kriya.workflow.runtime_command_approval import build_subject as build_runtime_subject
@@ -5246,10 +5247,15 @@ def _derive_runtime_command_subject(ctx: "AttemptContext", judgment: Dict[str, A
 
 
 def _runtime_commands_need_approval(ctx: "AttemptContext", state: GenerationState, judgment: Dict[str, Any], autonomy_mode: str) -> bool:
-    """A human must approve when Kriya INFERRED the commands (a goal-explicit command is the user's own words), the mode is human-in-the-loop, and the command set that would run
-    now is not the exact set already approved in this run."""
-    return (judgment["command_source"] == "inferred" and autonomy_mode == "human-in-the-loop"
-            and state.run_verification_approved_fingerprint != _derive_runtime_command_subject(ctx, judgment, "").fingerprint)
+    """A human must approve, in human-in-the-loop mode, every command set that is not the user's own exact words (``commands_authored_in_goal``: judge-generated, inferred, expanded,
+    reordered or substituted commands all need review; merely naming a tool in the goal is not authorization; the judge's ``command_source`` label is not trusted), unless the
+    exact set that would run now is the one already approved in this run. ExecutionPolicy, the sandbox and containment still apply to every command, authored or approved."""
+    if autonomy_mode != "human-in-the-loop":
+        return False
+    subject = _derive_runtime_command_subject(ctx, judgment, "")
+    if commands_authored_in_goal(subject.commands, exit_authority_text(ctx), subject.stdin_sha256):
+        return False
+    return state.run_verification_approved_fingerprint != subject.fingerprint
 
 
 async def _approve_runtime_commands(ctx: "AttemptContext", state: GenerationState, judgment: Dict[str, Any], intro: str) -> bool:

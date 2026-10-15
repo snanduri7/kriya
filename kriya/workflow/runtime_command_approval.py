@@ -21,6 +21,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -62,6 +64,32 @@ class RuntimeCommandSubject:
     @property
     def fingerprint(self) -> str:
         return fingerprint_of(self.working_directory, self.commands, self.input_channel, self.stdin_sha256)
+
+
+_WHITESPACE = re.compile(r"\s+")
+
+
+def commands_authored_in_goal(commands: Any, goal: str, stdin_sha256: Optional[str] = None) -> bool:
+    """True only when EVERY command that will execute is the user's own, exact words: its argv appears verbatim (whitespace-normalised, on word boundaries) in the user's goal text,
+    in the order the goal wrote them, and nothing Kriya or a model added exists (no synthetic stdin). Only the executable's PATH resolution is tolerated (``/opt/maven/bin/mvn``
+    for ``mvn``). A goal that merely NAMES a tool, a judge-invented command, an added or reordered argument, a substituted executable or an appended input are not authorship.
+    The judge's own ``command_source`` label is never consulted: it is a model's claim, and this is the deterministic check of it."""
+    if stdin_sha256 is not None or not commands:
+        return False
+    text = _WHITESPACE.sub(" ", goal or "")
+    position = 0
+    for argv in commands:
+        if not argv or not all(isinstance(a, str) and a for a in argv):
+            return False
+        found = None
+        for candidate in dict.fromkeys((" ".join(argv), " ".join((os.path.basename(argv[0]), *argv[1:])))):
+            match = re.compile(r"(?<![\w./-])" + re.escape(candidate) + r"(?![\w-])").search(text, position)
+            if match is not None and (found is None or match.start() < found.start()):
+                found = match
+        if found is None:
+            return False
+        position = found.end()
+    return True
 
 
 def build_subject(*, unit_id: Optional[str], criterion: str, working_directory: str, commands: List[List[str]], input_channel: str,

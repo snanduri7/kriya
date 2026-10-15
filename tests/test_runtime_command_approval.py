@@ -75,7 +75,7 @@ def test_a_typed_callback_gets_the_subject_not_text_and_its_answer_is_bound_to_a
 
 
 def _ctx(callback):
-    return SimpleNamespace(worktree_path=CWD, current_subtask_id="s4", approval_callback=callback)
+    return SimpleNamespace(worktree_path=CWD, current_subtask_id="s4", approval_callback=callback, goal="Add a feature", grounding_goal="", exit_authority_goal="")
 
 
 JUDGMENT = {"should_run": True, "run_commands": [["mvn", "-q", "test"]], "success_criteria": "prints Hello", "input_channel": "none", "command_source": "inferred"}
@@ -149,7 +149,7 @@ def test_when_a_human_must_approve_is_decided_by_the_exact_command_set():
         assert need(JUDGMENT) is False                                                             # the same exact set: not asked again on a retry
         assert need({**JUDGMENT, "run_commands": [["mvn", "-q", "verify"]]}) is True               # a retry that re-judged DIFFERENT commands is asked again
         assert need({**JUDGMENT, "input_channel": "stdin"}) is True                                # a different input channel is a different command set
-        assert need({**JUDGMENT, "command_source": "goal_explicit"}, ) is False                    # the user's own explicit command is not Kriya's inference
+        assert need({**JUDGMENT, "command_source": "goal_explicit"}) is False                      # the same exact approved set: the judge's label changes nothing (authorship: test_runtime_command_authorization.py)
         state.run_verification_approved_fingerprint = None
         assert need(JUDGMENT, "guardrails") is False                                               # policy unchanged outside human-in-the-loop
 
