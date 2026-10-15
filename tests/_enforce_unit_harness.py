@@ -32,12 +32,15 @@ class Run:
     approvals: List[Tuple[Optional[str], List[str], str]] = field(default_factory=list)   # EVERY approval-callback call: (unit, file paths, reason)
     judge_calls: List[Optional[str]] = field(default_factory=list)                        # units whose run-verification judge was consulted
     executed: List[Any] = field(default_factory=list)                                     # command sequences handed to the runtime executor
+    gate_outcomes: List[Any] = field(default_factory=list)                                # every gate outcome recorded on the generation state (what runs.gate_outcomes persists)
     grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
                 answer: Any = True, run_verification: bool = False, judge_reply: Optional[Dict[str, Any]] = None,
-                base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None) -> Run:
+                base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None,
+                record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None,
+                run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None) -> Run:
     from kriya.workflow.workflow_controller import WorkflowController
 
     model_runtime.clear_model_runtime_cache()
@@ -61,6 +64,8 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
     git(workspace, "init", "-q")
     git(workspace, "add", "-A")
     git(workspace, "commit", "-qm", "base")
+    if on_workspace is not None:  # the folder exists and is a committed repository; a caller may open a launch session on it
+        on_workspace(workspace)
 
     active: Dict[str, Optional[str]] = {}
     run = Run(workspace=workspace, events=[], result=None)
@@ -98,9 +103,19 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
 
     def run_app(_self, commands, **_kwargs):
         run.executed.append(commands)
-        return {"success": True, "returncode": 0, "output": app_output, "timed_out": False}
+        if on_execute is not None:
+            on_execute(commands)
+        result = {"success": True, "returncode": 0, "output": app_output, "timed_out": False}
+        if record_steps:  # the executor's own per-command record (what ApplicationOutcome reads): argv, exit code, stdout, stderr
+            result["steps"] = [{"command": list(c), "exit_code": 0, "stdout": app_output, "stderr": "", "timed_out": False} for c in commands]
+        return result
 
     real_record = GenerationState.record_event
+    real_gate = GenerationState.record_gate_outcome
+
+    def record_gate(state, outcome, *args, **kwargs):
+        run.gate_outcomes.append(dict(outcome))
+        return real_gate(state, outcome, *args, **kwargs)
 
     def record(state, event):
         run.events.append(event)
@@ -110,6 +125,7 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
     engine.planner.run = AsyncMock(return_value="structured plan")
     with patch.object(LLMClient, "_request_once", new=transport), \
          patch.object(GenerationState, "record_event", new=record), \
+         patch.object(GenerationState, "record_gate_outcome", new=record_gate), \
          patch.object(WorkflowEngine, "run_generation_workflow", new=run_unit), \
          patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: PASSING), \
@@ -117,7 +133,7 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
          patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app), \
          patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(object(), None)), \
          patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan):
-        run.result = asyncio.run(WorkflowController(engine).execute(goal, str(workspace), migration_mode="enforce", approval_callback=callback or default_callback))
+        run.result = asyncio.run(WorkflowController(engine).execute(goal, str(workspace), migration_mode="enforce", approval_callback=callback or default_callback, **({"run_id": run_id} if run_id else {})))
     return run
 
 
