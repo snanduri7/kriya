@@ -4,7 +4,9 @@ import type { RunSummary } from '../../model/kup';
 import { NEUTRAL_TITLE, OVERALL_GOAL_PENDING, activityText, changeSummary, currentChangeVerification, formatDuration, goalTitle, runCard, verificationGroups } from './presentation';
 import type { GateFact } from './runFacts';
 
-const gate = (type: string, passed: boolean | null, tests: GateFact['tests'] = null): GateFact => ({ type, passed, tests });
+const gate = (type: string, passed: boolean | null, tests: GateFact['tests'] = null, requirementsVerified: boolean | null = null): GateFact => ({ type, passed, tests, requirementsVerified });
+/** The run-level requirements gate as the terminal record says it: passed AND every requirement positively verified. */
+const verifiedReqs = () => gate('original_requirements', true, null, true);
 const COMPILED = '=== Authoritative Goal ===\nThis is the real, unmediated user request - the source of truth for what is actually required.\n\nFix the bug.\n\n=== Planned Implementation ===\nplanner detail';
 
 describe('goalTitle: the title is the ORIGINAL request, never a prompt', () => {
@@ -46,7 +48,7 @@ describe('runCard / formatDuration', () => {
 
 describe('verificationGroups: mechanism -> meaning, and nothing unmapped is dressed up', () => {
   it('groups compile, tests, behavior and safety with counts only when recorded', () => {
-    const { groups } = verificationGroups([gate('compile', true), gate('regression_test', true, { cases: 53, passed: 53 }), gate('original_requirements', true), gate('static_analysis', true)]);
+    const { groups } = verificationGroups([gate('compile', true), gate('regression_test', true, { cases: 53, passed: 53 }), verifiedReqs(), gate('static_analysis', true)]);
     expect(groups.map((g) => g.title)).toEqual(['Build', 'Tests', 'Requested behavior', 'Regression and safety']);
     expect(groups.flatMap((g) => g.lines.map((l) => l.text))).toEqual(['Build passed', '53 / 53 tests passed', 'Requested behavior verified', 'Safety checks passed']);
     expect(groups.every((g) => g.status === 'passed')).toBe(true);
@@ -55,9 +57,17 @@ describe('verificationGroups: mechanism -> meaning, and nothing unmapped is dres
     const lines = (types: Array<[string, boolean]>) => verificationGroups(types.map(([t, p]) => gate(t, p))).groups.flatMap((g) => g.lines.map((l) => l.text));
     expect(lines([['compile', true], ['goal_spec_compliance', true]])).toEqual(['Build passed', 'Matches the planned change']);
     expect(lines([['goal_spec_compliance', false]])).toEqual(['Does not match the planned change']);
-    expect(lines([['goal_spec_compliance', true], ['original_requirements', true]])).toEqual(['Matches the planned change', 'Requested behavior verified']);
+    expect(verificationGroups([gate('goal_spec_compliance', true), verifiedReqs()]).groups.flatMap((g) => g.lines.map((l) => l.text))).toEqual(['Matches the planned change', 'Requested behavior verified']);
     expect(lines([['goal_spec_compliance', true], ['original_requirements', false]])).toEqual(['Matches the planned change', 'Requested behavior not verified']);
     expect(lines([['goal_spec_compliance', true]]).join('|')).not.toMatch(/Requested behavior verified/);
+  });
+  it('a PASSED requirements gate that did not positively verify every requirement is "no unmet requirement recorded", never "verified" (independent review B4)', () => {
+    for (const flag of [false, null]) {
+      const g = verificationGroups([gate('original_requirements', true, null, flag)]).groups[0]!;
+      expect(g.lines[0]).toMatchObject({ text: 'No unmet requirement recorded (not every requirement was independently verified)', status: 'unknown' });
+      expect(g.status).toBe('unknown');
+    }
+    expect(verificationGroups([gate('original_requirements', false, null, true)]).groups[0]!.lines[0]!.text).toBe('Requested behavior not verified');
   });
   it('zero recorded test cases is "No tests ran", never a pass; an unrecorded count keeps the old wording', () => {
     const noTests = verificationGroups([gate('regression_test', true, { cases: 0, passed: 0 })]).groups[0]!;
@@ -154,7 +164,7 @@ describe('humanTimeline: a deterministic mapping from recorded run events; unkno
 });
 
 describe('userEvidence: why should I trust this result? Only recorded facts tick a box', () => {
-  const base = { displayGoal: 'Fix the bug', filesChanged: 1, gates: [gate('compile', true), gate('regression_test', true, { cases: 53, passed: 53 }), gate('original_requirements', true), gate('static_analysis', true)], approval: 'approved' as const, evidence: { status: 'VERIFIED', sealed: true } };
+  const base = { displayGoal: 'Fix the bug', filesChanged: 1, gates: [gate('compile', true), gate('regression_test', true, { cases: 53, passed: 53 }), verifiedReqs(), gate('static_analysis', true)], approval: 'approved' as const, evidence: { status: 'VERIFIED', sealed: true } };
   it('lists goal, change, build, tests, behavior, safety, approval and final result', () => {
     expect(userEvidence(base).map((i) => `${i.category}: ${i.text} [${i.state}]`)).toEqual([
       'Goal: Original request recorded [ok]', 'Change: 1 file changed [ok]', 'Build: Build passed [ok]', 'Tests: 53 / 53 tests passed [ok]', 'Behavior: Requested behavior verified [ok]',

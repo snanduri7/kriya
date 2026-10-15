@@ -48,6 +48,8 @@ export interface GateRow {
   timedOut: boolean | null;
   /** The structured test summary, only when the recorder persisted one (gate.result.test_execution). */
   testSummary: Record<string, unknown> | null;
+  /** `original_requirements` only: true when EVERY requirement was positively verified (the passed gate alone only says no unmet requirement was recorded); null when the record does not say. */
+  requirementsVerified: boolean | null;
   /** Whether the recorder kept the gate's output as content (shown only through an authorized content API; not part of M3). */
   outputKept: boolean;
 }
@@ -64,7 +66,7 @@ export function gateRows(records: readonly EvidenceRecord[]): GateRow[] {
     rows.push({
       seq: r.seq, attempt, id: gateKey(attempt, type, r.seq), type, success: bool(p.success), origin: mirrored ? 'mirrored' : p.stage === 'terminal' ? 'terminal' : 'validator',
       index: num(p.index), exitCode: num(p.exit_code), durationSeconds: num(p.duration_seconds), timedOut: bool(p.timed_out),
-      testSummary: obj(p.test_execution), outputKept: Object.keys(r.blobs ?? {}).length > 0,
+      testSummary: obj(p.test_execution), requirementsVerified: bool(p.requirements_verified), outputKept: Object.keys(r.blobs ?? {}).length > 0,
     });
   }
   return rows;

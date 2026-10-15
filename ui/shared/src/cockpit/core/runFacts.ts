@@ -13,6 +13,8 @@ export interface GateFact {
   passed: boolean | null;
   /** The structured test summary the recorder persisted, when there is one. */
   tests: { cases: number; passed: number | null } | null;
+  /** `original_requirements` only: every requirement positively verified (true), not all (false), or the record does not say (null). */
+  requirementsVerified?: boolean | null;
 }
 export interface ChangeFact { path: string; linesAdded: number | null; linesRemoved: number | null; kind: string }
 
@@ -26,10 +28,12 @@ export function validationFacts(records: readonly EvidenceRecord[]): GateFact[] 
     const cases = row.testSummary && typeof row.testSummary.cases === 'number' ? row.testSummary.cases : null;
     const counts = row.testSummary && row.testSummary.status_counts !== null && typeof row.testSummary.status_counts === 'object' ? (row.testSummary.status_counts as Record<string, unknown>) : null;
     const passedCount = counts && typeof counts.passed === 'number' ? counts.passed : null;
-    const fact: GateFact = { type: row.type, passed: row.success, tests: cases === null ? null : { cases, passed: passedCount } };
+    const fact: GateFact = { type: row.type, passed: row.success, tests: cases === null ? null : { cases, passed: passedCount }, requirementsVerified: row.requirementsVerified };
     // a mirrored outcome never replaces a validator result that carries the structured test summary
     const prior = latest.get(row.type);
-    latest.set(row.type, prior && prior.tests && !fact.tests ? { ...fact, tests: prior.tests } : fact);
+    // a mirrored outcome never replaces what the terminal record said about requirement verification either
+    const merged: GateFact = { ...fact, ...(prior && prior.tests && !fact.tests ? { tests: prior.tests } : {}), ...(fact.requirementsVerified == null && prior?.requirementsVerified != null ? { requirementsVerified: prior.requirementsVerified } : {}) };
+    latest.set(row.type, merged);
   }
   return [...latest.values()];
 }

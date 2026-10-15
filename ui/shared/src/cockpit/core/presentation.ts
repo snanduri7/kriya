@@ -96,7 +96,7 @@ function lineText(line: string, s: GroupStatus, gates: readonly GateFact[]): str
     return s === 'failed' ? (counted !== null && counted.passed !== null ? `Tests failed (${detail} passed)` : 'Tests failed') : 'Tests: no result recorded';
   }
   if (line === 'planned') return s === 'passed' ? 'Matches the planned change' : s === 'failed' ? 'Does not match the planned change' : 'Planned change: no result recorded';
-  if (line === 'behavior') return s === 'passed' ? 'Requested behavior verified' : s === 'failed' ? 'Requested behavior not verified' : 'Requested behavior: no result recorded';
+  if (line === 'behavior') return s === 'passed' ? (gates.some((g) => g.type === 'original_requirements' && g.requirementsVerified === true) ? 'Requested behavior verified' : 'No unmet requirement recorded (not every requirement was independently verified)') : s === 'failed' ? 'Requested behavior not verified' : 'Requested behavior: no result recorded';
   if (line === 'preserved') return s === 'passed' ? 'Existing behavior preserved' : s === 'failed' ? 'Existing behavior not preserved' : 'Existing behavior: no result recorded';
   return s === 'passed' ? 'Safety checks passed' : s === 'failed' ? 'Safety checks failed' : 'Safety checks: no result recorded';
 }
@@ -117,8 +117,10 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
     const lines: VerificationLine[] = LINE_ORDER.filter((l) => byLine.get(l)?.group === id).map((l) => {
       const entry = byLine.get(l)!;
       const noTestsRan = l === 'tests' && countedTests(entry.gates)?.cases === 0;
-      const s = noTestsRan && status(entry.gates) !== 'failed' ? 'unknown' : status(entry.gates);
-      return { text: lineText(l, s, entry.gates), status: s, gates: entry.gates.map((g) => g.type) };
+      // a passed run-level requirements gate that did not positively verify every requirement is not a "verified" claim (independent review B4)
+      const notFullyVerified = l === 'behavior' && status(entry.gates) === 'passed' && !entry.gates.some((g) => g.type === 'original_requirements' && g.requirementsVerified === true);
+      const s = (noTestsRan || notFullyVerified) && status(entry.gates) !== 'failed' ? 'unknown' : status(entry.gates);
+      return { text: lineText(l, status(entry.gates), entry.gates), status: s, gates: entry.gates.map((g) => g.type) };
     });
     if (lines.length === 0) continue;
     groups.push({ id, title: GROUP_TITLE[id], status: lines.some((l) => l.status === 'failed') ? 'failed' : lines.every((l) => l.status === 'passed') ? 'passed' : 'unknown', lines });

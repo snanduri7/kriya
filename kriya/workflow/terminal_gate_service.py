@@ -70,7 +70,9 @@ from kriya.workflow.obligations import (
 from kriya.workflow.plan_schema import EngineeringPlan, FileAction
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
+    RequirementOutcome,
     RequirementSet,
+    requirement_outcomes,
     record_requirement_verdicts,
     verifier_result_verdicts,
 )
@@ -236,6 +238,9 @@ class TerminalGateReport:
     preserved_reference_gap: Optional[str] = None
     terminal_obligation_gap: Optional[str] = None
     requirement_gap: Optional[str] = None
+    # Every original requirement was positively verified (not merely "no unmet requirement recorded"): under the default record policies an UNVERIFIED/UNKNOWN requirement does not block, so
+    # a passed ``original_requirements`` gate alone does not say the requested behavior was verified. False when nothing was evaluated.
+    requirements_verified: bool = False
     artifact_error: Optional[str] = None
     requirement_closure_attempts: Tuple[Dict[str, Any], ...] = ()
     candidate_derived_artifacts: Tuple[Any, ...] = ()
@@ -285,9 +290,22 @@ def _record_terminal_report(report: TerminalGateReport) -> None:
              ("terminal_obligations", report.terminal_obligation_gap),
              ("original_requirements", report.requirement_gap), ("artifact_registry", report.artifact_error))
     for gate, gap in gates:
-        attempt_evidence_scope.emit("gate.result", {
-            "stage": "terminal", "gate": gate, "success": gap is None,
-            "commit_eligible": report.commit_eligible}, content={"output": gap})
+        payload = {"stage": "terminal", "gate": gate, "success": gap is None, "commit_eligible": report.commit_eligible}
+        if gate == "original_requirements":
+            payload["requirements_verified"] = report.requirements_verified
+        attempt_evidence_scope.emit("gate.result", payload, content={"output": gap})
+
+
+_VERIFIED_OUTCOMES = frozenset({RequirementOutcome.SATISFIED, RequirementOutcome.CLOSED_BY_EVIDENCE, RequirementOutcome.HUMAN_ACCEPTED})
+
+
+def requirements_fully_verified(outcomes: Any, gap: Optional[str]) -> bool:
+    """True only when there is no gap and every requirement that states a proposition was positively verified (at least one exists). A requirement that is UNVERIFIED, UNKNOWN, PENDING or
+    DISPOSITIONED may be allowed through by the record policies, but it is not "verified"; a statement that is not a claim neither counts nor blocks."""
+    values = list(outcomes)
+    if gap is not None or not values:
+        return False
+    return all(v in _VERIFIED_OUTCOMES or v is RequirementOutcome.NOT_A_CLAIM for v in values) and any(v in _VERIFIED_OUTCOMES for v in values)
 
 
 class TerminalGateService:
@@ -328,6 +346,9 @@ class TerminalGateService:
         )
 
         requirement_gap, closure_attempts = await self._requirement_gap(request, migration_gap)
+        requirements_verified = False
+        if requirement_gap is None and request.requirement_set is not None and request.obligation_ledger is not None and request.autonomy is not None and request.autonomy.spec_compliance_enabled:
+            requirements_verified = requirements_fully_verified(requirement_outcomes(request.obligation_ledger, request.requirement_set).values(), requirement_gap)
         await emit_gate_outcome(
             "original_requirements", "failed" if requirement_gap else "passed", requirement_gap,
         )
@@ -346,7 +367,7 @@ class TerminalGateService:
             ran=True, migration_gap=migration_gap, stack_contract_gap=stack_contract_gap,
             preserved_reference_gap=preserved_reference_gap, terminal_obligation_gap=terminal_obligation_gap,
             static_analysis=static_analysis, static_analysis_gap=static_analysis_gap,
-            semantic_safety_gap=semantic_safety_gap, requirement_gap=requirement_gap, artifact_error=artifact_error,
+            semantic_safety_gap=semantic_safety_gap, requirement_gap=requirement_gap, requirements_verified=requirements_verified, artifact_error=artifact_error,
             requirement_closure_attempts=tuple(closure_attempts), candidate_derived_artifacts=derived,
             verified_candidate=verified_candidate,
         )
