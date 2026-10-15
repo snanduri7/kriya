@@ -72,8 +72,8 @@ from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     RequirementOutcome,
     RequirementSet,
-    requirement_outcomes,
     record_requirement_verdicts,
+    requirement_outcomes,
     verifier_result_verdicts,
 )
 from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary

@@ -115,7 +115,6 @@ def test_a_planner_restated_goal_is_not_the_users_words():
 
 
 # ---- independent review of the runtime-approval stack (2026-10-15): B1 / B2 -------------------------------------------------------------------------------------------------------------
-import pytest  # noqa: E402 - appended group
 
 from kriya.workflow.runtime_command_approval import commands_authored_in_goal as authored  # noqa: E402
 
