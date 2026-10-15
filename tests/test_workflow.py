@@ -9418,16 +9418,11 @@ async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_a
         '[{"filepath": "app.py", "content": "print(1)\\n"}]',     # Developer, attempt 1
         "Review A - stale, must not be reused",                   # Reviewer at 4.5, attempt 1
         '[{"filepath": "app.py", "content": "print(2)\\n"}]',     # Developer, attempt 2
-        # Demo-01 Finding 3 (2026-09-11): attempt 2's environment_failure
-        # populates state.final_attempt_contents, so this final review now
-        # goes through ReviewerAgent.rejected_candidate_system_prompt() and
-        # extract_rejected_candidate_diagnostic() - the mocked LLM response
-        # must use the required DIAGNOSTIC FINDINGS markers or the fail-
-        # closed path (correctly) discards it, which is not what THIS
-        # test is about (freshness of the review, not F3's own structure -
-        # see tests/test_agents.py and the dedicated F3 workflow tests for
-        # that). res["review"] below still resolves to the unwrapped text.
-        "=== DIAGNOSTIC FINDINGS ===\nReview B - fresh, describes the real final failure\n=== END DIAGNOSTIC FINDINGS ===",
+        # Demo V2 Gap B (2026-10-15): in human-in-the-loop mode nothing is built before the source review, so attempt 2 is REVIEWED first and only then
+        # fails to compile (before: it failed at compile and the person was never asked). This is attempt 2's pre-approval review of its own source.
+        "Review A2 - attempt 2's pre-approval review of its own source",
+        # Demo-01 Finding 3 (2026-09-11) used to add a final rejected-candidate review here. Since Demo V2 Gap B attempt 2 is reviewed BEFORE it fails to compile, so the final
+        # review IS attempt 2's own pre-approval review (the same content the run ended on): fresh for the final attempt, never attempt 1's.
     ])
 
     jvm_error = (
@@ -9463,7 +9458,8 @@ async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_a
     assert res["terminal_regression_passed"] is False
     assert res["overall_attempt_passed"] is False
     assert res["environment_failure"] is not None
-    assert res["review"] == "Review B - fresh, describes the real final failure"
+    assert res["review"] == "Review A2 - attempt 2's pre-approval review of its own source"          # attempt 2's, not the stale attempt-1 verdict
+    assert res["review"] != "Review A - stale, must not be reused"
     assert llm.complete.await_count == 6
     assert not (tmp_path / "app.py").exists()
     checkpoint = load_checkpoint(str(tmp_path), res["run_id"])

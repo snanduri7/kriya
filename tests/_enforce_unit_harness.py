@@ -34,12 +34,13 @@ class Run:
     executed: List[Any] = field(default_factory=list)                                     # command sequences handed to the runtime executor
     gate_outcomes: List[Any] = field(default_factory=list)                                # every gate outcome recorded on the generation state (what runs.gate_outcomes persists)
     grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
+    builds: List[Any] = field(default_factory=list)                                       # ("compile"|"tests", on_build() result) for every build/test gate execution, in order
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
                 answer: Any = True, run_verification: bool = False, judge_reply: Optional[Dict[str, Any]] = None,
                 base_files: Optional[Dict[str, str]] = None, app_output: str = "ok\n", callback: Optional[Callable] = None,
-                record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None,
+                record_steps: bool = False, on_execute: Optional[Callable[[Any], None]] = None, on_build: Optional[Callable[[], Any]] = None,
                 run_id: Optional[str] = None, on_workspace: Optional[Callable[[Any], None]] = None) -> Run:
     from kriya.workflow.workflow_controller import WorkflowController
 
@@ -110,6 +111,14 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
             result["steps"] = [{"command": list(c), "exit_code": 0, "stdout": app_output, "stderr": "", "timed_out": False} for c in commands]
         return result
 
+    def compile_gate(*_a, **_k):
+        run.builds.append(("compile", on_build() if on_build is not None else None))
+        return {"success": True, "output": "ok"}
+
+    def test_gate(*_a, **_k):
+        run.builds.append(("tests", on_build() if on_build is not None else None))
+        return PASSING
+
     real_record = GenerationState.record_event
     real_gate = GenerationState.record_gate_outcome
 
@@ -127,8 +136,8 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
          patch.object(GenerationState, "record_event", new=record), \
          patch.object(GenerationState, "record_gate_outcome", new=record_gate), \
          patch.object(WorkflowEngine, "run_generation_workflow", new=run_unit), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=lambda *a, **k: {"success": True, "output": "ok"}), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=lambda *a, **k: PASSING), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=compile_gate), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=test_gate), \
          patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=lambda *a, **k: {"success": True, "output": "ok"}), \
          patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app), \
          patch("kriya.workflow.workflow_controller.parse_planner_structured_output", return_value=(object(), None)), \

@@ -82,7 +82,8 @@ def _go(tmp_path, plan=None, judge=JUDGE, person_cls=Person):
     try:
         run = harness.run_enforce(tmp_path, plan=_plan(), units=UNITS, goal=GOAL, run_verification=True, judge_reply=judge, app_output="Hello from Kriya\n", callback=_callback(),
                                   record_steps=True, run_id=LID, on_workspace=_launch_on(opened, plan, person_cls),
-                                  on_execute=lambda commands: executed_at.append((time.monotonic(), opened["person"].log[:])))
+                                  on_execute=lambda commands: executed_at.append((time.monotonic(), opened["person"].log[:])),
+                                  on_build=lambda: opened["person"].log[:])
     finally:
         if "person" in opened:
             opened["person"].stop()
@@ -119,6 +120,19 @@ def test_demo_00_runs_the_whole_chain_with_one_human_decision_per_subject(tmp_pa
     assert outcome["status"] == STATUS_EXECUTED and outcome["succeeded"] is True and outcome["exit_code"] == 0
     assert outcome["commands"] == [" ".join(c) for c in runtime["commands"]]
     assert "Hello from Kriya" in outcome["stdout"]["text"] and outcome["stderr"]["text"] == ""
+
+
+def test_gap_b_structured_plan_builds_and_tests_each_unit_only_after_that_unit_s_source_was_approved(tmp_path):
+    """The same HITL ordering on the structured plan (the generic owner is run_attempt/run_generation_workflow, shared by every unit): each unit's build/tests start after the
+    person decided THAT unit's source review; the runtime review (the verification-only unit) comes last and nothing executes before its decision."""
+    run, person, _canonical, _executed_at = _go(tmp_path)
+    assert run.builds, "the build/test gates ran"
+    for _gate, log_at_build in run.builds:
+        approved = [entry for entry in log_at_build if entry == ("deciding", "change_approval")]
+        assert approved, f"a build/test gate ran before any source review was decided: {log_at_build}"
+    first_log = run.builds[0][1]
+    assert first_log[-2:] == [("pending", "change_approval"), ("deciding", "change_approval")]       # the first build ran right after the first unit's source decision
+    assert [p["kind"] for p in person.seen][-1] == "runtime_command"
 
 
 def test_reject_is_the_explicit_refusal_nothing_executes_and_the_run_does_not_claim_success(tmp_path):

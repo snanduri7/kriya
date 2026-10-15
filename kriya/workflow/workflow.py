@@ -5256,7 +5256,7 @@ class WorkflowEngine:
             targeted_max_retries=TARGETED_MAX_RETRIES,
             stream_callback=stream_callback,
             approval_callback=approval_callback,
-            defer_runtime_until_source_review=True,
+            defer_execution_until_source_review_enabled=True,
             active_skills=active_skills,
             active_skill_rules_snapshot=active_skill_rules_snapshot,
             developer=self.developer,
@@ -5348,7 +5348,7 @@ class WorkflowEngine:
             # run_attempt() is even called, guarantees no exception path can skip it.
             state.pre_approval_review = None
             state.verified_candidate_binding = None
-            attempt_ctx.deferred_runtime_verification = None
+            attempt_ctx.deferred_executing_gates = None
             attempt_ctx.post_source_review_guard = None
             # LR-R1-M1: the whole iteration is the attempt's evidence identity
             # (observational; reset in this try's finally).
@@ -5381,12 +5381,14 @@ class WorkflowEngine:
                 # judgment must never reach approval or copy sandbox files into
                 # the real workspace merely because the legacy aggregate gate
                 # boolean remained true.
-                def _raise_if_required_verification_unresolved(runtime_pending: bool = False) -> None:
-                    # runtime_pending: the runtime execution is held until the source is approved (Gap B), so only the requirements that need that execution wait for it;
-                    # every other unresolved requirement still stops the run before any approval is asked.
+                def _raise_if_required_verification_unresolved(execution_pending: bool = False) -> None:
+                    # execution_pending: the executing gates are held until the source is approved (Gap B), so only the requirements that those gates resolve (the builtin
+                    # compile/test tools, a judgment that needs runtime execution) wait for them; every other unresolved requirement still stops the run before any approval.
                     checkable = [
                         item for item in required_verification or []
-                        if not (runtime_pending and item.get("type") == "judgment" and item.get("requires_runtime_execution") is True)
+                        if not (execution_pending and (
+                            (item.get("type") == "tool" and item.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS)
+                            or (item.get("type") == "judgment" and item.get("requires_runtime_execution") is True)))
                     ]
                     required_evidence = _build_required_verification_evidence(
                         checkable,
@@ -5413,7 +5415,7 @@ class WorkflowEngine:
 
                 # Gap B: when the runtime execution is held until the person has approved the source (human-in-the-loop), the requirements that need it cannot be judged yet;
                 # the complete check runs again right after that deferred step (below), before anything is applied.
-                _raise_if_required_verification_unresolved(runtime_pending=attempt_ctx.deferred_runtime_verification is not None)
+                _raise_if_required_verification_unresolved(execution_pending=attempt_ctx.deferred_executing_gates is not None)
 
                 # PRD-022: near-duplicates the candidate actually created,
                 # against the grounded owners PRD-021 found before planning.
@@ -5427,162 +5429,169 @@ class WorkflowEngine:
                     except Exception as exc:
                         logger.warning(f"Post-generation ownership findings unavailable: {exc}")
 
-                # PRD-020: the user's original requirements are part of the
-                # pre-apply success boundary. Only the verifier's recorded
-                # outcomes count (never plan/design/review prose); what a
-                # non-satisfied outcome does is the requirement policy's call.
-                if requirement_set is not None:
-                    autonomy_policy = self.kernel.config.autonomy
-                    # "Do not modify any other file": decided from what the run
-                    # actually changed (this candidate plus the run's committed
-                    # history) against the files the goal itself names.
-                    try:
-                        scope_closures = await asyncio.to_thread(
-                            close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
-                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                            revision=state.attempt_number,
-                        )
-                    except Exception as exc:
-                        scope_closures = []
-                        logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
-                    # FS-1C2 B2-a: the operator's acceptance file judges the
-                    # behaviour claims it covers on this candidate.
-                    try:
-                        acceptance_closures = await asyncio.to_thread(
-                            close_requirements_with_acceptance_tests, self.kernel.config.autonomy,
-                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                            acceptance=bound_acceptance(self), approval=bound_approval(self),
-                            modified=state.all_files_written, revision=state.attempt_number,
-                            toolchain_declaration_mutable=toolchain_declaration_mutable(
-                                write_scope_mode, allowed_write_relpaths, structured_plan,
-                            ),
-                            contract=verification_contract,
-                        )
-                    except Exception as exc:
-                        acceptance_closures = []
-                        logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
-                    # VERIFICATION-CONTRACT-003: the goal's compiled examples, the
-                    # API predicate, the test-addition record and the documentation
-                    # referent - each closer bound by the sealed contract.
-                    contract_closures: List[Dict[str, Any]] = []
-                    for closer_name, closer_call in (
-                        ("external authority", lambda: close_requirements_with_authority_bundle_evidence(
-                            self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set,
-                            verification_contract, worktree_path, workspace_path, engine=self,
-                            revision=state.attempt_number,
-                            toolchain_declaration_mutable=toolchain_declaration_mutable(
-                                write_scope_mode, allowed_write_relpaths, structured_plan))),
-                        ("derived examples", lambda: close_requirements_with_derived_examples(
-                            self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set, worktree_path,
-                            workspace_path, engine=self, modified=state.all_files_written,
-                            revision=state.attempt_number, contract=verification_contract,
-                            toolchain_declaration_mutable=toolchain_declaration_mutable(
-                                write_scope_mode, allowed_write_relpaths, structured_plan))),
-                        ("API preservation", lambda: close_requirements_by_api_preservation(
-                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                            workspace_path, candidate_paths=state.all_files_written, revision=state.attempt_number)),
-                        ("test addition", lambda: close_requirements_by_test_addition(
-                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                            workspace_path, revision=state.attempt_number)),
-                        ("documentation", lambda: close_requirements_by_documentation(
-                            resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
-                            revision=state.attempt_number)),
-                    ):
+                async def _close_and_check_requirements() -> None:
+                    """PRD-020 closers + the blocking decision. They EXECUTE the candidate's tests (named tests, acceptance, suite preservation), so in human-in-the-loop mode they run after
+                    the source approval together with the other executing gates (Gap B); otherwise at their original place."""
+                    # PRD-020: the user's original requirements are part of the
+                    # pre-apply success boundary. Only the verifier's recorded
+                    # outcomes count (never plan/design/review prose); what a
+                    # non-satisfied outcome does is the requirement policy's call.
+                    if requirement_set is not None:
+                        autonomy_policy = self.kernel.config.autonomy
+                        # "Do not modify any other file": decided from what the run
+                        # actually changed (this candidate plus the run's committed
+                        # history) against the files the goal itself names.
                         try:
-                            contract_closures += await asyncio.to_thread(closer_call)
+                            scope_closures = await asyncio.to_thread(
+                                close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
+                                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                                revision=state.attempt_number,
+                            )
                         except Exception as exc:
-                            logger.warning(f"Requirement {closer_name} evidence unavailable: {exc}")
-                    # An UNVERIFIED (cannot confirm from code) requirement whose
-                    # own text names existing tests is closed only by running
-                    # exactly those tests on this candidate.
-                    try:
-                        closures = await asyncio.to_thread(
-                            close_requirements_with_named_tests, self.kernel.config.autonomy,
-                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                            modified=state.all_files_written, revision=state.attempt_number,
-                            toolchain_declaration_mutable=toolchain_declaration_mutable(
-                                write_scope_mode, allowed_write_relpaths, structured_plan,
-                            ),
-                            java_home_override=state.java_home_override, contract=verification_contract,
+                            scope_closures = []
+                            logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
+                        # FS-1C2 B2-a: the operator's acceptance file judges the
+                        # behaviour claims it covers on this candidate.
+                        try:
+                            acceptance_closures = await asyncio.to_thread(
+                                close_requirements_with_acceptance_tests, self.kernel.config.autonomy,
+                                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                                acceptance=bound_acceptance(self), approval=bound_approval(self),
+                                modified=state.all_files_written, revision=state.attempt_number,
+                                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                                ),
+                                contract=verification_contract,
+                            )
+                        except Exception as exc:
+                            acceptance_closures = []
+                            logger.warning(f"Requirement acceptance evidence unavailable: {exc}")
+                        # VERIFICATION-CONTRACT-003: the goal's compiled examples, the
+                        # API predicate, the test-addition record and the documentation
+                        # referent - each closer bound by the sealed contract.
+                        contract_closures: List[Dict[str, Any]] = []
+                        for closer_name, closer_call in (
+                            ("external authority", lambda: close_requirements_with_authority_bundle_evidence(
+                                self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set,
+                                verification_contract, worktree_path, workspace_path, engine=self,
+                                revision=state.attempt_number,
+                                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                    write_scope_mode, allowed_write_relpaths, structured_plan))),
+                            ("derived examples", lambda: close_requirements_with_derived_examples(
+                                self.kernel.config.autonomy, resolved_obligation_ledger, requirement_set, worktree_path,
+                                workspace_path, engine=self, modified=state.all_files_written,
+                                revision=state.attempt_number, contract=verification_contract,
+                                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                    write_scope_mode, allowed_write_relpaths, structured_plan))),
+                            ("API preservation", lambda: close_requirements_by_api_preservation(
+                                resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                                workspace_path, candidate_paths=state.all_files_written, revision=state.attempt_number)),
+                            ("test addition", lambda: close_requirements_by_test_addition(
+                                resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                                workspace_path, revision=state.attempt_number)),
+                            ("documentation", lambda: close_requirements_by_documentation(
+                                resolved_obligation_ledger, requirement_set, verification_contract, worktree_path,
+                                revision=state.attempt_number)),
+                        ):
+                            try:
+                                contract_closures += await asyncio.to_thread(closer_call)
+                            except Exception as exc:
+                                logger.warning(f"Requirement {closer_name} evidence unavailable: {exc}")
+                        # An UNVERIFIED (cannot confirm from code) requirement whose
+                        # own text names existing tests is closed only by running
+                        # exactly those tests on this candidate.
+                        try:
+                            closures = await asyncio.to_thread(
+                                close_requirements_with_named_tests, self.kernel.config.autonomy,
+                                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                                modified=state.all_files_written, revision=state.attempt_number,
+                                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                                ),
+                                java_home_override=state.java_home_override, contract=verification_contract,
+                            )
+                        except Exception as exc:
+                            closures = []
+                            logger.warning(f"Requirement closure by named tests unavailable: {exc}")
+                        # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the run's mutation
+                        # record decides "do not change any existing test"; the
+                        # candidate's own complete, green full suite closes
+                        # "every existing test must keep passing".
+                        try:
+                            immutability_closures = await asyncio.to_thread(
+                                close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
+                                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                                revision=state.attempt_number, contract=verification_contract,
+                            )
+                        except Exception as exc:
+                            immutability_closures = []
+                            logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
+                        # OD-3: the files the goal froze by name, judged from the same mutation record.
+                        try:
+                            frozen_closures = await asyncio.to_thread(
+                                close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
+                                worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                                revision=state.attempt_number, contract=verification_contract,
+                            )
+                        except Exception as exc:
+                            frozen_closures = []
+                            logger.warning(f"Requirement file-immutability evidence unavailable: {exc}")
+                        try:
+                            suite_closures = await asyncio.to_thread(
+                                close_requirements_by_suite_preservation, self.kernel.config.autonomy,
+                                resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                                revision=state.attempt_number, candidate_paths=state.all_files_written,
+                                toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                    write_scope_mode, allowed_write_relpaths, structured_plan,
+                                ),
+                                java_home_override=state.java_home_override, contract=verification_contract,
+                                # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
+                                # baseline, stability cache and replay - no second baseline run on this path.
+                                goal=goal, suite_baseline=state.validation_baseline_full_regression,
+                                stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
+                                baseline_source=SUITE_BASELINE_FROM_RUN,
+                                run_baseline_policy=state.validation_baseline_policy,
+                            )
+                        except Exception as exc:
+                            suite_closures = []
+                            logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
+                        closures = (scope_closures + acceptance_closures + contract_closures + closures
+                                    + immutability_closures + frozen_closures + suite_closures)
+                        if closures:
+                            state.record_event(RunEvent(
+                                kind="requirement.closure", attempt=state.attempt_number,
+                                source="workflow.requirement_closure", authority=EventAuthority.AUTHORITATIVE,
+                                message="unverified requirement closure: " + ", ".join(
+                                    f"{c['requirement']}={'closed' if c['closed'] else 'open'}" for c in closures),
+                                details={"requirement_set_digest": requirement_set.digest, "closures": closures},
+                            ))
+                        blocking = blocking_requirements(
+                            resolved_obligation_ledger, requirement_set,
+                            unknown_policy=autonomy_policy.requirement_unknown_policy,
+                            unverified_policy=autonomy_policy.requirement_unverified_policy,
                         )
-                    except Exception as exc:
-                        closures = []
-                        logger.warning(f"Requirement closure by named tests unavailable: {exc}")
-                    # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: the run's mutation
-                    # record decides "do not change any existing test"; the
-                    # candidate's own complete, green full suite closes
-                    # "every existing test must keep passing".
-                    try:
-                        immutability_closures = await asyncio.to_thread(
-                            close_requirements_by_test_immutability, resolved_obligation_ledger, requirement_set,
-                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                            revision=state.attempt_number, contract=verification_contract,
-                        )
-                    except Exception as exc:
-                        immutability_closures = []
-                        logger.warning(f"Requirement test-immutability evidence unavailable: {exc}")
-                    # OD-3: the files the goal froze by name, judged from the same mutation record.
-                    try:
-                        frozen_closures = await asyncio.to_thread(
-                            close_requirements_by_file_immutability, resolved_obligation_ledger, requirement_set,
-                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
-                            revision=state.attempt_number, contract=verification_contract,
-                        )
-                    except Exception as exc:
-                        frozen_closures = []
-                        logger.warning(f"Requirement file-immutability evidence unavailable: {exc}")
-                    try:
-                        suite_closures = await asyncio.to_thread(
-                            close_requirements_by_suite_preservation, self.kernel.config.autonomy,
-                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
-                            revision=state.attempt_number, candidate_paths=state.all_files_written,
-                            toolchain_declaration_mutable=toolchain_declaration_mutable(
-                                write_scope_mode, allowed_write_relpaths, structured_plan,
-                            ),
-                            java_home_override=state.java_home_override, contract=verification_contract,
-                            # SUITE-PRESERVATION-CLOSURE-BASELINE-ATTRIBUTION-001: the run's own captured
-                            # baseline, stability cache and replay - no second baseline run on this path.
-                            goal=goal, suite_baseline=state.validation_baseline_full_regression,
-                            stability_cache=state.pytest_stability_cache, baseline_suite_run=baseline_suite_run,
-                            baseline_source=SUITE_BASELINE_FROM_RUN,
-                            run_baseline_policy=state.validation_baseline_policy,
-                        )
-                    except Exception as exc:
-                        suite_closures = []
-                        logger.warning(f"Requirement suite-preservation evidence unavailable: {exc}")
-                    closures = (scope_closures + acceptance_closures + contract_closures + closures
-                                + immutability_closures + frozen_closures + suite_closures)
-                    if closures:
-                        state.record_event(RunEvent(
-                            kind="requirement.closure", attempt=state.attempt_number,
-                            source="workflow.requirement_closure", authority=EventAuthority.AUTHORITATIVE,
-                            message="unverified requirement closure: " + ", ".join(
-                                f"{c['requirement']}={'closed' if c['closed'] else 'open'}" for c in closures),
-                            details={"requirement_set_digest": requirement_set.digest, "closures": closures},
-                        ))
-                    blocking = blocking_requirements(
-                        resolved_obligation_ledger, requirement_set,
-                        unknown_policy=autonomy_policy.requirement_unknown_policy,
-                        unverified_policy=autonomy_policy.requirement_unverified_policy,
-                    )
-                    if blocking:
-                        detail = "; ".join(
-                            f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
-                        message = (
-                            f"{REQUIREMENTS_UNRESOLVED}: original requirement(s) without accepted "
-                            f"evidence - {detail}"
-                        )
-                        failure = Failure(
-                            type="requirements_unresolved", message=message, raw_output=message,
-                            source="orchestrator", attempt=state.attempt_number,
-                            diagnostics={
-                                "reason_code": REQUIREMENTS_UNRESOLVED,
-                                "requirement_set_digest": requirement_set.digest,
-                                "blocking": {req.id: outcome.value for req, outcome in blocking},
-                            },
-                        )
-                        state.record_gate_outcome(failure.to_gate_outcome())
-                        raise QualityGateFailure(failure)
+                        if blocking:
+                            detail = "; ".join(
+                                f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
+                            message = (
+                                f"{REQUIREMENTS_UNRESOLVED}: original requirement(s) without accepted "
+                                f"evidence - {detail}"
+                            )
+                            failure = Failure(
+                                type="requirements_unresolved", message=message, raw_output=message,
+                                source="orchestrator", attempt=state.attempt_number,
+                                diagnostics={
+                                    "reason_code": REQUIREMENTS_UNRESOLVED,
+                                    "requirement_set_digest": requirement_set.digest,
+                                    "blocking": {req.id: outcome.value for req, outcome in blocking},
+                                },
+                            )
+                            state.record_gate_outcome(failure.to_gate_outcome())
+                            raise QualityGateFailure(failure)
+
+                if attempt_ctx.deferred_executing_gates is None:
+                    await _close_and_check_requirements()
+
 
                 # PRD-031A: the static-analysis gate, on the exact batch the
                 # terminal apply below commits (it re-materializes it, and the
@@ -5644,7 +5653,7 @@ class WorkflowEngine:
                     )
 
                 # Gap B: "candidate gates passed" is only true once the held runtime verification has also run, so a resume can never skip it. Saved after that step when held.
-                if attempt_ctx.deferred_runtime_verification is None:
+                if attempt_ctx.deferred_executing_gates is None:
                     _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
                 # 4.5. Pre-Apply Human Approval Gate
@@ -5743,6 +5752,15 @@ class WorkflowEngine:
                         f"{control.process_profile.execution_weight.value}, kind="
                         f"{control.engineering_route.kind.value}, risk="
                         f"{control.engineering_route.max_observed_risk_class.name})"
+                    )
+
+                if need_human_approval and attempt_ctx.deferred_executing_gates is not None:
+                    # Gap B: nothing has been built, tested or run yet - say exactly that, never a pending check as a success. In the policy note (before the reviewer's section),
+                    # so a display that splits the reason at the review header keeps it with the policy, not with the automated review.
+                    escalation_reason += (
+                        "\nPre-checks passed: expected files present, static rules, stack contract. Nothing has been built, tested or run yet."
+                        "\nBuild and tests: will run after you approve."
+                        "\nRunning the application: you will be asked separately before any command runs."
                     )
 
                 # Stage 6 SME review, 2026-08-15, Finding 1: the Reviewer used to run
@@ -5998,16 +6016,17 @@ class WorkflowEngine:
                         "approval_callback was provided to run_generation_workflow().",
                     )
 
-                # Gap B (owner decision 2026-10-15): in human-in-the-loop mode the runtime execution was held back by run_attempt until the person approved the source (a source
-                # approval here means "this exact candidate may keep being verified"; nothing is applied to the real workspace until the terminal gate). It runs now, against the
-                # same bytes: the byte binding taken when the candidate gates passed must still hold before the commands run (checked again immediately before execution, inside
-                # the gate, and after it), the self-correction micro-loop is off, and a failure re-enters the ordinary retry loop whose new candidate is reviewed again.
-                deferred_runtime = attempt_ctx.deferred_runtime_verification
-                attempt_ctx.deferred_runtime_verification = None
+                # Gap B (owner decision 2026-10-15, stronger form): in human-in-the-loop mode every gate that EXECUTES the candidate (POM validation, build, tests, runtime
+                # verification) and the requirement closers that run its tests were held back by run_attempt until the person approved the source (a source approval here means
+                # "this exact candidate may keep being verified"; nothing is applied to the real workspace until the terminal gate). They run now, against the same bytes: the
+                # byte binding taken when the candidate gates were reached must still hold before each execution boundary and after the last, the self-correction micro-loops
+                # are off, and a failure re-enters the ordinary retry loop whose new candidate is reviewed again.
+                deferred_runtime = attempt_ctx.deferred_executing_gates
+                attempt_ctx.deferred_executing_gates = None
                 if deferred_runtime is not None:
                     if not (need_human_approval and approval_callback):
                         message = (
-                            "RUNTIME_VERIFICATION_DEFERRED_WITHOUT_SOURCE_REVIEW: runtime verification was held for a source review that was not asked. "
+                            "EXECUTION_DEFERRED_WITHOUT_SOURCE_REVIEW: verification was held for a source review that was not asked. "
                             "Nothing was run and nothing was applied."
                         )
                         failure = Failure(
@@ -6029,6 +6048,7 @@ class WorkflowEngine:
                     finally:
                         attempt_ctx.post_source_review_guard = None
                     _raise_if_required_verification_unresolved()
+                    await _close_and_check_requirements()
                     _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
                 # Worktree cleanup deliberately does NOT happen here anymore - see the

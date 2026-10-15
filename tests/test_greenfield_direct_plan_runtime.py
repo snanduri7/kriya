@@ -64,11 +64,17 @@ class DirectRun:
     log_at_execution: List[Any] = field(default_factory=list)
     applied_at_execution: List[Dict[str, bool]] = field(default_factory=list)
     bytes_at_execution: List[Dict[str, str]] = field(default_factory=list)
+    log_at_build: List[Any] = field(default_factory=list)
+    log_at_tests: List[Any] = field(default_factory=list)
+    log_at_pom: List[Any] = field(default_factory=list)
+    closers: List[Any] = field(default_factory=list)
+    bytes_at_build: List[Dict[str, str]] = field(default_factory=list)
+    bytes_at_tests: List[Dict[str, str]] = field(default_factory=list)
     person: Any = None
     canonical: Any = None
 
 
-def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, required_verification=None, tamper_during_execution=None, best_of_n=1, review_plan=None, person_cls=Person):
+def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, required_verification=None, tamper_during_execution=None, best_of_n=1, tamper_during_build=None, tamper_during_tests=None, compile_succeeds=True, tamper_during_pom=None, tests_succeed=True, review_plan=None, person_cls=Person):
     """`kriya generate` with the packaged defaults: the engine called directly (no controller), one direct unit."""
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
@@ -121,13 +127,38 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
         return {"success": app_succeeds, "returncode": code, "output": output, "timed_out": False,
                 "steps": [{"command": list(c), "exit_code": code, "stdout": output, "stderr": "", "timed_out": False} for c in commands]}
 
-    def compile_gate(*_a, **_k):
+    def compile_gate(_self, *_a, **_k):
         run.compile_calls += 1
+        run.log_at_build.append(run.person.log[:])
+        run.bytes_at_build.append({path: (Path(_self.workspace_path) / path).read_text() for path in files})
+        if tamper_during_build is not None:
+            tamper_during_build(_self.workspace_path)
+        if not compile_succeeds:
+            return {"success": False, "output": "src/main/java/hellokriya/App.java:3: error: cannot find symbol"}
         return {"success": True, "output": "[INFO] BUILD SUCCESS"}
 
-    def test_gate(*_a, **_k):
+    def test_gate(_self, *_a, **_k):
         run.test_calls += 1
+        run.log_at_tests.append(run.person.log[:])
+        run.bytes_at_tests.append({path: (Path(_self.workspace_path) / path).read_text() for path in files})
+        if tamper_during_tests is not None:
+            tamper_during_tests(_self.workspace_path)
+        if not tests_succeed:
+            return {"success": False, "output": "[ERROR] Tests run: 1, Failures: 1, Errors: 0\n[ERROR] AppTest.greets:7 expected:<Hello from Kriya> but was:<null>"}
         return TESTS_PASSED
+
+    def pom_gate(_self, *_a, **_k):
+        run.log_at_pom.append(run.person.log[:])
+        if tamper_during_pom is not None:
+            tamper_during_pom(_self.workspace_path)
+        return {"success": True, "output": "ok"}
+
+    from kriya.workflow import workflow as workflow_module  # noqa: PLC0415
+    real_closer = workflow_module.close_requirements_by_mutation_scope
+
+    def spy_closer(*args, **kwargs):
+        run.closers.append((run.person.log[:], run.compile_calls, run.test_calls))
+        return real_closer(*args, **kwargs)
 
     real_gate = GenerationState.record_gate_outcome
 
@@ -142,7 +173,8 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
              patch.object(GenerationState, "record_gate_outcome", new=record_gate), \
              patch("kriya.tools.validate.PolymorphicValidator.run_compile_check", new=compile_gate), \
              patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=test_gate), \
-             patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=lambda *a, **k: {"success": True, "output": "ok"}), \
+             patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=pom_gate), \
+             patch.object(workflow_module, "close_requirements_by_mutation_scope", new=spy_closer), \
              patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app):
             run.result = asyncio.run(engine.run_generation_workflow(goal, str(workspace), approval_callback=_callback(), required_verification=required_verification))
     finally:
@@ -378,10 +410,10 @@ def test_gap_b_the_complete_required_verification_check_runs_after_the_deferred_
 def test_gap_b_runtime_verification_held_for_a_review_that_is_not_asked_fails_closed(tmp_path):
     """Defence in depth: if the deferral were ever armed where no source review is asked, nothing may run unreviewed."""
     from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
-    with patch.object(attempt_module, "_defer_runtime_execution_until_source_review", new=lambda state, ctx: True):
+    with patch.object(attempt_module, "defer_execution_until_source_review", new=lambda state, ctx: True):
         run = run_direct(tmp_path, mode="autonomous")
     assert run.executed == [] and not _succeeded(run.result) and _applied(run) == set()
-    assert any("RUNTIME_VERIFICATION_DEFERRED_WITHOUT_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+    assert any("EXECUTION_DEFERRED_WITHOUT_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
 
 
 def test_gap_b_a_candidate_changed_before_the_runtime_review_is_not_even_offered_for_review(tmp_path):
@@ -447,10 +479,111 @@ def test_gap_b_a_new_attempt_never_inherits_the_held_execution_of_a_discarded_ca
 
     from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
     ctx = MagicMock(spec=attempt_module.AttemptContext)
-    ctx.deferred_runtime_verification = lambda: None
+    ctx.deferred_executing_gates = lambda: None
     with pytest.raises(AttributeError):    # the spec'd double has no fields beyond the first statement: the call stops right after the entry reset
         asyncio.run(attempt_module.run_attempt(MagicMock(spec=GenerationState), ctx))
-    assert ctx.deferred_runtime_verification is None
+    assert ctx.deferred_executing_gates is None
+
+
+def test_gap_b_strong_nothing_is_built_tested_or_run_before_the_source_review_is_decided(approved_run):
+    """Owner decision 2026-10-15 (stronger Gap B): in Desktop human-in-the-loop NO model-authored candidate content is executed by build, test or runtime before the required source
+    review succeeds. Order: source review pending -> decided -> build -> tests -> runtime review pending -> decided -> execution -> final apply."""
+    source_decided = [("pending", "change_approval"), ("deciding", "change_approval")]
+    [at_build] = approved_run.log_at_build
+    assert at_build == source_decided
+    assert approved_run.log_at_tests and all(log[:2] == source_decided for log in approved_run.log_at_tests)
+    [at_run] = approved_run.log_at_execution
+    assert at_run == source_decided + [("pending", "runtime_command"), ("deciding", "runtime_command")]
+    assert not any(approved_run.applied_at_execution[0].values())                               # still isolated until the terminal gate
+
+
+def test_gap_b_strong_pom_validation_also_waits_for_the_source_review(approved_run):
+    """`mvn validate` executes Maven against a model-authored pom.xml: it is held with the other executing gates."""
+    assert approved_run.log_at_pom and all(log[:2] == [("pending", "change_approval"), ("deciding", "change_approval")] for log in approved_run.log_at_pom)
+
+
+def test_gap_b_strong_reviewed_built_tested_executed_and_applied_bytes_are_identical(approved_run):
+    [built] = approved_run.bytes_at_build
+    [executed] = approved_run.bytes_at_execution
+    assert built == FILES and executed == FILES and all(seen == FILES for seen in approved_run.bytes_at_tests)
+    assert {path: (approved_run.workspace / path).read_text() for path in FILES} == FILES
+
+
+def test_gap_b_strong_the_source_review_says_what_has_not_happened_yet(approved_run):
+    reason = next(p for p in approved_run.person.seen if p["kind"] == "change_approval")["reason"]
+    assert "Nothing has been built, tested or run yet" in reason and "Build and tests: will run after you approve" in reason
+    assert "Nothing has been built" in reason.split("=== Automated Code Review ===")[0]        # in the policy note, not inside the automated review
+    assert "BUILD SUCCESS" not in reason and "Tests run" not in reason
+
+
+def test_gap_b_strong_rejecting_the_source_builds_tests_and_runs_nothing(tmp_path):
+    run = run_direct(tmp_path, review_plan={"change_approval": ("reject", 0.0)})
+    assert [p["kind"] for p in run.person.seen] == ["change_approval"]
+    assert run.compile_calls == 0 and run.test_calls == 0 and run.judge_calls == 0 and run.executed == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+
+
+def test_gap_b_strong_a_candidate_changed_by_the_build_is_never_tested_or_run(tmp_path):
+    edit = lambda workspace_path: (Path(workspace_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed by the build\n")  # noqa: E731 - one-line test hook
+    run = run_direct(tmp_path, tamper_during_build=edit)
+    assert run.compile_calls == 1 and run.test_calls == 0 and run.executed == []
+    assert [p["kind"] for p in run.person.seen] == ["change_approval"]
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_strong_a_candidate_changed_by_the_tests_never_reaches_the_runtime_review(tmp_path):
+    edit = lambda workspace_path: (Path(workspace_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed by the tests\n")  # noqa: E731 - one-line test hook
+    run = run_direct(tmp_path, tamper_during_tests=edit)
+    assert run.test_calls == 1 and run.executed == []                                           # the judge is a model call, not an execution
+    assert [p["kind"] for p in run.person.seen] == ["change_approval"]
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_strong_no_self_correction_edits_the_candidate_after_a_failed_build(tmp_path):
+    from unittest.mock import AsyncMock as _AsyncMock  # noqa: PLC0415
+    with patch("kriya.workflow.self_correction.run_self_correction_loop", new=_AsyncMock(side_effect=AssertionError("self-correction ran after the source approval"))) as loop:
+        run = run_direct(tmp_path, compile_succeeds=False)
+    assert loop.await_count == 0 and run.compile_calls >= 1
+    assert not _succeeded(run.result) and _applied(run) == set()
+
+
+def test_gap_b_strong_the_ledger_stays_unverified_and_the_run_is_still_an_honest_success(approved_run):
+    """Gap C owner decision: a successful run is not requirement-ledger closure. Build, tests and the executed application are facts; 'requested behavior verified' is not claimed."""
+    assert _succeeded(approved_run.result)
+    assert application_outcome(approved_run.gate_outcomes)["status"] == STATUS_EXECUTED
+    assert approved_run.result["requirements"]["outcomes"] == {"REQ-1": "pending", "REQ-2": "pending"}
+    assert not approved_run.result.get("requirements_verified")
+
+
+def test_gap_b_strong_a_candidate_changed_by_pom_validation_is_never_built(tmp_path):
+    edit = lambda workspace_path: (Path(workspace_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed by mvn validate\n")  # noqa: E731 - one-line test hook
+    run = run_direct(tmp_path, tamper_during_pom=edit)
+    assert run.log_at_pom and run.compile_calls == 0 and run.test_calls == 0 and run.executed == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+    # fail closed by either owner: the approval guard, or the pre-existing tree binding that compares the written bytes with what the authorized writer staged (the same bytes, checked first)
+    assert any(reason in str(g.get("output")) for g in run.gate_outcomes for reason in ("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW", "WORKTREE_CONTENT_MISMATCH"))
+
+
+def test_gap_b_strong_no_self_correction_edits_the_candidate_after_failing_tests(tmp_path):
+    from unittest.mock import AsyncMock as _AsyncMock  # noqa: PLC0415
+    boom = AssertionError("a candidate-editing loop ran after the source approval")
+    with patch("kriya.workflow.self_correction.run_self_correction_loop", new=_AsyncMock(side_effect=boom)) as loop, \
+            patch("kriya.workflow.self_correction.run_repair_loop", new=_AsyncMock(side_effect=boom)) as repair:     # the targeted-test repair of a retry attempt
+        from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
+        with patch.object(attempt_module, "extract_target_test", return_value="hellokriya.AppTest#greets"):      # as on a retry that names the failing test
+            run = run_direct(tmp_path, tests_succeed=False)
+    assert loop.await_count == 0 and repair.await_count == 0 and run.test_calls >= 1
+    assert not _succeeded(run.result) and _applied(run) == set()
+
+
+def test_gap_b_strong_the_requirement_closers_run_the_candidate_s_tests_only_after_approval_and_after_the_gates(approved_run):
+    """The PRD-020 closers (named tests, acceptance, suite preservation) EXECUTE the candidate's tests: they follow the source approval and the build/test gates, never precede them."""
+    assert approved_run.closers, "the closers ran"
+    log, compiles, tests = approved_run.closers[0]
+    assert log[:2] == [("pending", "change_approval"), ("deciding", "change_approval")]
+    assert compiles >= 1 and tests >= 1
 
 
 def test_CHARACTERISATION_gap_c_the_direct_plan_leaves_the_requirement_ledger_pending_exactly_like_the_structured_plan(approved_run):
