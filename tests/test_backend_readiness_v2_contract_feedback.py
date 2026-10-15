@@ -362,9 +362,12 @@ def test_the_gate_sits_after_compile_and_before_the_model_verifier_gates():
 
     from kriya.workflow import attempt
 
-    source = inspect.getsource(attempt.run_attempt)
+    # Demo V2 (Gap B): the compile, the contract-feedback gate and the test finder are the EXECUTING candidate gates, which a human-in-the-loop run holds until the source review succeeds. The
+    # order among them is unchanged; where they sit is `_run_executing_candidate_gates`, and `run_attempt` itself no longer compiles anything (nothing can execute ahead of the held gates).
+    source = inspect.getsource(attempt._run_executing_candidate_gates)
     assert source.index("compile_res = validator.run_compile_check") < source.index("_run_contract_feedback_gate(state, ctx)") \
         < source.index("runnable_test_files = find_runnable_test_files")
+    assert "run_compile_check" not in inspect.getsource(attempt.run_attempt)
 
 
 def test_unsupported_ambiguous_and_shadow_lines_alone_bind_no_feedback(tmp_path):

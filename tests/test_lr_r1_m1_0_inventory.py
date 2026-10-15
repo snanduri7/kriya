@@ -158,6 +158,11 @@ def test_inventory_counts_the_design_relies_on():
     # and the reopened owner's VERIFICATION_RETRY_NO_CHANGE_POSSIBLE refusal (workflow.py no-change settlement);
     # BACKEND-READINESS-V2 added one (attempt._reject_exception_masking: the typed unsafe_exception_masking stop) and one
     # (workflow._run_semantic_safety_gate: the same typed stop on the final direct batch); slot 3 added one
-    # (attempt._run_contract_feedback_gate: the typed, retriable deterministic_contract_violation).
-    assert records == 92, records
+    # (attempt._run_contract_feedback_gate: the typed, retriable deterministic_contract_violation); Demo V2 added one
+    # (attempt._managed_service_blocked_without_approval_subject: the typed MANAGED_SERVICE_APPROVAL_UNSUPPORTED stop) and,
+    # with the direct-plan correctness closure, a net one: two new typed stops (attempt._raise_if_required_runtime_verification_declined,
+    # REQUIRED_RUNTIME_VERIFICATION_DECLINED; attempt.assert_candidate_unchanged_since_source_review, CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW)
+    # and the rest of the movement is the extraction of the executing gates out of run_attempt (_run_executing_candidate_gates,
+    # _run_pom_validation_gate, _approve_and_execute_runtime_verification) - every site still records through state.record_gate_outcome.
+    assert records == 94, records
     assert os.path.exists(ROOT / "kriya/workflow/context_budget.py")

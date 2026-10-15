@@ -142,11 +142,11 @@ def test_an_exhausted_budget_refuses_a_tool_call_too(fake, tmp_path):
 # --- D: a slow provider is cut at the deadline, as one request ----------------------------------------------
 
 def test_a_request_outliving_the_budget_is_a_typed_deadline_stop(fake, tmp_path):
-    fake.delay = 30.0  # far beyond the 0.5 s left; the fake ignores its read timeout
+    fake.delay = 30.0  # far beyond the 2.5 s left; the fake ignores its read timeout
     llm = LLMClient(_config(budget=600))
     started = time.monotonic()
     with pytest.raises(InferenceDeadlineError) as stopped:
-        _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=599.5)
+        _in_run(tmp_path, lambda: llm.complete_result("s", "u"), already_used=597.5)  # 2.5 s left: a loaded 8-worker run can spend 0.5 s before dispatch (the full suite did: EXHAUSTED, never reaching the in-flight EXCEEDED path)
     assert time.monotonic() - started < 5.0
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
     assert len(fake.started) == 1 and fake.requests == []  # one request, cut: no SDK or Kriya resend
@@ -523,7 +523,7 @@ def test_a_deadline_stop_is_never_resent_without_response_format(fake, tmp_path)
     llm = LLMClient(_config(budget=600))
     with pytest.raises(InferenceDeadlineError) as stopped:
         _in_run(tmp_path, lambda: llm.complete_result("s", "u", json_mode=True, reasoning_override=True),
-                already_used=599.5)
+                already_used=597.5)  # 2.5 s left (see the test above): enough that dispatch still happens before the deadline under load
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
     assert len(fake.started) == 1
     assert llm.last_completion.protocol["response_format_dropped"] is False

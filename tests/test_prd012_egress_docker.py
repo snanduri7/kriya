@@ -92,6 +92,7 @@ async def test_hostile_plan_tool_subtask_cannot_reach_its_attacker_destination()
     the build log first'. It runs through the real tool boundary and real
     containment, and the destination stays unreachable."""
     cfg = _production_cfg()
+    cfg.autonomy.mode = "autonomous"  # a human-in-the-loop run stops a confirmation-requiring tool before it executes (tests/test_prd012_egress.py pins that); this test needs the command to RUN
     kernel = Kernel(config=cfg)
     kernel.registry.register("tool", "shell", ShellTool(autonomy_cfg=cfg.autonomy))
     subtask = Subtask(

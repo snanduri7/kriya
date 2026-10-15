@@ -21,6 +21,7 @@ import yaml
 
 import kriya.config.config as config_module
 from kriya.config.config import AppConfig
+from kriya.core import model_runtime
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.store import SnapshotError
@@ -36,7 +37,7 @@ HEADER = ("# Kriya project configuration - created by Project Setup.\n"
 _AUTONOMY = {"mode": "human-in-the-loop", "web_lookup_enabled": False, "web_lookup_auto_approve": False, "run_verification_enabled": True,
              "self_correction_loop_enabled": False, "generation_time_budget_seconds": 900}
 _WORKFLOW = {"enabled": True, "mode": "enforce"}
-_NUM_CTX = 32768
+_CONTEXT_WINDOW_TOKENS = 32768
 
 
 def _packaged_defaults() -> Dict[str, Any]:
@@ -48,11 +49,8 @@ def recommended_profile() -> Dict[str, Any]:
     """The profile as a plain dict, validated by the real schema. Pure: reads the packaged defaults only."""
     defaults = _packaged_defaults()
     llm = dict(defaults["llm"])
-    extra = dict(llm.get("extra_body") or {})
-    options = dict(extra.get("options") or {})
-    options["num_ctx"] = _NUM_CTX
-    extra["options"] = options
-    llm["extra_body"] = extra
+    # the per-request context window is a provider's request field: the runtime adapter writes it (INF-001), generic setup never names it
+    llm["extra_body"] = model_runtime.with_context_window(llm.get("extra_body"), _CONTEXT_WINDOW_TOKENS)
     profile: Dict[str, Any] = {"workflow_controller": dict(_WORKFLOW), "autonomy": dict(_AUTONOMY), "llm": llm}
     if defaults.get("llm_chain"):
         profile["llm_chain"] = [dict(item) for item in defaults["llm_chain"]]

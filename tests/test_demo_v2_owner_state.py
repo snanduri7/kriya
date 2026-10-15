@@ -37,6 +37,10 @@ def _fingerprint(work: Path) -> dict:
             files[str(rel)] = hashlib.sha256(path.read_bytes()).hexdigest()
     trees = {}
     for workspace in sorted(work.glob("scenario-*/workspace")):
+        if not (workspace / ".git").exists():
+            # scenario 00 is the GREENFIELD start: a brand-new empty folder with no git repository; its fingerprint is its (empty) listing
+            trees[str(workspace.relative_to(work))] = ("not a repository", "\n".join(sorted(p.name for p in workspace.iterdir())))
+            continue
         trees[str(workspace.relative_to(work))] = (
             subprocess.run(["git", "-C", str(workspace), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True, check=True).stdout.strip(),
             subprocess.run(["git", "-C", str(workspace), "status", "--short"], capture_output=True, text=True, check=True).stdout,
@@ -76,7 +80,8 @@ def test_reset_all_is_idempotent_and_leaves_no_service(tmp_path: Path) -> None:
     first = _run("reset_demo.sh", work, "all")
     assert first.returncode == 0, first.stderr + first.stdout
     state_one = _fingerprint(work)
-    assert sorted(state_one["trees"]) == ["scenario-01/workspace", "scenario-02/workspace", "scenario-03/workspace"]
+    assert sorted(state_one["trees"]) == ["scenario-00/workspace", "scenario-01/workspace", "scenario-02/workspace", "scenario-03/workspace"]
+    assert state_one["trees"]["scenario-00/workspace"] == ("not a repository", ""), "scenario 00 must be a brand-new EMPTY folder"
     second = _run("reset_demo.sh", work, "all")
     assert second.returncode == 0, second.stderr + second.stdout
     assert _fingerprint(work) == state_one
