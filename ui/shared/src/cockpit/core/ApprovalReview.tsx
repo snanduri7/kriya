@@ -8,7 +8,7 @@ import { toAvailability, useAsync } from './async';
 import { useProvider } from './context';
 import { useExecution, type PendingReview } from './execution';
 import { shortDigest } from './records';
-import { verificationSummary } from './presentation';
+import { currentChangeVerification } from './presentation';
 import { useLiveRunFacts } from './runFactsHooks';
 import { useWorkspacePath } from './workspace';
 
@@ -22,7 +22,7 @@ const REFUSAL_HELP: Record<string, string> = {
   NOT_PENDING: 'No change is waiting for review.',
   WRONG_WORKSPACE: 'This run belongs to a different folder.',
 };
-const STATUS_MARK = { passed: '✓', failed: '✕', unknown: '•' } as const;
+const STATUS_MARK = { passed: '✓', failed: '✕', unknown: '○' } as const;
 
 /** The EXACT proposed change of one review, proved by Kriya against the review's digests. Re-read whenever the review identity changes (a new candidate is a new review). */
 export function useChangeReview(launchId: string, reviewId: string | null, nonce = 0): Availability<ChangeApprovalReview> {
@@ -67,7 +67,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const viewable = data !== null && data.review_id === review.review_id && data.candidate_digest === review.candidate_digest && data.status === 'PENDING' && !truncated;
   const staleRefusal = decision.state === 'refused' && decision.code === 'STALE_REVIEW';
   const facts = useLiveRunFacts(launchId, `${review.review_id}@${review.candidate_digest}`);
-  const lines = facts && facts.state === 'ready' ? verificationSummary(facts.gates) : null;
+  const lines = facts && facts.state === 'ready' ? currentChangeVerification(facts.gates) : null;
   const added = (data?.files ?? review.files.map((f) => ({ additions: f.lines_added }))).reduce((n, f) => n + f.additions, 0);
   const removed = (data?.files ?? review.files.map((f) => ({ deletions: f.lines_removed }))).reduce((n, f) => n + ('deletions' in f ? f.deletions : 0), 0);
   const why = data?.review_summary ?? data?.policy_note ?? null;
@@ -96,7 +96,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
       <h4 className="ck-action-sub">Why</h4>
       {why !== null ? <div className="ck-why" data-testid="change-why">{sanitizeText(why)}</div> : <p className="muted">{shown.state === 'loading' ? 'Loading…' : 'Kriya recorded no explanation for this change.'}</p>}
 
-      <h4 className="ck-action-sub">Verification</h4>
+      <h4 className="ck-action-sub">Verification of this change</h4>
       {lines === null ? <p className="muted" role="status">{facts && facts.state === 'unavailable' ? `Verification results could not be read here (${facts.detail}).` : 'Reading the recorded results…'}</p>
         : lines.length === 0 ? <p className="muted">No verification result is recorded yet.</p>
         : <ul className="ck-verify" aria-label="Verification so far">{lines.map((l) => <li key={l.text} data-status={l.status}><span aria-hidden="true">{STATUS_MARK[l.status]}</span> {l.text}</li>)}</ul>}

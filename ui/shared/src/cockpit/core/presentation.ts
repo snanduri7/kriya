@@ -68,13 +68,18 @@ export interface VerificationGroup { id: GroupId; title: string; status: GroupSt
 const MAPPING: Record<string, { group: GroupId; line: string }> = {
   compile: { group: 'build', line: 'build' },
   test: { group: 'tests', line: 'tests' }, tests: { group: 'tests', line: 'tests' }, targeted_test: { group: 'tests', line: 'tests' }, regression_test: { group: 'tests', line: 'tests' },
-  goal_spec_compliance: { group: 'behavior', line: 'behavior' }, original_requirements: { group: 'behavior', line: 'behavior' },
+  // `goal_spec_compliance` is a PER-UNIT model judgment about one planned step's files; it is never the whole goal's verdict. Only `original_requirements` - recorded by the terminal gate over the
+  // ORIGINAL request, after every unit - may say the requested behavior was verified.
+  goal_spec_compliance: { group: 'behavior', line: 'planned' }, original_requirements: { group: 'behavior', line: 'behavior' },
   preserved_references: { group: 'safety', line: 'preserved' },
   static_analysis: { group: 'safety', line: 'safety' }, semantic_safety: { group: 'safety', line: 'safety' }, stack_contract: { group: 'safety', line: 'safety' },
 };
 const GROUP_ORDER: GroupId[] = ['build', 'tests', 'behavior', 'safety'];
 const GROUP_TITLE: Record<GroupId, string> = { build: 'Build', tests: 'Tests', behavior: 'Requested behavior', safety: 'Regression and safety' };
-const LINE_ORDER = ['build', 'tests', 'behavior', 'preserved', 'safety'];
+const LINE_ORDER = ['build', 'tests', 'planned', 'behavior', 'preserved', 'safety'];
+
+/** The recorded test count behind a tests line, when the recorder persisted one. Zero cases is NOT a pass: nothing was verified by tests. */
+const countedTests = (gates: readonly GateFact[]) => gates.find((g) => g.tests !== null)?.tests ?? null;
 
 function status(gates: readonly GateFact[]): GroupStatus {
   if (gates.some((g) => g.passed === false)) return 'failed';
@@ -84,11 +89,13 @@ function status(gates: readonly GateFact[]): GroupStatus {
 function lineText(line: string, s: GroupStatus, gates: readonly GateFact[]): string {
   if (line === 'build') return s === 'passed' ? 'Build passed' : s === 'failed' ? 'Build failed' : 'Build: no result recorded';
   if (line === 'tests') {
-    const counted = gates.find((g) => g.tests !== null)?.tests ?? null;
+    const counted = countedTests(gates);
+    if (s !== 'failed' && counted !== null && counted.cases === 0) return 'No tests ran for this change';
     const detail = counted === null ? '' : counted.passed !== null ? `${counted.passed} / ${counted.cases} tests` : `${counted.cases} test${counted.cases === 1 ? '' : 's'}`;
     if (s === 'passed') return counted === null ? 'Tests passed' : counted.passed !== null ? `${detail} passed` : `Tests passed (${detail})`;
     return s === 'failed' ? (counted !== null && counted.passed !== null ? `Tests failed (${detail} passed)` : 'Tests failed') : 'Tests: no result recorded';
   }
+  if (line === 'planned') return s === 'passed' ? 'Matches the planned change' : s === 'failed' ? 'Does not match the planned change' : 'Planned change: no result recorded';
   if (line === 'behavior') return s === 'passed' ? 'Requested behavior verified' : s === 'failed' ? 'Requested behavior not verified' : 'Requested behavior: no result recorded';
   if (line === 'preserved') return s === 'passed' ? 'Existing behavior preserved' : s === 'failed' ? 'Existing behavior not preserved' : 'Existing behavior: no result recorded';
   return s === 'passed' ? 'Safety checks passed' : s === 'failed' ? 'Safety checks failed' : 'Safety checks: no result recorded';
@@ -109,7 +116,8 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
   for (const id of GROUP_ORDER) {
     const lines: VerificationLine[] = LINE_ORDER.filter((l) => byLine.get(l)?.group === id).map((l) => {
       const entry = byLine.get(l)!;
-      const s = status(entry.gates);
+      const noTestsRan = l === 'tests' && countedTests(entry.gates)?.cases === 0;
+      const s = noTestsRan && status(entry.gates) !== 'failed' ? 'unknown' : status(entry.gates);
       return { text: lineText(l, s, entry.gates), status: s, gates: entry.gates.map((g) => g.type) };
     });
     if (lines.length === 0) continue;
@@ -121,6 +129,15 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
 /** The recorded checks in one sentence for a compact place (the approval screen, history): only groups with a recorded result, nothing counted that was not recorded. */
 export function verificationSummary(gates: readonly GateFact[]): VerificationLine[] {
   return verificationGroups(gates).groups.flatMap((g) => g.lines);
+}
+
+/** What a run waiting on a person's decision can honestly say about the WHOLE goal: nothing is verified yet - the run is mid-flight and continues after the decision. Never derived from a
+ * per-unit judgment, and shown on every approval screen (an approval is by definition not the end of the run). */
+export const OVERALL_GOAL_PENDING: VerificationLine = { text: 'Overall goal: not verified yet - Kriya continues after your decision', status: 'unknown', gates: [] };
+
+/** The verification lines for a decision taken MID-RUN: the checks of the current change, then the explicit overall-goal line. */
+export function currentChangeVerification(gates: readonly GateFact[]): VerificationLine[] {
+  return [...verificationSummary(gates), OVERALL_GOAL_PENDING];
 }
 
 // ------------------------------------------------------------------ the current run, in words

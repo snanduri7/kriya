@@ -64,6 +64,15 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(within(review).getByRole('list', { name: 'Verification so far' })).toHaveTextContent(/Build passed/);
   });
 
+  it('a decision taken mid-run never claims the whole goal: the verification of THIS change, then "Overall goal: not verified yet" - never "Requested behavior verified"', async () => {
+    const { bar } = await reachReview();
+    const review = within(bar).getByRole('region', { name: 'Change review' });
+    const list = await within(review).findByRole('list', { name: 'Verification so far' });
+    expect(list).toHaveTextContent(/Overall goal: not verified yet/);
+    expect(list.textContent).not.toMatch(/Requested behavior verified/);
+    expect(within(review).getByText('Verification of this change')).toBeInTheDocument();
+  });
+
   it('says what each decision does BEFORE it is pressed', async () => {
     const { bar } = await reachReview();
     const help = within(within(bar).getByRole('region', { name: 'Change review' })).getByTestId('decision-help');
