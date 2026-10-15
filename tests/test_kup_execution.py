@@ -510,8 +510,12 @@ def test_every_interactive_callback_of_generate_records_the_decision_before_it_w
                     "on_web_lookup": "decline_decision(", "on_web_lookup_query": "decline_decision("}
     for callback, call in expectations.items():
         if callback == "on_approval":  # the nested callback delegates to the module-level function that tests/test_launch_approval.py exercises by behaviour
-            assert "return _approval_decision(files, reason, yes)" in source[source.index("    def on_approval("):source.index("    def on_skill_gap(")]
+            assert "return _approval_decision(files, reason, yes)" in source[source.index("    def on_change_approval("):source.index("    def on_skill_gap(")]
             body = inspect.getsource(cli._approval_decision)
+            # the runtime-command channel of the same callback is held to the same rule: it records the decision that stops the run before it can reach the terminal prompt
+            assert "lambda subject: _runtime_command_decision(subject, yes)" in source
+            runtime_body = inspect.getsource(cli._runtime_command_decision)
+            assert runtime_body.index("note_approval_required(") < runtime_body.index("_approval_decision(")
         else:
             body = source[source.index(f"    def {callback}("):]
             body = body[: body.index("\n    def ", 10)] if "\n    def " in body[10:] else body
