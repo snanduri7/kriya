@@ -6,7 +6,12 @@ channel, stdin digest); the criterion and unit identify why, and never change wh
 
 Two call sites (kriya/workflow/attempt.py: the verification-only unit and the in-attempt gate) build the subject from the RESOLVED commands - after ``_resolve_run_command`` and the
 runtime-verification contract - and execute that same resolved set. After the human answers, the call site derives the commands it is about to run again and compares fingerprints
-(``approval_matches``): an approval of fingerprint A never executes fingerprint B. A callback that is a plain function (the terminal, the tests, every other caller) is asked the
+(``approval_matches``): an approval of fingerprint A never executes fingerprint B.
+
+Honest boundary (independent review of 52b89ea): the fingerprint binds the commands handed to the runtime executor. Two things happen AFTER that hand-off and are NOT in it: for a Python
+project ``PolymorphicValidator._substitute_python_interpreter`` rewrites ``python``/``python3`` to the project's virtual-environment interpreter (it may also install dependencies, so it
+cannot run before the review), and Kriya-owned build preparation (``_prepare_runtime``, ``_prepare_finite_command_runtime_artifacts``: e.g. ``mvn package`` when the command needs a
+built artifact) runs first. The review copy says so; these are Kriya's own prerequisites, not commands a model chose. A callback that is a plain function (the terminal, the tests, every other caller) is asked the
 legacy way - ``callback([], subject.reason)`` - so nothing outside a desktop launch changes.
 
 Deliberately small: one subject, one optional channel on the existing callback. It is not an approval framework.
@@ -52,6 +57,7 @@ class RuntimeCommandSubject:
     stdin_sha256: Optional[str]
     reason: str
     environment_names: Tuple[str, ...] = ()   # names only, never values; Kriya passes no extra environment to the verification run
+    incomplete_reason: Optional[str] = None   # the runtime-verification contract could not be satisfied: nothing will run, so nothing is asked (not part of the fingerprint)
 
     @property
     def fingerprint(self) -> str:
@@ -59,9 +65,9 @@ class RuntimeCommandSubject:
 
 
 def build_subject(*, unit_id: Optional[str], criterion: str, working_directory: str, commands: List[List[str]], input_channel: str,
-                  stdin_payload: Optional[str], reason: str) -> RuntimeCommandSubject:
+                  stdin_payload: Optional[str], reason: str, incomplete_reason: Optional[str] = None) -> RuntimeCommandSubject:
     return RuntimeCommandSubject(unit_id=unit_id, criterion=criterion, working_directory=working_directory, commands=tuple(tuple(str(a) for a in c) for c in commands),
-                                 input_channel=input_channel or "none", stdin_sha256=stdin_digest(stdin_payload), reason=reason)
+                                 input_channel=input_channel or "none", stdin_sha256=stdin_digest(stdin_payload), reason=reason, incomplete_reason=incomplete_reason)
 
 
 def reviewable(subject: RuntimeCommandSubject) -> bool:

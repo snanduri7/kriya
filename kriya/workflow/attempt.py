@@ -5237,12 +5237,12 @@ def _derive_runtime_command_subject(ctx: "AttemptContext", judgment: Dict[str, A
     same set again."""
     resolved = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
     channel = judgment.get("input_channel") or "none"
-    final, stdin_payload, _incomplete = _apply_runtime_verification_contract(resolved, channel)
+    final, stdin_payload, incomplete = _apply_runtime_verification_contract(resolved, channel)
     commands_desc = "\n".join(f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(final, 1))
     reason = (f"{intro}\n  Command(s):\n{commands_desc}\n  Looking for: {judgment['success_criteria']}\n"
               "Allow Kriya to execute these command(s) inside the sandboxed worktree?")
     return build_runtime_subject(unit_id=ctx.current_subtask_id, criterion=str(judgment.get("success_criteria") or ""), working_directory=str(ctx.worktree_path),
-                                 commands=final, input_channel=channel, stdin_payload=stdin_payload, reason=reason)
+                                 commands=final, input_channel=channel, stdin_payload=stdin_payload, reason=reason, incomplete_reason=incomplete)
 
 
 def _runtime_commands_need_approval(ctx: "AttemptContext", state: GenerationState, judgment: Dict[str, Any], autonomy_mode: str) -> bool:
@@ -5256,7 +5256,10 @@ async def _approve_runtime_commands(ctx: "AttemptContext", state: GenerationStat
     """Ask a human to approve the exact runtime command set; True (and the approved fingerprint recorded) only when the approval is bound to the commands the executor derives
     right after the answer. A changed set (the worktree or PATH moved while the person decided) is reviewed again, at most MAX_REVIEW_ROUNDS times, and never executed."""
     for _round in range(MAX_REVIEW_ROUNDS):
-        decision = await ask_runtime_commands(ctx.approval_callback, _derive_runtime_command_subject(ctx, judgment, intro))
+        subject = _derive_runtime_command_subject(ctx, judgment, intro)
+        if subject.incomplete_reason:
+            return True  # the runtime-verification contract cannot be satisfied: nothing will run and the caller raises RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE; no one is asked to approve it
+        decision = await ask_runtime_commands(ctx.approval_callback, subject)
         if not decision.approved:
             return False
         if approval_matches(decision, _derive_runtime_command_subject(ctx, judgment, intro)):

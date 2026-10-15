@@ -152,3 +152,16 @@ def test_when_a_human_must_approve_is_decided_by_the_exact_command_set():
         assert need({**JUDGMENT, "command_source": "goal_explicit"}, ) is False                    # the user's own explicit command is not Kriya's inference
         state.run_verification_approved_fingerprint = None
         assert need(JUDGMENT, "guardrails") is False                                               # policy unchanged outside human-in-the-loop
+
+
+def test_nobody_is_asked_to_approve_a_command_set_the_contract_refuses_to_run():
+    """Independent review of 52b89ea: a person could approve a set that then raised RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE without running. An unsatisfiable input channel asks nothing."""
+    asked = []
+    typed = TypedApprovalCallback(lambda f, r: True, lambda s: asked.append(s) or RuntimeCommandDecision(s.fingerprint))
+    state = SimpleNamespace(run_verification_approved_fingerprint=None)
+    unsatisfiable = {**JUDGMENT, "run_commands": [["somebinary"]], "input_channel": "argv"}      # an argv input is required but the command has no place for it
+    with patch.object(attempt, "_resolve_run_command", side_effect=lambda cmd, _wt: list(cmd)):
+        subject = attempt._derive_runtime_command_subject(_ctx(typed), unsatisfiable, "intro")
+        assert subject.incomplete_reason, "the fixture must be a command set the contract cannot satisfy"
+        assert asyncio.run(attempt._approve_runtime_commands(_ctx(typed), state, unsatisfiable, "intro")) is True
+    assert asked == [] and state.run_verification_approved_fingerprint is None

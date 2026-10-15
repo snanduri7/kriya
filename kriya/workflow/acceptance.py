@@ -223,14 +223,17 @@ _EXECUTABLE_SUBJECT = r"(?:application|app|program|executable|binary|service|ser
 _WORDS = r"(?:\s+[^\s.;!?]+)"
 _OUTPUT_INTENT_RE = re.compile(
     rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,6}}?\s+"
-    r"(?P<verb>(?:prints|outputs|displays|emits|echoes|responds\s+with)\b"
-    r"|(?:should|must|will|shall|can|to)\s+(?:also\s+)?(?:print|output|display|emit|echo|respond\s+with)\b"
+    r"(?P<verb>(?:prints|outputs|displays|emits|echoes)\b|responds\s+with(?=\s+(?:[\"'`]|\d|http\b|status\b))"
+    r"|(?:should|must|will|shall|can|to)\s+(?:also\s+)?(?:(?:print|output|display|emit|echo)\b|respond\s+with(?=\s+(?:[\"'`]|\d|http\b|status\b)))"
     r"|writes\s+(?:\S+\s+){0,3}?to\s+(?:stdout|standard\s+output|the\s+console)\b)",
     re.IGNORECASE,
 )
 _EXECUTION_MODALITY_RE = re.compile(
     rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,4}}?\s+(?:should|must|will|shall|needs?\s+to|has\s+to|can)\s+(?:\w+\s+)?"
-    r"(?:start|execute|run|launch|exit|terminate)\b",
+    r"(?:start|execute|run|launch|exit|terminate)\b"
+    # the verb must END the clause or be followed by an outcome word: "should run on Java 17", "run on port 8080", "execute handlers asynchronously" describe the design, not an
+    # observable execution requirement (independent review of b8cc982)
+    r"(?=\s*(?:$|[.,;:!?)]|\s+(?:and|then|successfully|correctly|cleanly|normally|without|when|if|before|after|within|with\s+(?:exit|code|status)|to\s+completion)\b))",
     re.IGNORECASE,
 )
 _RUNNABLE_PRODUCES_RE = re.compile(

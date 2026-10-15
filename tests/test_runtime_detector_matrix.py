@@ -25,6 +25,9 @@ POSITIVE = [
     "Start the Spring Boot application and confirm startup",
     "Execute the application and verify exit code 2",
     "Execute invalid input and verify exit status is non-zero.",
+    "The application should run.",
+    "The service should respond with 200 OK once started.",
+    'The server should respond with "pong" to GET /ping.',
 ]
 NEGATIVE = [
     "before any location check would even run",                                                                                   # P3 prose
@@ -46,6 +49,13 @@ NEGATIVE = [
     "Create a small Java 17 Maven application named hello-kriya and include a unit test. Make the application runnable.",
     "Describe in Javadoc what the application does.",
     "",
+    "The application should run on Java 17.",                                                                                       # independent review of b8cc982: design statements
+    "The application must run on Linux and macOS.",
+    "The service should run on port 8080 behind the gateway.",
+    "The service can run in a transaction.",
+    "The server application will execute handlers asynchronously.",
+    "The service should respond with a User object from getUser().",
+    "The program should exit gracefully when config is missing (throw ConfigException).",
 ]
 
 
