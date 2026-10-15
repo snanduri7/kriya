@@ -74,7 +74,7 @@ class DirectRun:
     canonical: Any = None
 
 
-def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, required_verification=None, tamper_during_execution=None, best_of_n=1, tamper_during_build=None, tamper_during_tests=None, compile_succeeds=True, tamper_during_pom=None, tests_succeed=True, review_plan=None, person_cls=Person):
+def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, required_verification=None, tamper_during_execution=None, best_of_n=1, tamper_during_build=None, tamper_during_tests=None, compile_succeeds=True, tamper_during_pom=None, tests_succeed=True, tamper_during_closer=None, with_approver=True, review_plan=None, person_cls=Person):
     """`kriya generate` with the packaged defaults: the engine called directly (no controller), one direct unit."""
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
@@ -158,6 +158,8 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
 
     def spy_closer(*args, **kwargs):
         run.closers.append((run.person.log[:], run.compile_calls, run.test_calls))
+        if tamper_during_closer is not None:
+            tamper_during_closer(args[2] if len(args) > 2 else kwargs.get("candidate_root"))      # close_requirements_by_mutation_scope(ledger, requirement_set, worktree_path, ...)
         return real_closer(*args, **kwargs)
 
     real_gate = GenerationState.record_gate_outcome
@@ -176,7 +178,7 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
              patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=pom_gate), \
              patch.object(workflow_module, "close_requirements_by_mutation_scope", new=spy_closer), \
              patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app):
-            run.result = asyncio.run(engine.run_generation_workflow(goal, str(workspace), approval_callback=_callback(), required_verification=required_verification))
+            run.result = asyncio.run(engine.run_generation_workflow(goal, str(workspace), approval_callback=_callback() if with_approver else None, required_verification=required_verification))
     finally:
         run.person.stop()
         session.finish(0, None, None)
@@ -356,8 +358,11 @@ def test_gap_b_a_changed_candidate_after_source_approval_is_never_executed_or_ap
         (Path(ctx.worktree_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed after the source review\n")
         return await real(ctx, state, judgment, intro)
 
-    with patch.object(attempt_module, "_approve_runtime_commands", new=tamper_then_review):
+    prepared = []
+    with patch.object(attempt_module, "_approve_runtime_commands", new=tamper_then_review), \
+            patch.object(attempt_module, "_prepare_finite_command_runtime_artifacts", side_effect=lambda *a, **k: prepared.append(1)):
         run = run_direct(tmp_path)
+    assert prepared == []                                                                          # Maven is not even asked to prepare anything for a stale approval
     assert run.executed == []
     assert not _succeeded(run.result) and _applied(run) == set()
     stale = [g for g in run.gate_outcomes if g.get("type") == "verification_infrastructure_failure"]
@@ -584,6 +589,47 @@ def test_gap_b_strong_the_requirement_closers_run_the_candidate_s_tests_only_aft
     log, compiles, tests = approved_run.closers[0]
     assert log[:2] == [("pending", "change_approval"), ("deciding", "change_approval")]
     assert compiles >= 1 and tests >= 1
+
+
+CORRECTABLE_POM = "<project><properties><exec.mainClass>com.example.App</exec.mainClass></properties></project>\n"
+
+
+def test_gap_b_strong_a_deterministic_pom_correction_is_in_the_reviewed_candidate_not_made_after_it(tmp_path):
+    """Independent review B1: `_apply_candidate_pom_corrections` rewrites a wrong exec.mainClass (a recurring model error) as an ordinary candidate mutation. It used to run before the review;
+    after the first form of Gap B it ran AFTER approval, so the build ran on a pom the person had not seen and the run then stopped on a false CANDIDATE_CHANGED. It now runs before the
+    binding and the diff are taken: what was reviewed (the per-file diff digests the person decided on) is what was built, tested, executed and applied."""
+    import difflib  # noqa: PLC0415
+
+    from kriya.control.launch_approval import _sha  # noqa: PLC0415
+    files = {**FILES, POM: CORRECTABLE_POM}
+    run = run_direct(tmp_path, files=files)
+    assert _succeeded(run.result), run.result.get("last_failure")
+    applied = {path: (run.workspace / path).read_text() for path in files}
+    assert "hellokriya.App" in applied[POM] and "com.example.App" not in applied[POM]              # the correction really fired
+    [built] = run.bytes_at_build
+    [executed] = run.bytes_at_execution
+    assert built == applied and executed == applied and all(seen == applied for seen in run.bytes_at_tests)
+    change = next(p for p in run.person.seen if p["kind"] == "change_approval")
+    diff_of = lambda path: "".join(difflib.unified_diff([], applied[path].splitlines(keepends=True), fromfile=f"a/{path}", tofile=f"b/{path}"))   # noqa: E731
+    assert {f["filepath"]: f["diff_sha256"] for f in change["files"]} == {path: _sha(diff_of(path)) for path in files}   # the reviewed diff already holds the corrected pom
+    assert not any(g.get("type") == "verification_infrastructure_failure" for g in run.gate_outcomes)
+
+
+def test_gap_b_strong_a_candidate_changed_while_the_requirement_closers_run_is_never_applied(tmp_path):
+    """Independent review I1: the PRD-020 closers execute the candidate's tests; they stay under the guard and the bytes are checked again after them."""
+    edit = lambda root: (Path(root) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed by a closer\n")  # noqa: E731 - one-line test hook
+    run = run_direct(tmp_path, tamper_during_closer=edit)
+    assert run.closers and run.executed != []                                                       # the application ran before the closers; nothing else was applied
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_strong_with_no_approver_nothing_is_built_tested_or_run_before_the_approval_abort(tmp_path):
+    """Independent review I7: human-in-the-loop with no way to ask for the source review can never succeed at it; the run ends at the approval gate having executed nothing."""
+    run = run_direct(tmp_path, with_approver=False)
+    assert run.compile_calls == 0 and run.test_calls == 0 and run.executed == [] and run.log_at_pom == [] and run.closers == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert "approval" in str(run.result["review"]).lower()
 
 
 def test_CHARACTERISATION_gap_c_the_direct_plan_leaves_the_requirement_ledger_pending_exactly_like_the_structured_plan(approved_run):

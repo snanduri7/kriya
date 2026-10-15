@@ -237,6 +237,8 @@ export function userEvidence(input: TrustInput): TrustItem[] {
   const { groups } = verificationGroups(input.gates);
   const category = { build: 'Build', tests: 'Tests', behavior: 'Behavior', safety: 'Safety' } as const;
   for (const group of groups) for (const line of group.lines) items.push({ category: category[group.id], text: line.text, state: line.status === 'passed' ? 'ok' : line.status === 'failed' ? 'bad' : 'unknown' });
+  const overall = groups.length > 0 ? overallRequestLine(input.gates) : null;
+  if (overall) items.push({ category: 'Behavior', text: overall.text, state: 'unknown' });
   if (input.approval === 'approved') items.push({ category: 'Approval', text: 'You approved the proposed change', state: 'ok' });
   else if (input.approval === 'rejected') items.push({ category: 'Approval', text: 'You rejected the proposed change', state: 'bad' });
   const e = input.evidence;

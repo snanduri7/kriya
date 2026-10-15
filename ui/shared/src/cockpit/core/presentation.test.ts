@@ -213,3 +213,15 @@ describe('overallRequestLine: a passed build is not closure of the whole request
     expect(withOverallRequest([line], overallRequestLine([g('compile')])).map((l) => l.text)).toEqual(['x', 'Overall request: not fully verified']);
   });
 });
+
+describe('the trust list qualifies a passed build the same way (owner decision on the requirement ledger)', () => {
+  const input = (gates: GateFact[]) => ({ displayGoal: 'g', filesChanged: 1, gates, approval: null, evidence: null });
+  it('adds "Overall request: not fully verified" when there are results but no run-level requirements record', () => {
+    expect(userEvidence(input([gate('compile', true), gate('test', true)])).map((i) => i.text)).toContain('Overall request: not fully verified');
+    expect(userEvidence(input([gate('compile', true)])).find((i) => i.text === 'Overall request: not fully verified')?.state).toBe('unknown');
+  });
+  it('adds nothing with no verification results, and defers to a recorded run-level record', () => {
+    expect(userEvidence(input([])).map((i) => i.text).join('|')).not.toMatch(/Overall request/);
+    expect(userEvidence(input([gate('compile', true), gate('original_requirements', true)])).map((i) => i.text).join('|')).not.toMatch(/Overall request/);
+  });
+});

@@ -5760,7 +5760,7 @@ class WorkflowEngine:
                     escalation_reason += (
                         "\nPre-checks passed: expected files present, static rules, stack contract. Nothing has been built, tested or run yet."
                         "\nBuild and tests: will run after you approve."
-                        "\nRunning the application: you will be asked separately before any command runs."
+                        "\nIf the application needs to be run, you will be asked separately before any command runs."
                     )
 
                 # Stage 6 SME review, 2026-08-15, Finding 1: the Reviewer used to run
@@ -6045,10 +6045,16 @@ class WorkflowEngine:
                         assert_candidate_unchanged_since_source_review(state, attempt_ctx)
                         await deferred_runtime()
                         assert_candidate_unchanged_since_source_review(state, attempt_ctx)
+                        _raise_if_required_verification_unresolved()
+                        await _close_and_check_requirements()      # it runs the candidate's tests: still under the guard, checked again after it
+                        assert_candidate_unchanged_since_source_review(state, attempt_ctx)
+                    except Exception:
+                        # The review shown with the final failure must describe what finally failed, not the pre-build review the person approved from: drop it so the rejected-
+                        # candidate diagnostic review (Demo-01 Finding 3) is produced, exactly as for a failure inside run_attempt.
+                        state.pre_approval_review = None
+                        raise
                     finally:
                         attempt_ctx.post_source_review_guard = None
-                    _raise_if_required_verification_unresolved()
-                    await _close_and_check_requirements()
                     _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
                 # Worktree cleanup deliberately does NOT happen here anymore - see the

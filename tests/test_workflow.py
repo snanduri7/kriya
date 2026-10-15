@@ -8709,6 +8709,7 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     gap during golden-use-case validation: the same JVM-startup crash recurred
     identically across 3 real retry attempts before a human had to intervene."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8775,6 +8776,7 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     caller can always ask 'why did this fail' the same way regardless of
     which specific failure mode it was."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8858,6 +8860,7 @@ async def test_workflow_failure_report_wires_real_failures_through_categorize_fa
     'why did the loop stop' answer AND a per-attempt 'what kind of thing
     kept failing' answer now coexist on the same result."""
     cfg = AppConfig()
+    cfg.autonomy.mode = "autonomous"   # about gate/categorization behavior, not approval: in human-in-the-loop with no approver nothing is built or tested (Demo V2 Gap B)
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -9421,8 +9424,11 @@ async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_a
         # Demo V2 Gap B (2026-10-15): in human-in-the-loop mode nothing is built before the source review, so attempt 2 is REVIEWED first and only then
         # fails to compile (before: it failed at compile and the person was never asked). This is attempt 2's pre-approval review of its own source.
         "Review A2 - attempt 2's pre-approval review of its own source",
-        # Demo-01 Finding 3 (2026-09-11) used to add a final rejected-candidate review here. Since Demo V2 Gap B attempt 2 is reviewed BEFORE it fails to compile, so the final
-        # review IS attempt 2's own pre-approval review (the same content the run ended on): fresh for the final attempt, never attempt 1's.
+        # Demo-01 Finding 3 (2026-09-11): attempt 2's failure populates state.final_attempt_contents, so this final review goes through ReviewerAgent.rejected_candidate_system_prompt()
+        # and extract_rejected_candidate_diagnostic() - the mocked response must use the required DIAGNOSTIC FINDINGS markers or the fail-closed path (correctly) discards it. That is
+        # not what THIS test is about (freshness of the review, not F3's own structure - see tests/test_agents.py and the dedicated F3 workflow tests). res["review"] resolves to the
+        # unwrapped text. Demo V2 Gap B: attempt 2's own pre-approval review (above) is dropped when its post-approval gates fail, so this fresh review is still what is returned.
+        "=== DIAGNOSTIC FINDINGS ===\nReview B - fresh, describes the real final failure\n=== END DIAGNOSTIC FINDINGS ===",
     ])
 
     jvm_error = (
@@ -9458,9 +9464,8 @@ async def test_workflow_terminal_regression_failure_is_not_reported_or_applied_a
     assert res["terminal_regression_passed"] is False
     assert res["overall_attempt_passed"] is False
     assert res["environment_failure"] is not None
-    assert res["review"] == "Review A2 - attempt 2's pre-approval review of its own source"          # attempt 2's, not the stale attempt-1 verdict
-    assert res["review"] != "Review A - stale, must not be reused"
-    assert llm.complete.await_count == 6
+    assert res["review"] == "Review B - fresh, describes the real final failure"
+    assert llm.complete.await_count == 7
     assert not (tmp_path / "app.py").exists()
     checkpoint = load_checkpoint(str(tmp_path), res["run_id"])
     assert checkpoint["stage"] == "candidate_gates_passed"

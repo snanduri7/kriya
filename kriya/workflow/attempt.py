@@ -7122,11 +7122,12 @@ def defer_execution_until_source_review(state: GenerationState, ctx: "AttemptCon
     """Demo V2 owner decision (2026-10-15, Gap B): in human-in-the-loop mode no model-authored candidate content is executed - POM validation, build, tests, runtime verification -
     before the person has reviewed and approved its source. When this attempt wrote source (so the pre-apply source review WILL be asked), a caller that runs the post-approval phase
     (``ctx.defer_execution_until_source_review_enabled``, run_generation_workflow) has the executing gates held in ``ctx.deferred_executing_gates`` and run right after the approval.
-    The non-executing checks (completeness, static rules, stack contract) still run first. Never deferred: other autonomy modes (their approval policy is unchanged), a run with no
-    approver (it refuses to execute unreviewed, as before) and an attempt that wrote no source (a verification-only unit has no source review)."""
+    The non-executing checks (completeness, static rules, stack contract) still run first. Held even with NO approver: the review can then never succeed, so the run ends at the approval gate
+    (approval_required) having executed nothing. Never deferred: other autonomy modes (their approval policy - sensitive paths, size, process profile - is unchanged and out of this decision's
+    scope) and an attempt that wrote no source (a verification-only unit has no source review)."""
     autonomy = ctx.kernel.config.autonomy
     return bool(
-        ctx.defer_execution_until_source_review_enabled and autonomy.mode == "human-in-the-loop" and ctx.approval_callback
+        ctx.defer_execution_until_source_review_enabled and autonomy.mode == "human-in-the-loop"
         and state.all_files_written
     )
 
@@ -7213,6 +7214,7 @@ async def _approve_and_execute_runtime_verification(
         # N's run started from attempt N-1's leftover state instead
         # of a fresh one, producing task-ID drift and "not found"
         # failures that had nothing to do with the generated code.
+        assert_candidate_unchanged_since_source_review(state, ctx)  # before Maven prepares anything for the reviewed command
         _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
         assert_candidate_unchanged_since_source_review(state, ctx)
         pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
@@ -7669,6 +7671,7 @@ async def _approve_and_execute_runtime_verification(
 def _run_pom_validation_gate(state: GenerationState, ctx: "AttemptContext", tree_binding: Any) -> None:
     """The POM semantic check (``mvn validate`` on the candidate: it EXECUTES Maven against model-authored build files). Extracted unchanged from run_attempt so human-in-the-loop mode can
     hold it, with the rest of the executing gates, until the source has been approved (``defer_execution_until_source_review``)."""
+    from kriya.tools.validate import PolymorphicValidator  # local: tests patch the class on kriya.tools.validate
     pom_files = [
         filepath for filepath in state.files_written
         if os.path.basename(filepath) == "pom.xml"
@@ -7697,6 +7700,63 @@ def _run_pom_validation_gate(state: GenerationState, ctx: "AttemptContext", tree
             raise QualityGateFailure(failure)
 
 
+def _new_candidate_validator(ctx: "AttemptContext") -> "PolymorphicValidator":
+    """The candidate-gates validator for this attempt (a new one every attempt). Extracted unchanged from the executing tail so the pre-review corrections can use the same one."""
+    from kriya.tools.validate import PolymorphicValidator  # local: tests patch the class on kriya.tools.validate
+    validator = PolymorphicValidator(
+        ctx.worktree_path, original_workspace_path=ctx.workspace_path,
+        autonomy_cfg=ctx.kernel.config.autonomy,
+        toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
+        # PRV-05 (2026-08-28, run 5): the dependency-preservation check
+        # below used to unconditionally reject ANY pom.xml dependency
+        # removal, restoring Gson every time the subtask that owns
+        # pom.xml tried to remove it - even though the top-level goal
+        # explicitly authorizes replacing it. PRV-05 run 6 (2026-08-28):
+        # re-resolving authorization from CURRENT (possibly already-
+        # mutated) workspace state per attempt was itself timing-
+        # sensitive - read from the run's ONE already-resolved
+        # migration_resolution instead (see AttemptContext.migration_
+        # resolution's own docstring), never re-derived here.
+        authorized_dependency_removals=(
+            set(ctx.migration_resolution.obligation.source_artifacts)
+            if ctx.migration_resolution is not None
+            and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
+            and ctx.migration_resolution.obligation is not None
+            else set()
+        ),
+    )
+    return validator
+
+
+def _resolve_candidate_toolchain(state: GenerationState, ctx: "AttemptContext", validator: "PolymorphicValidator") -> None:
+    """The one-time toolchain preflight and the JAVA_HOME override, applied to this attempt's validator. Extracted unchanged from the executing tail (no candidate code runs here)."""
+    if not state.toolchain_checked:
+        state.toolchain_checked = True
+        state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+        if state.toolchain_warning:
+            logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
+        if validator.stack == "java":
+            state.java_home_override = _resolve_java_home_override(ctx.goal)
+            if state.java_home_override:
+                logger.warning(
+                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
+                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
+                    "version doesn't match what 'mvn' resolves to by default here."
+                )
+    # Constructed fresh above (a new validator every attempt) - re-apply
+    # the one-time-resolved override every time, not just when it was
+    # just computed.
+    validator.java_home_override = state.java_home_override
+
+
+def apply_pre_review_candidate_corrections(state: GenerationState, ctx: "AttemptContext") -> None:
+    """Deterministic pom.xml corrections are ordinary candidate mutations (they are in the candidate's diff and commit batch). In the held-execution mode they must happen BEFORE the
+    binding is taken and the source is shown, or the build would run on bytes the person did not review (independent review B1). Idempotent: the executing tail applies them again as a no-op."""
+    validator = _new_candidate_validator(ctx)
+    _resolve_candidate_toolchain(state, ctx, validator)
+    _apply_candidate_pom_corrections(state, ctx, sorted(set(state.all_files_written) | set(ctx.established_files)))
+
+
 async def _run_executing_candidate_gates(
     state: GenerationState, ctx: "AttemptContext", skipping_candidate_gates: bool, tree_binding: Any, active_code_context: str,
 ) -> None:
@@ -7704,50 +7764,11 @@ async def _run_executing_candidate_gates(
     through ``candidate_gates_succeeded``. Extracted unchanged from run_attempt: in human-in-the-loop mode with an approver it is held (``ctx.deferred_executing_gates``) and run by
     the caller right after the person approves the source, so no model-authored content is built, tested or run before that review. ``ctx.post_source_review_guard`` (set while
     it runs after approval) is consulted at each execution boundary and the candidate-editing self-correction micro-loops are not entered."""
-    from kriya.tools.validate import PolymorphicValidator  # local: tests patch the class on kriya.tools.validate
     if not skipping_candidate_gates:
         # Quality Gates: Polymorphic compile & test checks inside sandbox
         logger.info("Quality Gates: Running polymorphic compiler and test checks...")
-        validator = PolymorphicValidator(
-            ctx.worktree_path, original_workspace_path=ctx.workspace_path,
-            autonomy_cfg=ctx.kernel.config.autonomy,
-            toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
-            # PRV-05 (2026-08-28, run 5): the dependency-preservation check
-            # below used to unconditionally reject ANY pom.xml dependency
-            # removal, restoring Gson every time the subtask that owns
-            # pom.xml tried to remove it - even though the top-level goal
-            # explicitly authorizes replacing it. PRV-05 run 6 (2026-08-28):
-            # re-resolving authorization from CURRENT (possibly already-
-            # mutated) workspace state per attempt was itself timing-
-            # sensitive - read from the run's ONE already-resolved
-            # migration_resolution instead (see AttemptContext.migration_
-            # resolution's own docstring), never re-derived here.
-            authorized_dependency_removals=(
-                set(ctx.migration_resolution.obligation.source_artifacts)
-                if ctx.migration_resolution is not None
-                and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
-                and ctx.migration_resolution.obligation is not None
-                else set()
-            ),
-        )
-
-        if not state.toolchain_checked:
-            state.toolchain_checked = True
-            state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
-            if state.toolchain_warning:
-                logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
-            if validator.stack == "java":
-                state.java_home_override = _resolve_java_home_override(ctx.goal)
-                if state.java_home_override:
-                    logger.warning(
-                        "JVM toolchain enforcement: forcing Maven subprocess calls to "
-                        f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
-                        "version doesn't match what 'mvn' resolves to by default here."
-                    )
-        # Constructed fresh above (a new validator every attempt) - re-apply
-        # the one-time-resolved override every time, not just when it was
-        # just computed.
-        validator.java_home_override = state.java_home_override
+        validator = _new_candidate_validator(ctx)
+        _resolve_candidate_toolchain(state, ctx, validator)
 
         # Unioned with ctx.established_files (see that field's own docstring) -
         # for a no-build-file Java project, this list is extended DIRECTLY into
@@ -11281,6 +11302,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # tests, runtime - before the source review has succeeded. The non-executing checks above/below still run now; the executing gates are held and run after the approval.
     ctx.deferred_executing_gates = None
     if defer_executing_gates:
+        apply_pre_review_candidate_corrections(state, ctx)
         ctx.deferred_executing_gates = functools.partial(_run_deferred_executing_gates, state, ctx, skipping_candidate_gates, tree_binding, active_code_context)
     else:
         await _run_executing_candidate_gates(state, ctx, skipping_candidate_gates, tree_binding, active_code_context)
