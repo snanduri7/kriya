@@ -102,3 +102,13 @@ def test_only_the_exact_code_prefix_counts_as_a_blocked_reason(output):
 def test_a_blocked_reason_is_ignored_when_the_application_actually_ran():
     out = application_outcome([{"attempt": 1, "type": "verification_infrastructure_failure", "success": False, "output": "REQUIRED_RUNTIME_VERIFICATION_DECLINED: x"}, gate()])
     assert out["status"] == STATUS_EXECUTED and "blocked_reason_code" not in out
+
+
+def test_a_build_or_test_only_sequence_is_not_the_application_running():
+    for command in (["mvn", "-q", "package"], ["mvn", "clean", "compile"], ["mvn", "test"]):
+        out = application_outcome([gate(command=command)])
+        assert out == {"status": STATUS_NOT_APPLICABLE, "reason": "build_or_test_execution_only"}, command
+    mixed = application_outcome([{"attempt": 1, "type": "run_verification", "success": True, "steps": [
+        {"command": ["mvn", "-q", "package"], "exit_code": 0, "stdout": "", "stderr": "", "timed_out": False},
+        {"command": ["java", "-cp", "target/classes", "App"], "exit_code": 0, "stdout": "Hello from Kriya\n", "stderr": "", "timed_out": False}]}])
+    assert mixed["status"] == STATUS_EXECUTED and mixed["succeeded"] is True and "Hello from Kriya" in mixed["stdout"]["text"]

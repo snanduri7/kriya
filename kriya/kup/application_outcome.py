@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from kriya.policy.telemetry import scrub_potential_secrets
+from kriya.workflow.verification_authority import deterministic_sequence_kind
 
 STATUS_EXECUTED = "EXECUTED"
 STATUS_NOT_APPLICABLE = "NOT_APPLICABLE"
@@ -58,6 +59,10 @@ def application_outcome(gate_outcomes: Any) -> Dict[str, Any]:
     steps: List[Dict[str, Any]] = [s for s in gate["steps"] if isinstance(s, dict)]
     if not steps:
         return {"status": STATUS_UNKNOWN, "reason": "execution_steps_unreadable"}
+    commands = [s.get("command") for s in steps]
+    if all(isinstance(c, list) and c and all(isinstance(a, str) for a in c) for c in commands) and deterministic_sequence_kind(commands) is not None:
+        # every recorded command is a build or test runner: a compile is not "the application ran" (independent review I6)
+        return {"status": STATUS_NOT_APPLICABLE, "reason": "build_or_test_execution_only"}
     last = steps[-1]
     exit_code = last.get("exit_code") if isinstance(last.get("exit_code"), int) and not isinstance(last.get("exit_code"), bool) else None
     timed_out = bool(last.get("timed_out")) or gate.get("type") == "run_verification_hung"
