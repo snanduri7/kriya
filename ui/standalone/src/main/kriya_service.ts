@@ -52,6 +52,7 @@ export const SERVICE_ARGUMENTS: Readonly<Record<KupRequest['operation'], readonl
   'configuration.approve': ['workspace', 'fingerprint'],
   'project.initialize': ['workspace'],
   'change_approval.review': ['workspace', 'launch_id', 'review_id'],
+  'runtime_command.review': ['workspace', 'launch_id', 'review_id'],
   'execution.context': ['workspace'],
   'execution.model_probe': ['workspace'],
   'skills.list': ['workspace'],

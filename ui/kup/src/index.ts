@@ -4,14 +4,14 @@
  * the validators are precompiled Ajv code with its one helper inlined, so they run under a CSP without eval.
  */
 import type { ErrorObject } from 'ajv';
-import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState, ConfigurationApprovalStatus, ConfigurationApprove, ChangeApprovalReview, ProjectInitialize, InitializeProjectRequest, InitializeProjectResult, ApproveConfigurationRequest, ApproveConfigurationResult, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
+import type { Envelope, KupRequest, OpenInIdeRequest, OpenInIdeResult, HostInfo, Capabilities, HistoryList, RunDetail, Prompt, WorkspaceStatus, WorkspaceDescribe, ExecutionPreflight, LaunchStatus, WorkspaceCreate, ExecutionContext, ExecutionModelProbe, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState, ConfigurationApprovalStatus, ConfigurationApprove, ChangeApprovalReview, RuntimeCommandReview, ProjectInitialize, InitializeProjectRequest, InitializeProjectResult, ApproveConfigurationRequest, ApproveConfigurationResult, WorkspaceChoice, RecentWorkspaces, StartRunRequest, StartRunResult, ExecutionState, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, Section, RunEvent, Availability, Consistency, SnapshotSummary, SnapshotAcquireResult, SnapshotList, SnapshotPrune, SnapshotVerify, EvidenceManifest, EvidenceVerify, EvidenceRecords, EvidenceChangeContent, EvidenceCallContent } from '../generated/ts/kup';
 import * as validators from '../generated/validators.mjs';
 
 export * from '../generated/ts/kup';
 export const KUP_SCHEMA_VERSION = 1 as const;
-export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'configuration.approval_status', 'configuration.approve', 'project.initialize', 'change_approval.review', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'] as const;
+export const KUP_OPERATIONS = ['capabilities', 'history.list', 'history.detail', 'history.prompt', 'workspace.status', 'workspace.describe', 'execution.preflight', 'launch.status', 'workspace.create', 'execution.context', 'execution.model_probe', 'skills.list', 'skills.describe', 'tools.list', 'tools.describe', 'tools.approval_state', 'configuration.approval_status', 'configuration.approve', 'project.initialize', 'change_approval.review', 'runtime_command.review', 'snapshot.acquire', 'snapshot.list', 'snapshot.prune', 'snapshot.verify', 'evidence.manifest', 'evidence.verify', 'evidence.records', 'evidence.change_content', 'evidence.call_content'] as const;
 /** Closed vocabulary (gate). HOST_ERROR is minted by a host for transport failures. */
-export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'EVIDENCE_STORE_UNREADABLE', 'EVIDENCE_SCHEMA_UNSUPPORTED', 'EVIDENCE_STORE_NOT_FOUND', 'EVIDENCE_VERIFY_FAILED', 'EVIDENCE_HEAD_CHANGED', 'EVIDENCE_CONTENT_POLICY', 'EVIDENCE_CONTENT_UNAVAILABLE', 'EVIDENCE_BLOB_TOO_LARGE', 'WORKSPACE_UNAVAILABLE', 'LAUNCH_NOT_FOUND', 'APPROVAL_STALE', 'APPROVAL_UNAVAILABLE', 'REVIEW_NOT_FOUND', 'REVIEW_DIFF_UNAVAILABLE', 'REVIEW_DIFF_UNVERIFIED', 'HOST_ERROR'] as const;
+export const KUP_ERROR_CODES = ['UNSUPPORTED_SCHEMA_VERSION', 'INVALID_RESPONSE', 'INVALID_REQUEST', 'STORE_BUSY', 'READ_ONLY_UNAVAILABLE', 'RESPONSE_TOO_LARGE', 'CONFIG_AUTHORITY_REFUSED', 'CONFIG_LOAD_FAILED', 'SNAPSHOT_MISSING', 'SNAPSHOT_UNAVAILABLE', 'SNAPSHOT_FAILED', 'SNAPSHOT_TOO_LARGE', 'SNAPSHOT_CORRUPT', 'ACQUISITION_IN_PROGRESS', 'ACQUISITION_REFUSED_RUN_ACTIVE', 'EVIDENCE_STORE_UNREADABLE', 'EVIDENCE_SCHEMA_UNSUPPORTED', 'EVIDENCE_STORE_NOT_FOUND', 'EVIDENCE_VERIFY_FAILED', 'EVIDENCE_HEAD_CHANGED', 'EVIDENCE_CONTENT_POLICY', 'EVIDENCE_CONTENT_UNAVAILABLE', 'EVIDENCE_BLOB_TOO_LARGE', 'WORKSPACE_UNAVAILABLE', 'LAUNCH_NOT_FOUND', 'APPROVAL_STALE', 'APPROVAL_UNAVAILABLE', 'REVIEW_NOT_FOUND', 'REVIEW_DIFF_UNAVAILABLE', 'REVIEW_DIFF_UNVERIFIED', 'REVIEW_COMMAND_UNVERIFIED', 'HOST_ERROR'] as const;
 export const CONSISTENCY_KINDS = ['snapshot_copy', 'live_observation', 'not_applicable', 'sealed_store'] as const;
 export const DATABASE_STATES = ['missing', 'hot_journal', 'locked', 'readonly_directory', 'unreadable', 'not_a_database'] as const;
 export const SNAPSHOT_ID_RE = /^\d{8}T\d{12}Z-[0-9a-f]{8}$/;
@@ -56,6 +56,7 @@ export const validate = {
   configurationApprovalStatus: (x: unknown) => run<ConfigurationApprovalStatus>('validateConfigurationApprovalStatus', x),
   configurationApprove: (x: unknown) => run<ConfigurationApprove>('validateConfigurationApprove', x),
   changeApprovalReview: (x: unknown) => run<ChangeApprovalReview>('validateChangeApprovalReview', x),
+  runtimeCommandReview: (x: unknown) => run<RuntimeCommandReview>('validateRuntimeCommandReview', x),
   projectInitialize: (x: unknown) => run<ProjectInitialize>('validateProjectInitialize', x),
   initializeProjectRequest: (x: unknown) => run<InitializeProjectRequest>('validateInitializeProjectRequest', x),
   initializeProjectResult: (x: unknown) => run<InitializeProjectResult>('validateInitializeProjectResult', x),
@@ -68,6 +69,8 @@ export const validate = {
   executionState: (x: unknown) => run<ExecutionState>('validateExecutionState', x),
   decideApprovalRequest: (x: unknown) => run<DecideApprovalRequest>('validateDecideApprovalRequest', x),
   decideApprovalResult: (x: unknown) => run<DecideApprovalResult>('validateDecideApprovalResult', x),
+  decideRuntimeCommandRequest: (x: unknown) => run<DecideRuntimeCommandRequest>('validateDecideRuntimeCommandRequest', x),
+  decideRuntimeCommandResult: (x: unknown) => run<DecideRuntimeCommandResult>('validateDecideRuntimeCommandResult', x),
   section: (x: unknown) => run<Section>('validateSection', x),
   kupRequest: (x: unknown) => run<KupRequest>('validateKupRequest', x),
   openInIdeRequest: (x: unknown) => run<OpenInIdeRequest>('validateOpenInIdeRequest', x),
@@ -108,6 +111,7 @@ export function validateData(operation: string, data: unknown): Validation<unkno
     case 'configuration.approval_status': return validate.configurationApprovalStatus(data);
     case 'configuration.approve': return validate.configurationApprove(data);
     case 'change_approval.review': return validate.changeApprovalReview(data);
+    case 'runtime_command.review': return validate.runtimeCommandReview(data);
     case 'project.initialize': return validate.projectInitialize(data);
     case 'snapshot.acquire': return validate.snapshotAcquireResult(data);
     case 'snapshot.list': return validate.snapshotList(data);

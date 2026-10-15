@@ -267,6 +267,12 @@
         },
         {
           "type": "object",
+          "required": ["operation", "workspace", "launch_id", "review_id"],
+          "properties": { "operation": { "const": "runtime_command.review" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "launch_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$" }, "review_id": { "type": "string", "pattern": "^ra-[0-9a-f]{24}$", "description": "The review identity Kriya gave in launch.status (pending_approval.review_id)." } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "required": ["operation", "workspace", "fingerprint"],
           "properties": { "operation": { "const": "configuration.approve" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/[^\\u0000-\\u001F]*$", "description": "Absolute path without control characters." }, "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The review fingerprint Kriya gave with the status this person reviewed; Kriya approves only if the configuration it now resolves has the same fingerprint." } },
           "additionalProperties": false
@@ -1087,6 +1093,91 @@
     },
     "DecideApprovalResult": {
       "description": "Answer to a review decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed refusal code.",
+      "type": "object",
+      "required": [
+        "accepted",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "launch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "review_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decided_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecideRuntimeCommandRequest": {
+      "description": "Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then asks Kriya (`launch-decision --kind runtime_command`), which validates every identity against its durable state.",
+      "type": "object",
+      "required": [
+        "workspace",
+        "launch_id",
+        "review_id",
+        "command_fingerprint",
+        "decision"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001F]*$",
+          "description": "Absolute path without control characters."
+        },
+        "launch_id": {
+          "type": "string",
+          "pattern": "^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$"
+        },
+        "review_id": {
+          "type": "string",
+          "pattern": "^ra-[0-9a-f]{24}$"
+        },
+        "command_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecideRuntimeCommandResult": {
+      "description": "Answer to a runtime-command decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed code; `CONFIRMATION_DECLINED` means the person pressed Cancel on the native confirmation: nothing was sent, nothing was approved, and the review is still waiting.",
       "type": "object",
       "required": [
         "accepted",

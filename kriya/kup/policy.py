@@ -49,6 +49,7 @@ OPERATIONS = (
     "configuration.approve",  # record the approval for exactly the configuration the person reviewed (a typed {workspace, fingerprint}); the same write the CLI makes
     "project.initialize",  # Project Setup: create the recommended kriya.yaml in a folder that has none (a typed {workspace}; approves nothing, never overwrites)
     "change_approval.review",  # the EXACT proposed change a pending (or decided) review asks the person to approve, verified against the review's digests; approval-scoped
+    "runtime_command.review",  # the EXACT commands a pending (or decided) runtime-command review asks the person to allow, re-proved against the command fingerprint; approval-scoped
     "snapshot.acquire",
     "snapshot.list",
     "snapshot.prune",
@@ -89,6 +90,7 @@ EVIDENCE_BLOB_TOO_LARGE = "EVIDENCE_BLOB_TOO_LARGE"          # the part is over 
 REVIEW_NOT_FOUND = "REVIEW_NOT_FOUND"                        # the launch has no review with that id (extra: reason)
 REVIEW_DIFF_UNAVAILABLE = "REVIEW_DIFF_UNAVAILABLE"          # the review exists but its diff text was not stored, or the document is missing/foreign/corrupt: it cannot be inspected
 REVIEW_DIFF_UNVERIFIED = "REVIEW_DIFF_UNVERIFIED"            # the stored diff text does not match the digests the review is bound to: it is never served (extra: reason)
+REVIEW_COMMAND_UNVERIFIED = "REVIEW_COMMAND_UNVERIFIED"      # the recorded commands do not match the fingerprint the review is bound to: never served (extra: reason)
 APPROVAL_STALE = "APPROVAL_STALE"                            # the configuration is not the one the person reviewed; nothing was approved (extra: reason)
 APPROVAL_UNAVAILABLE = "APPROVAL_UNAVAILABLE"                # an approval cannot be recorded here: trust file in effect, store inside the folder, store unwritable (extra: reason)
 ERROR_CODES = (
@@ -97,7 +99,7 @@ ERROR_CODES = (
     SNAPSHOT_TOO_LARGE, SNAPSHOT_CORRUPT, ACQUISITION_IN_PROGRESS, ACQUISITION_REFUSED_RUN_ACTIVE,
     EVIDENCE_STORE_UNREADABLE, EVIDENCE_SCHEMA_UNSUPPORTED, EVIDENCE_STORE_NOT_FOUND, EVIDENCE_VERIFY_FAILED, EVIDENCE_HEAD_CHANGED,
     EVIDENCE_CONTENT_POLICY, EVIDENCE_CONTENT_UNAVAILABLE, EVIDENCE_BLOB_TOO_LARGE, WORKSPACE_UNAVAILABLE, LAUNCH_NOT_FOUND,
-    APPROVAL_STALE, APPROVAL_UNAVAILABLE, REVIEW_NOT_FOUND, REVIEW_DIFF_UNAVAILABLE, REVIEW_DIFF_UNVERIFIED,
+    APPROVAL_STALE, APPROVAL_UNAVAILABLE, REVIEW_NOT_FOUND, REVIEW_DIFF_UNAVAILABLE, REVIEW_DIFF_UNVERIFIED, REVIEW_COMMAND_UNVERIFIED,
 )
 
 # database_state vocabulary (closed) reported with STORE_BUSY / READ_ONLY_UNAVAILABLE / SNAPSHOT_* errors.

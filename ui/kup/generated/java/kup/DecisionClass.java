@@ -4,7 +4,7 @@ package kup;
 
 import com.fasterxml.jackson.annotation.*;
 
-public class PendingApprovalDecision {
+public class DecisionClass {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
     @JsonAnyGetter

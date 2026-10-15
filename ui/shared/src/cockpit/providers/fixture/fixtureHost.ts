@@ -471,6 +471,7 @@ export class FixtureHost implements HostAdapter {
         }
         return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
       }
+      case 'runtime_command.review': return this.err('runtime_command.review', 'REVIEW_NOT_FOUND', 'the fixture host holds no runtime-command review');
       default: { const never: never = request; return this.err('unknown', 'INVALID_REQUEST', `fixture host does not answer ${JSON.stringify(never)}`); }
     }
   }

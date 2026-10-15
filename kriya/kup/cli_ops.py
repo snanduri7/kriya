@@ -72,6 +72,10 @@ def run_kup_operation(cfg, request: Dict[str, Any], request_id: str = "cli") -> 
             from kriya.kup import review_ops
 
             return review_ops.review(cfg, request, request_id)
+        if operation == "runtime_command.review":
+            from kriya.kup import runtime_command_ops
+
+            return runtime_command_ops.review(cfg, request, request_id)
         if operation == "workspace.create":
             from kriya.kup import project_ops
 

@@ -120,3 +120,46 @@ describe('host contract (gate A-2 P-R2) matches the Electron host validators', (
     expect(validate.hostInfo({ ...info, configDirectorySource: 'cwd' }).ok).toBe(false);
   });
 });
+
+describe('runtime-command review contract (GUI-RUNTIME-COMMAND-APPROVAL-001)', () => {
+  const RT = read('launch.status.runtime-command.json').data as { launch: { pending_approval: Record<string, unknown>; approval_history: Record<string, unknown>[] } };
+  const launchWith = (pending: unknown) => ({ ...(read('launch.status.runtime-command.json').data as object), launch: { ...RT.launch, pending_approval: pending } });
+  it('a launch may hold a runtime-command review (no files) and a change review in its history', () => {
+    expect(validateData('launch.status', RT).ok).toBe(true);
+    expect(RT.launch.pending_approval.kind).toBe('runtime_command');
+    expect('files' in RT.launch.pending_approval).toBe(false);
+  });
+  it('the kind discriminates: a runtime shape claiming the change kind, or a change shape claiming the runtime kind, fails', () => {
+    expect(validateData('launch.status', launchWith({ ...RT.launch.pending_approval, kind: 'change_approval' })).ok).toBe(false);
+    expect(validateData('launch.status', launchWith({ ...RT.launch.approval_history[0], kind: 'runtime_command' })).ok).toBe(false);
+    expect(validateData('launch.status', launchWith({ ...RT.launch.pending_approval, kind: 'something_else' })).ok).toBe(false);
+  });
+  it('a runtime review must carry its commands, fingerprint and the isolated-worktree directory kind', () => {
+    for (const drop of ['commands', 'command_fingerprint', 'working_directory', 'working_directory_kind', 'input_channel', 'environment_names']) {
+      const { [drop]: _removed, ...rest } = RT.launch.pending_approval; void _removed;
+      expect(validateData('launch.status', launchWith(rest)).ok, drop).toBe(false);
+    }
+    expect(validateData('launch.status', launchWith({ ...RT.launch.pending_approval, working_directory_kind: 'PROJECT_FOLDER' })).ok).toBe(false);
+    expect(validateData('launch.status', launchWith({ ...RT.launch.pending_approval, commands: [] })).ok).toBe(false);
+    expect(validateData('launch.status', launchWith(null)).ok).toBe(true);
+  });
+  it('runtime_command.review data is closed: no extra field, only the isolated-worktree kind, verified true', () => {
+    const data = read('runtime_command.review.json').data as Record<string, unknown>;
+    expect(validateData('runtime_command.review', data).ok).toBe(true);
+    expect(validateData('runtime_command.review', { ...data, stdin: 'secret' }).ok).toBe(false);
+    expect(validateData('runtime_command.review', { ...data, verified: false }).ok).toBe(false);
+    expect(validateData('runtime_command.review', { ...data, working_directory_kind: 'PROJECT_FOLDER' }).ok).toBe(false);
+  });
+  it('the request names only identities and a decision: no command, argument, directory or environment can be sent', () => {
+    const ok = { workspace: '/w', launch_id: '20261010T101010-abcdef01', review_id: 'ra-' + '1'.repeat(24), command_fingerprint: 'sha256:' + 'c'.repeat(64), decision: 'approve' };
+    expect(validate.decideRuntimeCommandRequest(ok).ok).toBe(true);
+    expect(validate.decideRuntimeCommandRequest({ ...ok, decision: 'always' }).ok).toBe(false);
+    for (const extra of [{ commands: [['rm', '-rf', '/']] }, { command: 'x' }, { args: ['--evil'] }, { working_directory: '/' }, { cwd: '/' }, { env: { A: 'b' } }, { stdin: 'x' }, { candidate_digest: ok.command_fingerprint }]) {
+      expect(validate.decideRuntimeCommandRequest({ ...ok, ...extra }).ok, JSON.stringify(extra)).toBe(false);
+    }
+    expect(validate.decideRuntimeCommandRequest({ ...ok, command_fingerprint: 'sha256:xyz' }).ok).toBe(false);
+    expect(validate.decideRuntimeCommandRequest({ ...ok, review_id: 'ra-short' }).ok).toBe(false);
+    expect(validate.kupRequest({ operation: 'runtime_command.review', workspace: '/w', launch_id: ok.launch_id, review_id: ok.review_id }).ok).toBe(true);
+    expect(validate.kupRequest({ operation: 'runtime_command.review', workspace: '/w', launch_id: ok.launch_id, review_id: ok.review_id, command: 'x' }).ok).toBe(false);
+  });
+});

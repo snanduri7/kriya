@@ -272,6 +272,16 @@ def test_every_error_code_is_producible():
         save_launch_review_diff(canonical, lid, pending["review_id"], {"schema": 1, "launch_id": lid, "review_id": pending["review_id"], "workspace_identity": workspace_identity(canonical),
                                                                    "candidate_digest": pending["candidate_digest"], "files": [{"filepath": "a.py", "diff": "tampered"}]})
         produced.add(ask(pending["review_id"]))  # REVIEW_DIFF_UNVERIFIED
+        # runtime_command.review: the recorded commands do not match the fingerprint the review is bound to
+        from kriya.control.launch_approval import build_pending_runtime
+        from kriya.workflow.runtime_command_approval import build_subject
+        runtime = build_pending_runtime(lid, workspace_identity(canonical), 2, build_subject(unit_id="s4", criterion="c", working_directory="/w", commands=[["java", "A"]], input_channel="none",
+                                                                                          stdin_payload=None, reason="r"))
+        runtime["commands"] = [["java", "-jar", "evil.jar"]]
+        record = load_launch_record(canonical, lid)
+        record["pending_approval"] = runtime
+        save_launch_record(canonical, lid, record)
+        produced.add(run_kup_operation(AppConfig(), {"operation": "runtime_command.review", "workspace": folder, "launch_id": lid, "review_id": runtime["review_id"]})["error"]["code"])  # REVIEW_COMMAND_UNVERIFIED
         session.finish(0, None, None)
     produced.add("RESPONSE_TOO_LARGE")  # covered by test_response_too_large_is_typed_never_partial
     produced.update({"INVALID_RESPONSE", "CONFIG_AUTHORITY_REFUSED", "CONFIG_LOAD_FAILED"})  # host-side / config-load codes: tests below

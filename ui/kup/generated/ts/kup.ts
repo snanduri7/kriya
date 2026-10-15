@@ -36,6 +36,7 @@ export type ErrorCode =
   | 'REVIEW_NOT_FOUND'
   | 'REVIEW_DIFF_UNAVAILABLE'
   | 'REVIEW_DIFF_UNVERIFIED'
+  | 'REVIEW_COMMAND_UNVERIFIED'
   | 'HOST_ERROR';
 /**
  * Closed store-state vocabulary reported with STORE_BUSY / READ_ONLY_UNAVAILABLE.
@@ -69,6 +70,7 @@ export interface Envelope {
     | 'configuration.approve'
     | 'project.initialize'
     | 'change_approval.review'
+    | 'runtime_command.review'
     | 'snapshot.acquire'
     | 'snapshot.list'
     | 'snapshot.prune'
@@ -711,63 +713,13 @@ export interface LaunchStatus {
       [k: string]: unknown;
     }[];
     /**
-     * The change review the run is waiting on (or last waited on): the exact candidate (digest; files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.
+     * The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed action for its own kind; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.
      */
-    pending_approval?: {
-      review_id: string;
-      sequence: number;
-      kind: string;
-      status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
-      requested_at: string;
-      expires_at: string;
-      candidate_digest: string;
-      files: {
-        filepath: string;
-        diff_sha256: string;
-        lines_added: number;
-        lines_removed: number;
-        [k: string]: unknown;
-      }[];
-      reason: string;
-      reason_truncated: boolean;
-      reason_sha256: string;
-      decision: {
-        decision?: string | null;
-        decided_at?: string | null;
-        source?: string;
-        [k: string]: unknown;
-      } | null;
-      [k: string]: unknown;
-    } | null;
+    pending_approval?: null | PendingChangeReview | PendingRuntimeCommandReview;
     /**
      * Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.
      */
-    approval_history?: {
-      review_id: string;
-      sequence: number;
-      kind: string;
-      status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
-      requested_at: string;
-      expires_at: string;
-      candidate_digest: string;
-      files: {
-        filepath: string;
-        diff_sha256: string;
-        lines_added: number;
-        lines_removed: number;
-        [k: string]: unknown;
-      }[];
-      reason: string;
-      reason_truncated: boolean;
-      reason_sha256: string;
-      decision: {
-        decision?: string | null;
-        decided_at?: string | null;
-        source?: string;
-        [k: string]: unknown;
-      } | null;
-      [k: string]: unknown;
-    }[];
+    approval_history?: (PendingChangeReview | PendingRuntimeCommandReview)[];
     /**
      * The human decision the run reached and the desktop cannot make (never auto-approved): which kind, the reason Kriya gave, and the recorded details.
      */
@@ -807,6 +759,83 @@ export interface LaunchStatus {
    */
   liveness: 'starting' | 'live' | 'interrupted' | 'ended';
   liveness_note: string;
+  [k: string]: unknown;
+}
+/**
+ * A CHANGE review: the exact candidate (digest; files with diff digests) and Kriya's reviewer text VERBATIM (bounded).
+ */
+export interface PendingChangeReview {
+  review_id: string;
+  sequence: number;
+  kind: 'change_approval';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  requested_at: string;
+  expires_at: string;
+  candidate_digest: string;
+  files: {
+    filepath: string;
+    diff_sha256: string;
+    lines_added: number;
+    lines_removed: number;
+    [k: string]: unknown;
+  }[];
+  reason: string;
+  reason_truncated: boolean;
+  reason_sha256: string;
+  decision: {
+    decision?: string | null;
+    decided_at?: string | null;
+    source?: string;
+    [k: string]: unknown;
+  } | null;
+  [k: string]: unknown;
+}
+/**
+ * A RUNTIME-COMMAND review (a subject distinct from a change review): the exact resolved commands Kriya asks to run to verify the application, in order, where they run, and the command fingerprint the decision must carry. Never a stdin or environment VALUE; `files` does not exist on this shape.
+ */
+export interface PendingRuntimeCommandReview {
+  review_id: string;
+  sequence: number;
+  kind: 'runtime_command';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  requested_at: string;
+  expires_at: string;
+  /**
+   * Equal to command_fingerprint: the digest the decision must carry.
+   */
+  candidate_digest: string;
+  /**
+   * Digest over the working directory, the commands in order, the input channel and the stdin digest.
+   */
+  command_fingerprint: string;
+  unit_id?: string | null;
+  /**
+   * What the verification looks for (bounded, secret-scrubbed).
+   */
+  criterion: string;
+  /**
+   * @minItems 1
+   */
+  commands: [[string, ...string[]], ...[string, ...string[]][]];
+  /**
+   * The ACTUAL absolute directory the commands run in: Kriya's isolated candidate worktree.
+   */
+  working_directory: string;
+  working_directory_kind: 'ISOLATED_WORKTREE';
+  input_channel: string;
+  stdin_present: boolean;
+  stdin_sha256?: string | null;
+  /**
+   * Names only; never a value.
+   */
+  environment_names: string[];
+  reason_sha256?: string;
+  decision: {
+    decision?: string | null;
+    decided_at?: string | null;
+    source?: string;
+    [k: string]: unknown;
+  } | null;
   [k: string]: unknown;
 }
 
@@ -920,6 +949,38 @@ export interface ChangeApprovalReview {
       }[];
     }[];
   }[];
+}
+
+// ---- RuntimeCommandReview (workspace.schema.json#/$defs/RuntimeCommandReview) ----
+/**
+ * data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is `kriya launch-decision --kind runtime_command`.
+ */
+export interface RuntimeCommandReview {
+  launch_id: string;
+  review_id: string;
+  run_id: string;
+  /**
+   * The review's own status: PENDING, APPROVED, REJECTED or EXPIRED.
+   */
+  status: string;
+  verified: true;
+  /**
+   * The digest the decision must carry.
+   */
+  command_fingerprint: string;
+  unit_id: string | null;
+  criterion: string;
+  /**
+   * @minItems 1
+   */
+  commands: [[string, ...string[]], ...[string, ...string[]][]];
+  working_directory: string;
+  working_directory_kind: 'ISOLATED_WORKTREE';
+  input_channel: string;
+  stdin_present: boolean;
+  environment_names: string[];
+  requested_at: string;
+  expires_at: string;
 }
 
 // ---- ProjectInitialize (workspace.schema.json#/$defs/ProjectInitialize) ----
@@ -1645,6 +1706,18 @@ export type KupRequest =
       review_id: string;
     }
   | {
+      operation: 'runtime_command.review';
+      /**
+       * Absolute path without control characters.
+       */
+      workspace: string;
+      launch_id: string;
+      /**
+       * The review identity Kriya gave in launch.status (pending_approval.review_id).
+       */
+      review_id: string;
+    }
+  | {
       operation: 'configuration.approve';
       /**
        * Absolute path without control characters.
@@ -1897,6 +1970,35 @@ export interface DecideApprovalRequest {
  * Answer to a review decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed refusal code.
  */
 export interface DecideApprovalResult {
+  accepted: boolean;
+  code: string;
+  message: string;
+  launch_id?: string | null;
+  review_id?: string | null;
+  decision?: string | null;
+  decided_at?: string | null;
+}
+
+// ---- DecideRuntimeCommandRequest (host-contract.schema.json#/$defs/DecideRuntimeCommandRequest) ----
+/**
+ * Runtime-command decision (GUI-RUNTIME-COMMAND-APPROVAL-001): ONE human decision for the RUNTIME-COMMAND review that is pending in a launch Kriya recorded. It carries only the identities Kriya gave the pending review (launch id, review id, command fingerprint) and the decision - never a command, argument, directory or environment value, so a renderer cannot approve a command Kriya did not propose, change what runs, or approve another run or unit. The host re-proves the review through `runtime_command.review`, shows a native confirmation built from that answer, and only then asks Kriya (`launch-decision --kind runtime_command`), which validates every identity against its durable state.
+ */
+export interface DecideRuntimeCommandRequest {
+  /**
+   * Absolute path without control characters.
+   */
+  workspace: string;
+  launch_id: string;
+  review_id: string;
+  command_fingerprint: string;
+  decision: 'approve' | 'reject';
+}
+
+// ---- DecideRuntimeCommandResult (host-contract.schema.json#/$defs/DecideRuntimeCommandResult) ----
+/**
+ * Answer to a runtime-command decision. accepted=true means Kriya durably recorded the decision for the waiting run; the run's outcome is only ever in Kriya's durable records. accepted=false carries Kriya's or the host's closed code; `CONFIRMATION_DECLINED` means the person pressed Cancel on the native confirmation: nothing was sent, nothing was approved, and the review is still waiting.
+ */
+export interface DecideRuntimeCommandResult {
   accepted: boolean;
   code: string;
   message: string;

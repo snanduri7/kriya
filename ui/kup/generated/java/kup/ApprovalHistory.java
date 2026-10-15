@@ -5,6 +5,15 @@ package kup;
 import com.fasterxml.jackson.annotation.*;
 import java.util.List;
 
+/**
+ * A CHANGE review: the exact candidate (digest; files with diff digests) and Kriya's
+ * reviewer text VERBATIM (bounded).
+ *
+ * A RUNTIME-COMMAND review (a subject distinct from a change review): the exact resolved
+ * commands Kriya asks to run to verify the application, in order, where they run, and the
+ * command fingerprint the decision must carry. Never a stdin or environment VALUE; `files`
+ * does not exist on this shape.
+ */
 public class ApprovalHistory {
     // Added by generate.mjs: unknown properties are preserved verbatim (P-24).
     private final java.util.Map<String, Object> additionalProperties = new java.util.LinkedHashMap<>();
@@ -14,27 +23,40 @@ public class ApprovalHistory {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private String candidateDigest;
-    private ApprovalHistoryDecision decision;
+    private DecisionClass decision;
     private String expiresAt;
     private List<ApprovalHistoryFile> files;
-    private String kind;
+    private ApprovalHistoryKind kind;
     private String reason;
     private String reasonSha256;
-    private boolean reasonTruncated;
+    private Boolean reasonTruncated;
     private String requestedAt;
     private String reviewid;
     private long sequence;
     private ApprovalHistoryStatus status;
+    private String commandFingerprint;
+    private List<List<String>> commands;
+    private String criterion;
+    private List<String> environmentNames;
+    private String inputChannel;
+    private Boolean stdinPresent;
+    private String stdinSha256;
+    private String unitid;
+    private String workingDirectory;
+    private WorkingDirectoryKind workingDirectoryKind;
 
+    /**
+     * Equal to command_fingerprint: the digest the decision must carry.
+     */
     @JsonProperty("candidate_digest")
     public String getCandidateDigest() { return candidateDigest; }
     @JsonProperty("candidate_digest")
     public void setCandidateDigest(String value) { this.candidateDigest = value; }
 
     @JsonProperty("decision")
-    public ApprovalHistoryDecision getDecision() { return decision; }
+    public DecisionClass getDecision() { return decision; }
     @JsonProperty("decision")
-    public void setDecision(ApprovalHistoryDecision value) { this.decision = value; }
+    public void setDecision(DecisionClass value) { this.decision = value; }
 
     @JsonProperty("expires_at")
     public String getExpiresAt() { return expiresAt; }
@@ -47,9 +69,9 @@ public class ApprovalHistory {
     public void setFiles(List<ApprovalHistoryFile> value) { this.files = value; }
 
     @JsonProperty("kind")
-    public String getKind() { return kind; }
+    public ApprovalHistoryKind getKind() { return kind; }
     @JsonProperty("kind")
-    public void setKind(String value) { this.kind = value; }
+    public void setKind(ApprovalHistoryKind value) { this.kind = value; }
 
     @JsonProperty("reason")
     public String getReason() { return reason; }
@@ -62,9 +84,9 @@ public class ApprovalHistory {
     public void setReasonSha256(String value) { this.reasonSha256 = value; }
 
     @JsonProperty("reason_truncated")
-    public boolean getReasonTruncated() { return reasonTruncated; }
+    public Boolean getReasonTruncated() { return reasonTruncated; }
     @JsonProperty("reason_truncated")
-    public void setReasonTruncated(boolean value) { this.reasonTruncated = value; }
+    public void setReasonTruncated(Boolean value) { this.reasonTruncated = value; }
 
     @JsonProperty("requested_at")
     public String getRequestedAt() { return requestedAt; }
@@ -85,4 +107,67 @@ public class ApprovalHistory {
     public ApprovalHistoryStatus getStatus() { return status; }
     @JsonProperty("status")
     public void setStatus(ApprovalHistoryStatus value) { this.status = value; }
+
+    /**
+     * Digest over the working directory, the commands in order, the input channel and the stdin
+     * digest.
+     */
+    @JsonProperty("command_fingerprint")
+    public String getCommandFingerprint() { return commandFingerprint; }
+    @JsonProperty("command_fingerprint")
+    public void setCommandFingerprint(String value) { this.commandFingerprint = value; }
+
+    @JsonProperty("commands")
+    public List<List<String>> getCommands() { return commands; }
+    @JsonProperty("commands")
+    public void setCommands(List<List<String>> value) { this.commands = value; }
+
+    /**
+     * What the verification looks for (bounded, secret-scrubbed).
+     */
+    @JsonProperty("criterion")
+    public String getCriterion() { return criterion; }
+    @JsonProperty("criterion")
+    public void setCriterion(String value) { this.criterion = value; }
+
+    /**
+     * Names only; never a value.
+     */
+    @JsonProperty("environment_names")
+    public List<String> getEnvironmentNames() { return environmentNames; }
+    @JsonProperty("environment_names")
+    public void setEnvironmentNames(List<String> value) { this.environmentNames = value; }
+
+    @JsonProperty("input_channel")
+    public String getInputChannel() { return inputChannel; }
+    @JsonProperty("input_channel")
+    public void setInputChannel(String value) { this.inputChannel = value; }
+
+    @JsonProperty("stdin_present")
+    public Boolean getStdinPresent() { return stdinPresent; }
+    @JsonProperty("stdin_present")
+    public void setStdinPresent(Boolean value) { this.stdinPresent = value; }
+
+    @JsonProperty("stdin_sha256")
+    public String getStdinSha256() { return stdinSha256; }
+    @JsonProperty("stdin_sha256")
+    public void setStdinSha256(String value) { this.stdinSha256 = value; }
+
+    @JsonProperty("unit_id")
+    public String getUnitid() { return unitid; }
+    @JsonProperty("unit_id")
+    public void setUnitid(String value) { this.unitid = value; }
+
+    /**
+     * The ACTUAL absolute directory the commands run in: Kriya's isolated candidate worktree.
+     */
+    @JsonProperty("working_directory")
+    public String getWorkingDirectory() { return workingDirectory; }
+    @JsonProperty("working_directory")
+    public void setWorkingDirectory(String value) { this.workingDirectory = value; }
+
+    @JsonProperty("working_directory_kind")
+    public WorkingDirectoryKind getWorkingDirectoryKind() { return workingDirectoryKind; }
+    @JsonProperty("working_directory_kind")
+    public void setWorkingDirectoryKind(WorkingDirectoryKind value) { this.workingDirectoryKind = value; }
 }

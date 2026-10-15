@@ -30,8 +30,12 @@ export interface RunProgress {
 export const NO_PROGRESS: RunProgress = { lastSeq: 0, kinds: {}, recent: [], error: null };
 
 export type OutcomeKind = 'success' | 'failure' | 'needs_review' | 'refused' | 'interrupted' | 'not_recorded' | 'approval_required' | 'rejected' | 'review_expired';
-/** The change review a run is waiting on, exactly as Kriya's launch record holds it. */
-export type PendingReview = NonNullable<LaunchStatus['launch']['pending_approval']>;
+/** What a run can be waiting on, exactly as Kriya's launch record holds it: a CHANGE review or a RUNTIME-COMMAND review, discriminated by `kind` (two distinct subjects). */
+export type AnyPendingReview = NonNullable<LaunchStatus['launch']['pending_approval']>;
+/** The CHANGE review a run is waiting on. */
+export type PendingReview = Extract<AnyPendingReview, { kind: 'change_approval' }>;
+/** The RUNTIME-COMMAND review a run is waiting on: the exact commands Kriya asks to run (never files). */
+export type PendingRuntimeCommandReview = Extract<AnyPendingReview, { kind: 'runtime_command' }>;
 export interface RunOutcome {
   kind: OutcomeKind;
   label: string;
@@ -211,7 +215,13 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
  * the launch ended or its process gone) is not actionable, so no decision control is offered for it. Pure: the tests drive it with every combination. */
 export function activeReview(status: LaunchStatus | null): PendingReview | null {
   const pending = status?.launch.pending_approval ?? null;
-  return status && pending && status.launch.phase === 'RUNNING' && status.liveness === 'live' && pending.status === 'PENDING' ? pending : null;
+  return status && pending && pending.kind === 'change_approval' && status.launch.phase === 'RUNNING' && status.liveness === 'live' && pending.status === 'PENDING' ? pending : null;
+}
+
+/** The RUNTIME-COMMAND review a run is waiting on RIGHT NOW (same liveness rules as `activeReview`; a change review is never returned here). */
+export function activeRuntimeCommandReview(status: LaunchStatus | null): PendingRuntimeCommandReview | null {
+  const pending = status?.launch.pending_approval ?? null;
+  return status && pending && pending.kind === 'runtime_command' && status.launch.phase === 'RUNNING' && status.liveness === 'live' && pending.status === 'PENDING' ? pending : null;
 }
 
 /** One decision at a time on the review pending NOW. The identities travel exactly as Kriya gave them; Kriya refuses a stale or replayed one. The guard is synchronous:

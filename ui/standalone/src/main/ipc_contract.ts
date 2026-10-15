@@ -94,6 +94,7 @@ export type KupRequest =
   | { operation: 'configuration.approve'; workspace: string; fingerprint: string }
   | { operation: 'project.initialize'; workspace: string }
   | { operation: 'change_approval.review'; workspace: string; launch_id: string; review_id: string }
+  | { operation: 'runtime_command.review'; workspace: string; launch_id: string; review_id: string }
   | { operation: 'execution.context'; workspace: string }
   | { operation: 'execution.model_probe'; workspace: string }
   | { operation: 'skills.list'; workspace: string }
@@ -246,6 +247,14 @@ export function validateKupRequest(v: unknown): ValidationResult<KupRequest> {
       if (typeof v.review_id !== 'string' || !/^ra-[0-9a-f]{24}$/.test(v.review_id)) return { ok: false, message: 'review_id must be a review identity Kriya gave (ra-<24 hex>)' };
       return { ok: true, value: { operation: 'change_approval.review', workspace: w.value, launch_id: v.launch_id, review_id: v.review_id } };
     }
+    case 'runtime_command.review': {
+      // A READ of the exact proposed change of one review Kriya gave for the open folder (Kriya re-proves it against the review's digests); it approves nothing.
+      if (keys.join() !== 'launch_id,operation,review_id,workspace') return { ok: false, message: 'runtime_command.review takes exactly workspace, launch_id and review_id' };
+      const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+      if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+      if (typeof v.review_id !== 'string' || !/^ra-[0-9a-f]{24}$/.test(v.review_id)) return { ok: false, message: 'review_id must be a review identity Kriya gave (ra-<24 hex>)' };
+      return { ok: true, value: { operation: 'runtime_command.review', workspace: w.value, launch_id: v.launch_id, review_id: v.review_id } };
+    }
     case 'launch.status': {
       if (keys.join() !== 'launch_id,operation,workspace') return { ok: false, message: 'launch.status takes exactly workspace and launch_id' };
       const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
@@ -308,6 +317,21 @@ export function validateDecideApproval(v: unknown): ValidationResult<DecideAppro
   if (typeof v.candidate_digest !== 'string' || !CANDIDATE_DIGEST_RE.test(v.candidate_digest)) return { ok: false, message: 'candidate_digest is malformed' };
   if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
   return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, candidate_digest: v.candidate_digest, decision: v.decision } };
+}
+
+export const COMMAND_FINGERPRINT_RE = /^sha256:[0-9a-f]{64}$/;
+export interface DecideRuntimeCommandRequest { workspace: string; launch_id: string; review_id: string; command_fingerprint: string; decision: 'approve' | 'reject' }
+
+/** Runtime-command decision: exactly these five fields, each in its closed grammar. There is NO field for a command, an argument, a directory, an environment value or stdin: the host
+ * re-proves the review through Kriya and everything shown or run comes from Kriya's own record, so a renderer cannot approve a command Kriya did not propose. */
+export function validateDecideRuntimeCommand(v: unknown): ValidationResult<DecideRuntimeCommandRequest> {
+  if (!isObj(v) || Object.keys(v).sort().join() !== 'command_fingerprint,decision,launch_id,review_id,workspace') return { ok: false, message: 'decideRuntimeCommand takes exactly workspace, launch_id, review_id, command_fingerprint and decision' };
+  const w = validateWorkspacePath(v.workspace); if (!w.ok) return w;
+  if (typeof v.launch_id !== 'string' || !LAUNCH_ID_RE.test(v.launch_id)) return { ok: false, message: 'launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx' };
+  if (typeof v.review_id !== 'string' || !REVIEW_ID_RE.test(v.review_id)) return { ok: false, message: 'review_id is malformed' };
+  if (typeof v.command_fingerprint !== 'string' || !COMMAND_FINGERPRINT_RE.test(v.command_fingerprint)) return { ok: false, message: 'command_fingerprint is malformed' };
+  if (v.decision !== 'approve' && v.decision !== 'reject') return { ok: false, message: 'decision must be approve or reject' };
+  return { ok: true, value: { workspace: w.value, launch_id: v.launch_id, review_id: v.review_id, command_fingerprint: v.command_fingerprint, decision: v.decision } };
 }
 
 export interface InitializeProjectRequest { workspace: string }

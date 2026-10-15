@@ -32,6 +32,7 @@
 //     ConfigurationApprovalStatus data = Converter.ConfigurationApprovalStatusFromJsonString(jsonString);
 //     ConfigurationApprove data = Converter.ConfigurationApproveFromJsonString(jsonString);
 //     ChangeApprovalReview data = Converter.ChangeApprovalReviewFromJsonString(jsonString);
+//     RuntimeCommandReview data = Converter.RuntimeCommandReviewFromJsonString(jsonString);
 //     ProjectInitialize data = Converter.ProjectInitializeFromJsonString(jsonString);
 //     InitializeProjectRequest data = Converter.InitializeProjectRequestFromJsonString(jsonString);
 //     InitializeProjectResult data = Converter.InitializeProjectResultFromJsonString(jsonString);
@@ -64,6 +65,8 @@
 //     ExecutionState data = Converter.ExecutionStateFromJsonString(jsonString);
 //     DecideApprovalRequest data = Converter.DecideApprovalRequestFromJsonString(jsonString);
 //     DecideApprovalResult data = Converter.DecideApprovalResultFromJsonString(jsonString);
+//     DecideRuntimeCommandRequest data = Converter.DecideRuntimeCommandRequestFromJsonString(jsonString);
+//     DecideRuntimeCommandResult data = Converter.DecideRuntimeCommandResultFromJsonString(jsonString);
 //     ApproveConfigurationRequest data = Converter.ApproveConfigurationRequestFromJsonString(jsonString);
 //     ApproveConfigurationResult data = Converter.ApproveConfigurationResultFromJsonString(jsonString);
 //     List<String> data = Converter.RecentWorkspacesFromJsonString(jsonString);
@@ -283,6 +286,14 @@ public class Converter {
 
     public static String ChangeApprovalReviewToJsonString(ChangeApprovalReview obj) throws JsonProcessingException {
         return getChangeApprovalReviewObjectWriter().writeValueAsString(obj);
+    }
+
+    public static RuntimeCommandReview RuntimeCommandReviewFromJsonString(String json) throws IOException {
+        return getRuntimeCommandReviewObjectReader().readValue(json);
+    }
+
+    public static String RuntimeCommandReviewToJsonString(RuntimeCommandReview obj) throws JsonProcessingException {
+        return getRuntimeCommandReviewObjectWriter().writeValueAsString(obj);
     }
 
     public static ProjectInitialize ProjectInitializeFromJsonString(String json) throws IOException {
@@ -539,6 +550,22 @@ public class Converter {
 
     public static String DecideApprovalResultToJsonString(DecideApprovalResult obj) throws JsonProcessingException {
         return getDecideApprovalResultObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideRuntimeCommandRequest DecideRuntimeCommandRequestFromJsonString(String json) throws IOException {
+        return getDecideRuntimeCommandRequestObjectReader().readValue(json);
+    }
+
+    public static String DecideRuntimeCommandRequestToJsonString(DecideRuntimeCommandRequest obj) throws JsonProcessingException {
+        return getDecideRuntimeCommandRequestObjectWriter().writeValueAsString(obj);
+    }
+
+    public static DecideRuntimeCommandResult DecideRuntimeCommandResultFromJsonString(String json) throws IOException {
+        return getDecideRuntimeCommandResultObjectReader().readValue(json);
+    }
+
+    public static String DecideRuntimeCommandResultToJsonString(DecideRuntimeCommandResult obj) throws JsonProcessingException {
+        return getDecideRuntimeCommandResultObjectWriter().writeValueAsString(obj);
     }
 
     public static ApproveConfigurationRequest ApproveConfigurationRequestFromJsonString(String json) throws IOException {
@@ -1183,6 +1210,37 @@ public class Converter {
     private static ObjectWriter getChangeApprovalReviewObjectWriter() {
         if (ChangeApprovalReviewWriter == null) instantiateChangeApprovalReviewMapper();
         return ChangeApprovalReviewWriter;
+    }
+
+    private static ObjectReader RuntimeCommandReviewReader;
+    private static ObjectWriter RuntimeCommandReviewWriter;
+
+    private static void instantiateRuntimeCommandReviewMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        RuntimeCommandReviewReader = mapper.readerFor(RuntimeCommandReview.class);
+        RuntimeCommandReviewWriter = mapper.writerFor(RuntimeCommandReview.class);
+    }
+
+    private static ObjectReader getRuntimeCommandReviewObjectReader() {
+        if (RuntimeCommandReviewReader == null) instantiateRuntimeCommandReviewMapper();
+        return RuntimeCommandReviewReader;
+    }
+
+    private static ObjectWriter getRuntimeCommandReviewObjectWriter() {
+        if (RuntimeCommandReviewWriter == null) instantiateRuntimeCommandReviewMapper();
+        return RuntimeCommandReviewWriter;
     }
 
     private static ObjectReader ProjectInitializeReader;
@@ -2175,6 +2233,68 @@ public class Converter {
     private static ObjectWriter getDecideApprovalResultObjectWriter() {
         if (DecideApprovalResultWriter == null) instantiateDecideApprovalResultMapper();
         return DecideApprovalResultWriter;
+    }
+
+    private static ObjectReader DecideRuntimeCommandRequestReader;
+    private static ObjectWriter DecideRuntimeCommandRequestWriter;
+
+    private static void instantiateDecideRuntimeCommandRequestMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideRuntimeCommandRequestReader = mapper.readerFor(DecideRuntimeCommandRequest.class);
+        DecideRuntimeCommandRequestWriter = mapper.writerFor(DecideRuntimeCommandRequest.class);
+    }
+
+    private static ObjectReader getDecideRuntimeCommandRequestObjectReader() {
+        if (DecideRuntimeCommandRequestReader == null) instantiateDecideRuntimeCommandRequestMapper();
+        return DecideRuntimeCommandRequestReader;
+    }
+
+    private static ObjectWriter getDecideRuntimeCommandRequestObjectWriter() {
+        if (DecideRuntimeCommandRequestWriter == null) instantiateDecideRuntimeCommandRequestMapper();
+        return DecideRuntimeCommandRequestWriter;
+    }
+
+    private static ObjectReader DecideRuntimeCommandResultReader;
+    private static ObjectWriter DecideRuntimeCommandResultWriter;
+
+    private static void instantiateDecideRuntimeCommandResultMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.findAndRegisterModules();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(OffsetDateTime.class, new JsonDeserializer<OffsetDateTime>() {
+            @Override
+            public OffsetDateTime deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException, JsonProcessingException {
+                String value = jsonParser.getText();
+                return Converter.parseDateTimeString(value);
+            }
+        });
+        mapper.registerModule(module);
+        DecideRuntimeCommandResultReader = mapper.readerFor(DecideRuntimeCommandResult.class);
+        DecideRuntimeCommandResultWriter = mapper.writerFor(DecideRuntimeCommandResult.class);
+    }
+
+    private static ObjectReader getDecideRuntimeCommandResultObjectReader() {
+        if (DecideRuntimeCommandResultReader == null) instantiateDecideRuntimeCommandResultMapper();
+        return DecideRuntimeCommandResultReader;
+    }
+
+    private static ObjectWriter getDecideRuntimeCommandResultObjectWriter() {
+        if (DecideRuntimeCommandResultWriter == null) instantiateDecideRuntimeCommandResultMapper();
+        return DecideRuntimeCommandResultWriter;
     }
 
     private static ObjectReader ApproveConfigurationRequestReader;

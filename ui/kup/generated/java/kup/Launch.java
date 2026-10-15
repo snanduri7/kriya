@@ -22,7 +22,7 @@ public class Launch {
     private List<History> history;
     private String launchid;
     private Map<String, Object> options;
-    private PendingApproval pendingApproval;
+    private WorkspaceSchema pendingApproval;
     private LaunchPhase phase;
     private Map<String, Object> process;
     private String requestedAt;
@@ -82,15 +82,16 @@ public class Launch {
     public void setOptions(Map<String, Object> value) { this.options = value; }
 
     /**
-     * The change review the run is waiting on (or last waited on): the exact candidate (digest;
-     * files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable
-     * status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the
-     * waiting process record the decision BEFORE the run continues.
+     * The review the run is waiting on (or last waited on): a CHANGE review (the exact
+     * candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya
+     * asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed
+     * action for its own kind; Kriya's `launch-decision` action and the waiting process record
+     * the decision BEFORE the run continues.
      */
     @JsonProperty("pending_approval")
-    public PendingApproval getPendingApproval() { return pendingApproval; }
+    public WorkspaceSchema getPendingApproval() { return pendingApproval; }
     @JsonProperty("pending_approval")
-    public void setPendingApproval(PendingApproval value) { this.pendingApproval = value; }
+    public void setPendingApproval(WorkspaceSchema value) { this.pendingApproval = value; }
 
     @JsonProperty("phase")
     public LaunchPhase getPhase() { return phase; }

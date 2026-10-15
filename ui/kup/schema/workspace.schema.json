@@ -364,6 +364,334 @@
       },
       "additionalProperties": true
     },
+    "RuntimeCommandReview": {
+      "description": "data of `runtime_command.review`: the EXACT commands a runtime-command review asks the person to allow Kriya to run, served only after Kriya re-proved them against the command fingerprint the review is bound to (working directory, commands in order, input channel, stdin digest). Approval-scoped and read-only: it approves nothing; the decision is `kriya launch-decision --kind runtime_command`.",
+      "type": "object",
+      "required": [
+        "launch_id",
+        "review_id",
+        "run_id",
+        "status",
+        "verified",
+        "command_fingerprint",
+        "unit_id",
+        "criterion",
+        "commands",
+        "working_directory",
+        "working_directory_kind",
+        "input_channel",
+        "stdin_present",
+        "environment_names",
+        "requested_at",
+        "expires_at"
+      ],
+      "properties": {
+        "launch_id": {
+          "type": "string"
+        },
+        "review_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "The review's own status: PENDING, APPROVED, REJECTED or EXPIRED."
+        },
+        "verified": {
+          "const": true
+        },
+        "command_fingerprint": {
+          "type": "string",
+          "description": "The digest the decision must carry."
+        },
+        "unit_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "criterion": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "working_directory": {
+          "type": "string"
+        },
+        "working_directory_kind": {
+          "const": "ISOLATED_WORKTREE"
+        },
+        "input_channel": {
+          "type": "string"
+        },
+        "stdin_present": {
+          "type": "boolean"
+        },
+        "environment_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requested_at": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PendingChangeReview": {
+      "required": [
+        "review_id",
+        "sequence",
+        "kind",
+        "status",
+        "requested_at",
+        "expires_at",
+        "candidate_digest",
+        "files",
+        "reason",
+        "reason_truncated",
+        "reason_sha256",
+        "decision"
+      ],
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "change_approval"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "APPROVED",
+            "REJECTED",
+            "EXPIRED"
+          ]
+        },
+        "requested_at": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "candidate_digest": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "filepath",
+              "diff_sha256",
+              "lines_added",
+              "lines_removed"
+            ],
+            "properties": {
+              "filepath": {
+                "type": "string"
+              },
+              "diff_sha256": {
+                "type": "string"
+              },
+              "lines_added": {
+                "type": "integer"
+              },
+              "lines_removed": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_truncated": {
+          "type": "boolean"
+        },
+        "reason_sha256": {
+          "type": "string"
+        },
+        "decision": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "decision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true,
+      "type": "object",
+      "description": "A CHANGE review: the exact candidate (digest; files with diff digests) and Kriya's reviewer text VERBATIM (bounded)."
+    },
+    "PendingRuntimeCommandReview": {
+      "description": "A RUNTIME-COMMAND review (a subject distinct from a change review): the exact resolved commands Kriya asks to run to verify the application, in order, where they run, and the command fingerprint the decision must carry. Never a stdin or environment VALUE; `files` does not exist on this shape.",
+      "type": "object",
+      "required": [
+        "review_id",
+        "sequence",
+        "kind",
+        "status",
+        "requested_at",
+        "expires_at",
+        "candidate_digest",
+        "command_fingerprint",
+        "commands",
+        "working_directory",
+        "working_directory_kind",
+        "input_channel",
+        "stdin_present",
+        "environment_names",
+        "criterion",
+        "decision"
+      ],
+      "properties": {
+        "review_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "runtime_command"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "APPROVED",
+            "REJECTED",
+            "EXPIRED"
+          ]
+        },
+        "requested_at": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "description": "Equal to command_fingerprint: the digest the decision must carry."
+        },
+        "command_fingerprint": {
+          "type": "string",
+          "description": "Digest over the working directory, the commands in order, the input channel and the stdin digest."
+        },
+        "unit_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "criterion": {
+          "type": "string",
+          "description": "What the verification looks for (bounded, secret-scrubbed)."
+        },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "working_directory": {
+          "type": "string",
+          "description": "The ACTUAL absolute directory the commands run in: Kriya's isolated candidate worktree."
+        },
+        "working_directory_kind": {
+          "const": "ISOLATED_WORKTREE"
+        },
+        "input_channel": {
+          "type": "string"
+        },
+        "stdin_present": {
+          "type": "boolean"
+        },
+        "stdin_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "environment_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Names only; never a value."
+        },
+        "reason_sha256": {
+          "type": "string"
+        },
+        "decision": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "decision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
     "LaunchStatus": {
       "description": "data of `launch.status` (GUI M6): one desktop launch read back from durable records only (launch record, RunRecord, attempt-evidence store, workspace run lock). `liveness` is DERIVED; no outcome is ever inferred from a process exit.",
       "type": "object",
@@ -426,16 +754,13 @@
               "items": { "type": "object", "required": ["kind", "reason", "details", "noted_at"], "properties": { "kind": { "type": "string" }, "reason": { "type": "string" }, "details": { "type": "object", "additionalProperties": true }, "noted_at": { "type": "string" } }, "additionalProperties": true }
             },
             "pending_approval": {
-              "type": ["object", "null"],
-              "description": "The change review the run is waiting on (or last waited on): the exact candidate (digest; files with diff digests), Kriya's reviewer text VERBATIM (bounded) and its durable status. Only a PENDING review can be decided; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.",
-              "required": ["review_id", "sequence", "kind", "status", "requested_at", "expires_at", "candidate_digest", "files", "reason", "reason_truncated", "reason_sha256", "decision"],
-              "properties": { "review_id": { "type": "string" }, "sequence": { "type": "integer" }, "kind": { "type": "string" }, "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED"] }, "requested_at": { "type": "string" }, "expires_at": { "type": "string" }, "candidate_digest": { "type": "string" }, "files": { "type": "array", "items": { "type": "object", "required": ["filepath", "diff_sha256", "lines_added", "lines_removed"], "properties": { "filepath": { "type": "string" }, "diff_sha256": { "type": "string" }, "lines_added": { "type": "integer" }, "lines_removed": { "type": "integer" } }, "additionalProperties": true } }, "reason": { "type": "string" }, "reason_truncated": { "type": "boolean" }, "reason_sha256": { "type": "string" }, "decision": { "type": ["object", "null"], "properties": { "decision": { "type": ["string", "null"] }, "decided_at": { "type": ["string", "null"] }, "source": { "type": "string" } }, "additionalProperties": true } },
-              "additionalProperties": true
+              "description": "The review the run is waiting on (or last waited on): a CHANGE review (the exact candidate, Kriya's reviewer text) or a RUNTIME-COMMAND review (the exact commands Kriya asks to run), discriminated by `kind`. Only a PENDING review can be decided, by the typed action for its own kind; Kriya's `launch-decision` action and the waiting process record the decision BEFORE the run continues.",
+              "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/PendingChangeReview" }, { "$ref": "#/$defs/PendingRuntimeCommandReview" } ]
             },
             "approval_history": {
               "type": "array",
               "description": "Earlier reviews of this launch (a retry produced a new candidate), oldest first; none of them can be decided any more.",
-              "items": { "type": "object", "required": ["review_id", "sequence", "kind", "status", "requested_at", "expires_at", "candidate_digest", "files", "reason", "reason_truncated", "reason_sha256", "decision"], "properties": { "review_id": { "type": "string" }, "sequence": { "type": "integer" }, "kind": { "type": "string" }, "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED"] }, "requested_at": { "type": "string" }, "expires_at": { "type": "string" }, "candidate_digest": { "type": "string" }, "files": { "type": "array", "items": { "type": "object", "required": ["filepath", "diff_sha256", "lines_added", "lines_removed"], "properties": { "filepath": { "type": "string" }, "diff_sha256": { "type": "string" }, "lines_added": { "type": "integer" }, "lines_removed": { "type": "integer" } }, "additionalProperties": true } }, "reason": { "type": "string" }, "reason_truncated": { "type": "boolean" }, "reason_sha256": { "type": "string" }, "decision": { "type": ["object", "null"], "properties": { "decision": { "type": ["string", "null"] }, "decided_at": { "type": ["string", "null"] }, "source": { "type": "string" } }, "additionalProperties": true } }, "additionalProperties": true }
+              "items": { "oneOf": [ { "$ref": "#/$defs/PendingChangeReview" }, { "$ref": "#/$defs/PendingRuntimeCommandReview" } ] }
             },
             "approval_required": {
               "type": ["object", "null"],

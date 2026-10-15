@@ -87,6 +87,7 @@
         "REVIEW_NOT_FOUND",
         "REVIEW_DIFF_UNAVAILABLE",
         "REVIEW_DIFF_UNVERIFIED",
+        "REVIEW_COMMAND_UNVERIFIED",
         "HOST_ERROR"
       ]
     },
@@ -266,6 +267,7 @@
             "configuration.approve",
             "project.initialize",
             "change_approval.review",
+            "runtime_command.review",
             "snapshot.acquire",
             "snapshot.list",
             "snapshot.prune",
