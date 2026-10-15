@@ -75,3 +75,65 @@ asks a human to approve nothing, and the desktop (correctly: it cannot hold an e
 Owner decisions after this trace (2026-10-15): a small generic fix at the source-change gate ownership point (`NO SOURCE MUTATION -> NO SOURCE-CHANGE APPROVAL`), without
 changing the `approval_callback([], ...)` contract used by other callers (`attempt.py` runtime-command approvals are a different subject and must be classified independently).
 Implementation and verification records follow in `GREENFIELD-OWNER-UX-CORRECTION.md`.
+
+## 7. Empty-change source approval: reproducer, fix, verification (owner decision 2 - done, local commit, not pushed)
+
+- **Reproducer (before the fix)** `tests/test_empty_change_source_approval.py` through the real `WorkflowController` enforce loop and workflow (only the model transport and the toolchain
+  gates stubbed; harness `tests/_enforce_unit_harness.py`): a plan with a producer unit and a no-file verification unit, `autonomy.mode = human-in-the-loop`, a recording approval
+  callback. Before the fix the callback was called a second time, for the verification unit, with `files == []` and the same reason text the owner saw ("Human-in-the-loop review
+  policy", an empty "Automated Code Review", the static-analysis banner). 3 of 6 tests failed on exactly that; the 3 guard tests (a real change asks once; a rejection records
+  `rejected` and applies nothing) passed.
+- **Fix** `kriya/workflow/workflow.py`, the pre-apply source-change gate (its ownership point): `need_human_approval = has_source_mutation and (...)` with
+  `has_source_mutation = bool(state.all_files_written)`. NO SOURCE MUTATION -> NO SOURCE-CHANGE APPROVAL. No empty approval is manufactured and no `rejected` decision is recorded for
+  nothing. Every non-empty change is approved exactly as before (the sensitive-path, diff-size and process-profile clauses are unchanged, and they all derive from the same file set).
+  The `approval_callback` contract and the `attempt.py` runtime-command call sites are untouched.
+- **After:** 6 of 6 pass. Mutations (each applied in place, run, restored): always-true 3 failed; inverted 5 failed; never-ask 6 failed; `and`->`or` 3 failed; all killed.
+- **Adjacent suites** (1081 tests: `test_workflow`, `test_best_of_n`, the `state_machine` tier, autonomy, events, the P4 verification-only reproducers, the D3/D4/D5 runtime-verification suites,
+  B3 human acceptance, enforce-verified-no-change) pass. `test_launch_approval` passes (45). One test in it failed once under a loaded `-n 6` run and passes alone, with and without the change, and in a full-file parallel run (load-dependent review expiry; unrelated).
+- **Behaviour change to be aware of:** a terminal human-in-the-loop user is no longer asked "Do you approve applying these changes?" for a unit that changed nothing.
+
+## 8. Controlled continuation past the old stop - what Kriya does next (steps 7-9; NO live model)
+
+`tests/test_greenfield_runtime_verification_dropped.py` replays the owner's exact goal text and plan shape (s1 `pom.xml`, s2 main class, s3 unit test, s4 verification with the Planner's
+real verifiers: compile + `{"type":"judgment","verifier_kind":"application_runtime","requires_runtime_execution":true}`, read from the recorded planner response) with
+`run_verification_enabled: true`, the recorded run-verification judge answer (`mvn exec:java -Dexec.mainClass=com.example.HelloKriya`, `goal_explicit`) and a recording callback.
+
+| Goal wording | Result after the empty-approval fix |
+|---|---|
+| The owner's: "... prints \"Hello from Kriya\" and includes a unit test. Make the application runnable." | exactly three approvals (no fourth); all four units `completed`; the run reports **success**; the judge is never consulted at s4; **the application is never executed** (`executed == []`) |
+| "... Run the application and confirm it prints \"Hello from Kriya\"." (recognised by the detector) | the three change approvals, then s4 calls `approval_callback([], "Kriya judged that this goal describes runtime behavior ... Allow Kriya to execute these command(s) inside the sandboxed worktree?")` - a **runtime-command approval**. A desktop launch declines it (other_approval) so nothing runs and s4 fails; with an approving callback the command runs |
+
+### Why the runtime check was dropped (CONFIRMED by the replay)
+1. (M) The Planner's s4 carried the runtime verifier "Confirm that the application output includes 'Hello from Kriya'" (`application_runtime`, `requires_runtime_execution: true`).
+2. (T) `workflow_controller` calls `scope_verification_to_requirements(plan, goal_requires_runtime_behavior(goal))`; with `False` a runtime verifier is "a verification category the Planner
+   invented" and is removed when the unit keeps another evidence-producing verifier (s4 kept `compile`). Record: `PLAN_VERIFICATION_SCOPE_NORMALIZED`, `verifier_removed`, subtask s4.
+3. (M) `goal_requires_runtime_behavior(<owner goal>)` is `False`. It is a deliberately narrow regex (acceptance.py:119-134, built after live false positives P2/P3): it needs
+   `run|start|launch|execute|... (the) application|app|program|...`, process-output language (exit code, stdout, stderr) or `shut down`. "prints ..." and "Make the application runnable"
+   match none of it; "The application must run and print ..." and "Verify by running the application" also return `False`; "Run the application and confirm it prints ..." returns `True`.
+4. (T) s2's judge did ask to run the main class (`should_run: true`), but `_runtime_verification_is_advisory_only` suppresses an undeclared inference ("a later subtask that DOES own this
+   obligation still runs it"). No later subtask owns it after step 2.
+5. Net: a gap in Kriya's goal-reading vocabulary (generic, not HelloWorld-specific), not a GUI problem. Registered: `GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001`.
+
+### The runtime-command approval (step 10 classification)
+- **Subject:** permission to execute model-chosen shell commands, as a list of argv arrays, plus the success criterion ("Looking for: ...").
+- **Where it fires:** `attempt.py` `_execute_runtime_verification_directly` (verification-only unit) and `run_attempt`'s inline block, only when `autonomy.mode == human-in-the-loop`, the
+  command source is `inferred` (a `goal_explicit` claim is downgraded when the command is not grounded in the goal text) and it was not already confirmed.
+- **Working directory / authority:** the sandboxed candidate worktree (`.kriya/worktrees/candidate-...`); execution under the existing containment/capability policy.
+- **GUI representation:** none. `cli._approval_decision` records any empty-file approval as `other_approval` and declines it. The change-review card, its digest-bound decider and the
+  `change_approval.review` proof are all file-diff specific.
+- **Resumable:** the two runtime-command call sites already `await` an awaitable returned by the callback (the in-process workflow can wait, as it does for a change); the escalation
+  site at `attempt.py:6854` does not. A safe desktop version needs a distinct typed review (argv, cwd, containment, criterion, digest-bound decision), a host path and UX - a new
+  approval class, not a small fix. Registered: `GUI-RUNTIME-COMMAND-APPROVAL-001`. NOT silently skipped, NOT built.
+
+## 9. Stop (owner decision required) - STOP CONDITIONS 8/9 of the 2026-10-15 task
+
+Demo 00 as worded cannot produce runtime proof today: either it succeeds without ever running the application, or (with a recognised wording) it needs a desktop approval class that does
+not exist. The UX correction (one-click approval, intermediate-vs-goal verification wording, zero-test wording, failure mapper, Activity drawer, Project Details, Why/Markdown, Recent
+Runs, typography) is independent of that and was NOT started in this session. Options for the owner:
+
+1. **Narrow Demo 00** to what Kriya can prove today: build + unit test, the application NOT run. The result screen must then say "not run" (the Application result already reports
+   UNKNOWN / NOT_APPLICABLE without recorded execution). Cheapest; keeps the demo honest.
+2. **Widen the detector** generically (`runnable`, `prints` next to an application noun) using the P2/P3 corpus as the regression set. Then Demo 00 reaches the command approval and
+   needs option 3.
+3. **Build a distinct desktop runtime-command review** (new typed subject). Larger; needs your approval as a design.
+4. Options 2 + 3 together are the full "EXECUTED output" path the Product UX task assumed for Demo 00.
