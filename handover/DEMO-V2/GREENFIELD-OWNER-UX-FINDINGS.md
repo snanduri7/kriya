@@ -238,3 +238,17 @@ All TRACED unless marked.
 - **Desktop reach: UNKNOWN as exercised** (a planner must choose `tool`; nothing measured here shows Demo V2 doing so), reachable in principle. Demo 00's plan uses `execution_method: model`
   with `verification` tool entries (compile/test), which are the gate runners, not TOOL subtasks.
 - **Registered:** `TOOL-SUBTASK-DESKTOP-REVIEW-001` (P2, OPEN, owner decision before the product is described as "every model-chosen command is reviewed").
+
+
+### 10-E. PRV-13 targeted check (2026-10-15 pass 4, REPORT ONLY - no frozen evidence touched, no live model)
+
+- **The five goal copies** (identical, sha256 `a9c1cedde8...`): `kriya-prv-harness-1.0/scenarios/PRV-13/goal.md`, `.../hardened-self-correct/goal.md`, `kriya-prv-harness-1.0.1/scenarios/PRV-13/goal.md`,
+  `.../hardened-self-correct/goal.md`, `kriya-production-readiness-pack-v3/PRV-13-bounded-self-correction/hardened-self-correct/goal.md`. The goal asks that "the application prints: CUSTOMER=<id>:<name>".
+- **MEASURED (`goal_requires_runtime_behavior`, the detector at `b8cc982^` loaded from git vs. today's):** prior `False` x5, now `True` x5.
+- **Prior behavior (TRACED from the detector's role):** the runtime verifier was scoped away from the plan and no unit owned the obligation, so the run could succeed without ever executing the application.
+  **New:** the obligation is kept; a run on this goal needs runtime verification and executes the application (a finite command).
+- **Configuration impact (MEASURED from `kriya.hardened-self-correct.yaml` and `prv.py`):** `run_verification_enabled: true` (so no `REQUIRED_RUNTIME_VERIFICATION_DISABLED`), `autonomy.mode: human-in-the-loop`, and the harness runs
+  `kriya ... generate -f goal -y`; with `-y` the runtime-command callback approves the shown set automatically and the approval is bound to that set (MEASURED: `cli._runtime_command_decision(subject, True)`
+  returns a decision whose fingerprint equals the subject's). The goal describes a finite command, not a long-running service, so the HITL managed-service refusal does not apply to it (INFERRED from the goal text; not run).
+- **Targeted result:** detector flip proven x5; `tests/test_runtime_detector_matrix.py` (the goal row is a permanent positive) and `tests/test_runtime_command_authorization.py` pass (58). A live PRV-13 re-qualification is NOT run
+  (no live model by instruction): whether the self-correction behavior the scenario certifies is unchanged with an added runtime-verification gate is UNKNOWN until the owner chooses to re-qualify. No benchmark redesign is implied.

@@ -313,6 +313,17 @@ falls back to the host's tools.
   - If the run command needs a Maven plugin that isn't cached, Kriya fetches only that plugin. It runs the plugin's
     `help` goal with registry-only network, in an empty directory with none of your project's files. Your
     application then runs once, offline.
+  - **Who approves the commands.** In `human-in-the-loop` mode, a command set that is not the exact words you wrote in the goal is
+    shown to you before it runs: the commands in order, where they run (Kriya's isolated worktree), and the input. The approval is
+    bound to exactly that set; if the set changes before it runs, you are asked again. In the desktop app this is its own review
+    ("Kriya wants to run commands to verify your application") with **Reject** and **Continue to Run Approval...**; the second step
+    is a confirmation from the application itself, and cancelling it makes no decision (the request stays waiting). With
+    `--yes` the terminal approves the shown set automatically. A goal that asks to *see* behavior (for example, that the
+    application prints something) requires this runtime check; it is not skipped.
+  - **Long-running services.** Starting a service to verify a goal (a server that must respond) has no approval step yet. In
+    `human-in-the-loop` mode such a verification stops before anything starts, with `MANAGED_SERVICE_APPROVAL_UNSUPPORTED`
+    when the check is required (and is recorded as a declined, optional check when it is not). Other autonomy modes are
+    unchanged. Approval for services is tracked as `MANAGED-SERVICE-APPROVAL-001`.
   - Your application never runs with network access. If the plugin still can't be fetched, or the command names no
     plugin at all (for example `mvn test` as a run command), the run stops with
     `RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE`, never a Developer repair.
