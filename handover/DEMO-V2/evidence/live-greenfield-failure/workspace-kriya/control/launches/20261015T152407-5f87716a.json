@@ -1,0 +1,147 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+  },
+  "approval_history": [],
+  "approval_required": null,
+  "declined_decisions": [],
+  "ended": {
+    "at": "2026-10-15T09:56:58.859473+00:00",
+    "error": null,
+    "exit_code": 1,
+    "failure_category": "quality_gates_exhausted",
+    "note": "copied from the workflow's own result; the RunRecord, evidence store and trace row are the outcome authority",
+    "quality_gates_passed": false,
+    "trace_run_id": "8cff9e22",
+    "workflow_status": null
+  },
+  "goal": {
+    "chars": 146,
+    "sha256": "eacece2f42489650b126467ef4b3a2694ddb0cbbff4e5f7f905601285c3435d3"
+  },
+  "history": [
+    {
+      "at": "2026-10-15T09:54:08.293036+00:00",
+      "phase": "STARTING"
+    },
+    {
+      "at": "2026-10-15T09:54:08.356764+00:00",
+      "phase": "RUNNING"
+    },
+    {
+      "at": "2026-10-15T09:56:58.859505+00:00",
+      "phase": "ENDED"
+    }
+  ],
+  "kind": "kriya.launch",
+  "launch_id": "20261015T152407-5f87716a",
+  "options": {
+    "interactive": false,
+    "knowledge_policy": "strict"
+  },
+  "pending_approval": null,
+  "phase": "ENDED",
+  "preflight": {
+    "blockers": [],
+    "configuration": {
+      "authority": {
+        "fields": [],
+        "status": "no_findings"
+      },
+      "directory": "/Users/sriramnanduri/delete/2/HelloWorld",
+      "discovery": "Configuration is discovered from the process working directory, which is this folder - the same as running `kriya generate` here. A kriya.yaml in the folder (else the Kriya installation) is read; fields only the operator may set need a durable approval.",
+      "file": null,
+      "fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+      "source": "packaged_default",
+      "status": "loaded"
+    },
+    "interaction": {
+      "approvals": "change_review",
+      "autonomy_mode": "human-in-the-loop",
+      "knowledge_policy": "strict",
+      "note": "A change Kriya proposes is held for your review in this window and applied only if you approve it. Any other step that needs a human decision (a knowledge-gap acknowledgement, a skill choice, a command approval) stops the run instead of being approved for you."
+    },
+    "model": {
+      "context_window": 32768,
+      "endpoint": "http://localhost:11434/v1",
+      "fallback_chain": [
+        "qwen3.6:35b-a3b-q4_K_M"
+      ],
+      "model": "qwen3-coder:30b",
+      "provider": "openai",
+      "role_overrides": {}
+    },
+    "ready": true,
+    "recovery": {
+      "run_active": false,
+      "status": "CLEAN"
+    },
+    "state": {
+      "cockpit_directory": null,
+      "directory": "/Users/sriramnanduri/kriya-demo-v2-work/scenario-00/state",
+      "observable_by_cockpit": null,
+      "source": "env"
+    },
+    "toolchains": {
+      "note": "Visibility under this process's own environment (a fixed PATH; no login shell). Which tools a goal needs is only known while the workflow runs; a missing tool then ends the run with Kriya's own typed failure.",
+      "tools": [
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/usr/bin/python3",
+          "tool": "python3"
+        },
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/usr/bin/git",
+          "tool": "git"
+        },
+        {
+          "available": true,
+          "checked": "registered JDK (java_home)",
+          "path": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java",
+          "tool": "java"
+        },
+        {
+          "available": true,
+          "checked": "found on PATH",
+          "path": "/opt/homebrew/bin/mvn",
+          "tool": "mvn"
+        },
+        {
+          "available": false,
+          "checked": "not on PATH",
+          "path": null,
+          "tool": "gradle"
+        },
+        {
+          "available": true,
+          "checked": "ran --version",
+          "path": "/opt/homebrew/bin/node",
+          "tool": "node"
+        }
+      ]
+    },
+    "workspace": {
+      "identity": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b",
+      "name": "HelloWorld",
+      "path": "/Users/sriramnanduri/delete/2/HelloWorld"
+    }
+  },
+  "process": {
+    "pid": 81748
+  },
+  "requested_at": "2026-10-15T09:54:08.292867+00:00",
+  "run": {
+    "base_revision": null,
+    "run_id": "20261015T152407-5f87716a",
+    "started_at": "2026-10-15T09:54:08.356754+00:00"
+  },
+  "schema": 1,
+  "workspace": {
+    "identity": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b",
+    "path": "/Users/sriramnanduri/delete/2/HelloWorld"
+  }
+}

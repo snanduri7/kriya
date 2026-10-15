@@ -1,0 +1,100 @@
+{
+  "stage": "design",
+  "resume_fingerprints": {
+    "schema_version": 1,
+    "fingerprints": {
+      "approved_plan": {
+        "value": "80a3a2eb71b644631727f6e595b4785f0d3834f91bef0d53687bf925f3f24322",
+        "basis": "approved-plan-inputs"
+      },
+      "authority_context": {
+        "value": "90603965d0dd03fad3aac123fb17e88f1a7105979297218c39a36d4e1c9f8e7c",
+        "basis": "authority-context"
+      },
+      "config": {
+        "value": "56d7ae3fb075184d2b30008f144970cb81ad068a98235e7cd1851959abbb94e4",
+        "basis": "config-excluding-owned-fields"
+      },
+      "containment": {
+        "value": "577aaed56c185378502593f0055690faa02612ffc877eab1ca0dd9c031a5a252",
+        "basis": "containment-config"
+      },
+      "contract_registry": {
+        "value": "fc2f1418cc17a4ba850c4b13362f714abb804c01755489f67372bf310797e589",
+        "basis": "contract-registry-v2"
+      },
+      "effective_obligation_ledger": {
+        "value": "0:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "basis": "obligation-ledger"
+      },
+      "goal": {
+        "value": "37ae909bd1d41f51e9933bf72315537e43f85428a6cc49d682fc9abb8aa00c13",
+        "basis": "goal-inputs"
+      },
+      "input_obligation_ledger": {
+        "value": "0:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "basis": "obligation-ledger"
+      },
+      "kriya_runtime": {
+        "value": "cc2b936dbe2f69fd5a8fe16436a6ea83d4456772d17511c3ace83005fe56e8c7",
+        "basis": "kriya-package-source"
+      },
+      "model_runtime": {
+        "value": "9cea3d2a47fde1e71143a1594169ca32e52ce86ae5dc32cf667ca640f471918c",
+        "basis": "model-runtime"
+      },
+      "skills": {
+        "value": "de01123c93c38633c8dd9946638fbfd3e67fb30f3a9cb5cdf48e58e5da4b65da",
+        "basis": "skill-source-content"
+      },
+      "toolchain": {
+        "value": "UNAVAILABLE",
+        "basis": "host toolchain has no attested identity (containment not required)"
+      },
+      "verification_policy": {
+        "value": "deee103f7ef893e92640e476ef0b2f15120bcebac5fda180ef4d2378a9cf32de",
+        "basis": "verification-policy"
+      },
+      "workspace": {
+        "value": "UNAVAILABLE",
+        "basis": "workspace content identity could not be computed (not a git repository, or git unavailable)"
+      }
+    }
+  },
+  "model_routes": null,
+  "workspace_fingerprint": null,
+  "workspace_content_hash": null,
+  "config_fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+  "goal_fingerprint": "a8b454343fe813c5b4b5d070c864514e39e400d1713448eb34f6fdfe2aaa7297",
+  "milestone_group_id": null,
+  "milestone_index": null,
+  "work_unit": {
+    "kind": "direct",
+    "group_id": null,
+    "milestone_id": null,
+    "definition_digest": null,
+    "work_unit_id": "direct"
+  },
+  "had_authorized_semantic_regions": false,
+  "validation_baseline_targeted": null,
+  "validation_baseline_full_regression": null,
+  "validation_baseline_pytest_stability": {},
+  "plan": "```markdown\n# Kriya Planner Agent - Implementation Plan\n\n## Overview\nCreate a minimal Java 17 Maven application named `hello-kriya` that prints \"Hello from Kriya\", includes a unit test, and is runnable.\n\n## Files to Create/Modify\n\n### 1. Project Structure Setup\n- **pom.xml** - Maven configuration file (REQ-1, REQ-2)\n- **src/main/java/hellokriya/App.java** - Main application class (REQ-1, REQ-2)\n- **src/test/java/hellokriya/AppTest.java** - Unit test class (REQ-1)\n\n## Step-by-Step Implementation\n\n### Step 1: Create Maven Project Structure\n- Create `pom.xml` with Java 17 target and JUnit dependency (REQ-1, REQ-2)\n- Create directory structure for source and test code\n\n### Step 2: Implement Main Application\n- Create `src/main/java/hellokriya/App.java` with main method that prints \"Hello from Kriya\" (REQ-1, REQ-2)\n\n### Step 3: Add Unit Test\n- Create `src/test/java/hellokriya/AppTest.java` with basic test for the application (REQ-1)\n\n### Step 4: Verify Build and Execution\n- Confirm Maven build works correctly (REQ-2)\n- Verify application runs and outputs expected message (REQ-2)\n\n## Verification Steps\n- Run `mvn compile` to ensure compilation succeeds\n- Run `mvn test` to verify unit tests pass\n- Run `mvn exec:java` to confirm application executes properly\n\n```",
+  "design": "```json\n{\n  \"files\": [\n    \"pom.xml\",\n    \"src/main/java/hellokriya/App.java\",\n    \"src/test/java/hellokriya/AppTest.java\"\n  ]\n}\n```",
+  "architect_files": [
+    "pom.xml",
+    "src/main/java/hellokriya/App.java",
+    "src/test/java/hellokriya/AppTest.java"
+  ],
+  "run_id": "20261015T152408-d015878e",
+  "saved_at": 1792058068.916851,
+  "_workspace": {
+    "workspace_id": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b",
+    "version": "2"
+  },
+  "_run_record": {
+    "classification": "derived",
+    "run_id": "20261015T152407-5f87716a",
+    "revision": 7
+  }
+}
