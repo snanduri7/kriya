@@ -935,6 +935,36 @@ def _build_quality_gate_failure(
     )
 
 
+def _paths_printed_in(text: str, known_files: Iterable[str]) -> List[str]:
+    """The known repository paths ``text`` prints, as whole paths: 'pom.xml' is not found inside 'module/pom.xml', and a
+    bare word is not a path. Deterministic - no basename or substring guessing."""
+    return [
+        path for path in dict.fromkeys(known_files)
+        if re.search(r"(?<![\w./-])" + re.escape(path) + r"(?![\w-])", text)
+    ]
+
+
+def build_static_rule_failure(static_violation: str, worktree_path: str, known_files: Iterable[str], attempt: int) -> Failure:
+    """The failure for a deterministic static-rule violation.
+
+    D2: every static check prints the repository path(s) its finding is about, so those paths are the validator's own
+    subject - deterministic evidence, not a guess. They are recorded as ``authoritative_files``, which attribute_failure()
+    ranks above the model's self-diagnosis (a claim about the model's own output); model narrative cannot move the subject
+    of a finding the validator located. A violation that prints no known path gets no authority (the pre-existing
+    attribution ladder applies unchanged)."""
+    known_files = list(known_files)
+    failure = _build_quality_gate_failure(
+        type_="static_rule_violation",
+        message=f"STATIC RULE VIOLATION: {static_violation}",
+        raw_output=static_violation,
+        worktree_path=worktree_path,
+        known_files=known_files,
+        attempt=attempt,
+    )
+    failure.authoritative_files = _paths_printed_in(static_violation, known_files)
+    return failure
+
+
 # Known build-tool signatures for "the test PROCESS itself was killed",
 # distinct from an ordinary assertion/compile failure - PRV-06 (2026-08-28,
 # real live-validation finding): a JUnit test invoked a System.exit()-calling

@@ -122,6 +122,7 @@ from kriya.workflow.failure_grounding import (
     _build_test_quality_gate_failure,
     _capture_failed_content,
     build_cross_package_mismatch_message,
+    build_static_rule_failure,
     classify_environment_failure,
     extract_missing_project_local_python_module,
     find_cross_package_symbol_mismatch,
@@ -9461,13 +9462,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # own empty-list fallback, same honest degrade-to-full-set behavior every
             # other gate type already has - never a regression from today's blind
             # broadcast, just no longer the ONLY behavior available.
-            failure = _build_quality_gate_failure(
-                type_="static_rule_violation",
-                message=f"STATIC RULE VIOLATION: {static_violation}",
-                raw_output=static_violation,
-                worktree_path=ctx.worktree_path,
-                known_files=static_check_known_files,
-                attempt=state.attempt_number,
+            failure = build_static_rule_failure(
+                static_violation, ctx.worktree_path, static_check_known_files, state.attempt_number,
             )
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
