@@ -10230,7 +10230,9 @@ async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override
         return_value={"success": True, "output": ""},
     ):
         res = await we.run_generation_workflow(
-            goal="Write a small Python script that prints hi",
+            # Not "...that prints hi": that wording is an explicit output requirement, which since GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001 correctly makes
+            # execution mandatory (REQUIRED_RUNTIME_VERIFICATION_MISSING here, no run verification is mocked). This test is about the reviewer path, not runtime.
+            goal="Write a small Python script named app.py",
             workspace_path=str(tmp_path),
         )
 

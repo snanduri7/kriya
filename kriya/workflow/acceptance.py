@@ -211,15 +211,72 @@ def subtask_owns_test_obligation(
     return not other_subtask_owns_it
 
 
+# GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001 (owner run 20261015T075602-2b5a0ad7): the goal "Create a small Java 17 Maven application named hello-kriya that prints 'Hello from
+# Kriya' and includes a unit test. Make the application runnable." was read as NOT requiring runtime behavior, so plan normalization removed the runtime verifier and the run
+# "succeeded" without ever executing the application. Measured: of nine explicit runtime statements (prints / outputs / displays / should start and respond / should exit and
+# print / must execute / runnable and produce ...) only "Run the application and confirm ..." matched. The detector had no OUTPUT-INTENT or EXECUTION-MODALITY clause, only
+# "run/start/launch ... <noun>" and exit-code language. Three explicit clauses are added below, each needing an executable SUBJECT (application, program, service, command,
+# ...) in the same sentence as the observable behavior - never an isolated verb, and never "runnable" alone (build/package readiness; "do not infer runtime execution merely
+# because a project is executable in principle"). They run per sentence so a documentation/comment sentence ("add a comment noting that the program will print ...") or a repair
+# sentence describing an existing defect ("fix the application that prints the wrong total") does not turn into a runtime obligation. Negation stays first and whole-goal.
+_EXECUTABLE_SUBJECT = r"(?:application|app|program|executable|binary|service|server|command|cli|script|tool|utility)"
+_WORDS = r"(?:\s+[^\s.;!?]+)"
+_OUTPUT_INTENT_RE = re.compile(
+    rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,6}}?\s+"
+    r"(?P<verb>(?:prints|outputs|displays|emits|echoes|responds\s+with)\b"
+    r"|(?:should|must|will|shall|can|to)\s+(?:also\s+)?(?:print|output|display|emit|echo|respond\s+with)\b"
+    r"|writes\s+(?:\S+\s+){0,3}?to\s+(?:stdout|standard\s+output|the\s+console)\b)",
+    re.IGNORECASE,
+)
+_EXECUTION_MODALITY_RE = re.compile(
+    rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,4}}?\s+(?:should|must|will|shall|needs?\s+to|has\s+to|can)\s+(?:\w+\s+)?"
+    r"(?:start|execute|run|launch|exit|terminate)\b",
+    re.IGNORECASE,
+)
+_RUNNABLE_PRODUCES_RE = re.compile(
+    r"\brunnable\b(?:\s+[^\s.;!?]+){0,3}?\s+(?:and|,)\s+(?:also\s+)?(?:produces?|prints?|outputs?|displays?|emits?)\b",
+    re.IGNORECASE,
+)
+# A documentation sentence ahead of the subject ("document how ...", "add a comment noting that the program will print ...") is about text, not about the artifact running.
+_DOCUMENTATION_FRAMING_RE = re.compile(
+    r"\b(?:comment|comments|javadoc|docstring|readme|documentation|document|describe|describing|explain|explaining|note|noting)\b", re.IGNORECASE)
+# "how a user could run the application": instructions for a human, not an execution requirement.
+_HOW_TO_RUN_RE = re.compile(
+    r"\bhow\s+(?:to|a\s+user|users|one|you|someone)\b[^.;!?]*", re.IGNORECASE)
+# A repair/refactor sentence's relative clause ("fix the application that prints the wrong total") describes existing behavior, not a requirement.
+_REPAIR_LEAD_RE = re.compile(r"^\W*(?:fix|repair|debug|refactor|rename|remove|delete|investigate|diagnose)\b", re.IGNORECASE)
+_RELATIVE_CLAUSE_RE = re.compile(r"\b(?:that|which)\s+(?:prints|outputs|displays|emits|echoes)\b", re.IGNORECASE)
+# a hard-wrapped line is NOT a sentence boundary (the owner goal wraps after "that"); punctuation, a blank line and a list bullet are
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n\s*\n|\n\s*(?:[-*\u2022]|\d+[.)])\s+")
+
+
+def _sentence_requires_runtime_behavior(sentence: str) -> bool:
+    if _RUNTIME_EXECUTION_CONTEXT_RE.search(_HOW_TO_RUN_RE.sub(" ", sentence)):
+        return True
+    repair_sentence = bool(_REPAIR_LEAD_RE.search(sentence))
+    for pattern in (_OUTPUT_INTENT_RE, _EXECUTION_MODALITY_RE):
+        for match in pattern.finditer(sentence):
+            if _DOCUMENTATION_FRAMING_RE.search(sentence[:match.start()]):
+                continue
+            if repair_sentence and _RELATIVE_CLAUSE_RE.search(match.group(0)):
+                continue
+            return True
+    runnable = _RUNNABLE_PRODUCES_RE.search(sentence)
+    return bool(runnable) and not _DOCUMENTATION_FRAMING_RE.search(sentence[:runnable.start()])
+
+
 def goal_requires_runtime_behavior(goal: str) -> bool:
-    """Bounded deterministic signal that observable execution is required -
-    see the comment above _RUNTIME_VERIFICATION_NEGATED_RE/_RUNTIME_
-    EXECUTION_CONTEXT_RE for the exact live false positives (P2, P3) this
-    two-stage design fixes and why negation is checked first."""
+    """Bounded deterministic signal that the goal explicitly requires observable
+    behavior that only EXECUTING the resulting artifact can show: output, process
+    exit, service startup/response, or an explicit execution requirement. Explicit
+    negation of runtime verification wins for the whole goal (live false positives
+    P2, P3); otherwise any sentence that states such behavior about an executable
+    subject requires it. See the comments above the patterns for what is, and
+    deliberately is not, treated as a requirement (``runnable`` alone is not)."""
     text = goal or ""
     if _RUNTIME_VERIFICATION_NEGATED_RE.search(text):
         return False
-    return bool(_RUNTIME_EXECUTION_CONTEXT_RE.search(text))
+    return any(_sentence_requires_runtime_behavior(s) for s in _SENTENCE_SPLIT_RE.split(text) if s.strip())
 
 
 def output_confirms_nonzero_test_execution(output: str) -> bool:

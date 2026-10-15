@@ -32,6 +32,7 @@ class Run:
     approvals: List[Tuple[Optional[str], List[str], str]] = field(default_factory=list)   # EVERY approval-callback call: (unit, file paths, reason)
     judge_calls: List[Optional[str]] = field(default_factory=list)                        # units whose run-verification judge was consulted
     executed: List[Any] = field(default_factory=list)                                     # command sequences handed to the runtime executor
+    grader_prompts: List[str] = field(default_factory=list)                               # user prompts sent to the run-verification grader (the captured-output evidence it judged)
 
 
 def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, str]], goal: str = "Change the page size", mode: str = "human-in-the-loop",
@@ -76,6 +77,10 @@ def run_enforce(tmp_path, *, plan: EngineeringPlan, units: Dict[str, Tuple[str, 
             run.judge_calls.append(active.get("id"))
             content = json.dumps(judge_reply or {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None,
                                                  "command_source": "goal_explicit", "input_channel": "none", "success_criteria": "", "reasoning": "none"})
+        elif "Run Verification Grader" in first:
+            run.grader_prompts.append(user_prompt or "")
+            seen = app_output.strip() in (user_prompt or "")       # PASS only on evidence actually present in the captured output it was shown
+            content = json.dumps({"passed": seen, "verdict": "PASS" if seen else "FAIL", "reasoning": "scripted grader", "likely_files": []})
         else:
             content = "Review: Approved"
         tokens = len(((system_prompt or "") + (user_prompt or "")).encode()) * 2 // 7

@@ -57,28 +57,50 @@ def _desktop(calls):
     return decide
 
 
+GOAL_BUILD_ONLY = ('Create a small Java 17 Maven application named hello-kriya and include a unit test.\nMake the application runnable.')
+
+
 def test_the_goal_reading_that_drives_the_scoping():
-    assert goal_requires_runtime_behavior(GOAL) is False        # the owner's own wording matches none of the runtime-context patterns
-    assert goal_requires_runtime_behavior(GOAL_RUN) is True     # "Run the application and confirm ..." does
+    assert goal_requires_runtime_behavior(GOAL) is True              # "application ... prints 'Hello from Kriya'" is an explicit output requirement (was False: the defect)
+    assert goal_requires_runtime_behavior(GOAL_RUN) is True
+    assert goal_requires_runtime_behavior(GOAL_BUILD_ONLY) is False  # "runnable" alone is build/package readiness, not an execution requirement
 
 
-def test_a_goal_not_recognised_as_runtime_behaviour_succeeds_without_ever_executing_the_application(tmp_path):
-    """MEASURED defect after the empty-approval fix: s4's runtime verifier is normalised away, s2's judge is advisory-only, nothing owns execution -> SUCCESS with no run."""
+def test_the_owner_goal_keeps_s4_and_the_application_is_executed(tmp_path):
+    """GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001, fixed at the detector: the owner's own wording now keeps the runtime obligation, s4's verifier survives plan normalization, the
+    judge is consulted for s4 and the application is executed once the (separate) command approval is given."""
     run = _run(tmp_path)
 
-    assert [(unit, files) for unit, files, _reason in run.approvals] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST])]     # the old fourth, empty approval is gone
-    assert harness.decisions(run.events) == ["approved", "approved", "approved"]
-    assert {r.subtask_id: r.status.value for r in run.result.subtask_results} == {"s1": "completed", "s2": "completed", "s3": "completed", "s4": "completed"}
+    assert [(unit, files) for unit, files, _reason in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST])]
+    assert "s4" in run.judge_calls                                   # the runtime judge IS consulted for s4: it owns the runtime obligation
+    assert run.executed, "the application was executed"
+    assert run.grader_prompts and "Hello from Kriya" in run.grader_prompts[-1]    # the grader judged the CAPTURED stdout, not a claim
     assert run.result.legacy_result["status"] == "success"
-    assert run.judge_calls == ["s1", "s2", "s3"]                # the runtime judge was never consulted for s4: it owns no runtime obligation any more
-    assert run.executed == []                                   # the application was never executed: no "Hello from Kriya" evidence exists
+
+
+def test_normalization_preserves_a_required_runtime_obligation_and_still_scopes_an_unrequired_one():
+    from kriya.workflow.plan_normalization import scope_verification_to_requirements
+    kept, kept_records = scope_verification_to_requirements(_plan(), goal_requires_runtime_behavior(GOAL))
+    assert kept_records == [] and [st.id for st in kept.subtasks] == ["s1", "s2", "s3", "s4"]
+    assert any(vm.requires_application_runtime for vm in next(st for st in kept.subtasks if st.id == "s4").verification)
+    scoped, records = scope_verification_to_requirements(_plan(), goal_requires_runtime_behavior(GOAL_BUILD_ONLY))   # existing policy for an unrequired, advisory runtime check
+    assert records and all(not vm.requires_application_runtime for st in scoped.subtasks for vm in st.verification)
+
+
+def test_a_goal_without_a_runtime_requirement_still_succeeds_without_executing(tmp_path):
+    """Policy unchanged for a goal that does not ask for execution: the advisory runtime verifier is normalised away and nothing is executed."""
+    run = _run(tmp_path, goal=GOAL_BUILD_ONLY)
+
+    assert run.judge_calls == ["s1", "s2", "s3"]
+    assert run.executed == []
+    assert run.result.legacy_result["status"] == "success"
 
 
 def test_a_goal_recognised_as_runtime_behaviour_reaches_a_command_approval_the_desktop_declines(tmp_path):
     """MEASURED (step 10): with the runtime obligation kept, s4 asks approval_callback([], ...) for a RUNTIME COMMAND - a different subject from a source change. A desktop launch
     declines it (note_approval_required -> other_approval), so nothing is executed and the run fails at s4."""
     calls = []
-    run = _run(tmp_path, goal=GOAL_RUN, callback=_desktop(calls))
+    run = _run(tmp_path, callback=_desktop(calls))
 
     assert [c for c in calls if c[0] == 0] and len([c for c in calls if c[0] == 0]) == 1                  # exactly one empty-file approval, at s4
     [(_n, reason)] = [c for c in calls if c[0] == 0]
@@ -91,7 +113,7 @@ def test_a_goal_recognised_as_runtime_behaviour_reaches_a_command_approval_the_d
 
 def test_the_runtime_command_approval_is_a_different_subject_from_the_source_change_gate(tmp_path):
     """Same recording callback that approves the command: the command runs ONLY after that distinct approval, and the source-change gate still saw exactly three changes."""
-    run = _run(tmp_path, goal=GOAL_RUN)
+    run = _run(tmp_path)
 
     assert [(unit, files) for unit, files, _r in run.approvals if files] == [("s1", [POM]), ("s2", [MAIN]), ("s3", [TEST])]
     [(unit, files, reason)] = [a for a in run.approvals if not a[1]]
