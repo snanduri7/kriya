@@ -22,18 +22,40 @@ describe('activity from recorded facts only', () => {
     for (const claim of [/Planning/, /Preparing runtime/, /Running application/, /Run completed/]) expect(all.join('|')).not.toMatch(claim);
   });
   it('a failed gate is a failure; zero test cases is "No tests ran", never a pass', () => {
-    expect(texts(activityFromRecords([gate(1, 'compile', false)]))).toEqual(['Build failed']);
+    expect(texts(activityFromRecords([gate(1, 'compile', false)]))).toEqual(['Build failed', 'Attempt 1 rejected', 'The project did not build.']);
     const none = activityFromRecords([gate(1, 'regression_test', true, { test_execution: { cases: 0 } })]);
     expect(none.map((e) => [e.text, e.tone])).toEqual([['No tests ran', 'info']]);
   });
   it('the runtime verification result is a recorded gate; its absence is absence', () => {
     expect(texts(activityFromRecords([gate(1, 'run_verification', true)]))).toEqual(['Runtime verification passed']);
-    expect(texts(activityFromRecords([gate(1, 'run_verification', false)]))).toEqual(['Runtime verification failed']);
+    expect(texts(activityFromRecords([gate(1, 'run_verification', false)]))).toEqual(['Runtime verification failed', 'Attempt 1 rejected', 'Running the application did not give the expected result.']);
     expect(texts(activityFromRecords([gate(1, 'compile', true)]))).not.toContain('Runtime verification passed');
   });
   it('terminal gates are not attempt activity; a second attempt says so', () => {
     expect(texts(activityFromRecords([gate(1, 'original_requirements', true, { stage: 'terminal' })]))).toEqual([]);
-    expect(texts(activityFromRecords([rec(1, 'attempt.opened', { attempt_number: 2 })]))).toEqual(['Trying again']);
+    expect(texts(activityFromRecords([rec(1, 'attempt.opened', { attempt_number: 2 })]))).toEqual(['Trying repair 2']);
+  });
+});
+
+describe('retry activity: what an attempt was rejected for, from recorded gate types only', () => {
+  const mirror = (seq: number, attempt: number, type: string, success: boolean) => rec(seq, 'mirror.gate_outcome', { attempt_number: attempt, payload: { index: seq, type, success, attempt } });
+  const attemptOpened = (seq: number, n: number) => rec(seq, 'attempt.opened', { attempt_number: n });
+  it('a rejected attempt says which attempt and why, and the next one is a numbered repair', () => {
+    const lines = texts(activityFromRecords([attemptOpened(1, 1), mirror(2, 1, 'static_rule_violation', false), attemptOpened(3, 2)]));
+    expect(lines).toEqual(['Working on the change', 'Attempt 1 rejected', 'A static quality rule was violated.', 'Trying repair 2']);
+  });
+  it('a delivery failure after a finding says the finding is still unresolved (the shape error neither opens nor closes it)', () => {
+    const lines = texts(activityFromRecords([attemptOpened(1, 1), mirror(2, 1, 'static_rule_violation', false), attemptOpened(3, 2), mirror(4, 2, 'operation_contract', false)]));
+    expect(lines.slice(-3)).toEqual(['Attempt 2 rejected', 'The model response format was invalid.', 'The earlier issue is still unresolved: A static quality rule was violated.']);
+  });
+  it('only the first failed gate of an attempt is its rejection, and an unknown gate type gets no invented reason', () => {
+    const lines = texts(activityFromRecords([mirror(1, 1, 'some_new_gate', false), mirror(2, 1, 'compile', false)]));
+    expect(lines.filter((l) => l.startsWith('Attempt')).length).toBe(1);
+    expect(lines).toContain('Attempt 1 rejected');
+    expect(lines.join('|')).not.toMatch(/model response|static quality/);
+  });
+  it('a passing attempt and terminal gates are never a rejection', () => {
+    expect(texts(activityFromRecords([gate(1, 'compile', true), gate(2, 'original_requirements', false, { stage: 'terminal' })])).filter((l) => /rejected/.test(l))).toEqual([]);
   });
 });
 

@@ -175,6 +175,9 @@ describe('K. The outcome is understood without opening diagnostics', () => {
     expect(changed.textContent).toMatch(/\+\d+ −\d+/);
     const verification = await within(run).findByLabelText('Verification', undefined, { timeout: 4000 });
     expect(verification.textContent).toMatch(/passed/);
+    // Demo V2 (owner decision on the requirement ledger): passed build/tests are not closure of the whole request; no recorded run-level verification means it says so, and never "Requested behavior verified".
+    expect(verification.textContent).toMatch(/Overall request: not fully verified/);
+    expect(verification.textContent).not.toMatch(/Requested behavior verified/);
     for (const name of ['View Changes', 'View Verification', 'New Goal']) expect(within(run).getByRole('button', { name })).toBeInTheDocument();
     expect(within(run).getByText('✓ Your change was applied successfully.')).toBeInTheDocument(); // said in plain words, from the RunRecord's COMMITTED
     expect(run.querySelector('.ck-outcome')!.textContent).not.toMatch(/NO_COMMIT|commit COMMITTED|RunRecord/); // no raw code or internal source name on the outcome card itself (they are under Technical status)

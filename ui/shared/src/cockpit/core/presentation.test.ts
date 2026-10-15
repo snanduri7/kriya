@@ -123,7 +123,7 @@ describe('activityText and changeSummary', () => {
   });
 });
 
-import { eventClock, failureSummary, humanTimeline, userEvidence } from './presentation';
+import { eventClock, failureSummary, humanTimeline, overallRequestLine, userEvidence, withOverallRequest } from './presentation';
 import type { RunEvent } from '../../model/kup';
 
 const ev = (kind: string, created_at: number, extra: Partial<RunEvent> = {}): RunEvent => ({ kind, created_at, ...extra }) as RunEvent;
@@ -195,5 +195,21 @@ describe('failureSummary: words for a failure, the raw record stays technical', 
   });
   it('never carries a mechanism word', () => {
     for (const c of ['quality_gate_failed', 'x', null]) expect(failureSummary(c as string, 'NOT_COMMITTED')).not.toMatch(/category|exit code|NOT_COMMITTED|digest|seq/i);
+  });
+});
+
+describe('overallRequestLine: a passed build is not closure of the whole request (owner decision)', () => {
+  const g = (type: string, passed: boolean | null = true) => gate(type, passed);
+  it('says "not fully verified" when verification results exist but no run-level requirements record does', () => {
+    expect(overallRequestLine([g('compile'), g('test')])).toEqual({ text: 'Overall request: not fully verified', status: 'unknown', gates: [] });
+  });
+  it('says nothing when there is nothing to qualify, or when the run-level record exists (it speaks for itself)', () => {
+    expect(overallRequestLine([])).toBeNull();
+    expect(overallRequestLine([g('compile'), g('original_requirements')])).toBeNull();
+  });
+  it('withOverallRequest appends it only when it applies', () => {
+    const line = { text: 'x', status: 'passed' as const, gates: [] };
+    expect(withOverallRequest([line], null)).toEqual([line]);
+    expect(withOverallRequest([line], overallRequestLine([g('compile')])).map((l) => l.text)).toEqual(['x', 'Overall request: not fully verified']);
   });
 });

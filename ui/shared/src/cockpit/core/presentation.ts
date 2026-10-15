@@ -128,6 +128,14 @@ export function verificationGroups(gates: readonly GateFact[]): { groups: Verifi
   return { groups, technical: [...gates], unmapped };
 }
 
+/** Demo V2 (owner decision on the requirement ledger): a successful build, test run and execution is not closure of the natural-language goal. On the COMPLETED screen of a run that has verification
+ * results but no run-level requirements record, say so: the absence of a verified record is the fact, and "Requested behavior verified" is only ever shown for a recorded positive verification
+ * (a recorded requirements gate keeps its own wording above). null when there is nothing to qualify or the run-level record exists. */
+export function overallRequestLine(gates: readonly GateFact[]): VerificationLine | null {
+  if (gates.length === 0 || gates.some((g) => g.type === 'original_requirements')) return null;
+  return { text: 'Overall request: not fully verified', status: 'unknown', gates: [] };
+}
+
 /** The recorded checks in one sentence for a compact place (the approval screen, history): only groups with a recorded result, nothing counted that was not recorded. */
 export function verificationSummary(gates: readonly GateFact[]): VerificationLine[] {
   return verificationGroups(gates).groups.flatMap((g) => g.lines);
@@ -266,8 +274,20 @@ export const runtimeStopWords = (code: string | null | undefined): RuntimeStopWo
  * What happened to a run that failed, as a sentence a person can act on. Only the recorded failure category and commit result select the words; the raw record
  * (category, exit code, commit result) stays in the technical reason. Categories this table does not know get the neutral sentence, never a guess about the cause.
  */
+/** The final message for a run that used its attempts and was never applied: how many attempts, the finding about the candidate that was still open (recorded gate type -> fixed words), and that
+ * nothing was applied. null unless the run really had several recorded attempts and nothing was committed - the caller then keeps the generic sentence. Raw codes stay under Technical reason. */
+export function exhaustedSummary(category: string | null | undefined, commitResult: string | null | undefined, retry: { attempts: number; dominant: string | null } | null): string | null {
+  if (category !== 'quality_gate_failed' || retry === null || retry.attempts < 2) return null;
+  if (commitResult === 'COMMITTED' || commitResult === null || commitResult === undefined) return null;
+  const head = retry.dominant !== null ? `Kriya could not produce a valid change after ${retry.attempts} attempts. ${retry.dominant}` : `Kriya could not produce a change that passed validation after ${retry.attempts} attempts.`;
+  return `${head} Nothing was applied to your project.`;
+}
+
 export function failureSummary(category: string | null | undefined, commitResult: string | null | undefined): string {
   const nothingApplied = commitResult !== null && commitResult !== undefined && commitResult !== 'COMMITTED' ? ' Nothing was applied to your folder.' : '';
   if (category === 'quality_gate_failed') return `The change did not pass Kriya's checks (build, tests or verification).${nothingApplied}`;
   return `Kriya could not complete the requested change.${nothingApplied}`;
 }
+
+/** The verification lines of the completed screen, with the overall-request qualification (overallRequestLine) appended when it applies. */
+export const withOverallRequest = (lines: VerificationLine[], overall: VerificationLine | null): VerificationLine[] => (overall === null ? lines : [...lines, overall]);

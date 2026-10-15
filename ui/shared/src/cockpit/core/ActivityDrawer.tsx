@@ -12,7 +12,7 @@ const MARK = { info: '•', ok: '✓', bad: '✕', wait: '⚠' } as const;
 const clock = (iso: string | null): string => (iso && /T(\d\d:\d\d:\d\d)/.test(iso) ? iso.match(/T(\d\d:\d\d:\d\d)/)![1]! : '');
 
 /** The records of the run being followed: its live evidence store while it executes, its trace row's store once it ended. Re-read when a new record arrives (`lastSeq`). */
-function useRunRecords(launchId: string, traceRunId: string | null, finished: boolean, snapshotReady: boolean, lastSeq: number): Availability<RunEvidence> | null {
+export function useRunRecords(launchId: string, traceRunId: string | null, finished: boolean, snapshotReady: boolean, lastSeq: number): Availability<RunEvidence> | null {
   const provider = useProvider();
   const snapshotId = useSession().snapshotId;
   const load = useCallback(async (signal: AbortSignal) => (finished && traceRunId ? loadRunEvidence(provider, traceRunId, snapshotId, signal) : loadLiveRunEvidence(provider, launchId, signal)), [provider, launchId, traceRunId, finished, snapshotId]);

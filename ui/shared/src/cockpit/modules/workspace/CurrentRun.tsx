@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, exhaustedSummary, failureSummary, retrySummary, runtimeStopWords, useRunRecords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, overallRequestLine, verificationGroups, withOverallRequest, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -63,7 +63,7 @@ function Completed({ phase }: { phase: RunPhase }) {
       <h3>Verification</h3>
       {groups === null ? <p className="muted" role="status">{reading('results')}</p>
         : groups.groups.length === 0 ? <p className="muted">No verification result is recorded for this run.</p>
-        : <VerificationLines lines={groups.groups.flatMap((g) => g.lines)} />}
+        : <VerificationLines lines={withOverallRequest(groups.groups.flatMap((g) => g.lines), overallRequestLine(groups.technical))} />}
 
       {app ? <ApplicationResult app={app} /> : null}
 
@@ -91,6 +91,10 @@ function Stopped({ phase }: { phase: RunPhase }) {
   const appData = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
   const blockedCode = appData?.status === 'NOT_APPLICABLE' && typeof appData.blocked_reason_code === 'string' ? appData.blocked_reason_code : null;
   const blocked = outcome.kind === 'failure' ? runtimeStopWords(blockedCode) : null;
+  // How many attempts the run used and what the last unresolved finding was (recorded gate types only): the exhausted-run sentence. Nothing here reads model prose.
+  const records = useRunRecords(run.launchId, outcome.traceRunId, true, run.timing.refreshedAt !== null, run.progress.lastSeq);
+  const recorded = records && (records.state === 'ready' || records.state === 'degraded') ? records.data.records : null;
+  const retry = recorded ? retrySummary(recorded) : null;
   return (
     <div className="ck-outcome">
       <p data-testid="what-happened"><span className="muted">What happened</span><br />
@@ -98,7 +102,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
           <span><strong>{APPROVAL_KIND[outcome.approval.kind] ?? outcome.approval.kind}.</strong> {outcome.approval.reason}</span>
         ) : blocked ? (
           <span data-testid="runtime-stop"><strong>{blocked.title}</strong><br />{blocked.body}<br /><span className="muted">{blocked.note}</span></span>
-        ) : <span>{outcome.kind === 'failure' ? failureSummary(run.status?.launch.ended?.failure_category, outcome.commitResult) : outcome.detail}</span>}
+        ) : <span data-testid="failure-summary">{outcome.kind === 'failure' ? (exhaustedSummary(run.status?.launch.ended?.failure_category, outcome.commitResult, retry) ?? failureSummary(run.status?.launch.ended?.failure_category, outcome.commitResult)) : outcome.detail}</span>}
       </p>
       {outcome.approval ? (
         <div>

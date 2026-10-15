@@ -5,6 +5,7 @@
  */
 import { gateRows } from './selectors';
 import { payloadOf, type EvidenceRecord } from './records';
+import { attemptRejections } from './retryFacts';
 import type { LaunchStatus } from '../../model/kup';
 
 export type ActivityTone = 'info' | 'ok' | 'bad' | 'wait';
@@ -17,12 +18,14 @@ const wall = (r: EvidenceRecord): string | null => { const t = (r as { t_wall?: 
 export function activityFromRecords(records: readonly EvidenceRecord[]): ActivityEntry[] {
   const out: ActivityEntry[] = [];
   let lastKind = '';
-  const push = (r: EvidenceRecord, text: string, tone: ActivityTone) => out.push({ key: `r${r.seq}`, text, tone, at: wall(r), source: r.kind });
+  const push = (r: EvidenceRecord, text: string, tone: ActivityTone, suffix = '') => out.push({ key: `r${r.seq}${suffix}`, text, tone, at: wall(r), source: r.kind });
+  // The first failed gate of each attempt is the attempt's rejection (Demo V2): what it was rejected for, from the recorded gate type only; a delivery failure also says which earlier finding is still open.
+  const rejectionAt = new Map(attemptRejections(records).map((x) => [x.seq, x]));
   for (const r of [...records].sort((a, b) => a.seq - b.seq)) {
     const p = payloadOf(r);
     switch (r.kind) {
       case 'run.opened': push(r, 'Run started', 'info'); break;
-      case 'attempt.opened': push(r, (r.attempt_number ?? 1) > 1 ? 'Trying again' : 'Working on the change', 'info'); break;
+      case 'attempt.opened': push(r, (r.attempt_number ?? 1) > 1 ? `Trying repair ${r.attempt_number}` : 'Working on the change', 'info'); break;
       case 'candidate.change': if (lastKind !== 'candidate.change') push(r, 'Creating project files', 'info'); break;
       case 'gate.result':
       case 'mirror.gate_outcome': {
@@ -34,6 +37,12 @@ export function activityFromRecords(records: readonly EvidenceRecord[]): Activit
           const cases = row.testSummary && typeof row.testSummary.cases === 'number' ? row.testSummary.cases : null;
           push(r, ok === true ? (cases === 0 ? 'No tests ran' : cases !== null ? `Tests passed (${cases} test${cases === 1 ? '' : 's'})` : 'Tests passed') : ok === false ? 'Tests failed' : 'Running tests', ok === false ? 'bad' : ok === true && cases !== 0 ? 'ok' : 'info');
         } else if (row.type === 'run_verification' || row.type === 'run_verification_hung') push(r, ok === true ? 'Runtime verification passed' : 'Runtime verification failed', ok === true ? 'ok' : 'bad');
+        const rejection = rejectionAt.get(r.seq);
+        if (rejection) {
+          push(r, `Attempt ${rejection.attempt} rejected`, 'bad', ':rejected');
+          if (rejection.words) push(r, rejection.words, 'info', ':why');
+          if (rejection.unresolved) push(r, `The earlier issue is still unresolved: ${rejection.unresolved}`, 'info', ':open');
+        }
         break;
       }
       case 'run.closed': push(r, p.status === 'success' || p.terminal_status === 'SUCCESS' ? 'Run completed' : 'Run ended', 'info'); break;
