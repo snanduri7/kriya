@@ -58,6 +58,13 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_controller import all_subtasks_completed, exclude_tool_subtasks_from_resume
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
 
+
+@pytest.fixture(autouse=True)
+def _tool_mechanics_not_hitl_gate(monkeypatch):
+    """These tests exercise the tool-execution MECHANICS under the default config; the human-in-the-loop refusal of confirmation-requiring tools is pinned in tests/test_tool_subtask_hitl_confirmation.py."""
+    monkeypatch.setattr("kriya.workflow.subtask_executor._hitl_blocks_tool_without_confirmation", lambda tool, kernel: False)
+
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS_DIR = os.path.join(REPO_ROOT, "tests")
 MOCK_SERVER = os.path.join(REPO_ROOT, "tests", "mock_mcp_server.py")

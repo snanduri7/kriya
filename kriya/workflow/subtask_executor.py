@@ -132,6 +132,15 @@ async def _execute_model_subtask(
     )
 
 
+TOOL_CONFIRMATION_UNSUPPORTED = "TOOL_CONFIRMATION_UNSUPPORTED"
+
+
+def _hitl_blocks_tool_without_confirmation(tool: Any, kernel: Any) -> bool:
+    """True when the tool asks for confirmation when an operator runs it and the run is human-in-the-loop (which has no per-run review for a planner-chosen tool call)."""
+    mode = getattr(getattr(getattr(kernel, "config", None), "autonomy", None), "mode", None)
+    return bool(getattr(tool, "requires_confirmation", False)) and mode == "human-in-the-loop"
+
+
 async def _execute_tool_subtask(subtask: Subtask, kernel: Any) -> SubtaskResult:
     try:
         tool = kernel.registry.get("tool", subtask.tool_name)
@@ -144,6 +153,16 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any) -> SubtaskResult:
             subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW,
             execution_method=ExecutionMethod.TOOL.value,
             error=f"tool_name {subtask.tool_name!r} not registered",
+        )
+
+    # Review of the runtime-approval stack (2026-10-15), B3: a tool that asks to be confirmed when an operator runs it (`kriya tools execute` honours `requires_confirmation`) must not run unasked
+    # from a planner-emitted subtask. Human-in-the-loop has no per-run review subject here, so it stops BEFORE the call (nothing executed) with a typed reason; every other mode is unchanged.
+    if _hitl_blocks_tool_without_confirmation(tool, kernel):
+        logger.warning(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} requires confirmation and human-in-the-loop mode cannot approve a planner-chosen tool call; not executed")
+        return SubtaskResult(
+            subtask_id=subtask.id, status=SubtaskStatus.NEEDS_REVIEW, execution_method=ExecutionMethod.TOOL.value,
+            error=f"{TOOL_CONFIRMATION_UNSUPPORTED}: tool {subtask.tool_name!r} requires your confirmation to run and this version cannot ask you from a planned step. Nothing was run.",
+            reason_codes=(TOOL_CONFIRMATION_UNSUPPORTED,),
         )
 
     try:

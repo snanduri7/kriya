@@ -15,6 +15,13 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_types import SubtaskStatus
 
 
+@pytest.fixture(autouse=True)
+def _tool_mechanics_not_hitl_gate(monkeypatch):
+    """These tests exercise the tool-execution MECHANICS under the default config; the human-in-the-loop refusal of confirmation-requiring tools is pinned in tests/test_tool_subtask_hitl_confirmation.py."""
+    monkeypatch.setattr("kriya.workflow.subtask_executor._hitl_blocks_tool_without_confirmation", lambda tool, kernel: False)
+
+
+
 def _model_subtask(**overrides):
     defaults = dict(
         id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
