@@ -99,3 +99,17 @@ def test_the_approval_decision_event_is_json_serialisable_and_names_its_trigger(
     [decision] = [e for e in events if e.kind == "approval.decision"]
     json.dumps(decision.details)
     assert decision.details["triggers"] == ["human_in_the_loop"]
+
+
+def test_a_planned_delete_unit_still_asks_for_what_it_changes_and_deletes_nothing_unapproved(tmp_path):
+    """Review finding: the fix reads only state.all_files_written. TRACED: no unit-level path stages the deletion of a pre-existing user file (the only delete=True staging is an
+    abandoned run-created candidate absent from the real workspace), so a planned DELETE reaches the gate as a non-empty change; this pins that it is still asked, and that the
+    file is not removed by the run."""
+    plan = EngineeringPlan.model_validate({
+        "plan_id": "p", "kind": "task", "global_invariants": [{"id": "gi1", "statement": "x"}], "acceptance_criteria": [],
+        "subtasks": [{"id": "s1", "description": "remove the module", "execution_method": "model", "planned_files": [{"path": SERVICE, "action": "delete"}],
+                      "relevant_global_invariant_ids": ["gi1"], "verification": [{"type": "tool", "tool_name": "compile", "description": "compile"}]}]})
+    run = harness.run_enforce(tmp_path, plan=plan, units={"s1": (SERVICE, PRODUCED_SOURCE)}, base_files={SERVICE: BASE_SOURCE, "shop/__init__.py": ""})
+
+    assert [(unit, files) for unit, files, _reason in run.approvals] == [("s1", [SERVICE])]
+    assert (run.workspace / SERVICE).read_text() == BASE_SOURCE

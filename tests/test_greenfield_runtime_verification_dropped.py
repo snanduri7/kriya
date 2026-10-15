@@ -98,3 +98,6 @@ def test_the_runtime_command_approval_is_a_different_subject_from_the_source_cha
     assert unit == "s4" and "Allow Kriya to execute" in reason
     assert harness.decisions(run.events) == ["approved", "approved", "approved"]                       # the command approval is NOT an approval.decision of the change gate
     assert run.executed, "approved -> the command runs"
+    # what the person is shown is what runs: every executed argv appears, in order, as a numbered line of the approval text
+    shown = [line.split(". ", 1)[1] for line in reason.splitlines() if line.strip()[:1].isdigit() and ". " in line]
+    assert shown == [" ".join(cmd) for sequence in run.executed for cmd in sequence]

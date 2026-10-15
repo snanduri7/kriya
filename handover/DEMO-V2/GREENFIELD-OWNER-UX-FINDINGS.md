@@ -85,7 +85,8 @@ Implementation and verification records follow in `GREENFIELD-OWNER-UX-CORRECTIO
   `rejected` and applies nothing) passed.
 - **Fix** `kriya/workflow/workflow.py`, the pre-apply source-change gate (its ownership point): `need_human_approval = has_source_mutation and (...)` with
   `has_source_mutation = bool(state.all_files_written)`. NO SOURCE MUTATION -> NO SOURCE-CHANGE APPROVAL. No empty approval is manufactured and no `rejected` decision is recorded for
-  nothing. Every non-empty change is approved exactly as before (the sensitive-path, diff-size and process-profile clauses are unchanged, and they all derive from the same file set).
+  nothing. Every non-empty change is approved exactly as before. The sensitive-path and diff-size clauses derive from the same file set, so an empty set could never fire them. The process-profile clause (`control.process_profile.human_review_required`, only when `process_profiles.enabled` and `enforce_approval` are both on) does NOT derive from the files: a profile-required review of a unit with nothing to apply is now skipped too - intended (there is nothing to review) and stated here.
+  **Deletions (TRACED, pinned by a test):** the gate set is `state.all_files_written`. The only unit-level deletion staging (`attempt.py` `delete=True`, "abandoned candidates") removes run-created files that are absent from the real workspace, and discards them from the set; no unit stages the deletion of a pre-existing user file. A planned `DELETE` unit reaches the gate as a non-empty change (replay: one approval for `shop/service.py`, the file is not removed, run ends `needs_review`); `plan_terminal_writes` can only commit a delete the candidate already reflects and otherwise fails closed ("did not delete approved file"). So no approval that was previously asked for a real mutation is dropped.
   The `approval_callback` contract and the `attempt.py` runtime-command call sites are untouched.
 - **After:** 6 of 6 pass. Mutations (each applied in place, run, restored): always-true 3 failed; inverted 5 failed; never-ask 6 failed; `and`->`or` 3 failed; all killed.
 - **Adjacent suites** (1081 tests: `test_workflow`, `test_best_of_n`, the `state_machine` tier, autonomy, events, the P4 verification-only reproducers, the D3/D4/D5 runtime-verification suites,
@@ -118,6 +119,18 @@ real verifiers: compile + `{"type":"judgment","verifier_kind":"application_runti
 - **Subject:** permission to execute model-chosen shell commands, as a list of argv arrays, plus the success criterion ("Looking for: ...").
 - **Where it fires:** `attempt.py` `_execute_runtime_verification_directly` (verification-only unit) and `run_attempt`'s inline block, only when `autonomy.mode == human-in-the-loop`, the
   command source is `inferred` (a `goal_explicit` claim is downgraded when the command is not grounded in the goal text) and it was not already confirmed.
+- **Exact text shown in the replay** (pinned: the numbered commands are exactly what then ran):
+  ```
+  Kriya judged that this goal describes runtime behavior compile/test checks can't verify, and wants to actually run the generated app (verification-only subtask):
+    Command(s):
+      1. javac -d .kriya/runtime-verification/classes src/main/java/com/example/HelloKriya.java
+      2. java -cp .kriya/runtime-verification/classes com.example.HelloKriya
+    Looking for: The command output contains the text 'Hello from Kriya'
+  Allow Kriya to execute these command(s) inside the sandboxed worktree?
+  ```
+  The recorded live judge answer was `mvn exec:java -Dexec.mainClass=com.example.HelloKriya`; in the replay the deterministic Java-entrypoint grounding replaced it with `javac`/`java`
+  (INFERRED: because the replay's s4 worktree has only a stub `pom.xml`; what the live run would show is UNKNOWN without a live run). Arguments are plain argv; the working directory is the
+  candidate worktree root; no environment, stdin or network is part of the shown subject.
 - **Working directory / authority:** the sandboxed candidate worktree (`.kriya/worktrees/candidate-...`); execution under the existing containment/capability policy.
 - **GUI representation:** none. `cli._approval_decision` records any empty-file approval as `other_approval` and declines it. The change-review card, its digest-bound decider and the
   `change_approval.review` proof are all file-diff specific.
@@ -131,8 +144,9 @@ Demo 00 as worded cannot produce runtime proof today: either it succeeds without
 not exist. The UX correction (one-click approval, intermediate-vs-goal verification wording, zero-test wording, failure mapper, Activity drawer, Project Details, Why/Markdown, Recent
 Runs, typography) is independent of that and was NOT started in this session. Options for the owner:
 
-1. **Narrow Demo 00** to what Kriya can prove today: build + unit test, the application NOT run. The result screen must then say "not run" (the Application result already reports
-   UNKNOWN / NOT_APPLICABLE without recorded execution). Cheapest; keeps the demo honest.
+1. **Narrow Demo 00** to what Kriya can prove today: build + unit test, the application NOT run. Cheapest, but only honest once the presentation items land: today's UI would show
+   "Run completed" and a whole-goal "Requested behavior verified" (section 5) for a run that never executed the application. The backend projection returns `NOT_APPLICABLE` when no
+   runtime gate step is recorded (TRACED, `application_outcome.py`); what the renderer then shows for `NOT_APPLICABLE` is NOT verified here (INFERRED: nothing, or a neutral line).
 2. **Widen the detector** generically (`runnable`, `prints` next to an application noun) using the P2/P3 corpus as the regression set. Then Demo 00 reaches the command approval and
    needs option 3.
 3. **Build a distinct desktop runtime-command review** (new typed subject). Larger; needs your approval as a design.
