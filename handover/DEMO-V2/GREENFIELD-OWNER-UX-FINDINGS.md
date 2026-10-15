@@ -151,3 +151,44 @@ Runs, typography) is independent of that and was NOT started in this session. Op
    needs option 3.
 3. **Build a distinct desktop runtime-command review** (new typed subject). Larger; needs your approval as a design.
 4. Options 2 + 3 together are the full "EXECUTED output" path the Product UX task assumed for Demo 00.
+
+## 10. Phase 0 of the Electron-host task (2026-10-15, pass 3): two pre-existing execution paths, classified BEFORE any Electron work
+
+### 10-A. Managed-service mode: **DESKTOP-REACHABLE BYPASS** (STOP CONDITION 1)
+
+- **Observation (MEASURED by reading the code, no run):** a runtime-verification judgment with `execution_mode == "managed_service"` is executed with NO approval of any kind. Neither
+  `_runtime_commands_need_approval` nor `_approve_runtime_commands` is consulted, and `autonomy.mode == "human-in-the-loop"` is never read on that branch.
+- **Producing path (TRACED):** `kriya/workflow/attempt.py` - site 1 `_execute_runtime_verification_directly` (`if execution_mode == "managed_service": await _execute_managed_service_verification(...); return`,
+  ~line 6041, BEFORE the approval block at ~6136 that only the finite-command branch reaches); site 2 `run_attempt` inline block (`if judgment.get("should_run") and execution_mode == "managed_service":`,
+  ~line 10105, before the approval block at ~10232). `_execute_managed_service_verification` (~5701) -> `run_managed_service_verification` (`kriya/tools/service_runtime.py`) starts the process.
+- **Who chooses it (TRACED):** `RunVerifierAgent.judge()` (`kriya/agents/agent.py` ~2357-2390) - the MODEL decides `execution_mode`, `service_command`, readiness and probe. Model text selects both the mode and the
+  command that runs; `command_source` is not consulted. `_resolve_execution_mode` only validates the string.
+- **What bounds it today (TRACED, not a substitute for approval):** `_validate_and_convert_managed_service_contract` rejects shell-compound shapes; `ExecutionPolicy` is audit-only except hard codes; the
+  service itself is NOT contained - only its artifact-preparation build step is, and only when `autonomy.contained_execution_required` (default False) is on (comment at ~5748, `service_runtime.py` docstring).
+- **Why DESKTOP-REACHABLE (INFERRED from the call-site trace, discriminating check not run):** Desktop and Demo V2 run the same `run_attempt`; nothing in the Desktop path restricts the judge's
+  `execution_mode`, and the new RuntimeCommandSubject is built only on the finite-command branch. Any Desktop goal that names a foreground server/service (e.g. "start a web server and respond on /health")
+  can be judged `managed_service` and run with no human decision. Demo 00 itself is finite-command (INFERRED: `controlled_script.json` of scenario 03 shows `finite_command`; scenario 00/01/02 judge
+  behaviour is not measured here, and the live demos 01/02 in `~/kriya-live-demo` are outside this repo, so whether they use managed_service is UNKNOWN).
+- **Consequence for the plan:** any GUI approval story is bypassable by a judge that answers `managed_service`. Per the task's own rule this STOPS the Electron/renderer work.
+- **Minimum generic correction (proposed, NOT implemented - needs an owner decision):**
+  - **Option 1 (smallest, recommended for Demo V2):** at both call sites, under `human-in-the-loop`, a managed-service judgment that is not already approved fails CLOSED with a typed
+    `verification_infrastructure_failure` reason code (e.g. `MANAGED_SERVICE_APPROVAL_UNSUPPORTED`) before any process starts; no new UI. Honest, tiny, but it makes managed-service verification
+    unavailable in HITL mode (a behaviour change for any flow that relies on it; the existing managed-service tests run in non-HITL or must pin the mode explicitly).
+  - **Option 2:** extend the typed runtime subject with a service kind (service_command, working dir, readiness, probe request, preparation build), fingerprinted and answered by the same launch layer
+    and KUP review kind, then renderer + native confirmation. Correct, but it is exactly the "approval-platform growth" STOP CONDITION 8 warns about; it should be its own slice.
+  - Not recommended: treating the judge's `command_source` as authority (model text is evidence, never authority).
+- **Registry:** NOT added. An open P1 may not be parked in `BACKLOG_REGISTRY.csv`, and this one is not classified "separate from Desktop".
+
+### 10-B. Self-correction runtime re-run omitted stdin: **REAL DIVERGENCE, FIXED**
+
+- **Observation (MEASURED, pre-fix):** `tests/test_runtime_stdin_rerun_binding.py::test_rerun_after_self_correction_carries_the_reviewed_stdin` recorded
+  `run_app_sequence` stdin `['kriya-verification-input', None]` - the first run carried the contract's stdin, the self-correction re-run carried none.
+- **Producer (TRACED):** `attempt.py` plain-nonzero-exit branch, after `self_correction_result.resolved`, re-ran `validator.run_app_sequence(resolved_run_commands, timeout=...)` without
+  `stdin_payload=rv_stdin_payload`; `process.py` then feeds `stdin_payload or ""`, i.e. EMPTY stdin.
+- **Answers to the Phase-0 questions (TRACED):** it occurs only AFTER the first run, i.e. after any RuntimeCommandSubject was reviewed (the approved fingerprint covers `stdin_sha256`, so a non-empty reviewed
+  stdin ran the second time with different input and no re-review). It cannot happen for `input_channel` `none`/`argv` (payload is None either way). Demo 00 has no stdin, so it cannot reach the divergence.
+- **Fix:** pass `stdin_payload=rv_stdin_payload` on the re-run (the same resolved commands, cwd, channel and stdin the approval covered).
+- **Post-fix:** the same test now sees `[X, X]`; control `input_channel=none` stays `[None, None]`; the adjacent self-correction re-run tests (`test_repair_003_f1_residual_*`) pass; ruff and pylint clean.
+  Mutation: the pre-fix code IS the mutation (test failed without the fix).
+- **Other surface noted, NOT traced:** `kriya/workflow/milestones.py` (~1088) replays persisted milestone verification commands via `run_app_sequence(resolved_commands)` with no approval check and no stdin.
+  Reachability from Desktop is UNKNOWN; it replays commands from an earlier run rather than judge output. Needs its own trace before any claim.
