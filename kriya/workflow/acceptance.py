@@ -219,10 +219,10 @@ def subtask_owns_test_obligation(
 # ...) in the same sentence as the observable behavior - never an isolated verb, and never "runnable" alone (build/package readiness; "do not infer runtime execution merely
 # because a project is executable in principle"). They run per sentence so a documentation/comment sentence ("add a comment noting that the program will print ...") or a repair
 # sentence describing an existing defect ("fix the application that prints the wrong total") does not turn into a runtime obligation. Negation stays first and whole-goal.
-_EXECUTABLE_SUBJECT = r"(?:application|app|program|executable|binary|service|server|command|cli|script|tool|utility)"
-_WORDS = r"(?:\s+[^\s.;!?]+)"
+_EXECUTABLE_SUBJECT = r"(?:application|app|program|executable|binary|service|server|command|cli|script|tool|utility)(?!\s+(?:class|interface|pattern|layer|method|function|type|object|module|package|component|handler|trait|enum)\b)"   # "a Server class", "the Command interface" name source code, not a program that runs
+_WORDS = r"(?:\s+[^\s;!?]+)"   # a token may hold an inner dot ("main.py", "17.0.1"): sentences are already split on ". "
 _OUTPUT_INTENT_RE = re.compile(
-    rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,6}}?\s+"
+    rf"\b{_EXECUTABLE_SUBJECT}\b{_WORDS}{{0,10}}?\s+"
     r"(?P<verb>(?:prints|outputs|displays|emits|echoes)\b|responds\s+with(?=\s+(?:[\"'`]|\d|http\b|status\b))"
     r"|(?:should|must|will|shall|can|to)\s+(?:also\s+)?(?:(?:print|output|display|emit|echo)\b|respond\s+with(?=\s+(?:[\"'`]|\d|http\b|status\b)))"
     r"|writes\s+(?:\S+\s+){0,3}?to\s+(?:stdout|standard\s+output|the\s+console)\b)",
@@ -242,7 +242,9 @@ _RUNNABLE_PRODUCES_RE = re.compile(
 )
 # A documentation sentence ahead of the subject ("document how ...", "add a comment noting that the program will print ...") is about text, not about the artifact running.
 _DOCUMENTATION_FRAMING_RE = re.compile(
-    r"\b(?:comment|comments|javadoc|docstring|readme|documentation|document|describe|describing|explain|explaining|note|noting)\b", re.IGNORECASE)
+    r"\b(?:comment|comments|javadoc|docstring|readme|documentation|document|describe|describing|explain|explaining|note|noting"
+    # a test that asserts the behavior is a test to write, not a run to perform ("write a unit test asserting that the program prints x")
+    r"|asserting|asserts|assertion|assertions)\b", re.IGNORECASE)
 # "how a user could run the application": instructions for a human, not an execution requirement.
 _HOW_TO_RUN_RE = re.compile(
     r"\bhow\s+(?:to|a\s+user|users|one|you|someone)\b[^.;!?]*", re.IGNORECASE)

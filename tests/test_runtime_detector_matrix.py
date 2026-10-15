@@ -21,6 +21,7 @@ POSITIVE = [
     "Build a CLI tool that displays the current time.",
     "Write a Python script that prints the first ten primes.",
     "The server will start and respond with the build number.",
+    "Write a Python script main.py that reads numbers from stdin and prints their sum.",   # independent review I5: a longer subject-to-verb stretch (was a silent drop of the verifier)
     "Fix the existing record-formatting behavior so the application prints:\n\nCUSTOMER=<id>:<name>\n\nRequirements:\n- Preserve all public APIs.",   # PRV-13: explicit output requirement
     "Start the Spring Boot application and confirm startup",
     "Execute the application and verify exit code 2",
@@ -49,6 +50,11 @@ NEGATIVE = [
     "Create a small Java 17 Maven application named hello-kriya and include a unit test. Make the application runnable.",
     "Describe in Javadoc what the application does.",
     "",
+    # (known limit, not fixable per sentence: "Command interface. The command should execute and log." - the second sentence alone reads as a real requirement)
+    "a Tool class whose toString prints the tool name",
+    "a Server class with a method that responds with 404",
+    "a Script class that outputs a string",
+    "Write a unit test asserting that the program prints 'x'",                                                                         # a test to write, not a run to perform
     "The application should run on Java 17.",                                                                                       # independent review of b8cc982: design statements
     "The application must run on Linux and macOS.",
     "The service should run on port 8080 behind the gateway.",
