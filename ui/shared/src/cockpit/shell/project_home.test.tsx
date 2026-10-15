@@ -331,3 +331,25 @@ describe('Project details and Recent runs are compact and in plain words (Demo V
     expect(within(region).queryByRole('button', { name: /^All runs$/ })).toBeNull();
   });
 });
+
+describe('L. A reopened folder whose history is not in this window\'s state directory says so (REOPENED-PROJECT-RUN-HISTORY-001)', () => {
+  it('a folder with a .kriya directory and no run in the history store names the state directory this window reads - never a bare "No runs yet"', async () => {
+    await openProject({ workspace: '/fixture/plain' });
+    expect(await screen.findByText('No runs yet.')).toBeInTheDocument();
+    const note = await screen.findByTestId('history-elsewhere');
+    expect(note.textContent).toMatch(/has a \.kriya directory, so Kriya has worked here before/);
+    expect(note.textContent).toMatch(/reads run history from .*\(KRIYA_STATE_DIR \(operator environment\)\)/);
+    expect(note.textContent).toMatch(/start Kriya with that one/);
+    expect(note.textContent).not.toMatch(/lost|deleted|corrupt/i);   // it states where this window reads; it does not guess what happened to the runs
+  });
+  it('a folder Kriya has not worked in says only "No runs yet."; a folder with runs lists them and adds no note', async () => {
+    await openProject({ workspace: '/fixture/empty' });
+    expect(await screen.findByText('No runs yet.')).toBeInTheDocument();
+    expect(screen.queryByTestId('history-elsewhere')).toBeNull();
+  });
+  it('a folder with recorded runs shows them and no note', async () => {
+    await openProject();
+    await screen.findByText(/A run that never closed its store/, undefined, { timeout: 3000 });
+    expect(screen.queryByTestId('history-elsewhere')).toBeNull();
+  });
+});

@@ -23,7 +23,7 @@ const treeLine = (c: Checkout): string => {
   const n = c.changed_entries ?? 0;
   return `${n}${c.changed_truncated ? '+' : ''} changed or untracked ${n === 1 ? 'entry' : 'entries'} reported by Git`;
 };
-const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR (operator environment)', config: 'paths.state (configuration)', default: 'Kriya default (~/.kriya/state)' };
+export const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR (operator environment)', config: 'paths.state (configuration)', default: 'Kriya default (~/.kriya/state)' };
 
 /** The published snapshots Kriya lists, to pin another one. Choosing re-verifies its digest before anything is read and clears the selection. */
 export function SnapshotPicker() {
