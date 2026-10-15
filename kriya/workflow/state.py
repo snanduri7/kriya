@@ -632,10 +632,10 @@ class GenerationState:
     # location(s) - empty whenever the last failure's error text named no
     # javac-style file:[line,col] locator, or before any failure has happened.
     last_error_source_context: Dict[str, str] = field(default_factory=dict)
-    # Tracks the human-in-the-loop confirmation for judgment-triggered (not
-    # goal-text-explicit) runtime verification, so it's asked at most once per
-    # generation run rather than on every retry attempt.
-    run_verification_confirmed: bool = False
+    # The fingerprint (kriya/workflow/runtime_command_approval.py) of the exact runtime command set a human approved for judgment-triggered (not goal-text-explicit)
+    # runtime verification: the same command set is not re-asked on a retry, a DIFFERENT one is (it used to be a bare boolean, so a retry that re-judged different
+    # commands ran them with no review).
+    run_verification_approved_fingerprint: Optional[str] = None
     run_verification_declined: bool = False
     # Caches RunVerifierAgent.judge()'s result across retry attempts within
     # this run - the goal/design driving "should we run this, and how" don't

@@ -70,7 +70,7 @@ def reset_state_for_independent_candidate(state) -> None:
     - toolchain_checked / toolchain_warning / java_home_override / jdtls_client /
       jdtls_unavailable / lsp_warning - real environment facts about this
       machine, not specific to any one candidate.
-    - run_verification_confirmed / run_verification_declined /
+    - run_verification_approved_fingerprint / run_verification_declined /
       cached_run_verification_judgment - their own field docstrings say these
       deliberately persist across retry attempts within a run (a human's
       approval to execute the generated app shouldn't be re-asked per candidate).

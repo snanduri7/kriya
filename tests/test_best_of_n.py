@@ -35,7 +35,7 @@ def _make_state(**overrides):
     state.budgets.targeted_retry_count = 2
     state.budgets.fallback_targeted_attempted = True
     state.toolchain_checked = True
-    state.run_verification_confirmed = True
+    state.run_verification_approved_fingerprint = "sha256:" + "a" * 64
     state.budgets.best_of_n_candidates_tried = 1
     state.budgets.seen_failure_signatures = {("compile", "sig")}
     for k, v in overrides.items():
@@ -76,7 +76,7 @@ def test_reset_leaves_trace_and_environment_fields_untouched():
     assert state.budgets.targeted_retry_count == 2
     assert state.budgets.fallback_targeted_attempted is True
     assert state.toolchain_checked is True
-    assert state.run_verification_confirmed is True
+    assert state.run_verification_approved_fingerprint == "sha256:" + "a" * 64
     # Accumulates across the whole run - never reset by this function itself.
     assert state.budgets.best_of_n_candidates_tried == 1
 

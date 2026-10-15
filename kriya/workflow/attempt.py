@@ -223,6 +223,13 @@ from kriya.workflow.retry_prompts import (
     _build_targeted_retry_prompt,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.runtime_command_approval import (
+    MAX_REVIEW_ROUNDS,
+    RuntimeCommandSubject,
+    approval_matches,
+)
+from kriya.workflow.runtime_command_approval import ask as ask_runtime_commands
+from kriya.workflow.runtime_command_approval import build_subject as build_runtime_subject
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import (
@@ -5224,6 +5231,41 @@ def _runtime_verification_is_advisory_only(ctx: "AttemptContext", judgment: Dict
     )
 
 
+def _derive_runtime_command_subject(ctx: "AttemptContext", judgment: Dict[str, Any], intro: str) -> RuntimeCommandSubject:
+    """The subject a human approves, built from the commands that will actually EXECUTE: resolved (``_resolve_run_command``) and with the runtime-verification contract applied,
+    never the judge's raw argv (those can differ: interpreter/PATH substitution, an appended argument or stdin payload). Pure and deterministic, so the executor derives the
+    same set again."""
+    resolved = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
+    channel = judgment.get("input_channel") or "none"
+    final, stdin_payload, _incomplete = _apply_runtime_verification_contract(resolved, channel)
+    commands_desc = "\n".join(f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(final, 1))
+    reason = (f"{intro}\n  Command(s):\n{commands_desc}\n  Looking for: {judgment['success_criteria']}\n"
+              "Allow Kriya to execute these command(s) inside the sandboxed worktree?")
+    return build_runtime_subject(unit_id=ctx.current_subtask_id, criterion=str(judgment.get("success_criteria") or ""), working_directory=str(ctx.worktree_path),
+                                 commands=final, input_channel=channel, stdin_payload=stdin_payload, reason=reason)
+
+
+def _runtime_commands_need_approval(ctx: "AttemptContext", state: GenerationState, judgment: Dict[str, Any], autonomy_mode: str) -> bool:
+    """A human must approve when Kriya INFERRED the commands (a goal-explicit command is the user's own words), the mode is human-in-the-loop, and the command set that would run
+    now is not the exact set already approved in this run."""
+    return (judgment["command_source"] == "inferred" and autonomy_mode == "human-in-the-loop"
+            and state.run_verification_approved_fingerprint != _derive_runtime_command_subject(ctx, judgment, "").fingerprint)
+
+
+async def _approve_runtime_commands(ctx: "AttemptContext", state: GenerationState, judgment: Dict[str, Any], intro: str) -> bool:
+    """Ask a human to approve the exact runtime command set; True (and the approved fingerprint recorded) only when the approval is bound to the commands the executor derives
+    right after the answer. A changed set (the worktree or PATH moved while the person decided) is reviewed again, at most MAX_REVIEW_ROUNDS times, and never executed."""
+    for _round in range(MAX_REVIEW_ROUNDS):
+        decision = await ask_runtime_commands(ctx.approval_callback, _derive_runtime_command_subject(ctx, judgment, intro))
+        if not decision.approved:
+            return False
+        if approval_matches(decision, _derive_runtime_command_subject(ctx, judgment, intro)):
+            state.run_verification_approved_fingerprint = decision.approved_fingerprint
+            return True
+        logger.warning("RUNTIME_COMMAND_CHANGED: the runtime command set differs from the one that was approved; it is not executed (review round %d)", _round + 1)
+    return False
+
+
 def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> str:
     """PRV-06 (2026-08-28): observability fix, not a behavioral one - the
     judge's own stated reasoning (RunVerifierAgent.judge()'s `reasoning`
@@ -6081,48 +6123,28 @@ async def _execute_runtime_verification_directly(
         return
 
     proceed_with_run = True
-    if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
-        if autonomy_cfg_rv.mode == "human-in-the-loop":
-            commands_desc = "\n".join(
-                f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
+    # The approval is bound to the exact command set (fingerprint), not to "this run was approved once": a retry that re-judged DIFFERENT commands is asked again.
+    if _runtime_commands_need_approval(ctx, state, judgment, autonomy_cfg_rv.mode):
+        if ctx.approval_callback:
+            proceed_with_run = await _approve_runtime_commands(
+                ctx, state, judgment,
+                "Kriya judged that this goal describes runtime behavior compile/test checks can't verify, and wants to actually run the generated app (verification-only subtask):")
+        else:
+            # Fail-closed (2026-09-20) - mirrors workflow.py's own code-application approval gate fix for the IDENTICAL shape (2026-08-16 adversarial review Finding 2: "this gate
+            # used to fail OPEN... execution silently fell through... with no approval ever having been requested"). human-in-the-loop mode's entire purpose is preventing
+            # exactly this - a real command executing inside the sandboxed worktree with zero human involvement because no approval_callback happened to be wired for this
+            # call, previously treated as "proceed under default policy" (fail open).
+            logger.warning(
+                "Runtime verification warrants human approval but no approval_callback "
+                "is available - refusing to execute unreviewed rather than proceeding "
+                "under default policy."
             )
-            confirm_reason = (
-                "Kriya judged that this goal describes runtime behavior compile/test checks "
-                "can't verify, and wants to actually run the generated app (verification-only "
-                "subtask):\n"
-                f"  Command(s):\n{commands_desc}\n"
-                f"  Looking for: {judgment['success_criteria']}\n"
-                "Allow Kriya to execute these command(s) inside the sandboxed worktree?"
-            )
-            if ctx.approval_callback:
-                approved = ctx.approval_callback([], confirm_reason)
-                if asyncio.iscoroutine(approved):
-                    approved = await approved
-                proceed_with_run = bool(approved)
-            else:
-                # Fail-closed (2026-09-20) - mirrors workflow.py's own
-                # code-application approval gate fix for the IDENTICAL
-                # shape (2026-08-16 adversarial review Finding 2: "this
-                # gate used to fail OPEN... execution silently fell
-                # through... with no approval ever having been
-                # requested"). human-in-the-loop mode's entire purpose is
-                # preventing exactly this - a real command executing
-                # inside the sandboxed worktree with zero human
-                # involvement because no approval_callback happened to be
-                # wired for this call, previously treated as "proceed
-                # under default policy" (fail open).
-                logger.warning(
-                    "Runtime verification warrants human approval but no approval_callback "
-                    "is available - refusing to execute unreviewed rather than proceeding "
-                    "under default policy."
-                )
-                proceed_with_run = False
+            proceed_with_run = False
         if not proceed_with_run:
             state.run_verification_declined = True
     if not proceed_with_run:
         return
 
-    state.run_verification_confirmed = True
     resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
     input_channel = judgment.get("input_channel") or "none"
     resolved_run_commands, stdin_payload, contract_incomplete_reason = _apply_runtime_verification_contract(
@@ -10198,38 +10220,23 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         judgment["run_commands"] = corrected_py_commands
             if judgment["should_run"]:
                 proceed_with_run = True
-                if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
-                    if autonomy_cfg_rv.mode == "human-in-the-loop":
-                        commands_desc = "\n".join(
-                            f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
+                if _runtime_commands_need_approval(ctx, state, judgment, autonomy_cfg_rv.mode):
+                    if ctx.approval_callback:
+                        proceed_with_run = await _approve_runtime_commands(
+                            ctx, state, judgment,
+                            "Kriya judged that this goal describes runtime behavior compile/test checks can't verify, and wants to actually run the generated app:")
+                    else:
+                        # Fail-closed (2026-09-20) - same fix as the sibling gate in _execute_runtime_verification_directly() above; see that call site's own comment for
+                        # the full 2026-08-16 precedent.
+                        logger.warning(
+                            "Runtime verification warrants human approval but no "
+                            "approval_callback is available - refusing to execute "
+                            "unreviewed rather than proceeding under default policy."
                         )
-                        confirm_reason = (
-                            "Kriya judged that this goal describes runtime behavior compile/test "
-                            "checks can't verify, and wants to actually run the generated app:\n"
-                            f"  Command(s):\n{commands_desc}\n"
-                            f"  Looking for: {judgment['success_criteria']}\n"
-                            "Allow Kriya to execute these command(s) inside the sandboxed worktree?"
-                        )
-                        if ctx.approval_callback:
-                            approved = ctx.approval_callback([], confirm_reason)
-                            if asyncio.iscoroutine(approved):
-                                approved = await approved
-                            proceed_with_run = bool(approved)
-                        else:
-                            # Fail-closed (2026-09-20) - same fix as the
-                            # sibling gate in _execute_runtime_verification_
-                            # directly() above; see that call site's own
-                            # comment for the full 2026-08-16 precedent.
-                            logger.warning(
-                                "Runtime verification warrants human approval but no "
-                                "approval_callback is available - refusing to execute "
-                                "unreviewed rather than proceeding under default policy."
-                            )
-                            proceed_with_run = False
+                        proceed_with_run = False
                     if not proceed_with_run:
                         state.run_verification_declined = True
                 if proceed_with_run:
-                    state.run_verification_confirmed = True
                     resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
                     if resolved_run_commands != judgment["run_commands"]:
                         logger.info(
