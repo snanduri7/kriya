@@ -5926,6 +5926,26 @@ async def _execute_managed_service_verification(
     })
 
 
+def _raise_if_required_runtime_verification_declined(state: GenerationState, ctx: "AttemptContext") -> None:
+    """Declining REQUIRED runtime verification is a refusal of required evidence, never a pass. The goal needs observable execution; the person (or the absence of any approver) did not
+    authorize it, so nothing ran and correctness remains unverified: a typed ``verification_infrastructure_failure`` (REQUIRED_RUNTIME_VERIFICATION_DECLINED; retry_strategy
+    STOP_ENVIRONMENT, so no Developer retry) that stops the run before any approval or apply. It is NOT a claim that the generated code failed validation. An optional check
+    (``runtime_verification_required`` False) keeps its declined-and-skipped semantics. Called on entry (a decline carried in ``state`` from an earlier gate call) and immediately after
+    a decline is recorded, so the same attempt cannot fall through to success on either plan shape."""
+    if not (ctx.runtime_verification_required and state.run_verification_declined):
+        return
+    message = (
+        "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
+        "authorized, so correctness remains unverified."
+    )
+    failure = Failure(
+        type="verification_infrastructure_failure", message=message,
+        raw_output=message, attempt=state.attempt_number,
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 async def _execute_runtime_verification_directly(
     state: GenerationState, ctx: "AttemptContext", validator: "PolymorphicValidator",
 ) -> None:
@@ -5977,17 +5997,7 @@ async def _execute_runtime_verification_directly(
         )
         state.record_gate_outcome(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
-    if ctx.runtime_verification_required and state.run_verification_declined:
-        message = (
-            "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
-            "authorized, so correctness remains unverified."
-        )
-        failure = Failure(
-            type="verification_infrastructure_failure", message=message,
-            raw_output=message, attempt=state.attempt_number,
-        )
-        state.record_gate_outcome(failure.to_gate_outcome())
-        raise QualityGateFailure(failure)
+    _raise_if_required_runtime_verification_declined(state, ctx)
     if not autonomy_cfg_rv.run_verification_enabled or state.run_verification_declined:
         return
 
@@ -6187,6 +6197,7 @@ async def _execute_runtime_verification_directly(
             proceed_with_run = False
         if not proceed_with_run:
             state.run_verification_declined = True
+            _raise_if_required_runtime_verification_declined(state, ctx)
     if not proceed_with_run:
         return
 
@@ -10010,17 +10021,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
-        if ctx.runtime_verification_required and state.run_verification_declined:
-            message = (
-                "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
-                "authorized, so correctness remains unverified."
-            )
-            failure = Failure(
-                type="verification_infrastructure_failure", message=message,
-                raw_output=message, attempt=state.attempt_number,
-            )
-            state.record_gate_outcome(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
+        _raise_if_required_runtime_verification_declined(state, ctx)
         if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
             current_judgment_basis = _run_verification_basis_hash(ctx, state)
             if (
@@ -10278,6 +10279,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         proceed_with_run = False
                     if not proceed_with_run:
                         state.run_verification_declined = True
+                        _raise_if_required_runtime_verification_declined(state, ctx)
                 if proceed_with_run:
                     resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
                     if resolved_run_commands != judgment["run_commands"]:

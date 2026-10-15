@@ -11,6 +11,7 @@ layer and the same decision functions a desktop uses. Stubbed: the model transpo
 import asyncio
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
@@ -18,13 +19,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from _protocol_responses import sentinel
 from test_greenfield_runtime_end_to_end import Person, _callback, _fast  # noqa: F401 - _fast is an autouse fixture
-from test_launch_approval import _session
+from test_launch_approval import LID, _session
 
+import kriya.control.launch_approval as approval
 from kriya.config import AppConfig
+from kriya.control.persistence import load_launch_record
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.kup.application_outcome import STATUS_EXECUTED, application_outcome
+from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine
 
@@ -62,7 +66,7 @@ class DirectRun:
     canonical: Any = None
 
 
-def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop"):
+def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, review_plan=None, person_cls=Person):
     """`kriya generate` with the packaged defaults: the engine called directly (no controller), one direct unit."""
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
@@ -80,7 +84,7 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
         subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=workspace, check=True, capture_output=True)
     run = DirectRun(workspace=workspace)
     run.canonical, session = _session(workspace)
-    run.person = Person(run.canonical, plan)
+    run.person = person_cls(run.canonical, review_plan)
     run.person.start()
 
     async def transport(llm, client, model, system_prompt, user_prompt, *args, **kwargs):
@@ -106,8 +110,9 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
         run.executed.append(commands)
         run.log_at_execution.append(run.person.log[:])
         run.applied_at_execution.append({path: (workspace / path).exists() for path in files})
-        return {"success": True, "returncode": 0, "output": "Hello from Kriya\n", "timed_out": False,
-                "steps": [{"command": list(c), "exit_code": 0, "stdout": "Hello from Kriya\n", "stderr": "", "timed_out": False} for c in commands]}
+        output, code = ("Hello from Kriya\n", 0) if app_succeeds else ("Exception in thread main\n", 1)
+        return {"success": app_succeeds, "returncode": code, "output": output, "timed_out": False,
+                "steps": [{"command": list(c), "exit_code": code, "stdout": output, "stderr": "", "timed_out": False} for c in commands]}
 
     def compile_gate(*_a, **_k):
         run.compile_calls += 1
@@ -203,26 +208,87 @@ def test_application_outcome_is_executed_with_the_printed_output(approved_run):
     assert run_verification and run_verification[-1]["success"] is True                         # the grader judged the CAPTURED stdout
 
 
-def test_CHARACTERISATION_declining_the_runtime_review_on_the_direct_plan_still_reports_success(tmp_path):
-    """MEASURED product defect, pinned so the owner's decision flips it deliberately (STOP condition 'direct plans silently lose runtime
-    verification', handover/DEMO-V2/LIVE-GREENFIELD-FAILURE-ROOT-CAUSE.md Phase 6). On the structured plan a declined required runtime check
-    is a recorded `verification_infrastructure_failure` and the run is not a success (tests/test_greenfield_runtime_end_to_end.py). On the
-    direct plan, declining only sets run_verification_declined: nothing executes, no run_verification outcome is recorded, every gate
-    passes, and the change is still offered and applied - while the goal ('prints Hello from Kriya') required runtime behaviour."""
-    original = Person.__init__
+def _applied(run):
+    return {path for path in FILES if (run.workspace / path).exists()}
 
-    def scripted(self, canonical, plan=None):
-        original(self, canonical, {"runtime_command": ("reject", 0.0)})
 
-    with patch.object(Person, "__init__", scripted):
-        run = run_direct(tmp_path)
+def test_gap_a_rejecting_the_required_runtime_review_is_not_success_and_applies_nothing(tmp_path):
+    """GAP A (owner decision 2026-10-15). The goal REQUIRES observable runtime behaviour. A rejected runtime review is a refusal of required
+    verification: nothing executes, the run is not a success, no verdict of any kind is recorded as passing, and the candidate is never
+    applied to the owner's folder. Same terminal semantics as the structured plan (tests/test_greenfield_runtime_end_to_end.py)."""
+    run = run_direct(tmp_path, review_plan={"runtime_command": ("reject", 0.0)})
 
-    assert run.executed == []                                                                    # nothing was executed
-    assert [p["kind"] for p in run.person.seen] == ["runtime_command", "change_approval"]
-    assert not any(g.get("type") == "run_verification" for g in run.gate_outcomes)               # no runtime verdict of any kind was recorded
-    assert application_outcome(run.gate_outcomes) == {"status": "NOT_APPLICABLE", "reason": "no_runtime_execution_recorded"}
-    assert _succeeded(run.result)                                                                # ...and the run still reports success (the defect)
-    assert {path for path in FILES if (run.workspace / path).exists()} == set(FILES)
+    assert goal_requires_runtime_behavior(GOAL) is True
+    assert run.executed == []                                                                    # the reviewed command never ran
+    assert not _succeeded(run.result)                                                            # ...and the run is NOT a success
+    assert _applied(run) == set()                                                                # ...and nothing reached the owner's folder
+    assert not [p for p in run.person.seen if p["kind"] == "change_approval"]                    # the person is never asked to approve unverified source
+    assert not any(g.get("type") == "run_verification" for g in run.gate_outcomes)               # no runtime verdict was recorded
+    declined = [g for g in run.gate_outcomes if g.get("type") == "verification_infrastructure_failure"]
+    assert declined and declined[-1]["success"] is False and "REQUIRED_RUNTIME_VERIFICATION_DECLINED" in str(declined[-1]["output"])
+    outcome = application_outcome(run.gate_outcomes)
+    assert outcome["status"] != STATUS_EXECUTED and outcome["blocked_reason_code"] == "REQUIRED_RUNTIME_VERIFICATION_DECLINED"   # never claims an execution; names the refusal
+    assert run.result["last_failure"]["type"] == "verification_infrastructure_failure"           # a typed refusal, not a code-validation failure
+
+
+def test_gap_a_the_decline_is_not_retried_into_asking_again(tmp_path):
+    """The existing STOP_ENVIRONMENT classification stops the run: the person's refusal is final for the run, not a Developer retry."""
+    run = run_direct(tmp_path, review_plan={"runtime_command": ("reject", 0.0)})
+    assert [p["kind"] for p in run.person.seen].count("runtime_command") == 1
+    assert run.compile_calls == 1                                                                # no regenerate-and-rebuild loop
+
+
+def test_gap_a_an_optional_runtime_check_keeps_its_declined_semantics(tmp_path):
+    """Pinned so the fix is not global: when the goal does NOT require runtime behaviour a declined check is recorded as declined, nothing runs,
+    and the run still succeeds on compile + tests (tests/test_workflow.py::test_workflow_run_verification_declined_still_passes_on_compile_alone)."""
+    optional_goal = "Create a small Java 17 Maven application named hello-kriya with a unit test."
+    assert goal_requires_runtime_behavior(optional_goal) is False
+    run = run_direct(tmp_path, goal=optional_goal, review_plan={"runtime_command": ("reject", 0.0)})
+    assert [p["kind"] for p in run.person.seen].count("runtime_command") == 1                    # the optional check was still offered
+    assert run.executed == []
+    assert _succeeded(run.result)
+
+
+def test_gap_a_a_failing_runtime_command_is_not_success_either(tmp_path):
+    run = run_direct(tmp_path, app_succeeds=False)
+    assert len(run.executed) >= 1                                                                # approved, so it ran
+    assert not _succeeded(run.result)
+    assert _applied(run) == set()
+    assert application_outcome(run.gate_outcomes)["succeeded"] is False
+
+
+def test_gap_a_a_slow_decision_is_waiting_not_a_refusal(tmp_path):
+    """Native Cancel / not deciding yet leaves the review PENDING; here the person simply decides late and the run continues normally."""
+    run = run_direct(tmp_path, review_plan={"runtime_command": ("approve", 0.3)})
+    assert run.executed == [next(p for p in run.person.seen if p["kind"] == "runtime_command")["commands"]]
+    assert _succeeded(run.result)
+
+
+def test_gap_a_a_decision_of_the_wrong_kind_cannot_approve_the_runtime_review(tmp_path):
+    refusals = []
+
+    class Confused(Person):
+        def _loop(self):
+            decided = set()
+            while not self._stop.is_set():
+                pending = (load_launch_record(self.canonical, LID) or {}).get("pending_approval")
+                if isinstance(pending, dict) and pending.get("status") == "PENDING" and pending["review_id"] not in decided:
+                    decided.add(pending["review_id"])
+                    self.seen.append(pending)
+                    self.log.append(("pending", pending["kind"]))
+                    if pending["kind"] == "runtime_command":
+                        try:
+                            approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", "change_approval")
+                        except approval.ApprovalRefused as refused:
+                            refusals.append(refused.code)
+                        refusals.append((load_launch_record(self.canonical, LID) or {})["pending_approval"]["status"])
+                    self.log.append(("deciding", pending["kind"]))
+                    approval.decide(self.canonical, LID, pending["review_id"], pending["candidate_digest"], "approve", pending["kind"])
+                time.sleep(0.01)
+
+    run = run_direct(tmp_path, person_cls=Confused)
+    assert refusals == ["WRONG_REVIEW_KIND", "PENDING"]
+    assert run.executed and _succeeded(run.result)
 
 
 def test_CHARACTERISATION_the_direct_plan_never_closes_the_goal_requirements(approved_run):
