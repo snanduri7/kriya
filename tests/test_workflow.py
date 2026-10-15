@@ -4663,6 +4663,7 @@ async def test_current_managed_service_judgment_reaches_execution_primitive_with
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = {"manage.py"}
@@ -4717,6 +4718,7 @@ def _managed_service_ctx_for_grounding(tmp_path, *, service_command):
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     return ctx, developer, run_verifier, judgment
 
 
@@ -4920,6 +4922,7 @@ async def _run_managed_service_terminal_attempt(tmp_path, judge_result):
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = {"manage.py"}
@@ -5026,6 +5029,7 @@ async def _run_managed_service_terminal_attempt_with_files(tmp_path, judge_resul
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set(all_files_written)
@@ -5124,6 +5128,7 @@ async def test_malformed_managed_service_contract_causes_zero_developer_calls(tm
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=_managed_service_judgment(managed_service=None))
     ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
@@ -5156,6 +5161,7 @@ async def test_compound_server_and_probe_managed_service_contract_is_rejected(tm
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=compound_judgment)
     ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
@@ -5208,6 +5214,7 @@ async def test_managed_service_readiness_and_probe_reject_non_local_host(tmp_pat
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=non_local_judgment)
     ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
@@ -5254,6 +5261,7 @@ async def test_managed_service_readiness_and_probe_accept_private_and_loopback_h
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = {"manage.py"}
@@ -5409,6 +5417,7 @@ async def test_prv17_managed_service_semantic_shape_never_constructs_compound_co
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
         }],
     )
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = {"manage.py"}

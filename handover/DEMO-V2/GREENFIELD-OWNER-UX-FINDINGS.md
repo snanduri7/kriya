@@ -192,3 +192,36 @@ Runs, typography) is independent of that and was NOT started in this session. Op
   Mutation: the pre-fix code IS the mutation (test failed without the fix).
 - **Other surface noted, NOT traced:** `kriya/workflow/milestones.py` (~1088) replays persisted milestone verification commands via `run_app_sequence(resolved_commands)` with no approval check and no stdin.
   Reachability from Desktop is UNKNOWN; it replays commands from an earlier run rather than judge output. Needs its own trace before any claim.
+
+### 10-A (resolution, 2026-10-15 pass 4): OWNER DECISION = OPTION 1, implemented
+
+- In human-in-the-loop mode a managed-service verification fails CLOSED with a typed `verification_infrastructure_failure`, reason code `MANAGED_SERVICE_APPROVAL_UNSUPPORTED`, raised by
+  `_refuse_managed_service_without_approval_subject` at the TOP of `_execute_managed_service_verification` - the one function both call-site families route through - so it fires before the
+  contract is admitted (hence before the interpreter resolver can prepare an environment), before `run_managed_service_verification` and before any process start. Nothing is asked
+  (`approval_callback` is never called with `files=[]`), `run_verification_declined` stays False (this is not a rejection), and the existing infrastructure classification stops the run with
+  no Developer retry (`STOP_ENVIRONMENT`, asserted through `handle_attempt_failure`). Every other autonomy mode is unchanged.
+- Evidence: `tests/test_managed_service_hitl_fail_closed.py`. PRE-FIX (MEASURED): the three A-cases failed (managed service ran to success in HITL, both call-site families); the control cases passed.
+  4 mutations killed (remove the call; invert the mode test; never fail; move the guard after admission).
+- Existing managed-service mechanics tests that ran under the default HITL config were pinned to a non-HITL mode on purpose (they test admission/execution mechanics, which HITL no longer reaches).
+- Deferred, registered: `MANAGED-SERVICE-APPROVAL-001` (P2, DEFERRED, owner-approved). Not built: service approval card, ports/listeners, lifecycle, containment redesign.
+- User-facing mapping (for the presentation slice): "Runtime verification could not continue - this goal requires Kriya to start a long-running service. This desktop version does not yet support approval
+  for managed-service execution. No service was started." Raw code under "Technical reason".
+
+### 10-C. `milestones.py` replay: classification **C - UNREACHABLE FROM THE CURRENT DESKTOP FLOW** (a CLI-only unapproved-execution finding remains, registered)
+
+All TRACED unless marked.
+
+1. **Callers:** `replay_prior_milestone_verifications` (milestones.py:1058) <- `_MilestonePlanDriver.run_phase(REPLAY_PRIOR_VERIFICATIONS)` (:1470) <- `run_milestones` (:1495/:1750) <- `WorkflowController.execute_milestones`
+   (workflow_controller.py:3866) <- `kriya/cli.py:2827`, inside `run_milestone_sequence`, which exists only under `if from_milestones:` (`kriya generate --from-milestones <plan.json>`). No other caller exists.
+2. **What is replayed:** `run_state.verification_commands[milestone_id]` = argv lists. **Who authored them:** `_capture_verification_commands` (:1411) makes its OWN `run_verifier.judge()` call after the milestone
+   completes (a third judge call site, independent of attempt.py) and stores `judgment["run_commands"]` (Python-target grounding only); the commands are MODEL-DERIVED.
+3. **Previously approved? Fingerprint persisted?** No. The capture is not shown to any human, no RuntimeCommandSubject is built, nothing is fingerprinted; `MilestoneRunState` persists only the argv lists.
+   So there is no approved subject whose semantics the replay could contradict (the Phase-11 "stdin changes a previously approved subject" clause does not apply).
+4. **Same subject?** No: replay runs `validator.run_app_sequence(resolved_commands)` on the WORKSPACE (`PolymorphicValidator(workspace_path, ...)`), not Kriya's isolated worktree, with no `stdin_payload`
+   and without the argv/stdin input contract (`input_channel` is not captured), so even the judged semantics are not reproduced. Stdin is omitted because the capture stores `run_commands` only.
+5. **Desktop reachable? NO.** The desktop host's argv is fixed to `generate --json --launch-id <id>` with the goal on stdin (`ui/standalone/src/main/execution_host.ts:70`; pinned by
+   `ui/standalone/test/execution_host.test.ts:69`, which forbids `--from-milestones`), and `_launched_generate` (cli.py:2902-2918) raises a `UsageError` when `--from-milestones` is given
+   with `--launch-id`. A plain goal never enters `run_milestones` (the MILESTONE route kind in `workflow_controller.py:3591` only attaches metadata). **Demo V2 reachable? NO** (same path).
+6. **Model-derived command through it without the new boundary?** YES in CLI milestone mode, not from Desktop. That is the registered follow-up `MILESTONE-REPLAY-UNAPPROVED-COMMANDS-001` (P2, OPEN, target
+   scope: before milestone mode is exposed to the desktop or described as approval-gated). INFERRED-UNKNOWN: whether any non-Desktop route (MCP, REPL) can start milestone mode; the MCP/REPL entry points were not traced.
+7. **Boundary claim:** the runtime-command approval is a Desktop security boundary; it is NOT claimed to cover CLI milestone mode. No code was changed for this path.

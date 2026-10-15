@@ -5698,6 +5698,29 @@ def _validate_and_convert_managed_service_contract(
     ), None
 
 
+MANAGED_SERVICE_APPROVAL_UNSUPPORTED = "MANAGED_SERVICE_APPROVAL_UNSUPPORTED"
+
+
+def _refuse_managed_service_without_approval_subject(state: GenerationState, ctx: "AttemptContext") -> None:
+    """Demo V2 owner decision (2026-10-15): in human-in-the-loop mode a managed-service verification (a model-chosen long-running service) has NO reviewable approval subject - the
+    RuntimeCommandSubject covers finite commands only - so it fails closed BEFORE the contract is admitted, before interpreter/build preparation and before any process starts.
+    It is an unsupported approval semantic, not a human rejection: nothing is asked, ``run_verification_declined`` stays False, and the existing verification-infrastructure
+    classification stops the run without Developer retries. Every other autonomy mode keeps its behavior. The single choke point both runtime call sites route through."""
+    if ctx.kernel.config.autonomy.mode != "human-in-the-loop":
+        return
+    message = (
+        f"{MANAGED_SERVICE_APPROVAL_UNSUPPORTED}: this goal requires Kriya to start a long-running service to verify it, and this version has no way to ask you to approve "
+        "that. No service was started."
+    )
+    logger.warning(message)
+    failure = Failure(
+        type="verification_infrastructure_failure", message=message, raw_output=message, attempt=state.attempt_number,
+        diagnostics={"reason_code": MANAGED_SERVICE_APPROVAL_UNSUPPORTED},
+    )
+    state.record_gate_outcome(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 async def _execute_managed_service_verification(
     state: GenerationState, ctx: "AttemptContext", judgment: Dict[str, Any], known_files: List[str],
     validator: "PolymorphicValidator",
@@ -5717,6 +5740,7 @@ async def _execute_managed_service_verification(
     the obligation was already decided above (advisory-only suppression,
     ctx.runtime_verification_required) before this function is ever
     called."""
+    _refuse_managed_service_without_approval_subject(state, ctx)
     spec, invalid_reason = _validate_and_convert_managed_service_contract(
         judgment.get("managed_service"), ctx.worktree_path, validator,
     )

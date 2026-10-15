@@ -159,6 +159,7 @@ async def test_f1_managed_service_admission_carries_the_environment_code_not_a_c
                "readiness": {"kind": "http", "host": "127.0.0.1", "port": 8765, "path": "/"},
                "probe": {"method": "GET", "host": "127.0.0.1", "port": 8765, "path": "/", "expected_status": 200}}
     ctx, developer, run_verifier = _verification_only_ctx(tmp_path, [], managed_service=service)
+    ctx.kernel.config.autonomy.mode = "autonomous"  # managed-service mechanics under test; HITL fails closed (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, tests/test_managed_service_hitl_fail_closed.py)
     state = GenerationState()
     stub = _VenvCreationFails()
     with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", new=stub.method), \
