@@ -127,6 +127,8 @@ def test_reject_is_the_explicit_refusal_nothing_executes_and_the_run_does_not_cl
     assert [p["kind"] for p in person.seen][-1] == "runtime_command"
     assert run.executed == [] and executed_at == []
     assert load_launch_record(canonical, LID)["pending_approval"]["status"] == "REJECTED"
+    # MEASURED on the real path: the declined required check is a recorded verification-infrastructure failure, never a pass
+    assert any(g.get("type") == "verification_infrastructure_failure" and "REQUIRED VERIFICATION UNRESOLVED" in str(g.get("output")) and g.get("success") is False for g in run.gate_outcomes)
     assert run.result.legacy_result["status"] != "success"
     assert application_outcome(run.gate_outcomes)["status"] != STATUS_EXECUTED
 

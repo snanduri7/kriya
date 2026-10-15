@@ -140,7 +140,7 @@ export function CurrentRun() {
       {!finished && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
       {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
       {!finished && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
-      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; nothing will be applied.</div> : null}
+      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; {pendingKind === 'runtime_command' ? 'nothing will be run' : 'nothing will be applied'}.</div> : null}
       {finished && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
       {finished && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
       <details className="ck-tech">

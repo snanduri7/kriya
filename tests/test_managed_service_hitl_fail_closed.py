@@ -31,26 +31,26 @@ from kriya.workflow.state import GenerationState
 
 CODE = "MANAGED_SERVICE_APPROVAL_UNSUPPORTED"
 HITL = "human-in-the-loop"
-NON_HITL = "autonomous"
+NON_HITL = "guardrails"  # the documented non-HITL mode (docs/user_guide.md: any other value behaves as guardrails)
 FINITE = {
     "should_run": True, "run_commands": [["java", "-cp", "target/classes", "com.example.App"]],
     "command_source": "inferred", "success_criteria": "prints HELLO",
 }
 
 
-def _verification_only_ctx(tmp_path, *, mode, judgment):
+def _verification_only_ctx(tmp_path, *, mode, judgment, required=True):
     developer = developer_double()
     developer.run_generation = AsyncMock(side_effect=AssertionError("the Developer must not be called for a verification-only unit"))
     run_verifier = AsyncMock()
     run_verifier.judge = AsyncMock(return_value=judgment)
     run_verifier.grade = AsyncMock(return_value={"passed": True, "reasoning": "ok", "likely_files": []})
-    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier)
+    ctx = _runtime_verifier_ctx(tmp_path, developer=developer, run_verifier=run_verifier, runtime_verification_required=required)
     ctx.kernel.config.autonomy.mode = mode
     ctx.approval_callback = AsyncMock(return_value=True)
     return ctx
 
 
-def _mutating_ctx(tmp_path, *, mode, judgment=None):
+def _mutating_ctx(tmp_path, *, mode, judgment=None, required=True, planned=True):
     plan = _managed_service_plan()
     views_py = "customers/views.py"
     developer = developer_double()
@@ -61,7 +61,7 @@ def _mutating_ctx(tmp_path, *, mode, judgment=None):
         tmp_path, developer=developer, run_verifier=run_verifier, goal="Create a Python 3.12 Django application.",
         architect_files=[views_py], expected_files_upfront=[views_py], architect_basename_to_path={"views.py": views_py},
         allowed_write_relpaths=[views_py], write_scope_mode=WriteScopeMode.ALLOWLIST,
-        structured_plan=plan, current_subtask_id="s4", runtime_verification_required=True,
+        structured_plan=plan if planned else None, current_subtask_id="s4" if planned else None, runtime_verification_required=required,
         required_verification=[{
             "type": "judgment", "description": "GET /customers/health returns 200",
             "tool_name": None, "verifier_kind": "application_runtime", "requires_runtime_execution": True,
@@ -175,7 +175,7 @@ async def test_c_non_hitl_managed_service_still_executes(tmp_path, builder):
 @pytest.mark.asyncio
 async def test_d_hitl_judge_asks_for_no_run_so_no_managed_service_and_no_failure(tmp_path):
     judgment = _managed_service_judgment(should_run=False)
-    ctx = _verification_only_ctx(tmp_path, mode=HITL, judgment=judgment)
+    ctx = _verification_only_ctx(tmp_path, mode=HITL, judgment=judgment, required=False)
     state = _state()
     raised, executor, admission, spawn = await _run(ctx, state)
     assert raised is None
@@ -183,6 +183,29 @@ async def test_d_hitl_judge_asks_for_no_run_so_no_managed_service_and_no_failure
     admission.assert_not_called()
     spawn.assert_not_called()
     ctx.approval_callback.assert_not_called()
+
+
+# ------------------------------------------------------------------ E. runtime verification NOT required: a declined check, not a failure (mirrors the finite path)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("builder", ["verification_only", "inline_unplanned", "inline_planned"])
+async def test_e_hitl_managed_service_that_is_not_required_is_declined_not_failed_and_never_starts(tmp_path, builder):
+    """The owner invariant is required AND managed_service AND human approval: when the declared contract does NOT require the runtime check, nothing is run, no infrastructure STOP is raised
+    (the run is not killed for an optional check) and it is recorded exactly like a finite command whose approval is unavailable - ``run_verification_declined``."""
+    if builder == "verification_only":
+        ctx = _verification_only_ctx(tmp_path, mode=HITL, judgment=_managed_service_judgment(), required=False)
+    else:
+        ctx = _mutating_ctx(tmp_path, mode=HITL, required=False, planned=builder == "inline_planned")
+    state = _state()
+    raised, executor, admission, spawn = await _run(ctx, state)
+    assert raised is None, raised.failure.message if raised else None
+    executor.assert_not_called()
+    admission.assert_not_called()
+    spawn.assert_not_called()
+    ctx.approval_callback.assert_not_called()
+    if builder != "inline_planned":  # (a planned unit that does not own the obligation never reaches the managed path at all: the existing advisory-only suppression ran first)
+        assert state.run_verification_declined is True
+    assert state.environment_failure is None
+    assert not any(o.get("type") == "verification_infrastructure_failure" for o in state.gate_outcomes)
 
 
 # ------------------------------------------------------------------ the guard is keyed on the mode alone

@@ -200,7 +200,11 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
     const succeeded = record.found && record.terminal_status === 'SUCCESS';
     // The RunRecord is the authority: a run that reached SUCCESS was not stopped by any decision, whatever was noted along the way.
     if (review && !succeeded && review.status === 'REJECTED') {
+      if (review.kind === 'runtime_command') return { kind: 'rejected', label: 'Commands not allowed', detail: 'You did not allow Kriya to run the verification commands, so nothing was run and the application could not be verified.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
       return { kind: 'rejected', label: 'Changes rejected', detail: 'You rejected the proposed changes; Kriya applied nothing.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
+    }
+    if (review && !succeeded && review.status === 'EXPIRED' && review.kind === 'runtime_command') {
+      return { kind: 'review_expired', label: 'Request expired', detail: 'The request to run the verification commands was not decided in time, so Kriya declined it: nothing was run.', source: 'Kriya launch record (the review expired undecided) and the run\'s own record', traceRunId, workflowStatus };
     }
     if (review && !succeeded && review.status === 'EXPIRED') {
       return { kind: 'review_expired', label: 'Review expired', detail: review.decision?.source === 'host-gone' ? 'This window went away while the review was waiting, so Kriya declined it: nothing was applied.' : review.decision?.source === 'interrupted' ? 'The run was interrupted while the review was waiting: nothing was applied.' : 'The review was not decided in time, so Kriya declined it: nothing was applied.', source: 'Kriya launch record (the review\'s recorded end)', traceRunId, workflowStatus };

@@ -2,7 +2,7 @@
  * the commitment is the host's NATIVE confirmation (scripted here by `nativeAnswers`). Every word about the commands comes from Kriya's record; the renderer sends identities, never a command. */
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { activeReview, activeRuntimeCommandReview, createRuntimeCommandDecider, type RunView, type RuntimeDecisionState } from '../core';
+import { activeReview, activeRuntimeCommandReview, createRuntimeCommandDecider, deriveOutcome, type RunView, type RuntimeDecisionState } from '../core';
 import type { LaunchStatus } from '../../model/kup';
 import { renderWorkspaceShell } from '../testing/harness';
 import cardSource from '../core/RuntimeCommandReview.tsx?raw';
@@ -118,8 +118,12 @@ describe('the decision: ONE renderer click, then the native confirmation; nothin
     await waitFor(() => expect(host.exec!.runtimeDecisions).toHaveLength(1));
     expect(host.exec!.runtimeDecisions[0]!.decision).toBe('reject');
     expect(host.exec!.confirmationsShown).toBe(0);
+    await within(bar).findByText(/nothing will be run/);   // the interim note names the RIGHT subject (not "nothing will be applied")
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'));
+    expect(bar).toHaveTextContent('Commands not allowed');
+    expect(bar).toHaveTextContent(/You did not allow Kriya to run the verification commands, so nothing was run/);
+    expect(bar).not.toHaveTextContent(/Changes rejected|proposed changes/);
   });
 
   it('a double click sends exactly one decision; the buttons are gone while it is in flight', async () => {
@@ -201,6 +205,16 @@ describe('the pure rules', () => {
     for (const status of ['APPROVED', 'REJECTED', 'EXPIRED']) expect(activeRuntimeCommandReview(pending('runtime_command', status))).toBeNull();
     expect(activeRuntimeCommandReview({ launch: { phase: 'ENDED', pending_approval: { kind: 'runtime_command', status: 'PENDING' } }, liveness: 'ended' } as unknown as LaunchStatus)).toBeNull();
     expect(activeRuntimeCommandReview(null)).toBeNull();
+  });
+
+  it('an undecided runtime request that expired is its own outcome with its own words, and a change review keeps its own', () => {
+    const ended = (kind: string, status: string) => ({ launch: { phase: 'ENDED', approval_required: null, run: { run_id: 'r' }, ended: { exit_code: 1, workflow_status: null, trace_run_id: null, error: null, failure_category: null }, declined_decisions: [], pending_approval: { kind, status, decision: null } }, run_record: { found: true, terminal_status: 'FAILURE', commit_result: null } }) as unknown as LaunchStatus;
+    const runtime = deriveOutcome(ended('runtime_command', 'EXPIRED'), false, null);
+    expect(runtime).toMatchObject({ kind: 'review_expired', label: 'Request expired' });
+    expect(runtime!.detail).toMatch(/nothing was run/);
+    expect(deriveOutcome(ended('change_approval', 'EXPIRED'), false, null)).toMatchObject({ kind: 'review_expired', label: 'Review expired' });
+    expect(deriveOutcome(ended('runtime_command', 'REJECTED'), false, null)).toMatchObject({ kind: 'rejected', label: 'Commands not allowed' });
+    expect(deriveOutcome(ended('change_approval', 'REJECTED'), false, null)).toMatchObject({ kind: 'rejected', label: 'Changes rejected' });
   });
 
   const reviewed = { review_id: REVIEW_ID, command_fingerprint: RUNTIME_FINGERPRINT };
