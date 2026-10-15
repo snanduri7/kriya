@@ -30,6 +30,7 @@ from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
 from kriya.workflow.failure_reporting import dominant_category
+from kriya.workflow.runtime_command_approval import TypedApprovalCallback
 from kriya.workflow.workflow_controller import WorkflowController
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,8 @@ def kup_stdio(ctx: click.Context) -> None:
 @click.option('--review-id', required=True, help='The pending review being decided (from launch.status).')
 @click.option('--candidate-digest', required=True, help='The digest of the change under review (from launch.status).')
 @click.option('--decision', required=True, type=click.Choice(['approve', 'reject']))
-def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decision: str) -> None:
+@click.option('--kind', default='change_approval', type=click.Choice(['change_approval', 'runtime_command']), help='Which review this decision is for; refused for a review of the other kind.')
+def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decision: str, kind: str) -> None:
     """The typed approval action of the desktop host: record ONE human decision for the change review that is pending in this folder's launch.
 
     The folder is the working directory (like `generate`). Prints one JSON object on stdout; exit 0 only when the decision was accepted. The waiting
@@ -212,7 +214,7 @@ def launch_decision(launch_id: str, review_id: str, candidate_digest: str, decis
     from kriya.control.launch_approval import ApprovalRefused, decide
 
     try:
-        result = decide(os.getcwd(), launch_id, review_id, candidate_digest, decision)
+        result = decide(os.getcwd(), launch_id, review_id, candidate_digest, decision, kind)
     except ApprovalRefused as refusal:
         click.echo(json.dumps({"accepted": False, "code": refusal.code, "message": refusal.message}, sort_keys=True))
         sys.exit(2)
@@ -3057,6 +3059,21 @@ def _approval_decision(files: List[Dict[str, str]], reason: str, yes: bool) -> A
     return click.confirm("\nDo you approve applying these changes to the codebase?")
 
 
+def _runtime_command_decision(subject: Any, yes: bool) -> Any:
+    """The `kriya generate` answer to a RUNTIME-COMMAND review (a subject distinct from a source change). Inside a desktop launch it is held as a typed pending review and the awaitable
+    that resolves to the human's decision is returned; a launch that cannot hold the review declines (recorded as approval required). Outside a launch it is the terminal behaviour,
+    unchanged (the same prompt text, `--yes`)."""
+    from kriya.control.launch import note_approval_required, request_runtime_command_approval
+    from kriya.workflow.runtime_command_approval import RuntimeCommandDecision
+
+    awaiting = request_runtime_command_approval(subject)
+    if awaiting is not None:
+        return awaiting
+    if note_approval_required("runtime_command", subject.reason, {"commands": [" ".join(c) for c in subject.commands][:10]}):
+        return RuntimeCommandDecision(None)
+    return RuntimeCommandDecision(subject.fingerprint if _approval_decision([], subject.reason, yes) else None)
+
+
 def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                    resume, resume_id, json_output, from_milestones, output, acceptance=None,
                    acceptance_approval=None, requirements_file=None, verification_authority=None,
@@ -3194,8 +3211,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         click.echo(token, nl=False)
         sys.stdout.flush()
 
-    def on_approval(files: List[Dict[str, str]], reason: str) -> Any:
+    def on_change_approval(files: List[Dict[str, str]], reason: str) -> Any:
         return _approval_decision(files, reason, yes)
+
+    on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes))
 
     def on_skill_gap(reason: str, skill_names: List[str]) -> Optional[str]:
         from kriya.control.launch import (

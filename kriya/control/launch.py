@@ -154,13 +154,7 @@ class LaunchSession:
     def request_change_approval(self, files: List[Dict[str, str]], reason: str) -> Optional[Awaitable[bool]]:
         """The change gate asked for a human decision. Record the exact pending review durably (bound to this launch, workspace and candidate) and return the
         awaitable that resolves to the human's decision (see kriya/control/launch_approval.py). None = no review could be recorded: the caller declines."""
-        from kriya.control.launch_approval import (
-            HISTORY_MAX,
-            STATUS_EXPIRED,
-            STATUS_PENDING,
-            await_decision,
-            build_pending,
-        )
+        from kriya.control.launch_approval import await_decision, build_pending
 
         if not files:
             return None
@@ -171,6 +165,26 @@ class LaunchSession:
         if not self._store_review_diff(pending, files):
             self._review_sequence -= 1
             return None
+        if not self._install_pending(pending):
+            return None
+        return await_decision(self, pending["review_id"], pending["candidate_digest"])
+
+    def request_runtime_command_approval(self, subject: Any) -> Optional[Awaitable[Any]]:
+        """The runtime executor asked for a human decision on the exact commands it is about to run. Records the pending RUNTIME-COMMAND review (a subject distinct from a change
+        review) and returns the awaitable that resolves to a RuntimeCommandDecision. None - the caller declines - when no review could be recorded or the commands cannot be shown."""
+        from kriya.control.launch_approval import await_runtime_decision, build_pending_runtime
+
+        self._review_sequence += 1
+        pending = build_pending_runtime(self.launch_id, self._record["workspace"]["identity"], self._review_sequence, subject)
+        if pending is None or not self._install_pending(pending):
+            self._review_sequence -= 1
+            return None
+        return await_runtime_decision(self, pending["review_id"], pending["candidate_digest"])
+
+    def _install_pending(self, pending: Dict[str, Any]) -> bool:
+        """Make ``pending`` THE pending review (the previous one, if undecided, is expired into the history) and persist it; False - with the record unchanged - when it cannot be saved."""
+        from kriya.control.launch_approval import HISTORY_MAX, STATUS_EXPIRED, STATUS_PENDING
+
         previous = self._record.get("pending_approval")
         history = list(self._record.get("approval_history") or [])
         if isinstance(previous, dict):
@@ -182,8 +196,8 @@ class LaunchSession:
         except Exception as error:  # no durable pending review means nothing can be approved against it
             logger.error("Launch %s: pending review not recorded (%s: %s)", self.launch_id, type(error).__name__, error)
             self._record["pending_approval"], self._record["approval_history"] = previous, history[:-1] if isinstance(previous, dict) else history
-            return None
-        return await_decision(self, pending["review_id"], pending["candidate_digest"])
+            return False
+        return True
 
     def _store_review_diff(self, pending: Dict[str, Any], files: List[Dict[str, str]]) -> bool:
         from kriya.control.persistence import save_launch_review_diff
@@ -301,6 +315,16 @@ def request_change_approval(files: List[Dict[str, str]], reason: str) -> Optiona
         return _ACTIVE.request_change_approval(files, reason) if _ACTIVE is not None else None
     except Exception as error:  # observational: a failure to record means the caller declines
         logger.error("Launch: change review not requested (%s: %s)", type(error).__name__, error)
+        return None
+
+
+def request_runtime_command_approval(subject: Any) -> Optional[Awaitable[Any]]:
+    """For the runtime-command channel of `kriya generate`: inside a desktop launch, the awaitable that resolves to a RuntimeCommandDecision (the executor awaits it). None outside a
+    launch or when no review could be recorded."""
+    try:
+        return _ACTIVE.request_runtime_command_approval(subject) if _ACTIVE is not None else None
+    except Exception as error:  # observational: a failure to record means the caller declines
+        logger.error("Launch: runtime-command review not requested (%s: %s)", type(error).__name__, error)
         return None
 
 

@@ -47,7 +47,13 @@ REASON_MAX_CHARS = 60000
 HISTORY_MAX = 20
 
 REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABLE", "WRONG_WORKSPACE", "LAUNCH_ENDED", "LAUNCH_NOT_ACTIVE", "NOT_PENDING",
-                 "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED")
+                 "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED", "WRONG_REVIEW_KIND")
+# The two subjects a launch can hold for a human. A decision names the kind it is for, and `decide` refuses it for a review of the other kind: the change-approval action can never
+# approve a runtime-command review, nor the reverse.
+KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"
+KINDS = (KIND_CHANGE, KIND_RUNTIME)
+WORKING_DIRECTORY_KIND = "ISOLATED_WORKTREE"   # Kriya runs verification in its isolated candidate worktree, never in the project folder
+CRITERION_MAX_CHARS = 500
 
 
 class ApprovalRefused(Exception):
@@ -120,6 +126,29 @@ def build_pending(launch_id: str, workspace_identity_value: str, sequence: int, 
     }
 
 
+def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequence: int, subject: Any) -> Optional[Dict[str, Any]]:
+    """The pending RUNTIME-COMMAND review: the exact resolved commands, in order, the directory kind and the input channel, bound by ``candidate_digest`` (= the subject's command
+    fingerprint). None - the review is not offered - when the commands cannot be shown faithfully: a secret scrub that would alter any argument means what the person would read is not
+    what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do."""
+    from kriya.policy.telemetry import scrub_potential_secrets
+    from kriya.workflow.runtime_command_approval import fingerprint_of, reviewable
+
+    commands = [list(c) for c in subject.commands]
+    if not reviewable(subject) or any(scrub_potential_secrets(a) != a for c in commands for a in c):
+        return None
+    digest = fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)
+    requested = _now()
+    return {
+        "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, subject.reason), "sequence": sequence, "kind": KIND_RUNTIME,
+        "status": STATUS_PENDING, "requested_at": _stamp(requested), "expires_at": _stamp(requested + timedelta(seconds=APPROVAL_WAIT_SECONDS)),
+        "candidate_digest": digest, "command_fingerprint": digest, "unit_id": subject.unit_id,
+        "criterion": scrub_potential_secrets(subject.criterion)[:CRITERION_MAX_CHARS], "commands": commands,
+        "working_directory": subject.working_directory, "working_directory_kind": WORKING_DIRECTORY_KIND, "input_channel": subject.input_channel,
+        "stdin_present": subject.stdin_sha256 is not None, "stdin_sha256": subject.stdin_sha256, "environment_names": list(subject.environment_names),
+        "reason_sha256": _sha(subject.reason), "decision": None,
+    }
+
+
 def valid_decision_payload(payload: Optional[Dict[str, Any]], launch_id: str, review_id: str, digest: str, workspace_identity_value: str) -> bool:
     """The waiting process re-validates what the typed action wrote; a file that does not bind every identity is not a decision."""
     return (isinstance(payload, dict) and payload.get("schema") == 1 and payload.get("launch_id") == launch_id and payload.get("review_id") == review_id
@@ -133,6 +162,13 @@ async def await_decision(session: Any, review_id: str, digest: str) -> bool:
     except BaseException:  # the terminal's own cancellation (SIGINT -> KeyboardInterrupt) or a cancelled task: the review ends undecided, and the record says so
         session.resolve_review(review_id, STATUS_EXPIRED, {"decision": None, "decided_at": _stamp(_now()), "source": "interrupted"})
         raise
+
+
+async def await_runtime_decision(session: Any, review_id: str, fingerprint: str) -> Any:
+    """The runtime-command review's wait: the same durable, fail-closed decision as a change review, answered with the fingerprint the approval is bound to."""
+    from kriya.workflow.runtime_command_approval import RuntimeCommandDecision
+
+    return RuntimeCommandDecision(fingerprint if await await_decision(session, review_id, fingerprint) else None)
 
 
 async def _wait(session: Any, review_id: str, digest: str) -> bool:
@@ -162,8 +198,8 @@ async def _wait(session: Any, review_id: str, digest: str) -> bool:
         await asyncio.sleep(POLL_SECONDS)
 
 
-def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest_value: str, decision: str) -> Dict[str, Any]:
-    """The typed approval action (``kriya launch-decision``): accept ONE decision for the review that is pending right now, or refuse with a closed code."""
+def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest_value: str, decision: str, kind: str = KIND_CHANGE) -> Dict[str, Any]:
+    """The typed approval action (``kriya launch-decision``): accept ONE decision for the review of ``kind`` that is pending right now, or refuse with a closed code."""
     from kriya.control.launch import (  # launch imports this module for its session methods
         PHASE_ENDED,
         PHASE_RUNNING,
@@ -178,6 +214,8 @@ def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest
         raise ApprovalRefused("INVALID_REQUEST", "candidate digest is malformed")
     if decision not in DECISIONS:
         raise ApprovalRefused("INVALID_REQUEST", "decision must be approve or reject")
+    if kind not in KINDS:
+        raise ApprovalRefused("INVALID_REQUEST", "kind must be change_approval or runtime_command")
     workspace = canonical_workspace(workspace_path)
     try:
         record = load_launch_record(workspace, launch_id)
@@ -196,6 +234,8 @@ def decide(workspace_path: str, launch_id: str, review_id: str, candidate_digest
         raise ApprovalRefused("NOT_PENDING", "no change is waiting for review in this launch")
     if pending.get("review_id") != review_id or pending.get("candidate_digest") != candidate_digest_value:
         raise ApprovalRefused("STALE_REVIEW", "the change under review is no longer the one you were shown; review it again")
+    if pending.get("kind", KIND_CHANGE) != kind:
+        raise ApprovalRefused("WRONG_REVIEW_KIND", f"the review waiting is not a {kind.replace('_', ' ')} review; nothing was recorded")
     status = pending.get("status")
     if status != STATUS_PENDING:
         raise ApprovalRefused("REVIEW_EXPIRED" if status == STATUS_EXPIRED else "ALREADY_DECIDED", f"this review is already {str(status).lower()}")

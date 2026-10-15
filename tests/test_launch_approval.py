@@ -563,7 +563,8 @@ def test_the_cli_action_answers_json_and_exits_non_zero_when_refused(ws, monkeyp
 
 def test_the_cli_action_has_no_option_that_could_broaden_authority():
     names = {param.name for param in main.commands["launch-decision"].params}
-    assert names == {"launch_id", "review_id", "candidate_digest", "decision"}, "no -y, no always-approve, no autonomy selector"
+    # `kind` only NARROWS a decision to one subject (change or runtime command; refused for the other): it cannot broaden anything
+    assert names == {"launch_id", "review_id", "candidate_digest", "decision", "kind"}, "no -y, no always-approve, no autonomy selector"
 
 
 def test_inside_a_launch_a_change_is_held_for_review_and_everything_else_is_declined_synchronously(ws):
@@ -600,9 +601,10 @@ def test_the_generate_callback_delegates_to_the_tested_function():
 
     import kriya.cli as cli
     source = inspect.getsource(cli._generate_impl)
-    nested = source[source.index("    def on_approval("):]
-    nested = nested[: nested.index("\n    def ", 10)]
+    nested = source[source.index("    def on_change_approval("):]
+    nested = nested[: nested.index("\n    def ", 10)] if "\n    def " in nested[10:] else nested[:400]
     assert "return _approval_decision(files, reason, yes)" in nested
+    assert "on_approval = TypedApprovalCallback(on_change_approval, lambda subject: _runtime_command_decision(subject, yes))" in source   # the one typed channel for the runtime subject
 
 
 def test_only_the_change_gate_passes_a_non_empty_change_set_to_an_approval_callback():
