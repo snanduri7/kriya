@@ -3,6 +3,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderWorkspaceShell } from '../testing/harness';
+import { RECENT_RUN } from './recent_runs_helpers';
 
 const toolbar = () => screen.getByRole('banner');
 const welcome = () => screen.findByRole('main', { name: 'Welcome' });
@@ -36,7 +37,7 @@ describe('Open Folder', () => {
     const { host } = renderWorkspaceShell({ fixture: { workspace: null, choices: ['/fixture/workspace'] } });
     await openFromWelcome();
     expect(await screen.findByRole('navigation', { name: 'Destinations' })).toBeInTheDocument();
-    expect(await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 })).toBeInTheDocument();
     expect(host.workspaceCalls).toEqual(['choose', 'remember:/fixture/workspace']);
     const described = host.calls.filter((c) => c.operation === 'workspace.describe');
     expect(described).toEqual([{ operation: 'workspace.describe', workspace: '/fixture/workspace' }]);
@@ -66,7 +67,7 @@ describe('Open Folder', () => {
 
   it('cancelling while a workspace is open leaves it exactly as it was (selection included)', async () => {
     const { host, store } = renderWorkspaceShell({ fixture: { choices: [null] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     act(() => store.dispatch({ type: 'selectRun', runId: 'fx-greenfield-success' }));
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Open Folder…/ }));
@@ -85,7 +86,7 @@ describe('Open Folder', () => {
 
   it('the toolbar selector invokes the same action and lists remembered folders other than the open one', async () => {
     const { host } = renderWorkspaceShell({ fixture: { recent: ['/fixture/workspace', '/fixture/dirty'], choices: ['/fixture/empty'] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     const menu = await screen.findByRole('menu', { name: 'Workspace menu' });
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^New Project…/), expect.stringMatching(/^Open Folder…/), 'dirty', 'Close workspace']);
@@ -150,7 +151,7 @@ describe('a folder Kriya refuses', () => {
 
   it('while a workspace is open, a refused folder leaves it open and unchanged', async () => {
     const { host, store } = renderWorkspaceShell({ fixture: { choices: ['/fixture/missing'] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     act(() => store.dispatch({ type: 'selectRun', runId: 'fx-greenfield-success' }));
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Open Folder…/ }));
@@ -201,18 +202,18 @@ describe('a folder Kriya refuses', () => {
 describe('switching workspace', () => {
   it('A -> B clears the previous workspace\'s selection and runs, B -> A restores A\'s runs from Kriya (nothing carried over), and the pinned snapshot is kept', async () => {
     const { host, store } = renderWorkspaceShell({ fixture: { choices: ['/fixture/empty'], recent: ['/fixture/workspace'] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     act(() => store.dispatch({ type: 'selectRun', runId: 'fx-greenfield-success' }));
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Open Folder…/ }));
     expect(await screen.findByText('No runs yet.')).toBeInTheDocument(); // the Project page's recent runs say so quietly
     expect(store.getState().runId).toBeNull();
-    expect(screen.queryByText(/Greenfield: |Create a utility library/)).toBeNull();
+    expect(screen.queryByText(RECENT_RUN)).toBeNull();
     expect(screen.getByRole('button', { name: 'Switch workspace' }).textContent).toContain('empty');
     // back to A through the remembered list
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'workspace' }));
-    expect(await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 })).toBeInTheDocument();
     expect(store.getState().runId).toBeNull();
     const lists = host.calls.filter((c) => c.operation === 'history.list').map((c) => (c as { workspace?: string }).workspace);
     expect(lists).toEqual(expect.arrayContaining(['/fixture/workspace', '/fixture/empty']));
@@ -222,7 +223,7 @@ describe('switching workspace', () => {
 
   it('Close workspace returns to the welcome screen and keeps the remembered folders', async () => {
     const { host } = renderWorkspaceShell({ fixture: { recent: ['/fixture/workspace'] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Close workspace' }));
     const main = await welcome();
@@ -234,7 +235,7 @@ describe('switching workspace', () => {
 describe('the Project page lives in the registry like any module', () => {
   it('shows the pinned snapshot beside Kriya\'s facts, and the identity as a prefix with the whole value on hover', async () => {
     renderWorkspaceShell({ fixture: { choices: [] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     goTo('Project');
     const panel = (await screen.findByRole('heading', { name: 'About this project' })).closest('section')!;
     expect(panel.textContent).toMatch(/Pinned snapshot\s*2026/);
@@ -245,7 +246,7 @@ describe('the Project page lives in the registry like any module', () => {
 describe('same-named folders are told apart where the name alone would be ambiguous', () => {
   it('the toolbar list adds the parent folder only for a duplicate name', async () => {
     renderWorkspaceShell({ fixture: { recent: ['/fixture/workspace', '/other/dirty', '/fixture/dirty', '/fixture/empty'] } });
-    await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 });
+    await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
     const menu = await screen.findByRole('menu', { name: 'Workspace menu' });
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/^New Project…/), expect.stringMatching(/^Open Folder…/), 'dirty — other', 'dirty — fixture', 'empty', 'Close workspace']);

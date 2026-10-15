@@ -3,13 +3,14 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderWorkspaceShell } from '../testing/harness';
+import { openGreenfieldFromAllRuns } from './recent_runs_helpers';
 
 const goTo = (name: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Destinations' })).getByRole('button', { name }));
 const asked = (host: { calls: Array<{ operation: string }> }, op: string) => host.calls.filter((c) => c.operation === op).length;
 
 async function openRun(fixture = {}) {
   const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', evidenceContent: true, ...fixture } });
-  fireEvent.click(await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 }));
+  await openGreenfieldFromAllRuns();
   return mounted;
 }
 

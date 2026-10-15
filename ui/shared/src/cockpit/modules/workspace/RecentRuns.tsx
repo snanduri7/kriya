@@ -1,6 +1,6 @@
 import { RUN_DOCUMENTS_PAGE, RunCardView, toAvailability, useAsync, useDispatch, useExecution, useNavigate, useProvider, useSession, useWorkspacePath } from '../../core';
 
-const SHOWN = 5;
+const SHOWN = 3;   // a compact shortcut (Demo V2): the current run stays dominant; everything else is one click away under "View all runs"
 
 
 /** The last few runs recorded for this folder (Kriya's own list, read from the pinned snapshot). It is a shortcut to Runs, never a place to start work. */
@@ -36,7 +36,7 @@ export function RecentRuns() {
           ))}
         </ul>
       )}
-      <button type="button" className="ck-link" onClick={() => go(RUN_DOCUMENTS_PAGE)}>All runs</button>
+      <button type="button" className="ck-link" onClick={() => go(RUN_DOCUMENTS_PAGE)}>View all runs</button>
     </section>
   );
 }

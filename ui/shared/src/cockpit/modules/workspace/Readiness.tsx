@@ -9,7 +9,7 @@ const SOURCES: Record<string, string> = {
 const STATE_SOURCE: Record<string, string> = { env: 'KRIYA_STATE_DIR', config: 'paths.state in the configuration', default: 'Kriya default (~/.kriya/state)' };
 const AUTHORITY: Record<string, string> = {
   no_findings: 'No findings: this folder\'s configuration sets nothing only an operator may set',
-  approved: 'Operator-only fields are present and covered by a durable approval',
+  approved: 'Operator-only fields are present and covered by a durable approval',   // exact diagnostics: shown under Technical details only
   refused: 'Needs approval: operator-controlled settings have not been approved yet',
   failed: 'The configuration could not be loaded',
 };
@@ -97,6 +97,41 @@ export function preflightBody(state: PreflightState) {
     case 'ready': return <PreflightSummary data={state.data} />;
     default: return null;
   }
+}
+
+/** The four facts a person needs about a project, in words (Demo V2). Each is derived from the same Kriya answer as the technical checklist; the exact authority/storage diagnostics stay under Technical details. */
+export interface ProjectFact { id: 'folder' | 'configuration' | 'git' | 'model'; label: string; status: string; tone: 'ok' | 'warn' | 'bad' | 'info' | 'neutral'; note?: string }
+export function projectFacts(pre: ExecutionPreflight, probe: Availability<ExecutionModelProbe>): ProjectFact[] {
+  const c = pre.configuration;
+  const git = pre.toolchains.tools.find((t) => t.tool === 'git');
+  const model = modelRow(probe);
+  const configuration: ProjectFact = c.status !== 'loaded' ? { id: 'configuration', label: 'Configuration', status: 'Could not be loaded', tone: 'bad' }
+    : c.authority.status === 'approved' ? { id: 'configuration', label: 'Configuration', status: 'Approved', tone: 'ok', note: 'Protected project settings are approved. Kriya will ask again if they change.' }
+    : c.authority.status === 'no_findings' ? { id: 'configuration', label: 'Configuration', status: 'Ready', tone: 'ok' }
+    : { id: 'configuration', label: 'Configuration', status: 'Needs your approval', tone: 'warn', note: 'Protected project settings have not been approved yet.' };
+  return [
+    pre.recovery.status === 'CLEAN' ? { id: 'folder', label: 'Project folder', status: 'Ready', tone: 'ok' } : { id: 'folder', label: 'Project folder', status: 'Needs recovery', tone: 'bad', note: 'The last run left the folder mid-change.' },
+    configuration,
+    git ? (git.available ? { id: 'git', label: 'Git', status: 'Ready', tone: 'ok' } : { id: 'git', label: 'Git', status: 'Unavailable', tone: 'bad' }) : { id: 'git', label: 'Git', status: 'Not reported', tone: 'neutral' },
+    model.tone === 'ok' ? { id: 'model', label: 'Model', status: 'Connected', tone: 'ok' } : model.tone === 'bad' ? { id: 'model', label: 'Model', status: model.status === 'Not reachable' ? 'Not reachable' : 'Not available', tone: 'bad' }
+      : model.status === 'Checking…' ? { id: 'model', label: 'Model', status: 'Checking…', tone: 'info' } : { id: 'model', label: 'Model', status: 'Not checked', tone: 'neutral' },
+  ];
+}
+const FACT_MARK = { ok: '✓', warn: '⚠', bad: '✕', info: '•', neutral: '○' } as const;
+
+/** Project details, primary layer: four plain lines. Everything technical is one disclosure below. */
+export function ProjectFacts({ pre, probe }: { pre: ExecutionPreflight; probe: Availability<ExecutionModelProbe> }) {
+  const facts = projectFacts(pre, probe);
+  return (
+    <ul className="ck-project-facts" aria-label="Project details summary" data-testid="project-facts">
+      {facts.map((f) => (
+        <li key={f.id} data-status={f.tone}>
+          <span aria-hidden="true">{FACT_MARK[f.tone]}</span> <span className="ck-fact-label">{f.label}</span> <span className="ck-fact-status">{f.status}</span>
+          {f.note ? <div className="muted small">{f.note}</div> : null}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function ReadinessChecklist({ pre, probe }: { pre: ExecutionPreflight; probe: Availability<ExecutionModelProbe> }) {

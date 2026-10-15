@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import css from '../design/cockpit.css?raw';
 import diffSource from '../modules/changes/DiffView.tsx?raw';
 import { renderShell, renderWorkspaceShell } from '../testing/harness';
+import { openGreenfieldFromAllRuns } from './recent_runs_helpers';
 const body = () => document.querySelector('.ck-body') as HTMLElement;
 
 describe('widths: 1536 / 1360 / 1180 / 1100', () => {
@@ -63,7 +64,7 @@ describe('accessibility', () => {
   it('status is never colour alone: badges and outcomes carry text', async () => {
     renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace' } });
     await screen.findByRole('navigation', { name: 'Destinations' });
-    fireEvent.click(await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 }));
+    await openGreenfieldFromAllRuns();
     await screen.findByLabelText('Trust strip');
     for (const badge of document.querySelectorAll('.ck-badge')) expect((badge.textContent ?? '').trim().length, (badge as HTMLElement).outerHTML).toBeGreaterThan(0);
   });

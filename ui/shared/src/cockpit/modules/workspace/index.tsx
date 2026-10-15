@@ -4,7 +4,7 @@ import { CONFIG_APPROVAL_BLOCKER } from './ConfigApproval';
 import { CurrentRun } from './CurrentRun';
 import { ProjectSetupCard } from './ProjectSetup';
 import { GoalComposer } from './GoalComposer';
-import { PreflightSummary, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
+import { PreflightSummary, ProjectFacts, ReadinessChecklist, preflightBody, summarizeReadiness } from './Readiness';
 import { RecentRuns } from './RecentRuns';
 import { useRunSetup } from './runSetup';
 import { ModelRouting, SkillsSummary, ToolsSummary } from './SetupSections';
@@ -45,8 +45,9 @@ function ProjectHome() {
       <RecentRuns />
       <details className="ck-setup" open={detailsOpen} onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}>
         <summary>Project details</summary>
-        {pre ? <ReadinessChecklist pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}
+        {pre ? <ProjectFacts pre={pre} probe={probe} /> : ex.available ? preflightBody(ex.preflight) : null}
         {ex.available ? <p><button type="button" className="ck-quiet" onClick={recheck}>Check again</button></p> : null}
+        {pre ? <details className="ck-setup" data-testid="technical-project-details"><summary>Technical details</summary><ReadinessChecklist pre={pre} probe={probe} /></details> : null}
         <details className="ck-setup"><summary>Skills{skillCount === null ? '' : ` · ${skillCount}${unverified ? ` (${unverified} unverified)` : ''}`}</summary><SkillsSummary context={context} /></details>
         <details className="ck-setup"><summary>Tools and capabilities{mcp === null ? '' : ` · ${mcp} MCP server${mcp === 1 ? '' : 's'}`}</summary><ToolsSummary context={context} /></details>
         <details className="ck-setup"><summary>Model routing</summary><ModelRouting context={context} probe={probe} /></details>

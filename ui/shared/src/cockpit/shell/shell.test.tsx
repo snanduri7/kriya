@@ -4,10 +4,11 @@ import { createCockpitRegistry } from '../composition';
 import type { ModuleDefinition } from '../core';
 import { renderShell } from '../testing/harness';
 import { INSPECTOR_COLLAPSE_AT } from './AppShell';
+import { RECENT_RUN } from './recent_runs_helpers';
 
 const GF = 'fx-greenfield-compile-retry';
 const body = () => document.querySelector('.ck-body') as HTMLElement;
-const ready = async () => { await screen.findByRole('navigation', { name: 'Destinations' }); await screen.findByText(/Greenfield: |Create a utility library/, undefined, { timeout: 3000 }).catch(() => undefined); };
+const ready = async () => { await screen.findByRole('navigation', { name: 'Destinations' }); await screen.findByText(RECENT_RUN, undefined, { timeout: 3000 }).catch(() => undefined); };
 
 describe('AppShell layout and navigation', () => {
   it('shows the Project / Runs / Skills / Tools / Settings destinations once capabilities load, lands on Project, and switches with the rail and Ctrl+number', async () => {
@@ -97,6 +98,7 @@ describe('AppShell mounts modules through the registry and the shared selection'
   it('selecting a run, a timeline node, a tab and the drawer all go through the SelectionStore', async () => {
     const { store } = renderShell();
     await ready();
+    fireEvent.click(await screen.findByRole('button', { name: 'View all runs' }));   // (the Project page's Recent runs shows only the newest three)
     fireEvent.click(await screen.findByRole('button', { name: /Create a utility library/ }));
     await waitFor(() => expect(store.getState().runId).toBe(GF));
     const tabs = await screen.findByRole('tablist', { name: 'Run documents' });

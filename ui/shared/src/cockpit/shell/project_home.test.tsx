@@ -295,3 +295,30 @@ describe('M/N and accessible names', () => {
     expect(within(s).getByRole('button', { name: 'Review' })).toBeInTheDocument();
   });
 });
+
+
+describe('Project details and Recent runs are compact and in plain words (Demo V2)', () => {
+  it('Project details lead with four plain lines; the exact authority diagnostics are one level down under Technical details', async () => {
+    await openProject();
+    const details = document.querySelector('details.ck-setup > summary')!.parentElement as HTMLDetailsElement;
+    details.open = true;
+    const facts = await screen.findByTestId('project-facts');
+    expect(Array.from(facts.querySelectorAll('li')).map((li) => (li.textContent ?? '').replace(/\s+/g, ' ').trim().split(' Protected')[0])).toEqual(
+      expect.arrayContaining(['✓ Project folder Ready', '✓ Git Ready']));
+    expect(facts.textContent).toMatch(/Configuration/);
+    expect(facts.textContent).toMatch(/Model/);
+    expect(facts.textContent).not.toMatch(/Operator-only|durable approval|fingerprint|sha256/i);
+    const technical = screen.getByTestId('technical-project-details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(within(technical).getByRole('region', { name: 'Readiness' })).toBeInTheDocument();
+  });
+
+  it('Recent runs shows at most three compact entries and "View all runs"', async () => {
+    await openProject();
+    const region = await screen.findByRole('region', { name: 'Recent runs' });
+    await waitFor(() => expect(within(region).queryAllByRole('listitem').length).toBeGreaterThan(0));
+    expect(within(region).getAllByRole('listitem').length).toBeLessThanOrEqual(3);
+    expect(within(region).getByRole('button', { name: 'View all runs' })).toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: /^All runs$/ })).toBeNull();
+  });
+});
