@@ -1,0 +1,19 @@
+{
+ "status": "EXECUTED",
+ "succeeded": true,
+ "attempt": 1,
+ "command": "mvn -e exec:java -Dexec.mainClass=hello.Main",
+ "commands": [
+  "mvn -e exec:java -Dexec.mainClass=hello.Main"
+ ],
+ "exit_code": 0,
+ "timed_out": false,
+ "stdout": {
+  "text": "[INFO] Error stacktraces are turned on.\n[INFO] Scanning for projects...\n[INFO] \n[INFO] -------------------------< hello:hello-kriya >--------------------------\n[INFO] Building Hello Kriya 1.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- exec:3.6.4:java (default-cli) @ hello-kriya ---\nHello from Kriya\n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.232 s\n[INFO] Finished at: 2026-10-15T20:09:33+05:30\n[INFO] ------------------------------------------------------------------------\n",
+  "truncated": false
+ },
+ "stderr": {
+  "text": "Picked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\n",
+  "truncated": false
+ }
+}

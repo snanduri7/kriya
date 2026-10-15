@@ -1,0 +1,25 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+  },
+  "candidate_digest": "sha256:e6e39e508d8d363acd33c85a5e2da4925e62577506b81583649d83f408e1e66e",
+  "files": [
+    {
+      "diff": "--- a/pom.xml\n+++ b/pom.xml\n@@ -0,0 +1,63 @@\n+<project xmlns=\"http://maven.apache.org/POM/4.0.0\"\n+         xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n+         xsi:schemaLocation=\"http://maven.apache.org/POM/4.0.0 \n+         http://maven.apache.org/xsd/maven-4.0.0.xsd\">\n+    <modelVersion>4.0.0</modelVersion>\n+\n+    <groupId>hello</groupId>\n+    <artifactId>hello-kriya</artifactId>\n+    <version>1.0-SNAPSHOT</version>\n+    <packaging>jar</packaging>\n+\n+    <name>Hello Kriya</name>\n+    <description>A simple Java 17 Maven application that prints \"Hello from Kriya\"</description>\n+\n+    <properties>\n+        <maven.compiler.source>17</maven.compiler.source>\n+        <maven.compiler.target>17</maven.compiler.target>\n+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>\n+    </properties>\n+\n+    <dependencies>\n+        <dependency>\n+            <groupId>org.junit.jupiter</groupId>\n+            <artifactId>junit-jupiter</artifactId>\n+            <version>5.10.0</version>\n+            <scope>test</scope>\n+        </dependency>\n+    </dependencies>\n+\n+    <build>\n+        <plugins>\n+            <plugin>\n+                <groupId>org.apache.maven.plugins</groupId>\n+                <artifactId>maven-compiler-plugin</artifactId>\n+                <version>3.11.0</version>\n+                <configuration>\n+                    <source>17</source>\n+                    <target>17</target>\n+                </configuration>\n+            </plugin>\n+\n+            <plugin>\n+                <groupId>org.apache.maven.plugins</groupId>\n+                <artifactId>maven-surefire-plugin</artifactId>\n+                <version>3.1.2</version>\n+            </plugin>\n+\n+            <plugin>\n+                <groupId>org.apache.maven.plugins</groupId>\n+                <artifactId>maven-jar-plugin</artifactId>\n+                <version>3.3.0</version>\n+                <configuration>\n+                    <archive>\n+                        <manifest>\n+                            <addClasspath>true</addClasspath>\n+                            <mainClass>hello.Main</mainClass>\n+                        </manifest>\n+                    </archive>\n+                </configuration>\n+            </plugin>\n+        </plugins>\n+    </build>\n+</project>\n",
+      "filepath": "pom.xml"
+    },
+    {
+      "diff": "--- a/src/main/java/hello/Main.java\n+++ b/src/main/java/hello/Main.java\n@@ -0,0 +1,7 @@\n+package hello;\n+\n+public class Main {\n+    public static void main(String[] args) {\n+        System.out.println(\"Hello from Kriya\");\n+    }\n+}\n",
+      "filepath": "src/main/java/hello/Main.java"
+    },
+    {
+      "diff": "--- a/src/test/java/hello/MainTest.java\n+++ b/src/test/java/hello/MainTest.java\n@@ -0,0 +1,18 @@\n+package hello;\n+\n+import org.junit.jupiter.api.Test;\n+import static org.junit.jupiter.api.Assertions.*;\n+\n+public class MainTest {\n+\n+    @Test\n+    public void testMainMethod() {\n+        // This test verifies that the Main class can be instantiated and run\n+        // without throwing any exceptions. The actual output \"Hello from Kriya\"\n+        // is printed to System.out, which we cannot easily capture in a unit test,\n+        // but we can verify the method executes successfully.\n+        assertDoesNotThrow(() -> {\n+            Main.main(new String[]{});\n+        });\n+    }\n+}\n",
+      "filepath": "src/test/java/hello/MainTest.java"
+    }
+  ],
+  "launch_id": "20261015T200748-08db1057",
+  "review_id": "ra-d999e5f335c1a56025eff96d",
+  "schema": 1,
+  "workspace_identity": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+}

@@ -1,0 +1,1512 @@
+{
+ "run_id": "43c4c2a0",
+ "timestamp": "2026-10-15 20:09:43",
+ "goal": "Create a small Java 17 Maven application named hello-kriya that\nprints \"Hello from Kriya\" and includes a unit test.\nMake the application runnable.",
+ "duration_sec": 113.15520191192627,
+ "attempts": 0,
+ "status": "success",
+ "files_modified": "pom.xml,src/main/java/hello/Main.java,src/test/java/hello/MainTest.java",
+ "retrieved_chunks": [],
+ "active_skills": "",
+ "gate_outcomes": [
+  {
+   "attempt": 1,
+   "type": "compile",
+   "success": true,
+   "output": "Maven compilation succeeded.",
+   "resources": {
+    "strategy": "jvm_heap",
+    "cpu_seconds": 240,
+    "memory_budget_mb": 4096,
+    "address_space_limit_mb": null,
+    "address_space_enforcement": null,
+    "jvm_options": [
+     "-Xmx2048m",
+     "-XX:MaxMetaspaceSize=512m",
+     "-XX:MaxDirectMemorySize=512m"
+    ]
+   }
+  },
+  {
+   "attempt": 1,
+   "type": "targeted_test",
+   "success": true,
+   "output": "[INFO] Scanning for projects...\n[INFO] \n[INFO] -------------------------< hello:hello-kriya >--------------------------\n[INFO] Building Hello Kriya 1.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- resources:3.4.0:resources (default-resources) @ hello-kriya ---\n[INFO] skip non existing resourceDirectory /Users/sriramnanduri/delete/2/HelloWorld/.kriya/worktree/src/main/resources\n[INFO] \n[INFO] --- compiler:3.11.0:compile (default-compile) @ hello-kriya ---\n[INFO] Nothing to compile - all classes are up to date\n[INFO] \n[INFO] --- resources:3.4.0:testResources (default-testResources) @ hello-kriya ---\n[INFO] skip non existing resourceDirectory /Users/sriramnanduri/delete/2/HelloWorld/.kriya/worktree/src/test/resources\n[INFO] \n[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ hello-kriya ---\n[INFO] Changes detected - recompiling the module! :source\n[INFO] Compiling 1 source file with javac [debug target 17] to target/test-classes\n[WARNING] location of system modules is not set in conjunction with -source 17\n  not setting the location of system modules may lead to class files that cannot run on JDK 17\n    --release 17 is recommended instead of -source 17 -target 17 because it sets the location of system modules automatically\n[INFO] \n[INFO] --- surefire:3.1.2:test (default-test) @ hello-kriya ---\n[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider\n[INFO] \n[INFO] -------------------------------------------------------\n[INFO]  T E S T S\n[INFO] -------------------------------------------------------\n[INFO] Running hello.MainTest\nHello from Kriya\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.023 s -- in hello.MainTest\n[INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0\n[INFO] \n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.996 s\n[INFO] Finished at: 2026-10-15T20:09:14+05:30\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\nPicked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\n",
+   "resources": {
+    "strategy": "jvm_heap",
+    "cpu_seconds": 240,
+    "memory_budget_mb": 4096,
+    "address_space_limit_mb": null,
+    "address_space_enforcement": null,
+    "jvm_options": [
+     "-Xmx2048m",
+     "-XX:MaxMetaspaceSize=512m",
+     "-XX:MaxDirectMemorySize=512m"
+    ]
+   }
+  },
+  {
+   "attempt": 1,
+   "type": "run_verification",
+   "success": true,
+   "output": "=== Runtime prerequisite: mvn clean compile (current source): PASSED ===\n\n=== Step 1/1: mvn -e exec:java -Dexec.mainClass=hello.Main ===\n[INFO] Error stacktraces are turned on.\n[INFO] Scanning for projects...\n[INFO] \n[INFO] -------------------------< hello:hello-kriya >--------------------------\n[INFO] Building Hello Kriya 1.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- exec:3.6.4:java (default-cli) @ hello-kriya ---\nHello from Kriya\n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.232 s\n[INFO] Finished at: 2026-10-15T20:09:33+05:30\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\n\n\n[Grader reasoning]: The captured output shows 'Hello from Kriya' printed to standard output, which directly matches the expected success criterion. The exit code is 0 and the build succeeds, indicating no runtime errors occurred.",
+   "graded_by": "llm",
+   "commands": [
+    [
+     "mvn",
+     "-e",
+     "exec:java",
+     "-Dexec.mainClass=hello.Main"
+    ]
+   ],
+   "steps": [
+    {
+     "command": [
+      "mvn",
+      "-e",
+      "exec:java",
+      "-Dexec.mainClass=hello.Main"
+     ],
+     "exit_code": 0,
+     "stdout": "[INFO] Error stacktraces are turned on.\n[INFO] Scanning for projects...\n[INFO] \n[INFO] -------------------------< hello:hello-kriya >--------------------------\n[INFO] Building Hello Kriya 1.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- exec:3.6.4:java (default-cli) @ hello-kriya ---\nHello from Kriya\n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.232 s\n[INFO] Finished at: 2026-10-15T20:09:33+05:30\n[INFO] ------------------------------------------------------------------------\n",
+     "stderr": "Picked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\n",
+     "timed_out": false,
+     "resources": {
+      "strategy": "jvm_heap",
+      "cpu_seconds": 240,
+      "memory_budget_mb": 4096,
+      "address_space_limit_mb": null,
+      "address_space_enforcement": null,
+      "jvm_options": [
+       "-Xmx2048m",
+       "-XX:MaxMetaspaceSize=512m",
+       "-XX:MaxDirectMemorySize=512m"
+      ]
+     }
+    }
+   ],
+   "deterministic_result": null,
+   "runtime_disposition": {
+    "deterministic": "NONE",
+    "deterministic_reason": null,
+    "semantic": "PASS",
+    "semantic_reason": "VERIFIER_CONFIRMED",
+    "final": "PASS",
+    "authority": "llm"
+   },
+   "verifier_evidence": [
+    {
+     "extraction_version": "verifier-evidence/1",
+     "model": "qwen3-coder:30b",
+     "budget_bytes": 35596,
+     "rendered_bytes": 939,
+     "rendered_chars": 939,
+     "rendered_sha256": "d3b2d1b9bdc7ec449018681bcecb821db02505383454dd8b5f381071f3ddfcaa",
+     "truncation": [],
+     "capture_truncation": [],
+     "package_truncated": false,
+     "omitted_ranges": [],
+     "included_windows": [],
+     "omitted_windows": [],
+     "decisive_windows_omitted": false,
+     "distinct_signature_overflow": 0,
+     "head_tail": [],
+     "answered": true
+    }
+   ]
+  },
+  {
+   "attempt": 1,
+   "type": "goal_spec_compliance",
+   "success": true,
+   "output": "The code satisfies all concrete requirements: it creates a Java 17 Maven application named hello-kriya with a Main class that prints 'Hello from Kriya', includes a unit test, and is runnable via the main method specified in the pom.xml."
+  },
+  {
+   "attempt": 1,
+   "type": "regression_test",
+   "success": true,
+   "output": "[INFO] Scanning for projects...\n[INFO] \n[INFO] -------------------------< hello:hello-kriya >--------------------------\n[INFO] Building Hello Kriya 1.0-SNAPSHOT\n[INFO]   from pom.xml\n[INFO] --------------------------------[ jar ]---------------------------------\n[INFO] \n[INFO] --- resources:3.4.0:resources (default-resources) @ hello-kriya ---\n[INFO] skip non existing resourceDirectory /Users/sriramnanduri/delete/2/HelloWorld/.kriya/worktree/src/main/resources\n[INFO] \n[INFO] --- compiler:3.11.0:compile (default-compile) @ hello-kriya ---\n[INFO] Nothing to compile - all classes are up to date\n[INFO] \n[INFO] --- resources:3.4.0:testResources (default-testResources) @ hello-kriya ---\n[INFO] skip non existing resourceDirectory /Users/sriramnanduri/delete/2/HelloWorld/.kriya/worktree/src/test/resources\n[INFO] \n[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ hello-kriya ---\n[INFO] Changes detected - recompiling the module! :source\n[INFO] Compiling 1 source file with javac [debug target 17] to target/test-classes\n[WARNING] location of system modules is not set in conjunction with -source 17\n  not setting the location of system modules may lead to class files that cannot run on JDK 17\n    --release 17 is recommended instead of -source 17 -target 17 because it sets the location of system modules automatically\n[INFO] \n[INFO] --- surefire:3.1.2:test (default-test) @ hello-kriya ---\n[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider\n[INFO] \n[INFO] -------------------------------------------------------\n[INFO]  T E S T S\n[INFO] -------------------------------------------------------\n[INFO] Running hello.MainTest\nHello from Kriya\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.024 s -- in hello.MainTest\n[INFO] \n[INFO] Results:\n[INFO] \n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0\n[INFO] \n[INFO] ------------------------------------------------------------------------\n[INFO] BUILD SUCCESS\n[INFO] ------------------------------------------------------------------------\n[INFO] Total time:  0.926 s\n[INFO] Finished at: 2026-10-15T20:09:42+05:30\n[INFO] ------------------------------------------------------------------------\n\nPicked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\nPicked up JAVA_TOOL_OPTIONS: -Xmx2048m -XX:MaxMetaspaceSize=512m -XX:MaxDirectMemorySize=512m\n",
+   "resources": {
+    "strategy": "jvm_heap",
+    "cpu_seconds": 240,
+    "memory_budget_mb": 4096,
+    "address_space_limit_mb": null,
+    "address_space_enforcement": null,
+    "jvm_options": [
+     "-Xmx2048m",
+     "-XX:MaxMetaspaceSize=512m",
+     "-XX:MaxDirectMemorySize=512m"
+    ]
+   }
+  }
+ ],
+ "model_hops": [
+  "qwen3-coder:30b"
+ ],
+ "failure_category": null,
+ "milestone_group_id": null,
+ "milestone_index": null,
+ "milestone_total": null,
+ "run_events": [
+  {
+   "kind": "egress.authority",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "configured outbound-network authority",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "decisions": [
+     {
+      "channel": "model_endpoint",
+      "capability": "explicit_destinations",
+      "allowed": true,
+      "authority_source": "llm.base_url",
+      "destinations": [
+       "http://localhost:11434/v1"
+      ],
+      "reason": "egress_policy local_only: loopback/private endpoints only"
+     },
+     {
+      "channel": "model_endpoint",
+      "capability": "explicit_destinations",
+      "allowed": true,
+      "authority_source": "llm_chain[0].base_url",
+      "destinations": [
+       "http://localhost:11434/v1"
+      ],
+      "reason": "egress_policy local_only: loopback/private endpoints only"
+     },
+     {
+      "channel": "model_endpoint",
+      "capability": "explicit_destinations",
+      "allowed": true,
+      "authority_source": "embedding.base_url",
+      "destinations": [
+       "http://localhost:11434/v1"
+      ],
+      "reason": "egress_policy local_only: loopback/private endpoints only"
+     },
+     {
+      "channel": "registry_metadata",
+      "capability": "approved_public_knowledge",
+      "allowed": true,
+      "authority_source": "knowledge.offline_mode (fixed platform registry hosts)",
+      "destinations": [
+       "search.maven.org",
+       "pypi.org",
+       "registry.npmjs.org",
+       "rubygems.org",
+       "proxy.golang.org",
+       "crates.io",
+       "api.nuget.org"
+      ],
+      "reason": "KnowledgeGuard release-date lookups for libraries named in the goal"
+     },
+     {
+      "channel": "web_lookup",
+      "capability": "denied",
+      "allowed": false,
+      "authority_source": "autonomy.web_lookup_enabled + search.base_url",
+      "destinations": [],
+      "reason": "live lookup disabled"
+     },
+     {
+      "channel": "verification_execution",
+      "capability": "unrestricted",
+      "allowed": true,
+      "authority_source": "autonomy.contained_execution_required",
+      "destinations": [],
+      "reason": "host execution has the host's network",
+      "containment": {
+       "required": false,
+       "backend": "none"
+      }
+     },
+     {
+      "channel": "dependency_acquisition",
+      "capability": "unrestricted",
+      "allowed": true,
+      "authority_source": "autonomy.contained_execution_required (host execution)",
+      "destinations": [],
+      "reason": "host execution has the host's network",
+      "containment": {
+       "required": false,
+       "backend": "none"
+      }
+     },
+     {
+      "channel": "shell_tool",
+      "capability": "unrestricted",
+      "allowed": true,
+      "authority_source": "autonomy.shell_network",
+      "destinations": [],
+      "reason": "privileged: shell commands keep the network of their execution environment",
+      "containment": {
+       "required": false,
+       "backend": "none"
+      }
+     }
+    ]
+   },
+   "created_at": 1792075069.714008
+  },
+  {
+   "kind": "evidence.attempt_store",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "attempt evidence store",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "run_id": "20261015T200748-08db1057",
+    "status": "OPEN",
+    "capture": "full",
+    "seq_at_row": 4,
+    "path": "/Users/sriramnanduri/.kriya/state/attempt-evidence/20261015T200748-08db1057"
+   },
+   "created_at": 1792075069.714699
+  },
+  {
+   "kind": "model.runtime",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "primary model runtime identity",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "fingerprint": {
+     "alias": "qwen3-coder:30b",
+     "endpoint": "http://localhost:11434/v1",
+     "provider": "ollama",
+     "provider_version": "0.40.4",
+     "artifact_digest": "sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca",
+     "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a",
+     "model_format": "gguf",
+     "family": "qwen3moe",
+     "parameter_size": "30.5B",
+     "quantization": "Q4_K_M",
+     "chat_template": "renderer:qwen3-coder",
+     "tool_call_parser": "parser:qwen3-coder",
+     "tokenizer_identity": "gpt2/qwen2",
+     "tokenizer_digest": "sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b",
+     "runtime_parameters_digest": "sha256:da6082e309c09dfcf08f90fdfb26a8501f12e1f264aaae681b29fd2579c9d28b",
+     "served_capabilities": [
+      "completion",
+      "tools"
+     ],
+     "server_parameters": [
+      "repeat_penalty 1.05",
+      "stop \"<|endoftext|>\"",
+      "stop \"<|im_end|>\"",
+      "stop \"<|im_start|>\"",
+      "temperature 0.7",
+      "top_k 20",
+      "top_p 0.8"
+     ],
+     "model_context_length": 262144,
+     "configured_context_window": 32768,
+     "effective_context_window": null,
+     "kriya_protocol": "capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0",
+     "adapter_version": "kriya-openai-compat/3",
+     "schema_version": 1,
+     "digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+     "exact": true,
+     "missing_components": [
+      "effective_context_window"
+     ],
+     "probe_errors": []
+    },
+    "developer_qualification": {
+     "status": "MISSING",
+     "fingerprint_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+     "missing": [
+      "plain_completion",
+      "finish_reason_stop",
+      "output_truncation",
+      "reasoning_behavior",
+      "endpoint_error_semantics",
+      "over_context_refusal",
+      "full_file_raw_content",
+      "anchored_edit_protocol",
+      "malformed_output_recovery",
+      "native_tool_calls",
+      "multiple_tool_calls",
+      "tool_argument_integrity",
+      "structured_json",
+      "streaming_assembly"
+     ],
+     "failed": [],
+     "reasons": [
+      "no qualification record for this exact runtime and inference settings"
+     ]
+    }
+   },
+   "created_at": 1792075069.870304
+  },
+  {
+   "kind": "model.role_independence",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "role to exact-runtime assignment",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "roles": {
+     "architect": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "developer": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "planner": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "reviewer": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "run_verifier": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "skill_gap": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     },
+     "spec_compliance": {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true
+     }
+    },
+    "groups": [
+     {
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "identity": "exact",
+      "roles": [
+       "architect",
+       "developer",
+       "planner",
+       "reviewer",
+       "run_verifier",
+       "skill_gap",
+       "spec_compliance"
+      ]
+     }
+    ],
+    "independent_roles_required": [],
+    "violations": [],
+    "second_opinion_is_verification": false
+   },
+   "created_at": 1792075069.871414
+  },
+  {
+   "kind": "requirement.derived",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "2 original requirement(s): REQ-1, REQ-2",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "version": 1,
+    "goal_digest": "a8b454343fe813c5b4b5d070c864514e39e400d1713448eb34f6fdfe2aaa7297",
+    "digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "requirements": [
+     {
+      "id": "REQ-1",
+      "text": "Create a small Java 17 Maven application named hello-kriya that prints \"Hello from Kriya\" and includes a unit test.",
+      "kind": "requirement",
+      "source": "goal",
+      "ordinal": 1
+     },
+     {
+      "id": "REQ-2",
+      "text": "Make the application runnable.",
+      "kind": "requirement",
+      "source": "goal",
+      "ordinal": 2
+     }
+    ]
+   },
+   "created_at": 1792075069.9038541
+  },
+  {
+   "kind": "verification_contract.compiled",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "verification contract c6ff4be62283: VERIFICATION_AUTHORITY_REQUIRED; requirements=2, non_claim=0, closable=0, authority_required=2, ambiguous=0, dispositioned=0, residual_claims=2",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "format": "kriya.verification_contract/1",
+    "contract_digest": "c6ff4be622831ab287c8e95f52ac8c498c517eaf3ab54861426a02a24f26761b",
+    "goal_digest": "a8b454343fe813c5b4b5d070c864514e39e400d1713448eb34f6fdfe2aaa7297",
+    "requirement_set_digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "base_revision": null,
+    "project_language": null,
+    "totals": {
+     "requirements": 2,
+     "non_claim": 0,
+     "closable": 0,
+     "authority_required": 2,
+     "ambiguous": 0,
+     "dispositioned": 0,
+     "residual_claims": 2
+    },
+    "requirements": [
+     {
+      "id": "REQ-1",
+      "text": "Create a small Java 17 Maven application named hello-kriya that prints \"Hello from Kriya\" and includes a unit test.",
+      "origin": "sentence",
+      "scopes": [
+       "TEST_ADDITION",
+       "BEHAVIOR"
+      ],
+      "claims": [
+       "TEST_ADDITION",
+       "BEHAVIOR"
+      ],
+      "strength": "GENERAL",
+      "closers": [
+       "test_addition"
+      ],
+      "authorities": [
+       "repository"
+      ],
+      "status": "AUTHORITY_REQUIRED",
+      "residual": [
+       {
+        "claim": "BEHAVIOR",
+        "strength": "GENERAL",
+        "why": "a general behaviour statement (no concrete example case is stated): finite cases never prove it (B2-COV), model judgment never closes it",
+        "acceptable_authorities": [
+         "external_acceptance_command (reference or property oracle)",
+         "acceptance_approval (B3: an operator-approved acceptance suite)",
+         "authoritative acceptance test (an acceptance file plus approval)"
+        ]
+       }
+      ],
+      "ambiguity": null,
+      "disposition": null,
+      "dispositioned_claims": []
+     },
+     {
+      "id": "REQ-2",
+      "text": "Make the application runnable.",
+      "origin": "sentence",
+      "scopes": [
+       "BEHAVIOR"
+      ],
+      "claims": [
+       "BEHAVIOR"
+      ],
+      "strength": "GENERAL",
+      "closers": [],
+      "authorities": [],
+      "status": "AUTHORITY_REQUIRED",
+      "residual": [
+       {
+        "claim": "BEHAVIOR",
+        "strength": "GENERAL",
+        "why": "a general behaviour statement (no concrete example case is stated): finite cases never prove it (B2-COV), model judgment never closes it",
+        "acceptable_authorities": [
+         "external_acceptance_command (reference or property oracle)",
+         "acceptance_approval (B3: an operator-approved acceptance suite)",
+         "authoritative acceptance test (an acceptance file plus approval)"
+        ]
+       }
+      ],
+      "ambiguity": null,
+      "disposition": null,
+      "dispositioned_claims": []
+     }
+    ],
+    "authorities": [],
+    "visibility": {},
+    "dispositions": null,
+    "admission": "VERIFICATION_AUTHORITY_REQUIRED"
+   },
+   "created_at": 1792075069.9049752
+  },
+  {
+   "kind": "verification_contract.sealed",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "authoritative",
+   "message": "verification contract c6ff4be62283 sealed before the first model call",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "digest": "c6ff4be622831ab287c8e95f52ac8c498c517eaf3ab54861426a02a24f26761b",
+    "stored_path": "/Users/sriramnanduri/.kriya/state/verification-contracts/c6ff4be622831ab287c8e95f52ac8c498c517eaf3ab54861426a02a24f26761b.json",
+    "admission": "VERIFICATION_AUTHORITY_REQUIRED",
+    "totals": {
+     "requirements": 2,
+     "non_claim": 0,
+     "closable": 0,
+     "authority_required": 2,
+     "ambiguous": 0,
+     "dispositioned": 0,
+     "residual_claims": 2
+    },
+    "authorities": [],
+    "visibility": {},
+    "dispositions": null
+   },
+   "created_at": 1792075069.9075358
+  },
+  {
+   "kind": "requirement.lineage",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "plan cites ['REQ-1', 'REQ-2']; omitted (still active) []",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "stage": "plan",
+    "requirement_set_digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "cited": [
+     "REQ-1",
+     "REQ-2"
+    ],
+    "omitted": []
+   },
+   "created_at": 1792075101.870431
+  },
+  {
+   "kind": "requirement.lineage",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "design cites []; omitted (still active) ['REQ-1', 'REQ-2']",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "stage": "design",
+    "requirement_set_digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "cited": [],
+    "omitted": [
+     "REQ-1",
+     "REQ-2"
+    ]
+   },
+   "created_at": 1792075104.631165
+  },
+  {
+   "kind": "validation_baseline.policy",
+   "attempt": 0,
+   "source": "workflow.run_generation_workflow",
+   "authority": "auxiliary",
+   "message": "brownfield full-regression baseline: auto -> disabled",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "configured": "auto",
+    "effective": "disabled",
+    "auto_decision": {
+     "required": false,
+     "reasons": [
+      "route milestone is not a brownfield change"
+     ],
+     "signals": {}
+    }
+   },
+   "created_at": 1792075104.652208
+  },
+  {
+   "kind": "attempt.started",
+   "attempt": 1,
+   "source": "workflow",
+   "authority": "advisory",
+   "message": "",
+   "failure_type": null,
+   "operation": "create_full_file",
+   "details": {
+    "mode": "full_set"
+   },
+   "created_at": 1792075104.8099918
+  },
+  {
+   "kind": "context.retry_target_source",
+   "attempt": 1,
+   "source": "attempt._prepare_retry_context",
+   "authority": "advisory",
+   "message": "Retry-time source provenance resolved for this attempt's implicated target(s).",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "mode": "full_set",
+    "targets": []
+   },
+   "created_at": 1792075104.814229
+  },
+  {
+   "kind": "retry.progress_decision",
+   "attempt": 1,
+   "source": "attempt._prepare_retry_context",
+   "authority": "advisory",
+   "message": "Retry evidence progressed since the last attempt.",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "mode": "full_set",
+    "model": "qwen3-coder:30b",
+    "request_profile": "bfd022c5dbdd157005297bbad297fe1f13003c4be5cc316a19edba71dd5eaaa4",
+    "target_files": [],
+    "no_progress": false,
+    "sampling_resample": false,
+    "fingerprint_hash": "e95ec194df8d282df8b5ffe14704b58f0730bc4250259c391b5639e2f1ead790"
+   },
+   "created_at": 1792075104.8179479
+  },
+  {
+   "kind": "context.known_target_package",
+   "attempt": 1,
+   "source": "attempt.run_attempt",
+   "authority": "advisory",
+   "message": "Known-target context package built for the attempt-1 owner-contract replacement.",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "known_target_files": [
+     "pom.xml",
+     "src/main/java/hello/Main.java",
+     "src/test/java/hello/MainTest.java"
+    ],
+    "unit_count": 0,
+    "tiers": [],
+    "omitted": [
+     {
+      "path": "pom.xml",
+      "rank": 1,
+      "reason": "source_unavailable",
+      "estimated_tokens": 0
+     },
+     {
+      "path": "src/main/java/hello/Main.java",
+      "rank": 2,
+      "reason": "source_unavailable",
+      "estimated_tokens": 0
+     },
+     {
+      "path": "src/test/java/hello/MainTest.java",
+      "rank": 3,
+      "reason": "source_unavailable",
+      "estimated_tokens": 0
+     }
+    ],
+    "package_hash": "b1e2be3dbc8c19534902878e3f46cb2bc1d62b947317fc358243a4f637a274da",
+    "member_hint_paths": []
+   },
+   "created_at": 1792075104.8189282
+  },
+  {
+   "kind": "model.transition",
+   "attempt": 1,
+   "source": "attempt._run_developer_generation",
+   "authority": "advisory",
+   "message": "Developer request profile for qwen3-coder:30b",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "initial": true,
+    "fallback": false,
+    "from": null,
+    "to": {
+     "model": "qwen3-coder:30b",
+     "endpoint": "http://localhost:11434/v1",
+     "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+     "runtime_exact": true,
+     "qualification": "MISSING",
+     "failed_cases": [],
+     "capability_source": "explicit_primary",
+     "native_tool_calls": true,
+     "json_mode": true,
+     "reliable_multiline_json": false,
+     "streaming": true,
+     "edit_protocol": "small_native_tools",
+     "reasoning": false,
+     "context_window": 32768,
+     "allocation_window": 10060,
+     "output_tokens": 16384,
+     "context_policy": "adaptive",
+     "retry_inference_settings_digest": null,
+     "retry_qualification": null,
+     "digest": "bfd022c5dbdd157005297bbad297fe1f13003c4be5cc316a19edba71dd5eaaa4"
+    },
+    "changes": {
+     "model": {
+      "from": null,
+      "to": "qwen3-coder:30b"
+     },
+     "endpoint": {
+      "from": null,
+      "to": "http://localhost:11434/v1"
+     },
+     "runtime_digest": {
+      "from": null,
+      "to": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58"
+     },
+     "runtime_exact": {
+      "from": null,
+      "to": true
+     },
+     "qualification": {
+      "from": null,
+      "to": "MISSING"
+     },
+     "failed_cases": {
+      "from": null,
+      "to": []
+     },
+     "capability_source": {
+      "from": null,
+      "to": "explicit_primary"
+     },
+     "native_tool_calls": {
+      "from": null,
+      "to": true
+     },
+     "json_mode": {
+      "from": null,
+      "to": true
+     },
+     "reliable_multiline_json": {
+      "from": null,
+      "to": false
+     },
+     "streaming": {
+      "from": null,
+      "to": true
+     },
+     "edit_protocol": {
+      "from": null,
+      "to": "small_native_tools"
+     },
+     "reasoning": {
+      "from": null,
+      "to": false
+     },
+     "context_window": {
+      "from": null,
+      "to": 32768
+     },
+     "allocation_window": {
+      "from": null,
+      "to": 10060
+     },
+     "output_tokens": {
+      "from": null,
+      "to": 16384
+     },
+     "context_policy": {
+      "from": null,
+      "to": "adaptive"
+     },
+     "retry_inference_settings_digest": {
+      "from": null,
+      "to": null
+     },
+     "retry_qualification": {
+      "from": null,
+      "to": null
+     }
+    }
+   },
+   "created_at": 1792075104.8225589
+  },
+  {
+   "kind": "developer.prompt_composition",
+   "attempt": 1,
+   "source": "developer",
+   "authority": "advisory",
+   "message": "Developer prompt composition (estimated per section; provider-reported total).",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "t0_member_tokens": 0,
+    "t0_header_tokens": 0,
+    "sibling_signatures_tokens": 0,
+    "t1_tokens": 0,
+    "t2_tokens": 0,
+    "t3_tokens": 0,
+    "skills_tokens": 22,
+    "code_context_tokens": 97,
+    "prompt_tokens_reported": 2944,
+    "prefill_seconds": null,
+    "load_seconds": null,
+    "prefix_shared_tokens": 34,
+    "prefix_break": "system",
+    "token_counts": "estimated (len/4) per section; total as reported by the provider"
+   },
+   "created_at": 1792075125.268716
+  },
+  {
+   "kind": "generation.completed",
+   "attempt": 1,
+   "source": "developer",
+   "authority": "advisory",
+   "message": "Developer generation completed for 3 file(s) in 20.44s.",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "duration_seconds": 20.443997415946797,
+    "file_count": 3,
+    "model": "qwen3-coder:30b",
+    "model_use": {
+     "status": "OK",
+     "model": "qwen3-coder:30b",
+     "runtime_fingerprint": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+     "runtime_fingerprint_exact": true,
+     "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+     "protocol": {
+      "json_mode": false,
+      "json_schema": false,
+      "streaming": true,
+      "tools": false,
+      "reasoning_model": false,
+      "response_format_dropped": false,
+      "empty_content_floor_retry": false,
+      "provider_contract": {
+       "adapter": "ollama",
+       "settings": {
+        "context_window": {
+         "effective": null,
+         "provenance": "unverified",
+         "requested": 32768
+        },
+        "min_p": {
+         "effective": null,
+         "provenance": "unverified"
+        },
+        "presence_penalty": {
+         "effective": null,
+         "provenance": "unverified"
+        },
+        "reasoning": {
+         "effective": "none",
+         "provenance": "request"
+        },
+        "repeat_penalty": {
+         "effective": 1.05,
+         "provenance": "server_model_config"
+        },
+        "temperature": {
+         "effective": 0.7,
+         "provenance": "request"
+        },
+        "top_k": {
+         "effective": 20,
+         "provenance": "server_model_config"
+        },
+        "top_p": {
+         "effective": 0.8,
+         "provenance": "request"
+        }
+       },
+       "context": {
+        "requested_context_window": 32768,
+        "served_context_window": 65536,
+        "served_context_provenance": "server_observed",
+        "budget_context_window": 32768
+       },
+       "timeout_seconds": {
+        "connect": 10.0,
+        "read": 900.0
+       },
+       "inference_deadline_bound": false,
+       "deadline": {
+        "deadline_bound": false,
+        "deadline_source": null,
+        "configured_transport_timeout_ms": 900000,
+        "effective_request_timeout_ms": 900000,
+        "elapsed_request_ms": 5618
+       },
+       "sdk_max_retries": 0,
+       "proxy_policy": "direct",
+       "served_context_observation": {
+        "status": "observed",
+        "window": 65536,
+        "reason": null
+       },
+       "served_context_window_after_call": 65536,
+       "prompt_tokens_reported": 2944,
+       "dispatched_bytes": 11308,
+       "prompt_consumption": "consistent"
+      }
+     },
+     "reasoning_present": false,
+     "reasoning_chars": 0,
+     "reasoning_source": null,
+     "tool_call_count": 0,
+     "tool_call_sources": [],
+     "finish_reason": "stop",
+     "prompt_tokens": 2944,
+     "completion_tokens": 143,
+     "tokens_estimated": false,
+     "elapsed_seconds": 5.619,
+     "parser_status": "not_applicable",
+     "backend_status": "ok",
+     "backend_error": null,
+     "max_tokens": 16384,
+     "output_truncated": false,
+     "content_chars": 650,
+     "provider_metadata": {
+      "id": "chatcmpl-638",
+      "model": "qwen3-coder:30b",
+      "system_fingerprint": "fp_ollama"
+     },
+     "prefix_reuse": {
+      "prefix_shared_chars": 137,
+      "prefix_break": "system"
+     },
+     "budget": {
+      "prompt_tokens": 5205,
+      "exact": false,
+      "approximate": true,
+      "counting_method": "default_byte_bound",
+      "context_window": 32768,
+      "window_source": "served_observed",
+      "requested_max_tokens": 16384,
+      "max_tokens": 16384,
+      "min_output_tokens": 1024,
+      "reasoning_allowance": 0,
+      "satisfiable": true,
+      "output_reduced": false,
+      "policy_mode": "adaptive",
+      "preferred_context_window": 32768,
+      "preferred_output_tokens": 16384,
+      "selected_context_window": 32768,
+      "selected_output_tokens": 16384,
+      "required_tokens": 6485,
+      "expected_output_tokens": null,
+      "output_grounding": null,
+      "context_expanded": false,
+      "output_expanded": false,
+      "selection_reason": "fits_preferred",
+      "qualification_source": "preferred",
+      "hard_context_ceiling": 262144,
+      "hard_output_ceiling": null,
+      "safety_margin": 256,
+      "context_state": {
+       "requested_context_window": 32768,
+       "served_context_window": 65536,
+       "served_context_provenance": "server_observed",
+       "budget_context_window": 32768
+      },
+      "reasoning_reserve_source": null,
+      "considered_tiers": [
+       {
+        "tokens": 32768,
+        "source": "preferred",
+        "room": 27307,
+        "fits": true
+       }
+      ],
+      "tier_note": "",
+      "reported_prompt_tokens": 2944,
+      "under_predicted": false
+     }
+    }
+   },
+   "created_at": 1792075125.269465
+  },
+  {
+   "kind": "static_analysis.result",
+   "attempt": 1,
+   "source": "static_analysis_gate",
+   "authority": "authoritative",
+   "message": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "outcome": "DISABLED",
+    "requirement": "optional",
+    "permits_commit": true,
+    "accepted_risk": false,
+    "reason_codes": [
+     "STATIC_ANALYSIS_NOT_CONFIGURED"
+    ],
+    "waiver_ids": [],
+    "banner": "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)",
+    "summary": null,
+    "coverage": null,
+    "provider": null,
+    "evidence_digest": "eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18",
+    "evidence_path": null
+   },
+   "created_at": 1792075126.3293471
+  },
+  {
+   "kind": "approval.decision",
+   "attempt": 1,
+   "source": "workflow.approval_gate",
+   "authority": "authoritative",
+   "message": "human approval: approved",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "outcome": "approved",
+    "triggers": [
+     "human_in_the_loop"
+    ]
+   },
+   "created_at": 1792075149.965674
+  },
+  {
+   "kind": "requirement.verdicts",
+   "attempt": 1,
+   "source": "attempt.goal_spec_compliance",
+   "authority": "advisory",
+   "message": "original requirement outcomes: REQ-1=unverified(VERIFIER_CONFIRMED), REQ-2=unverified(VERIFIER_CONFIRMED)",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "requirement_set_digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "evidence_id": "d7156b3badf78d7d0f3c7afb26346b9df362aa2011cf0a6976b1c30f698c1515",
+    "outcomes": {
+     "REQ-1": "unverified",
+     "REQ-2": "unverified"
+    },
+    "evidence": {
+     "REQ-1": "Main class exists in src/main/java/hello/Main.java with main method printing 'Hello from Kriya'; unit test exists in src/test/java/hello/MainTest.java",
+     "REQ-2": "pom.xml specifies mainClass as hello.Main and includes maven-jar-plugin configuration for runnable jar"
+    },
+    "verdicts": {
+     "REQ-1": {
+      "outcome": "unverified",
+      "reason_code": "VERIFIER_CONFIRMED",
+      "model_outcome": "satisfied",
+      "evidence_class": "MODEL_CLAIMED",
+      "detail": "Main class exists in src/main/java/hello/Main.java with main method printing 'Hello from Kriya'; unit test exists in src/test/java/hello/MainTest.java",
+      "verifier": {
+       "model": "qwen3-coder:30b",
+       "runtime_fingerprint": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+       "runtime_exact": true
+      },
+      "evidence_id": "d7156b3badf78d7d0f3c7afb26346b9df362aa2011cf0a6976b1c30f698c1515",
+      "revision": 1,
+      "source": "attempt.goal_spec_compliance"
+     },
+     "REQ-2": {
+      "outcome": "unverified",
+      "reason_code": "VERIFIER_CONFIRMED",
+      "model_outcome": "satisfied",
+      "evidence_class": "MODEL_CLAIMED",
+      "detail": "pom.xml specifies mainClass as hello.Main and includes maven-jar-plugin configuration for runnable jar",
+      "verifier": {
+       "model": "qwen3-coder:30b",
+       "runtime_fingerprint": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+       "runtime_exact": true
+      },
+      "evidence_id": "d7156b3badf78d7d0f3c7afb26346b9df362aa2011cf0a6976b1c30f698c1515",
+      "revision": 1,
+      "source": "attempt.goal_spec_compliance"
+     }
+    },
+    "findings": []
+   },
+   "created_at": 1792075181.0459719
+  },
+  {
+   "kind": "candidate_gates.passed",
+   "attempt": 1,
+   "source": "workflow",
+   "authority": "authoritative",
+   "message": "",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "passed": true,
+    "terminal": false
+   },
+   "created_at": 1792075181.047625
+  },
+  {
+   "kind": "requirement.closure",
+   "attempt": 1,
+   "source": "workflow.requirement_closure",
+   "authority": "authoritative",
+   "message": "unverified requirement closure: REQ-1=closed",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "requirement_set_digest": "e606d69e41de0403612c586fdcee693bbdd66c0f7d39b3690c633ff5c2ecb3cc",
+    "closures": [
+     {
+      "requirement": "REQ-1",
+      "kind": "test_addition_record",
+      "closed": true,
+      "added_test_files": [
+       "src/test/java/hello/MainTest.java"
+      ],
+      "new_test_identities": null,
+      "reason_code": "TEST_ADDED"
+     }
+    ]
+   },
+   "created_at": 1792075181.130731
+  },
+  {
+   "kind": "terminal_regression.passed",
+   "attempt": 1,
+   "source": "workflow",
+   "authority": "authoritative",
+   "message": "",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "passed": true,
+    "terminal": true
+   },
+   "created_at": 1792075182.919483
+  },
+  {
+   "kind": "attempt.passed",
+   "attempt": 1,
+   "source": "workflow",
+   "authority": "authoritative",
+   "message": "",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "passed": true,
+    "applied": true
+   },
+   "created_at": 1792075183.007466
+  },
+  {
+   "kind": "model.role_metrics",
+   "attempt": 1,
+   "source": "workflow",
+   "authority": "auxiliary",
+   "message": "per-role model metrics of this run (observations, not verification evidence)",
+   "failure_type": null,
+   "operation": null,
+   "details": {
+    "rows": [
+     {
+      "role": "architect",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 1,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 2.751,
+      "prompt_tokens": 2009,
+      "completion_tokens": 37,
+      "estimated_token_calls": 0,
+      "attempts": 0,
+      "attempts_passed": 0,
+      "first_pass_success": null,
+      "retries_triggered": 0,
+      "structured_valid": 0,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     },
+     {
+      "role": "developer",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 3,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 20.429,
+      "prompt_tokens": 8244,
+      "completion_tokens": 727,
+      "estimated_token_calls": 0,
+      "attempts": 1,
+      "attempts_passed": 1,
+      "first_pass_success": true,
+      "retries_triggered": 0,
+      "structured_valid": 0,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     },
+     {
+      "role": "planner",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 1,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 31.152,
+      "prompt_tokens": 2687,
+      "completion_tokens": 1240,
+      "estimated_token_calls": 0,
+      "attempts": 0,
+      "attempts_passed": 0,
+      "first_pass_success": null,
+      "retries_triggered": 0,
+      "structured_valid": 1,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     },
+     {
+      "role": "reviewer",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 1,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 9.268,
+      "prompt_tokens": 1913,
+      "completion_tokens": 495,
+      "estimated_token_calls": 0,
+      "attempts": 0,
+      "attempts_passed": 0,
+      "first_pass_success": null,
+      "retries_triggered": 0,
+      "structured_valid": 0,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     },
+     {
+      "role": "run_verifier",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 2,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 7.912,
+      "prompt_tokens": 4224,
+      "completion_tokens": 198,
+      "estimated_token_calls": 0,
+      "attempts": 0,
+      "attempts_passed": 0,
+      "first_pass_success": null,
+      "retries_triggered": 0,
+      "structured_valid": 0,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     },
+     {
+      "role": "spec_compliance",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58",
+      "runtime_exact": true,
+      "inference_settings_digest": "sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e",
+      "calls": 1,
+      "protocol_failures": 0,
+      "schema_failures": 0,
+      "latency_seconds": 5.008,
+      "prompt_tokens": 1706,
+      "completion_tokens": 226,
+      "estimated_token_calls": 0,
+      "attempts": 0,
+      "attempts_passed": 0,
+      "first_pass_success": null,
+      "retries_triggered": 0,
+      "structured_valid": 0,
+      "structured_malformed": 0,
+      "structured_validation_failures": 0,
+      "structured_policy_rejections": 0,
+      "structured_other_failures": 0
+     }
+    ]
+   },
+   "created_at": 1792075183.05695
+  }
+ ],
+ "evidence_records": [
+  {
+   "kind": "active_skills",
+   "source": "skill_engine",
+   "attempt": 0,
+   "payload": {
+    "skills": []
+   },
+   "sensitivity": "local_only",
+   "created_at": 1792075104.6355479
+  }
+ ],
+ "generation_metrics": {
+  "calls": 1,
+  "successful_calls": 1,
+  "duration_seconds": 20.443997415946797,
+  "files_requested": 3,
+  "operation_fallbacks": 0,
+  "validation_invalidations": 0,
+  "validated_files": 3,
+  "total_wall_seconds": 113.34737762494478,
+  "terminal_status": "success",
+  "llm": {
+   "calls": 4,
+   "wall_seconds": 63.65097908198368,
+   "developer_calls": 1,
+   "developer_wall_seconds": 20.443997415946797,
+   "developer_prompt_tokens": 2944,
+   "developer_completion_tokens": 143,
+   "developer_tokens_available_for": 1,
+   "planner_calls": 1,
+   "planner_wall_seconds": 31.175775874988176,
+   "architect_calls": 1,
+   "architect_wall_seconds": 2.7564675000030547,
+   "reviewer_calls": 1,
+   "reviewer_wall_seconds": 9.27473829104565
+  },
+  "validators": {
+   "invocations": 1,
+   "wall_seconds": 1.3325249169720337,
+   "by_kind": {
+    "compile": 1
+   }
+  },
+  "retry": {
+   "full_set_attempts": 0,
+   "targeted_attempts": 0,
+   "attempts_by_mode": {
+    "full_set": 1
+   },
+   "unrecoverable_scope_denials": 0,
+   "candidate_independent_diagnostic_invocations": 0,
+   "baseline_replay_count": 0
+  },
+  "engineering_route": {
+   "kind": "milestone",
+   "initial_risk_class": "LOW",
+   "current_risk_class": "HIGH",
+   "max_observed_risk_class": "HIGH",
+   "execution_weight": "heavy",
+   "initial_execution_weight": "standard",
+   "final_execution_weight": "heavy",
+   "impact": {
+    "files_touched": 3,
+    "symbols_impacted": 0,
+    "downstream_references": 0,
+    "public_contract_change": false,
+    "persistence_change": false,
+    "security_boundary_change": false,
+    "dependency_change": true,
+    "configuration_change": false,
+    "build_system_change": true,
+    "shared_entrypoint_change": false
+   },
+   "impact_initial": {
+    "files_touched": 0,
+    "symbols_impacted": 0,
+    "downstream_references": 0,
+    "public_contract_change": false,
+    "persistence_change": false,
+    "security_boundary_change": false,
+    "dependency_change": false,
+    "configuration_change": false,
+    "build_system_change": false,
+    "shared_entrypoint_change": false
+   },
+   "impact_final": {
+    "files_touched": 3,
+    "symbols_impacted": 0,
+    "downstream_references": 0,
+    "public_contract_change": false,
+    "persistence_change": false,
+    "security_boundary_change": false,
+    "dependency_change": true,
+    "configuration_change": false,
+    "build_system_change": true,
+    "shared_entrypoint_change": false
+   },
+   "escalated": true,
+   "escalation_stage": "post_architect",
+   "reason_codes": [
+    "repo_appears_empty",
+    "post_architect:build_system_change",
+    "post_architect:dependency_change"
+   ],
+   "deterministic_signals": {
+    "repro_shape": false,
+    "migration_language": false,
+    "multi_part_structure": false,
+    "scope_language": "quick",
+    "security_terms": false,
+    "dependency_terms": false,
+    "enhancement_language": false,
+    "creation_language": false,
+    "repo_appears_empty": true,
+    "known_files_count": 0,
+    "dependency_graph_available": false
+   },
+   "router_used": false,
+   "router_confidence": null
+  },
+  "process_profile": {
+   "execution_weight": "heavy",
+   "context_depth": "impact_wide",
+   "planning_required": true,
+   "structured_subtasks_required": false,
+   "impact_revalidation_required": true,
+   "contract_analysis_required": false,
+   "full_test_suite_required": true,
+   "human_review_required": true,
+   "auto_merge_allowed": false,
+   "verification_tier": "heavy",
+   "heavy_extended_checks_not_yet_available": true
+  }
+ },
+ "failure_report": [
+  {
+   "failure_type": "compile",
+   "category": "build",
+   "attribution_tier": null
+  },
+  {
+   "failure_type": "targeted_test",
+   "category": "verification",
+   "attribution_tier": null
+  },
+  {
+   "failure_type": "run_verification",
+   "category": "verification",
+   "attribution_tier": null
+  },
+  {
+   "failure_type": "goal_spec_compliance",
+   "category": "verification",
+   "attribution_tier": null
+  },
+  {
+   "failure_type": "regression_test",
+   "category": "verification",
+   "attribution_tier": null
+  }
+ ],
+ "enforce_run_id": null
+}

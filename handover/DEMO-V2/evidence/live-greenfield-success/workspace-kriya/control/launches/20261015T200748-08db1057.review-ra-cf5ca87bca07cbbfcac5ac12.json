@@ -1,0 +1,14 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+  },
+  "candidate_digest": "sha256:7ea552ffbceb47b3c559396dec9d839fd84947f75c09172c36275213bf9df458",
+  "decided_at": "2026-10-15T14:39:31.227+00:00",
+  "decision": "approve",
+  "launch_id": "20261015T200748-08db1057",
+  "nonce": "6b8232b3625f5cb3",
+  "review_id": "ra-cf5ca87bca07cbbfcac5ac12",
+  "schema": 1,
+  "workspace_identity": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+}

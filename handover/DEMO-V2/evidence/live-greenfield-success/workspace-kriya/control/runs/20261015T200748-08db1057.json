@@ -1,0 +1,88 @@
+{
+  "_workspace": {
+    "version": "2",
+    "workspace_id": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+  },
+  "active_work_unit": null,
+  "approved_plan_hash": null,
+  "base_source_revision": null,
+  "base_tree_hash": null,
+  "candidate_hash": "d666e3050bca053a493ba176d046a8baa7770d8978770006f1bf76b02365b6ed",
+  "commit_intent": "APPLY_VERIFIED_CANDIDATE",
+  "commit_result": "COMMITTED",
+  "commit_transaction_id": "4016105426a8419ba27699d8bc5c43a9",
+  "commits": [
+    {
+      "candidate_hash": "d666e3050bca053a493ba176d046a8baa7770d8978770006f1bf76b02365b6ed",
+      "intent": "APPLY_VERIFIED_CANDIDATE",
+      "result": "COMMITTED",
+      "transaction_id": "4016105426a8419ba27699d8bc5c43a9",
+      "work_unit": {
+        "definition_digest": null,
+        "group_id": null,
+        "kind": "direct",
+        "milestone_id": null,
+        "work_unit_id": "direct"
+      }
+    }
+  ],
+  "created_at": "2026-10-15T14:37:49.653164+00:00",
+  "effective_config_fingerprint": "29f228760c58c6e231fe1b0b4837bc91730284d676f24d2d6ddb410b8e820f05",
+  "execution_plan": {
+    "commit_strategy": "incremental_work_unit",
+    "fingerprint": "6a4976b6157bb038e5aa0ae84474b176cdd6ea5fba7f43593c07110d78232a9b",
+    "plan_id": "20261015T200748-08db1057",
+    "provenance": {},
+    "schema": 1,
+    "source_kind": "direct",
+    "terminal_phases": [],
+    "work_units": [
+      {
+        "acceptance_criteria": [],
+        "consumes": [],
+        "definition_digest": "eacece2f42489650b126467ef4b3a2694ddb0cbbff4e5f7f905601285c3435d3",
+        "depends_on": [],
+        "goal": "Create a small Java 17 Maven application named hello-kriya that\nprints \"Hello from Kriya\" and includes a unit test.\nMake the application runnable.",
+        "id": "direct",
+        "obligation_refs": [],
+        "provenance": {},
+        "provides": [],
+        "role": "primary",
+        "verification_requirements": []
+      }
+    ]
+  },
+  "goal_hash": "eacece2f42489650b126467ef4b3a2694ddb0cbbff4e5f7f905601285c3435d3",
+  "lifecycle_state": "SUCCESS",
+  "milestone_reuse": null,
+  "model_runtime_fingerprint_ids": [
+    "8687fd28ad2ab869223094e39a4509dcf00db39b008b8267a557618f48fcbb58"
+  ],
+  "obligation_ledger_hash": null,
+  "obligation_ledger_revision": null,
+  "recovery": null,
+  "resume_decision": null,
+  "retry_counters": {
+    "retry_count": 0,
+    "targeted_retry_count": 0
+  },
+  "retry_state_reference": "checkpoint:20261015T200749-3d97e1f2",
+  "revision": 14,
+  "run_id": "20261015T200748-08db1057",
+  "schema_version": 3,
+  "terminal_status": "SUCCESS",
+  "updated_at": "2026-10-15T14:39:43.068616+00:00",
+  "verification_evidence_ids": [
+    "commit:4016105426a8419ba27699d8bc5c43a9",
+    "static_analysis:DISABLED:eff54be508cf0a561e30563264cdfb34206a0b54f037d0ccaf45d2d2a21a6c18"
+  ],
+  "work_unit_states": {
+    "direct": {
+      "blocked_by": [],
+      "reason_codes": [],
+      "status": "VERIFIED",
+      "work_unit_id": "direct"
+    }
+  },
+  "workspace_identity": "dd3c7b275617c9fd2406521fb4a7389ce9c7cc93502b9e43701c54b373e7ba3b"
+}
