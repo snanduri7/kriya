@@ -1049,6 +1049,13 @@ export interface ApplicationOutcome {
     text: string;
     truncated: boolean;
   };
+  /**
+   * Present only with NOT_APPLICABLE: why runtime verification could not start - a code of Kriya's own closed table (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, REQUIRED_RUNTIME_VERIFICATION_DECLINED, REQUIRED_RUNTIME_VERIFICATION_DISABLED). Nothing was executed.
+   */
+  blocked_reason_code?:
+    | 'MANAGED_SERVICE_APPROVAL_UNSUPPORTED'
+    | 'REQUIRED_RUNTIME_VERIFICATION_DECLINED'
+    | 'REQUIRED_RUNTIME_VERIFICATION_DISABLED';
 }
 
 // ---- ExecutionContext (workspace.schema.json#/$defs/ExecutionContext) ----

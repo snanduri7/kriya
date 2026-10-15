@@ -1,4 +1,4 @@
-import { ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -17,7 +17,9 @@ function Completed({ phase }: { phase: RunPhase }) {
   // Independent reads of THIS finished run (after the refreshed snapshot is pinned); none changes which run is selected elsewhere.
   const facts = useRunRowFacts(outcome.traceRunId, snapshotReady);
   const application = useApplicationOutcome(outcome.traceRunId, snapshotReady);
-  const approvedReview = run.status?.launch.pending_approval?.status === 'APPROVED' ? run.status.launch.pending_approval : null;
+  const lastApproval = run.status?.launch.pending_approval?.status === 'APPROVED' ? run.status.launch.pending_approval : null;
+  const approvedReview = lastApproval?.kind === 'change_approval' ? lastApproval : null;    // (a runtime-command approval is not a change review: the change diff is never asked of it)
+  const allowedCommands = lastApproval?.kind === 'runtime_command';
   const reviewed = useChangeReview(run.launchId, approvedReview?.review_id ?? null);
   const review = reviewed.state === 'ready' || reviewed.state === 'degraded' ? reviewed.data : null;
   const gates = facts && facts.state === 'ready' ? facts.gates : null;
@@ -30,12 +32,17 @@ function Completed({ phase }: { phase: RunPhase }) {
   const groups = gates ? verificationGroups(gates) : null;
   const app = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
   const applied = outcome.commitResult === 'COMMITTED';
+  const workspace = useWorkspacePath();
+  // A NEW application: every recorded change is a file Kriya added AND Kriya recorded executing it successfully (from the executor's recorded steps - never a claim).
+  const created = applied && app?.status === 'EXECUTED' && app.succeeded === true && files !== null && files.length > 0 && files.every((f) => f.changeType === 'added');
+  const projectName = workspace ? workspace.split('/').filter(Boolean).pop() ?? null : null;
   return (
     <div className="ck-outcome">
       <p className="ck-applied" data-testid="applied-statement">
-        {applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya did not record that the change was applied to your folder. Check your folder before relying on it.</span>}
-        {approvedReview ? ' You approved the change.' : ''}
+        {created ? <strong>✓ Application created successfully</strong> : applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya did not record that the change was applied to your folder. Check your folder before relying on it.</span>}
+        {approvedReview ? ' You approved the change.' : ''}{allowedCommands ? ' You allowed Kriya to run the verification commands.' : ''}
       </p>
+      {created && projectName ? <p className="ck-project-name" data-testid="created-project">{projectName}</p> : null}
 
       <h3>What changed</h3>
       {files === null ? <p className="muted" role="status">{reading('changes')}</p>
@@ -75,11 +82,18 @@ function Stopped({ phase }: { phase: RunPhase }) {
   const ex = useExecution();
   const run = ex.run!;
   const outcome = run.outcome!;
+  // Why runtime verification could not start, when Kriya recorded one of its closed reasons (read from the run's recorded ApplicationOutcome; never inferred from text here).
+  const application = useApplicationOutcome(outcome.traceRunId, run.timing.refreshedAt !== null);
+  const appData = application && (application.state === 'ready' || application.state === 'degraded') ? application.data : null;
+  const blockedCode = appData?.status === 'NOT_APPLICABLE' && typeof appData.blocked_reason_code === 'string' ? appData.blocked_reason_code : null;
+  const blocked = outcome.kind === 'failure' ? runtimeStopWords(blockedCode) : null;
   return (
     <div className="ck-outcome">
       <p data-testid="what-happened"><span className="muted">What happened</span><br />
         {outcome.approval ? (
           <span><strong>{APPROVAL_KIND[outcome.approval.kind] ?? outcome.approval.kind}.</strong> {outcome.approval.reason}</span>
+        ) : blocked ? (
+          <span data-testid="runtime-stop"><strong>{blocked.title}</strong><br />{blocked.body}<br /><span className="muted">{blocked.note}</span></span>
         ) : <span>{outcome.kind === 'failure' ? failureSummary(run.status?.launch.ended?.failure_category, outcome.commitResult) : outcome.detail}</span>}
       </p>
       {outcome.approval ? (
@@ -92,7 +106,7 @@ function Stopped({ phase }: { phase: RunPhase }) {
       {outcome.declined.length ? <p className="muted small">Decisions declined, nothing approved (the run proceeded without them): {outcome.declined.map((d) => `${d.kind}: ${d.reason}`).join('; ')}</p> : null}
       <details className="ck-tech">
         <summary>Technical reason</summary>
-        <div className="muted small"><span className="mono">{outcome.kind === 'failure' ? outcome.detail : `Outcome kind ${outcome.kind}`}</span>{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span> · <strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : null}</div>
+        <div className="muted small">{blockedCode ? <div data-testid="runtime-stop-code">Reason code <span className="mono">{blockedCode}</span></div> : null}<span className="mono">{outcome.kind === 'failure' ? outcome.detail : `Outcome kind ${outcome.kind}`}</span>{outcome.recordedError && outcome.recordedError !== outcome.detail && outcome.kind !== 'approval_required' ? <span> · <strong>Kriya reported:</strong> <span className="mono">{outcome.recordedError}</span></span> : null}</div>
         <p><CopyText what="failure details" label="Copy details" text={[`Run ${run.launchId}: ${outcome.label}`, outcome.detail, outcome.recordedError ? `Kriya reported: ${outcome.recordedError}` : null, `Source: ${outcome.source}`].filter(Boolean).join('\n')} /></p>
       </details>
     </div>
@@ -105,6 +119,7 @@ export function CurrentRun() {
   const dispatch = useDispatch();
   const go = useNavigate();
   const run = ex.run;
+  const desktop = useProvider().desktop;
   const elapsed = useElapsed(run?.status?.launch.requested_at ?? null, run !== null && run.stage !== 'finished', run?.status?.launch.ended?.at ?? null);
   if (!run) return null;
   const phase = runPhase(run);
@@ -119,6 +134,7 @@ export function CurrentRun() {
     if (tab) dispatch({ type: 'centralTab', tab });
     go(RUN_DOCUMENTS_PAGE);
   };
+  const openProject = desktop?.revealWorkspace ? () => { void desktop.revealWorkspace!(); } : null;
   const heading = finished ? (phase.state === 'COMPLETED' ? 'Run completed' : phase.state === 'STOPPED' ? 'Run stopped' : 'Run failed') : finishing ? 'Finishing your change' : phase.label;
   return (
     <section className="ck-current" aria-label="Current run" data-stage={run.stage} data-outcome={run.outcome?.kind ?? ''} data-state={phase.state} data-timing={JSON.stringify(run.timing)}>
@@ -161,6 +177,7 @@ export function CurrentRun() {
       <div className="ck-current-actions">
         {finished ? (
           <>
+            {phase.state === 'COMPLETED' && openProject ? <button type="button" onClick={openProject}>Open Project</button> : null}
             {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}
             {phase.state === 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.validation)}>View Verification</button> : <button type="button" onClick={() => viewDetails()}>View Failure Details</button>}
             {phase.state !== 'COMPLETED' ? <button type="button" onClick={() => viewDetails(OPEN_TARGETS.changes)}>View Changes</button> : null}

@@ -269,6 +269,7 @@ export class FixtureHost implements HostAdapter {
       run_events: rec('run_events', [...(s.s1Events ?? []), ...(this.storeEvent(s) ? [{ kind: 'evidence.attempt_store', attempt: 0, source: 'workflow.run_generation_workflow', authority: 'auxiliary', message: 'attempt evidence store', failure_type: null, operation: null, details: this.storeEvent(s), created_at: 2 }] : [])]),
       evidence_records: s.s1Evidence ? rec('evidence_records', s.s1Evidence) : absent('fixture', 'evidence_records'), gate_outcomes: absent('fixture', 'gate_outcomes'), model_hops: absent('fixture', 'model_hops'),
       generation_metrics: absent('fixture', 'generation_metrics'), failure_report: absent('fixture', 'failure_report'),
+      ...(s.id === LAUNCHED_TRACE_ID && this.exec?.applicationOutcome() ? { application_outcome: this.exec.applicationOutcome() } : {}),
       context: absent('not persisted', 'not_persisted'), attribution: absent('not persisted', 'not_persisted'), diagnostics: absent('not persisted', 'not_persisted'),
       comparisons: absent('not persisted', 'not_persisted'), output: absent('not persisted', 'not_persisted'),
     };

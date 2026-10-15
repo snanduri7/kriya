@@ -51,6 +51,8 @@ export interface FixtureExecutionOptions {
   review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean; /** The review answers with a candidate digest that is NOT the pending review's (a host or store out of step). */ digestMismatch?: boolean };
   /** How the scripted runtime-command review behaves (DEV/TEST ONLY): Kriya cannot prove the recorded commands against their fingerprint (`unverified`), so none are shown. */
   runtimeReview?: { fault?: 'unverified' };
+  /** A failed run whose recorded ApplicationOutcome says runtime verification could not start, with Kriya's own closed reason code (nothing was executed). */
+  blockedReason?: 'MANAGED_SERVICE_APPROVAL_UNSUPPORTED' | 'REQUIRED_RUNTIME_VERIFICATION_DECLINED' | 'REQUIRED_RUNTIME_VERIFICATION_DISABLED';
   /** The host has no runtime-command decision path (an older host): the review is shown but cannot be decided from this window. */
   noRuntimeDecisionPort?: boolean;
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
@@ -395,6 +397,17 @@ export class FixtureExecution {
     if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
     this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
     return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
+  }
+
+  /** The `application_outcome` section of the launched run's detail: EXECUTED (from the approved commands' recorded steps) only after the runtime commands were approved, otherwise nothing is claimed. */
+  applicationOutcome(): Json | null {
+    if (this.outcome === 'failure' && this.options.blockedReason && this.frame >= 4) {
+      return { availability: 'recorded', provenance: 'derived:runs.gate_outcomes', reason: null, data: { status: 'NOT_APPLICABLE', reason: 'no_runtime_execution_recorded', blocked_reason_code: this.options.blockedReason } };
+    }
+    if (this.outcome !== 'runtime_review' || this.reviewStatus !== 'APPROVED' || this.frame < 4) return null;
+    return { availability: 'recorded', provenance: 'derived:runs.gate_outcomes', reason: null, data: {
+      status: 'EXECUTED', succeeded: true, attempt: 1, command: RUNTIME_COMMANDS[1]!.join(' '), commands: RUNTIME_COMMANDS.map((c) => c.join(' ')), exit_code: 0, timed_out: false,
+      stdout: { text: 'Hello from Kriya\n', truncated: false }, stderr: { text: '', truncated: false } } };
   }
 
   /** A launch that never got past STARTING (the child died right after writing its record). */

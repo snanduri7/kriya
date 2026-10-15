@@ -238,6 +238,28 @@ export function userEvidence(input: TrustInput): TrustItem[] {
 
 // ------------------------------------------------------------------ a run that did not complete, in words
 
+/** Plain-language words for the reasons runtime verification could not even start (Kriya's own closed table: kriya/kup/application_outcome.py BLOCKED_REASON_CODES). The raw code is shown only
+ * under the technical reason. A code this table does not know gets NO sentence here - never a guess. */
+export interface RuntimeStopWords { title: string; body: string; note: string }
+const RUNTIME_STOP_WORDS: Record<string, RuntimeStopWords> = {
+  MANAGED_SERVICE_APPROVAL_UNSUPPORTED: {
+    title: 'Runtime verification could not continue',
+    body: 'This goal requires Kriya to start a long-running service. This desktop version does not yet support approval for managed-service execution.',
+    note: 'No service was started.',
+  },
+  REQUIRED_RUNTIME_VERIFICATION_DECLINED: {
+    title: 'Runtime verification was not allowed',
+    body: 'This goal needs Kriya to run the application to verify it, and the commands were not allowed.',
+    note: 'Nothing was run.',
+  },
+  REQUIRED_RUNTIME_VERIFICATION_DISABLED: {
+    title: 'Runtime verification is turned off',
+    body: 'This goal needs Kriya to run the application to verify it, but running verification commands is turned off for this project.',
+    note: 'Nothing was run.',
+  },
+};
+export const runtimeStopWords = (code: string | null | undefined): RuntimeStopWords | null => (code && Object.prototype.hasOwnProperty.call(RUNTIME_STOP_WORDS, code) ? RUNTIME_STOP_WORDS[code]! : null);
+
 /**
  * What happened to a run that failed, as a sentence a person can act on. Only the recorded failure category and commit result select the words; the raw record
  * (category, exit code, commit result) stays in the technical reason. Categories this table does not know get the neutral sentence, never a guess about the cause.

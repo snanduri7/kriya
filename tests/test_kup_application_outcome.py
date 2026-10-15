@@ -81,3 +81,24 @@ def test_history_detail_carries_the_projection_as_a_derived_section(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE runs SET gate_outcomes = NULL WHERE run_id = 'r2'")  # the column itself is not recorded
     assert history_detail(snap, "r2")["application_outcome"]["data"]["status"] == STATUS_UNKNOWN
+
+
+@pytest.mark.parametrize("code", ["MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "REQUIRED_RUNTIME_VERIFICATION_DECLINED", "REQUIRED_RUNTIME_VERIFICATION_DISABLED"])
+def test_a_runtime_stop_with_a_known_code_is_reported_as_blocked_and_nothing_was_executed(code):
+    out = application_outcome([{"attempt": 1, "type": "compile", "success": True},
+                               {"attempt": 1, "type": "verification_infrastructure_failure", "success": False, "output": f"{code}: this goal requires something. No service was started."}])
+    assert out == {"status": STATUS_NOT_APPLICABLE, "reason": "no_runtime_execution_recorded", "blocked_reason_code": code}
+
+
+@pytest.mark.parametrize("output", [
+    "an unrelated infrastructure failure", "the message mentions MANAGED_SERVICE_APPROVAL_UNSUPPORTED: but not at the start", "MANAGED_SERVICE_APPROVAL_UNSUPPORTED no colon",
+    "managed_service_approval_unsupported: lowercase", None, 7, "MANAGED_SERVICE_APPROVAL_UNSUPPORTEDX: near miss",
+])
+def test_only_the_exact_code_prefix_counts_as_a_blocked_reason(output):
+    out = application_outcome([{"attempt": 1, "type": "verification_infrastructure_failure", "success": False, "output": output}])
+    assert out == {"status": STATUS_NOT_APPLICABLE, "reason": "no_runtime_execution_recorded"}
+
+
+def test_a_blocked_reason_is_ignored_when_the_application_actually_ran():
+    out = application_outcome([{"attempt": 1, "type": "verification_infrastructure_failure", "success": False, "output": "REQUIRED_RUNTIME_VERIFICATION_DECLINED: x"}, gate()])
+    assert out["status"] == STATUS_EXECUTED and "blocked_reason_code" not in out

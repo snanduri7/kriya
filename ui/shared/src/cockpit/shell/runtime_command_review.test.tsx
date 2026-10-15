@@ -92,6 +92,23 @@ describe('the decision: ONE renderer click, then the native confirmation; nothin
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
   });
 
+  it('a completed greenfield run states the result as the product: created, the project, the executor\'s recorded output - and never the absolute worktree path', async () => {
+    const { host, bar } = await reachRuntimeReview();
+    await commands();
+    fireEvent.click(within(card(bar)).getByRole('button', { name: CONTINUE }));
+    await waitFor(() => expect(host.exec!.runtimeDecisions).toHaveLength(1));
+    act(() => host.exec!.finish());
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));
+    await waitFor(() => expect(within(bar).getByTestId('applied-statement')).toHaveTextContent('✓ Application created successfully'));
+    expect(within(bar).getByTestId('applied-statement')).toHaveTextContent('You allowed Kriya to run the verification commands.');
+    expect(within(bar).getByTestId('applied-statement')).not.toHaveTextContent('You approved the change');
+    const app = await within(bar).findByTestId('application-outcome');
+    expect(app).toHaveTextContent('✓ Ran successfully');
+    expect(within(app).getByLabelText('Application output')).toHaveTextContent('Hello from Kriya');
+    expect(within(app).getByTestId('application-runs-in')).toHaveTextContent('Runs in Kriya isolated worktree');
+    expect((bar.textContent ?? '')).not.toContain(RUNTIME_WORKTREE);
+  });
+
   it('native CANCEL is no decision: nothing is recorded, the review is still pending, the person is told so, and can still reject or continue', async () => {
     const { host, bar } = await reachRuntimeReview();
     await commands();
@@ -192,6 +209,39 @@ describe('Kriya\'s refusals reach the person; a change review and a runtime revi
     const wrong = await runtime.host.exec!.port.decideApproval({ workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: RUNTIME_FINGERPRINT, decision: 'approve' });
     expect(wrong).toMatchObject({ accepted: false, code: 'WRONG_REVIEW_KIND' });
     expect(runtime.host.exec!.reviewPending()).toBe(true);
+  });
+});
+
+describe('a run that could not even start runtime verification says so in words (managed service in human-in-the-loop mode)', () => {
+  async function stopped(blockedReason?: 'MANAGED_SERVICE_APPROVAL_UNSUPPORTED') {
+    const mounted = renderWorkspaceShell({ fixture: { workspace: '/fixture/workspace', execution: { outcome: 'failure', ...(blockedReason ? { blockedReason } : {}) } } });
+    await screen.findByRole('navigation', { name: 'Destinations' });
+    goTo('Project');
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Engineering goal' }), { target: { value: 'Start a web server and respond on /health' } });
+    await screen.findAllByText(/^✓ Ready/);
+    fireEvent.click(screen.getByRole('button', { name: /^Start Run$/ }));
+    const bar = await banner();
+    for (let i = 0; i < 4; i += 1) act(() => mounted.host.exec!.advance());
+    await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'failure'));
+    return bar;
+  }
+  it('MANAGED_SERVICE_APPROVAL_UNSUPPORTED: plain words first, "No service was started", the raw code only under Technical reason', async () => {
+    const bar = await stopped('MANAGED_SERVICE_APPROVAL_UNSUPPORTED');
+    const what = await within(bar).findByTestId('runtime-stop');
+    expect(what).toHaveTextContent('Runtime verification could not continue');
+    expect(what).toHaveTextContent('This goal requires Kriya to start a long-running service. This desktop version does not yet support approval for managed-service execution.');
+    expect(what).toHaveTextContent('No service was started.');
+    expect(what.textContent).not.toMatch(/MANAGED_SERVICE_APPROVAL_UNSUPPORTED/);
+    const tech = bar.querySelector('details.ck-tech:last-of-type') as HTMLElement;
+    const code = within(bar).getByTestId('runtime-stop-code');
+    expect(code).toHaveTextContent('MANAGED_SERVICE_APPROVAL_UNSUPPORTED');
+    expect(code.closest('details')!.hasAttribute('open')).toBe(false);
+    expect(tech).not.toBeNull();
+  });
+  it('an unrelated failure, or no recorded code, keeps the neutral sentence - no guess about the cause', async () => {
+    const bar = await stopped();
+    expect(within(bar).queryByTestId('runtime-stop')).toBeNull();
+    expect(within(bar).getByTestId('what-happened')).toHaveTextContent(/The change did not pass Kriya's checks|Kriya could not complete the requested change/);
   });
 });
 

@@ -18,6 +18,10 @@ STATUS_EXECUTED = "EXECUTED"
 STATUS_NOT_APPLICABLE = "NOT_APPLICABLE"
 STATUS_UNKNOWN = "UNKNOWN"
 RUNTIME_GATE_TYPES = ("run_verification", "run_verification_hung")
+# Why runtime verification could not even start, as Kriya's OWN closed vocabulary. The failure records no structured field in the persisted gate outcome (``diagnostics`` stays on the in-memory
+# Failure), but Kriya authors the message and begins it with the code and a colon, so the projection reads exactly that prefix against this closed table - never free text, never a substring.
+BLOCKED_REASON_CODES = ("MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "REQUIRED_RUNTIME_VERIFICATION_DECLINED", "REQUIRED_RUNTIME_VERIFICATION_DISABLED")
+INFRASTRUCTURE_GATE_TYPE = "verification_infrastructure_failure"
 OUTPUT_MAX_CHARS = 4000
 
 
@@ -32,13 +36,24 @@ def _command(argv: Any) -> Optional[str]:
     return scrub_potential_secrets(" ".join(argv))
 
 
+def _blocked_reason(gate_outcomes: List[Any]) -> Optional[str]:
+    """The newest recorded runtime-verification stop whose message begins with a code of the closed table, or None."""
+    for gate in reversed(gate_outcomes):
+        if isinstance(gate, dict) and gate.get("type") == INFRASTRUCTURE_GATE_TYPE and isinstance(gate.get("output"), str):
+            for code in BLOCKED_REASON_CODES:
+                if gate["output"].startswith(code + ":"):
+                    return code
+    return None
+
+
 def application_outcome(gate_outcomes: Any) -> Dict[str, Any]:
     """The projection for one run's recorded gate outcomes (a list of dicts, or whatever the column held)."""
     if not isinstance(gate_outcomes, list):
         return {"status": STATUS_UNKNOWN, "reason": "no_gate_outcomes_recorded"}
     runtime = [g for g in gate_outcomes if isinstance(g, dict) and g.get("type") in RUNTIME_GATE_TYPES and isinstance(g.get("steps"), list) and g["steps"]]
     if not runtime:
-        return {"status": STATUS_NOT_APPLICABLE, "reason": "no_runtime_execution_recorded"}
+        blocked = _blocked_reason(gate_outcomes)
+        return {"status": STATUS_NOT_APPLICABLE, "reason": "no_runtime_execution_recorded", **({"blocked_reason_code": blocked} if blocked else {})}
     gate = runtime[-1]  # the newest recorded execution (the last attempt that ran the application)
     steps: List[Dict[str, Any]] = [s for s in gate["steps"] if isinstance(s, dict)]
     if not steps:

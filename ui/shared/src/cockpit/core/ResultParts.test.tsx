@@ -16,11 +16,20 @@ describe('ApplicationResult', () => {
   it('a non-zero exit never reads as success and says the exit code; a timeout says it did not finish', () => {
     const { unmount } = render(<ApplicationResult app={exec({ succeeded: false, exit_code: 1, stdout: { text: '', truncated: false }, stderr: { text: 'boom', truncated: false } })} />);
     expect(screen.queryByText(/Ran successfully/)).toBeNull();
-    expect(screen.getByText(/did not run successfully \(exit code 1\)/)).toBeInTheDocument();
+    expect(screen.getByText('✕ Runtime verification failed')).toBeInTheDocument();
+    expect(screen.getByTestId('application-exit')).toHaveTextContent('Exit code 1');
     expect(screen.getByLabelText('Application output')).toHaveTextContent('boom');
     unmount();
     render(<ApplicationResult app={exec({ succeeded: false, timed_out: true, exit_code: null })} />);
     expect(screen.getByText(/did not finish in time/)).toBeInTheDocument();
+    expect(screen.getByText('✕ Runtime verification failed')).toBeInTheDocument();
+  });
+  it('says where it ran in words (the isolated worktree) and never shows the absolute path; the command is under Technical details', () => {
+    const { container } = render(<ApplicationResult app={exec({ command: '/private/var/x/.kriya/worktrees/candidate-1/run.sh' })} />);
+    expect(screen.getByTestId('application-runs-in')).toHaveTextContent('Runs in Kriya isolated worktree');
+    const tech = container.querySelector('details.ck-tech')!;
+    expect(tech.hasAttribute('open')).toBe(false);
+    expect((container.textContent ?? '').replace(tech.textContent ?? '', '')).not.toMatch(/\/private\/var|\.kriya\/worktrees/);
   });
   it('says the output is longer than shown when the recorded output was truncated; shows "(no output)" for none', () => {
     const { unmount } = render(<ApplicationResult app={exec({ stdout: { text: 'abc', truncated: true } })} />);

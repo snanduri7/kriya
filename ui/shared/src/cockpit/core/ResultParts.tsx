@@ -12,13 +12,18 @@ export function VerificationLines({ lines, label = 'Verification' }: { lines: re
 /** What Kriya recorded about EXECUTING the application: only an EXECUTED record renders, and `succeeded` alone says "ran successfully". */
 export function ApplicationResult({ app }: { app: ApplicationOutcome }) {
   if (app.status !== 'EXECUTED') return null;
+  const ok = app.succeeded === true;
+  const exitLine = ok ? null : app.timed_out ? 'It did not finish in time' : app.exit_code !== null && app.exit_code !== undefined ? `Exit code ${app.exit_code}` : null;
   return (
     <section aria-label="Application" data-testid="application-outcome">
       <h3>Application</h3>
-      <p data-status={app.succeeded ? 'passed' : 'failed'}>{app.succeeded ? '✓ Ran successfully' : `✕ The application did not run successfully${app.timed_out ? ' (it did not finish in time)' : app.exit_code !== null && app.exit_code !== undefined ? ` (exit code ${app.exit_code})` : ''}`}</p>
-      {app.command ? <div className="muted small">Command <span className="mono">{app.command}</span></div> : null}
+      <p data-status={ok ? 'passed' : 'failed'}>{ok ? '✓ Ran successfully' : '✕ Runtime verification failed'}</p>
+      {exitLine ? <div data-testid="application-exit">{exitLine}</div> : null}
+      <div className="muted small" data-testid="application-runs-in">Runs in Kriya isolated worktree</div>
+      <h4 className="ck-action-sub">{ok ? 'Output' : 'Output / error'}</h4>
       <pre className="mono ck-output" aria-label="Application output">{app.stdout?.text || app.stderr?.text || '(no output)'}</pre>
       {app.stdout?.truncated || app.stderr?.truncated ? <p className="muted small">The output is longer than can be shown here.</p> : null}
+      {app.command ? <details className="ck-tech"><summary>Technical details</summary><div className="muted small">Command <span className="mono">{app.command}</span></div></details> : null}
     </section>
   );
 }

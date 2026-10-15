@@ -21,6 +21,7 @@ public class ApplicationOutcome {
     public void setAdditionalProperty(String name, Object value) { additionalProperties.put(name, value); }
 
     private Long attempt;
+    private BlockedReasonCode blockedReasonCode;
     private String command;
     private List<String> commands;
     private Long exitCode;
@@ -35,6 +36,17 @@ public class ApplicationOutcome {
     public Long getAttempt() { return attempt; }
     @JsonProperty("attempt")
     public void setAttempt(Long value) { this.attempt = value; }
+
+    /**
+     * Present only with NOT_APPLICABLE: why runtime verification could not start - a code of
+     * Kriya's own closed table (MANAGED_SERVICE_APPROVAL_UNSUPPORTED,
+     * REQUIRED_RUNTIME_VERIFICATION_DECLINED, REQUIRED_RUNTIME_VERIFICATION_DISABLED). Nothing
+     * was executed.
+     */
+    @JsonProperty("blocked_reason_code")
+    public BlockedReasonCode getBlockedReasonCode() { return blockedReasonCode; }
+    @JsonProperty("blocked_reason_code")
+    public void setBlockedReasonCode(BlockedReasonCode value) { this.blockedReasonCode = value; }
 
     @JsonProperty("command")
     public String getCommand() { return command; }

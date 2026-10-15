@@ -160,7 +160,8 @@
         "command": { "type": ["string", "null"] }, "commands": { "type": "array", "items": { "type": "string" } },
         "exit_code": { "type": ["integer", "null"] }, "timed_out": { "type": "boolean" },
         "stdout": { "type": "object", "required": ["text", "truncated"], "properties": { "text": { "type": "string" }, "truncated": { "type": "boolean" } }, "additionalProperties": false },
-        "stderr": { "type": "object", "required": ["text", "truncated"], "properties": { "text": { "type": "string" }, "truncated": { "type": "boolean" } }, "additionalProperties": false }
+        "stderr": { "type": "object", "required": ["text", "truncated"], "properties": { "text": { "type": "string" }, "truncated": { "type": "boolean" } }, "additionalProperties": false },
+        "blocked_reason_code": { "description": "Present only with NOT_APPLICABLE: why runtime verification could not start - a code of Kriya's own closed table (MANAGED_SERVICE_APPROVAL_UNSUPPORTED, REQUIRED_RUNTIME_VERIFICATION_DECLINED, REQUIRED_RUNTIME_VERIFICATION_DISABLED). Nothing was executed.", "enum": ["MANAGED_SERVICE_APPROVAL_UNSUPPORTED", "REQUIRED_RUNTIME_VERIFICATION_DECLINED", "REQUIRED_RUNTIME_VERIFICATION_DISABLED"] }
       },
       "additionalProperties": false
     },
