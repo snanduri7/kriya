@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from kriya.workflow.context_projection import FileProjection, project_implementation_source
 from kriya.workflow.failure import Failure
+from kriya.workflow.open_findings import OpenFinding, render_open_findings
 
 _OMISSION = "\n... [middle omitted from retry evidence; canonical evidence remains local] ...\n"
 
@@ -32,6 +33,7 @@ class RetryPackage:
     reference_projections: tuple[FileProjection, ...]
     source_context: Dict[str, str]
     omitted_files: tuple[str, ...]
+    open_findings: tuple[OpenFinding, ...] = ()
 
     def render_error(self) -> str:
         rendered = (
@@ -43,7 +45,19 @@ class RetryPackage:
                 "\n\nAdvisory reference evidence (verify against local validators):\n"
                 + self.advisory_context
             )
+        unresolved = self._unresolved_block()
+        if unresolved:
+            rendered += "\n\n" + unresolved
         return rendered
+
+    def _unresolved_block(self) -> str:
+        """The open candidate findings other than the failure already rendered above (D1)."""
+        return render_open_findings([f for f in self.open_findings if f.failure_type != self.failure_type])
+
+    def prior_error_text(self) -> str:
+        """The authoritative error plus any still-open finding, for the Developer agent's ``prior_error_context``."""
+        unresolved = self._unresolved_block()
+        return f"{self.authoritative_error}\n\n{unresolved}" if unresolved else self.authoritative_error
 
     def render_context(self) -> str:
         blocks: List[str] = []
@@ -81,6 +95,7 @@ def build_retry_package(
     max_error_chars: int = 6000,
     advisory_context: str = "",
     known_revisions: Optional[Dict[str, str]] = None,
+    open_findings: Sequence[OpenFinding] = (),
 ) -> RetryPackage:
     """Build a deterministic package without sending or resolving data remotely.
 
@@ -155,4 +170,5 @@ def build_retry_package(
             if path in target_set
         },
         omitted_files=tuple(omitted),
+        open_findings=tuple(open_findings),
     )

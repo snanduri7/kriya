@@ -359,6 +359,9 @@ class GenerationState:
     # into bounded, revision-labelled evidence instead of relying on an
     # unbounded string concatenation of errors and complete files.
     last_failure: Optional[Any] = None
+    # D1: validator findings about the candidate that are still unresolved (kriya/workflow/open_findings.py). Unlike
+    # last_failure, a response-shape failure never replaces them.
+    open_findings: List[Any] = field(default_factory=list)
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: candidate paths whose latest

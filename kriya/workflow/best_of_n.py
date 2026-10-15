@@ -79,6 +79,7 @@ def reset_state_for_independent_candidate(state) -> None:
     """
     state.error_context = ""
     state.last_failure = None
+    state.open_findings = []
     state.last_implicated_files = None
     state.last_missing_files = None
     state.last_error_source_context = {}

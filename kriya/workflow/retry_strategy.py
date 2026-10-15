@@ -69,6 +69,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.model_transition import fallback_routing_for_context
+from kriya.workflow.open_findings import DELIVERY_FAILURE_TYPES, update_open_findings
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
@@ -94,16 +95,7 @@ from kriya.workflow.verification_coordinator import is_verification_only_unit
 logger = logging.getLogger(__name__)
 
 
-_REPAIR_FEEDBACK_FAILURE_TYPES = {
-    "anchored_edit",
-    "attribution_rejected",
-    "diagnosis_mismatch",
-    "misdirected_edit",
-    "no_op_edit",
-    "operation_contract",
-    "structural_corruption",
-    "unaddressed_error_location",
-}
+_REPAIR_FEEDBACK_FAILURE_TYPES = DELIVERY_FAILURE_TYPES
 
 
 def _failure_from_validated_scope_denial(
@@ -554,6 +546,7 @@ async def _record_attempt_failure(
         state.last_failure = failure
     else:
         state.last_failure = previous_primary_failure
+    state.open_findings = update_open_findings(state.open_findings, failure, state.attempt_number)
     fail_type = failure.type
     recovery_diagnostics = (failure.diagnostics or {}).get("api_contract_recovery")
     if recovery_diagnostics:

@@ -1250,7 +1250,7 @@ def _prepare_retry_context(
                      "unfit_targets": unfit},
         ))
     retry_error_context = (
-        retry_package.authoritative_error if retry_package else state.error_context
+        retry_package.prior_error_text() if retry_package else state.error_context
     )
     _record_retry_projection_context_items(state, retry_package)
 
@@ -1907,6 +1907,7 @@ def _retry_package_for_attempt(
         # worktree. Files outside that snapshot (e.g. genuinely still-missing
         # ones) simply fall back to a fresh hash inside project_implementation_source.
         known_revisions=state.validated_file_revisions,
+        open_findings=state.open_findings,
         advisory_context=(
             state.error_context[
                 state.error_context.index("=== Reference material found"):
