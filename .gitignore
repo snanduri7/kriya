@@ -193,3 +193,6 @@ scratch_generate/
 
 # KRIYA-VERSION-001: generated into build output only (setup.py), never committed
 kriya/_build_info.json
+
+# Editor swap files are never committed (0b92510 committed an owner vim swap file by mistake)
+*.swp

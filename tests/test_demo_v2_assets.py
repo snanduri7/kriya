@@ -109,9 +109,21 @@ def test_fixture_identity_is_complete_and_well_formed() -> None:
     assert re.search(env["FIXTURE_FIX_REGEX"], "driver = driverRepository.save(driverDO);")
 
 
+def _tracked_demo_files() -> list[Path]:
+    """What is COMMITTED under demo-v2/ (git's index), not whatever is on disk: an editor's swap file or bytecode is a by-product of working here, not an asset."""
+    listed = subprocess.run(["git", "ls-files", "-z", "--", str(DEMO_V2)], cwd=DEMO_V2.parent, capture_output=True, text=True, check=True, timeout=30).stdout
+    return [DEMO_V2.parent / name for name in listed.split("\0") if name]
+
+
+def test_no_editor_swap_file_is_tracked() -> None:
+    # 0b92510 committed the owner's live vim swap file; the test below caught it (binary content) and was wrongly dismissed as owner clutter.
+    swap = [p.name for p in _tracked_demo_files() if p.name.endswith((".swp", ".swo", "~")) or (p.name.startswith(".") and ".sw" in p.suffix)]
+    assert swap == []
+
+
 def test_nothing_machine_specific_or_heavy_is_committed() -> None:
-    for path in DEMO_V2.rglob("*"):
-        if not path.is_file() or "__pycache__" in path.parts:  # bytecode is a by-product of importing the stub in a test, not a committed asset
+    for path in _tracked_demo_files():
+        if not path.is_file():  # tracked but absent from the working tree (a pending deletion) is not an asset on disk
             continue
         assert path.stat().st_size <= MAX_FILE_BYTES, f"{path} is too large for a contract/template"
         text = path.read_text(encoding="utf-8")
