@@ -1,4 +1,4 @@
-# Runtime-approval screenshots (Demo V2, 2026-10-15)
+# Runtime-approval screenshots (Demo V2, 2026-10-15; regenerated after the second independent review's fixes, from the final sources)
 
 Produced by `demo-v2/scripts/runtime_approval_smoke.sh` against the evidence-packaged app with the product's CONTROLLED workflow body (no model, no live run, scratch project and HOME).
 Real: New Project, Project Setup, configuration approval, the launch, the change-approval path (ONE click), the runtime-command approval path, the result screens.
