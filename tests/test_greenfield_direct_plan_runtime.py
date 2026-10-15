@@ -453,10 +453,14 @@ def test_gap_b_a_new_attempt_never_inherits_the_held_execution_of_a_discarded_ca
     assert ctx.deferred_runtime_verification is None
 
 
-def test_CHARACTERISATION_the_direct_plan_never_closes_the_goal_requirements(approved_run):
-    """MEASURED: even with the application executed and graded PASS, the direct plan's requirement ledger stays pending/NOT_YET_VERIFIED
-    (requirement closure and `requirements_verified` belong to the enforce terminal gate). 'Full-goal verification true' is therefore
-    not reachable on this plan shape today - an owner decision, not something this test can make true."""
+def test_CHARACTERISATION_gap_c_the_direct_plan_leaves_the_requirement_ledger_pending_exactly_like_the_structured_plan(approved_run):
+    """GAP C (owner brief 2026-10-15) premise REFUTED by measurement, pinned so an owner decision flips it deliberately. The brief says the structured plan closes the run-level ledger
+    on this evidence and the direct plan does not. MEASURED on the same evidence (build + nonzero tests + approved runtime command executed + grader PASS + run success): BOTH shapes leave
+    REQ-1/REQ-2 pending / NOT_YET_VERIFIED (the structured side is pinned in tests/test_greenfield_runtime_end_to_end.py with the identical assertion). There is no plan-shape divergence.
+    Why (TRACED): requirements.record_requirement_verdicts records a verifier's verdict as MODEL_CLAIMED -> UNVERIFIED; only a DETERMINISTIC closer closes a requirement
+    (requirement_outcomes). None consumes runtime-execution evidence, and the one that judges 'prints X' (the compiled goal examples, workflow.compile_run_contract) is refused for a
+    project of unknown language - an empty Greenfield folder - on both shapes. Closing on 'the command ran and an LLM grader said PASS' would make model text authority."""
     requirements = approved_run.result["requirements"]
     assert requirements["outcomes"] == {"REQ-1": "pending", "REQ-2": "pending"}
     assert {v["reason_code"] for v in requirements["verdicts"].values()} == {"NOT_YET_VERIFIED"}
+    assert requirements["evidence"] == {}

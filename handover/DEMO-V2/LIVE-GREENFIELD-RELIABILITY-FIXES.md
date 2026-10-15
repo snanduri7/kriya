@@ -43,6 +43,9 @@ Proven on the approve path: all three files accepted and applied; one multi-file
 
 Verdict: runtime verification is reachable and executes on the direct plan; the three gaps need an owner decision (and 1 is a correctness defect on the decline path).
 
+## Update 2026-10-15 (later)
+Gaps 1 and 2 are fixed and gap 3 was re-measured (the structured plan leaves the ledger pending too): see `DIRECT-PLAN-CORRECTNESS-CLOSURE.md`.
+
 ## Not done
 Activity retry UX (Phase 7) and the final failure message (Phase 8): held, because the direct-plan phase hit a stop condition and the order says they follow a proven direct path. `out/Kriya.app` not rebuilt; Demo 00 not reset (rebuild only after the owner decides the gaps).
 

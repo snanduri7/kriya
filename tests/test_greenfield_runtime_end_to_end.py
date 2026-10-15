@@ -134,6 +134,17 @@ def test_reject_is_the_explicit_refusal_nothing_executes_and_the_run_does_not_cl
     assert application_outcome(run.gate_outcomes)["status"] != STATUS_EXECUTED
 
 
+def test_CHARACTERISATION_gap_c_the_structured_plan_leaves_the_same_requirement_ledger_pending(tmp_path):
+    """Pair of tests/test_greenfield_direct_plan_runtime.py::test_CHARACTERISATION_gap_c_*: the SAME evidence (executed, graded PASS, run success) on the structured plan leaves the same
+    pending / NOT_YET_VERIFIED ledger and no requirements_verified. MEASURED 2026-10-15; the brief's premise that this shape closes the ledger is refuted."""
+    run, _person, _canonical, _executed_at = _go(tmp_path)
+    assert run.result.legacy_result["status"] == "success" and application_outcome(run.gate_outcomes)["status"] == STATUS_EXECUTED
+    requirements = run.result.legacy_result["requirements"]
+    assert requirements["outcomes"] == {"REQ-1": "pending", "REQ-2": "pending"}
+    assert {v["reason_code"] for v in requirements["verdicts"].values()} == {"NOT_YET_VERIFIED"}
+    assert requirements["evidence"] == {} and run.result.legacy_result.get("requirements_verified") is None
+
+
 def test_a_pending_runtime_review_waits_for_the_person_and_nothing_runs_while_it_waits(tmp_path):
     """Native Cancel is 'no decision yet': the review stays PENDING and the executor keeps waiting. Here the person simply takes their time."""
     run, person, canonical, executed_at = _go(tmp_path, plan={"runtime_command": ("approve", 0.4)})
