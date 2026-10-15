@@ -5687,7 +5687,13 @@ class WorkflowEngine:
                     and control is not None
                     and control.process_profile.human_review_required
                 )
-                need_human_approval = (
+                # NO SOURCE MUTATION -> NO SOURCE-CHANGE APPROVAL. This gate approves the exact change set (diffs_to_show) before it is applied; a unit that wrote nothing (a
+                # verification-only unit: no planned files, DENY_ALL) has no subject to approve. Before this, the human-in-the-loop clause alone fired with an empty set: a
+                # desktop launch declined it (other_approval -> human_rejected, FAILURE) and a terminal user was asked to approve nothing (owner run 20261015T075602-2b5a0ad7, s4).
+                # Every non-empty change is approved exactly as before; the runtime-command approvals (attempt.py, approval_callback([], ...)) are a different subject and are
+                # not touched here.
+                has_source_mutation = bool(state.all_files_written)
+                need_human_approval = has_source_mutation and (
                     autonomy_cfg.mode == "human-in-the-loop" or
                     sensitive_match or
                     total_diff_lines > autonomy_cfg.risk_threshold_lines or
