@@ -23,6 +23,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -67,25 +69,66 @@ class RuntimeCommandSubject:
 
 
 _WHITESPACE = re.compile(r"\s+")
+# Interpreters that run CODE passed as an argument, and tools that move data over a network: a command naming them is never "the user's own words" however it is written (the person wrote a
+# command line, not a program; review shows exactly what it would do).
+_CODE_INTERPRETERS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "python", "python2", "python3", "node", "nodejs", "deno", "ruby", "perl", "php", "osascript", "powershell", "pwsh"})
+_CODE_FLAGS = frozenset({"-c", "-e", "-E", "-p", "--eval", "--command", "-Command", "-EncodedCommand"})
+_NETWORK_TOOLS = frozenset({"curl", "wget", "nc", "ncat", "netcat", "ssh", "scp", "sftp", "ftp", "telnet", "socat"})
+_NEGATION = re.compile(r"\b(?:not|never|no|don't|dont|doesn't|doesnt|do not|without|avoid|shouldn't|mustn't|cannot|can't|nor)\b", re.IGNORECASE)
+_NEGATION_WINDOW_WORDS = 6
+
+
+def _same_resolved_tool(written: str, argv0: str) -> bool:
+    """``argv0`` is only a PATH-resolved form of ``written`` when it is absolute and is exactly what PATH resolves ``written`` to (or Kriya's own interpreter for a python the user named)."""
+    if not os.path.isabs(argv0):
+        return False
+    resolved = shutil.which(os.path.basename(argv0))
+    real = os.path.realpath(argv0)
+    if resolved is not None and os.path.realpath(resolved) == real:
+        return True
+    return os.path.basename(argv0).startswith("python") and real == os.path.realpath(sys.executable)
+
+
+def _is_code_or_network_command(argv: Any) -> bool:
+    name = os.path.basename(str(argv[0]))
+    if name in _NETWORK_TOOLS:
+        return True
+    return name in _CODE_INTERPRETERS and any(str(a) in _CODE_FLAGS for a in argv[1:])
+
+
+def _negated(text: str, start: int) -> bool:
+    """A mention shortly after a negation ("never run rm -rf build", "do not run python main.py") is the user forbidding the command, not writing it."""
+    words = text[:start].split()[-_NEGATION_WINDOW_WORDS:]
+    return _NEGATION.search(" ".join(words)) is not None
 
 
 def commands_authored_in_goal(commands: Any, goal: str, stdin_sha256: Optional[str] = None) -> bool:
     """True only when EVERY command that will execute is the user's own, exact words: its argv appears verbatim (whitespace-normalised, on word boundaries) in the user's goal text,
-    in the order the goal wrote them, and nothing Kriya or a model added exists (no synthetic stdin). Only the executable's PATH resolution is tolerated (``/opt/maven/bin/mvn``
-    for ``mvn``). A goal that merely NAMES a tool, a judge-invented command, an added or reordered argument, a substituted executable or an appended input are not authorship.
-    The judge's own ``command_source`` label is never consulted: it is a model's claim, and this is the deterministic check of it."""
+    in the order the goal wrote them, and nothing Kriya or a model added exists (no synthetic stdin). The executable must be the one the user WROTE: a different ``argv[0]`` is accepted
+    only when it is the absolute path PATH resolves that name to (or Kriya's own interpreter for ``python``) - never ``./mvn`` or ``/tmp/x/python``. A single bare word (``make``, ``pytest``,
+    ``python``) is not a command line: it counts only inside backticks or quotes. A mention that follows a negation ("never run ...") is not authorship. Interpreters given code to run
+    (``bash -c ...``, ``python -c ...``) and network tools are never authored-exempt. A goal that merely NAMES a tool, a judge-invented command, an added or reordered argument, a substituted
+    executable or an appended input are not authorship. The judge's own ``command_source`` label is never consulted: it is a model's claim, and this is the deterministic check of it."""
     if stdin_sha256 is not None or not commands:
         return False
     text = _WHITESPACE.sub(" ", goal or "")
     position = 0
     for argv in commands:
-        if not argv or not all(isinstance(a, str) and a for a in argv):
+        if not argv or not all(isinstance(a, str) and a for a in argv) or _is_code_or_network_command(argv):
             return False
+        written = [" ".join(argv)]
+        if len(argv) > 0 and argv[0] != os.path.basename(argv[0]) and _same_resolved_tool(os.path.basename(argv[0]), argv[0]):
+            written.append(" ".join((os.path.basename(argv[0]), *argv[1:])))
         found = None
-        for candidate in dict.fromkeys((" ".join(argv), " ".join((os.path.basename(argv[0]), *argv[1:])))):
-            match = re.compile(r"(?<![\w./-])" + re.escape(candidate) + r"(?![\w-])").search(text, position)
-            if match is not None and (found is None or match.start() < found.start()):
-                found = match
+        for candidate in dict.fromkeys(written):
+            for match in re.finditer(r"(?<![\w./-])" + re.escape(candidate) + r"(?![\w-])", text):
+                if match.start() < position or _negated(text, match.start()):
+                    continue
+                if len(argv) == 1 and not (text[max(0, match.start() - 1):match.start()] in "`'\"" and text[match.end():match.end() + 1] in "`'\""):
+                    continue
+                if found is None or match.start() < found.start():
+                    found = match
+                break
         if found is None:
             return False
         position = found.end()

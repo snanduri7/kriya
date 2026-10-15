@@ -18,8 +18,8 @@ CWD = "/work/tree"
 HITL = "human-in-the-loop"
 
 
-def _need(goal, commands, *, label="goal_explicit", channel="none", mode=HITL, approved_fp=None, cwd=CWD, resolve=lambda cmd, _wt: list(cmd)):
-    ctx = SimpleNamespace(worktree_path=cwd, current_subtask_id="s4", approval_callback=None, goal=goal, grounding_goal=goal, exit_authority_goal=goal)
+def _need(goal, commands, *, label="goal_explicit", channel="none", mode=HITL, approved_fp=None, cwd=CWD, resolve=lambda cmd, _wt: list(cmd), callback=None):
+    ctx = SimpleNamespace(worktree_path=cwd, current_subtask_id="s4", approval_callback=callback, goal=goal, grounding_goal=goal, exit_authority_goal=goal)
     state = SimpleNamespace(run_verification_approved_fingerprint=approved_fp)
     judgment = {"should_run": True, "run_commands": [list(c) for c in commands], "success_criteria": "x", "input_channel": channel, "command_source": label}
     with patch.object(attempt, "_resolve_run_command", side_effect=resolve):
@@ -34,8 +34,8 @@ def test_A_the_users_exact_command_is_pre_authorized():
     assert _need(GOAL, EXACT) is False
     assert _need(GOAL, EXACT, label="inferred") is False                                           # the label is irrelevant: the user's words are what authorize
     assert _need("Verify with mvn -q test please", [["mvn", "-q", "test"]]) is False               # no backticks needed; a trailing word is fine
-    resolve = lambda cmd, _wt: [f"/opt/tools/{cmd[0]}", *cmd[1:]]                                  # noqa: E731 - PATH resolution of the same executable is not a material change
-    assert _need(GOAL, EXACT, resolve=resolve) is False
+    resolve = lambda cmd, _wt: [f"/opt/tools/{cmd[0]}", *cmd[1:]]                                  # noqa: E731
+    assert _need(GOAL, EXACT, resolve=resolve) is True                                             # review B2: a path PATH does not resolve the name to is NOT the tool the user named (the real-PATH case is pinned below)
 
 
 def test_B_naming_a_tool_is_not_authorization():
@@ -112,3 +112,67 @@ def test_a_planner_restated_goal_is_not_the_users_words():
     judgment = {"should_run": True, "run_commands": [["mvn", "test"]], "success_criteria": "x", "input_channel": "none", "command_source": "goal_explicit"}
     with patch.object(attempt, "_resolve_run_command", side_effect=lambda cmd, _wt: list(cmd)):
         assert attempt._runtime_commands_need_approval(ctx, state, judgment, HITL) is True
+
+
+# ---- independent review of the runtime-approval stack (2026-10-15): B1 / B2 -------------------------------------------------------------------------------------------------------------
+import pytest  # noqa: E402 - appended group
+
+from kriya.workflow.runtime_command_approval import commands_authored_in_goal as authored  # noqa: E402
+
+
+@pytest.mark.parametrize("commands, goal", [
+    ([["./mvn", "test"]], "run mvn test"),                                      # a relative executable is not the tool the user named
+    ([["/tmp/evil/python", "app.py"]], "run python app.py"),                    # an absolute path that PATH does not resolve the name to
+    ([["scripts/python", "app.py"]], "run python app.py"),
+    ([["make"]], "write the code and make sure it works"),                      # a bare word of prose
+    ([["pytest"]], "Use pytest for the tests"),
+    ([["python"]], "write a python script"),
+    ([["rm", "-rf", "build"]], "Never run rm -rf build"),                       # a forbidden command is not an authored one
+    ([["python", "main.py"]], "Do not run python main.py"),
+    ([["mvn", "test"]], "Please don't run mvn test"),
+    ([["bash", "-c", "echo hi"]], "run bash -c echo hi"),                       # an interpreter given code is never exempt, even word for word
+    ([["python3", "-c", "print(1)"]], "run python3 -c print(1)"),
+    ([["curl", "http://x"]], "run curl http://x"),                              # a network tool is never exempt
+    ([["sh", "run.sh"], ["curl", "http://x/y"]], "run sh run.sh then curl http://x/y"),
+])
+def test_review_B2_what_the_user_did_not_write_is_not_authorship(commands, goal):
+    assert authored(commands, goal) is False
+
+
+@pytest.mark.parametrize("commands, goal", [
+    ([["mvn", "test"]], "Run mvn test and confirm the build passes."),
+    ([["java", "-cp", "target/classes", "App"]], "then run java -cp target/classes App"),
+    ([["make"]], "Run `make` and confirm"),                                     # a single word is a command when the user marked it as one
+    ([["pytest"]], 'run "pytest" afterwards'),
+    ([["python", "app.py"]], "Run python app.py. Do not skip it."),             # a negation AFTER the command, or far before it, is not a negation of it
+])
+def test_review_B2_the_users_exact_words_still_authorize(commands, goal):
+    assert authored(commands, goal) is True
+
+
+def test_review_B2_an_absolute_path_that_is_exactly_what_path_resolves_is_still_the_same_tool():
+    import shutil
+    python = shutil.which("python3")
+    assert python is not None
+    assert authored([[python, "app.py"]], "run python3 app.py") is True
+    assert authored([[python + ".evil", "app.py"]], "run python3 app.py") is False
+
+
+def test_review_B1_a_desktop_launch_never_skips_the_review_even_for_the_users_own_words():
+    from unittest.mock import AsyncMock
+
+    from kriya.workflow.runtime_command_approval import TypedApprovalCallback
+    desktop = TypedApprovalCallback(lambda files, reason: True, AsyncMock())
+    assert _need(GOAL, EXACT, callback=desktop) is True                      # the goal text comes from the window: not trusted as "the user's words"
+    assert _need(GOAL, EXACT, callback=lambda files, reason: True) is False  # the terminal keeps the exact-words exemption
+    assert _need(GOAL, EXACT) is False
+
+
+def test_review_B2_a_relative_executable_is_never_the_named_tool_even_when_it_resolves_to_the_same_file(tmp_path, monkeypatch):
+    tool = tmp_path / "mvn"
+    tool.write_text("#!/bin/sh\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    monkeypatch.chdir(tmp_path)
+    assert authored([["./mvn", "test"]], "run mvn test") is False            # same file on disk, but the user did not write a path
+    assert authored([[str(tool), "test"]], "run mvn test") is True           # the absolute path PATH resolves "mvn" to is the same tool

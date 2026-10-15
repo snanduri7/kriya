@@ -226,6 +226,7 @@ from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.runtime_command_approval import (
     MAX_REVIEW_ROUNDS,
     RuntimeCommandSubject,
+    TypedApprovalCallback,
     approval_matches,
     commands_authored_in_goal,
 )
@@ -5253,7 +5254,9 @@ def _runtime_commands_need_approval(ctx: "AttemptContext", state: GenerationStat
     if autonomy_mode != "human-in-the-loop":
         return False
     subject = _derive_runtime_command_subject(ctx, judgment, "")
-    if commands_authored_in_goal(subject.commands, exit_authority_text(ctx), subject.stdin_sha256):
+    # A desktop launch (typed approval callback) always asks: the goal text it would be matched against is supplied by the window, so "the user's own words" cannot be trusted there, and the
+    # native confirmation is the one commitment outside the renderer. Only the terminal keeps the exact-words exemption.
+    if not isinstance(ctx.approval_callback, TypedApprovalCallback) and commands_authored_in_goal(subject.commands, exit_authority_text(ctx), subject.stdin_sha256):
         return False
     return state.run_verification_approved_fingerprint != subject.fingerprint
 
