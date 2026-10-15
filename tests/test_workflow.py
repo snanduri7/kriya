@@ -10230,8 +10230,7 @@ async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override
         return_value={"success": True, "output": ""},
     ):
         res = await we.run_generation_workflow(
-            # Not "...that prints hi": that wording is an explicit output requirement, which since GREENFIELD-RUNTIME-VERIFICATION-DROPPED-001 correctly makes
-            # execution mandatory (REQUIRED_RUNTIME_VERIFICATION_MISSING here, no run verification is mocked). This test is about the reviewer path, not runtime.
+            # This test does not exercise runtime-intent semantics; its goal wording is deliberately non-runtime. Runtime-intent behavior is covered by test_greenfield_runtime_verification_dropped / the detector matrix.
             goal="Write a small Python script named app.py",
             workspace_path=str(tmp_path),
         )
@@ -10418,7 +10417,8 @@ async def test_workflow_accepted_candidate_streaming_unchanged(tmp_path):
         return_value={"success": True, "output": ""},
     ):
         res = await we.run_generation_workflow(
-            goal="Write a small Python script named app.py",   # not "...that prints hi": an explicit output requirement now makes execution mandatory (see the reviewer-disposition test above)
+            # This test does not exercise runtime-intent semantics; its goal wording is deliberately non-runtime. Runtime-intent behavior is covered by test_greenfield_runtime_verification_dropped / the detector matrix.
+            goal="Write a small Python script named app.py",
             workspace_path=str(tmp_path),
             stream_callback=lambda step, token: streamed_events.append((step, token)),
         )
