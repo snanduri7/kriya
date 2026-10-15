@@ -4796,6 +4796,11 @@ def _run_verification_basis_hash(ctx: "AttemptContext", state: GenerationState) 
     return digest.hexdigest()
 
 
+# Retries whose originating failure came from a deterministic gate that runs again, on the whole candidate, after the write
+# loop: the prose heuristic defers to that gate (see _diagnosis_mismatch_bypass_reason).
+_DETERMINISTIC_GATE_RETRY_TYPES = frozenset({"compile", "pom_semantic_validation", "targeted_test", "static_rule_violation"})
+
+
 def _diagnosis_mismatch_bypass_reason(
     state: GenerationState, ctx: "AttemptContext", filepath: str, candidate_content: str,
 ) -> Optional[str]:
@@ -4897,7 +4902,7 @@ def _diagnosis_mismatch_bypass_reason(
     if not sig:
         return None
     fail_type = sig[0]
-    if fail_type in ("compile", "pom_semantic_validation", "targeted_test"):
+    if fail_type in _DETERMINISTIC_GATE_RETRY_TYPES:
         # targeted_test added 2026-08-17: run_tests(target_test=...) (kriya/
         # tools/validate.py) already scopes a targeted-test rerun to the ONE
         # test file extract_target_test() identified - not the whole
@@ -4925,17 +4930,17 @@ def _diagnosis_mismatch_bypass_reason(
         # XML-attribute-vs-bare-tag-name, not really about pom.xml
         # specifically - a 6th signal here would just be the next incident-
         # specific patch this function's whole redesign was meant to stop).
-        return "this retry responds to a compile/POM-validation/targeted-test failure - deferring to the real gate instead of prose-matching"
-    if fail_type == "static_rule_violation":
-        from kriya.workflow.static_checks import run_static_checks
-        # Unioned with ctx.established_files (see that field's own docstring) -
-        # a static rule can span an established file plus the one just edited.
-        still_violates = run_static_checks(
-            ctx.worktree_path, sorted(set(state.all_files_written) | set(ctx.established_files)),
-            overrides={filepath: candidate_content},
+        # static_rule_violation joined this list on D3 (live Greenfield run 20261015T152407-5f87716a, attempt 6): the
+        # pom.xml analysis quoted Maven coordinates (`org.junit.jupiter:junit-jupiter`), which no pom.xml contains literally,
+        # so this prose heuristic vetoed pom.xml and discarded the whole candidate - with a verdict about the wrong file,
+        # before the static rule (which judges the WHOLE candidate right after the write loop) could speak. The earlier
+        # branch re-ran the static check with ONLY this file overridden and the not-yet-written sibling files still on
+        # disk, so it could never see a response that resolves the finding in a different file. The real gate is the
+        # authority for the finding being repaired and sees the complete candidate; a prose heuristic must not pre-empt it.
+        return (
+            "this retry responds to a failure of a deterministic gate that judges the whole candidate right after this loop "
+            "(compile/POM-validation/targeted-test/static-rule) - deferring to that gate instead of prose-matching"
         )
-        if not still_violates:
-            return "the static check that originally flagged this file no longer flags the proposed content"
     return None
 
 
