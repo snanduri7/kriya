@@ -252,3 +252,31 @@ All TRACED unless marked.
   returns a decision whose fingerprint equals the subject's). The goal describes a finite command, not a long-running service, so the HITL managed-service refusal does not apply to it (INFERRED from the goal text; not run).
 - **Targeted result:** detector flip proven x5; `tests/test_runtime_detector_matrix.py` (the goal row is a permanent positive) and `tests/test_runtime_command_authorization.py` pass (58). A live PRV-13 re-qualification is NOT run
   (no live model by instruction): whether the self-correction behavior the scenario certifies is unchanged with an added runtime-verification gate is UNKNOWN until the owner chooses to re-qualify. No benchmark redesign is implied.
+
+## 11. Security case table: each claim has a concrete test (2026-10-15 pass 4)
+
+Paths are relative to the repository. "H" = `ui/standalone/test/runtime_command_host.test.ts`, "R" = `ui/standalone/test/runtime_command_real.test.ts` (REAL Kriya), "S" = `ui/shared/src/cockpit/shell/runtime_command_review.test.tsx`,
+"L" = `tests/test_runtime_command_review_launch.py`, "A" = `tests/test_runtime_command_authorization.py`, "E" = `tests/test_greenfield_runtime_end_to_end.py`, "M" = `tests/test_managed_service_hitl_fail_closed.py`.
+
+| # | Case | Test(s) |
+|---|---|---|
+| 1-3 | Renderer cannot invent a command, change args or cwd | H `a renderer cannot invent or alter a command, a directory, another run or another unit: the request grammar has no such field`; S `sends only the five identities...` |
+| 4 | Another run | H (same); R `a stale or invented fingerprint...` (a launch id Kriya never recorded -> COMMAND_NOT_REVIEWABLE, no dialog) |
+| 5 | Another unit / review | R (same, an identity this run never issued); H `a stale or unverifiable subject is never shown and never sent` |
+| 6 | Wrong review kind | L `test_a_decision_of_the_other_kind_is_refused_both_ways`; R (REAL `launch-decision` without `--kind` -> WRONG_REVIEW_KIND); E `test_a_decision_of_the_wrong_kind_cannot_approve_the_runtime_review`; S `the change-review channel refuses a runtime review` |
+| 7 | Stale fingerprint | L `test_a_stale_fingerprint_is_refused_and_records_nothing`; R (STALE_REVIEW from Kriya itself); H |
+| 8 | Changed command set -> re-review | A `test_G_a_changed_command_after_review_is_stale_and_asked_again` |
+| 9 | Native Cancel does not execute | H `native CANCEL is "no decision yet"`; R `native CANCEL: nothing is sent, the REAL record stays PENDING...`; S `native CANCEL is no decision` |
+| 10 | Reject does not execute | E `test_reject_is_the_explicit_refusal...`; R `REJECT: no native dialog...`; H `REJECT is the explicit refusal` |
+| 11-12 | No secret env value / stdin content exposed | L `test_no_secret_stdin_or_argument_enters_the_record` (digest and names only); `ui/kup` schema has no value field |
+| 13 | User-command exemption stays exact | A `test_A..test_F`, `test_the_pure_check_edge_cases`, `test_a_planner_restated_goal_is_not_the_users_words` |
+| 14 | Judge/inferred command requires review | A `test_C_a_command_the_judge_invents_needs_review_whatever_it_calls_itself`; E (the judge label `goal_explicit` is ignored) |
+| 15 | Source approval unchanged | `tests/test_launch_approval.py`; `ui/standalone/test/approval_host.test.ts`; `ui/shared/.../approval.test.tsx` (digest, stale, ONE click) |
+| 16 | Configuration approval unchanged | `ui/standalone/test/config_approval_host.test.ts`, `config_approval_real.test.ts`; `ui/shared/.../config_approval.test.tsx` |
+| 17 | HITL managed service does not execute | M `test_a1/a2/a3` (both call-site families), 4 mutations killed |
+| 18 | Failure occurs before any process start | M (`admission` and `executor` never called; spawn spy is secondary, not independent proof) |
+| 19 | Self-correction stdin = reviewed stdin | `tests/test_runtime_stdin_rerun_binding.py` (`[X, X]` / `[None, None]`) |
+| 20 | Milestone replay cannot reach Desktop | `tests/test_launch_refuses_milestone_mode.py`; `ui/standalone/test/execution_host.test.ts` (argv has no `--from-milestones`); registry `MILESTONE-REPLAY-UNAPPROVED-COMMANDS-001` (CLI-only finding) |
+
+Mutation evidence: managed-service guard 8 mutants killed (M); TypeScript host 7 + renderer decider 3 killed (H, S); end-to-end boundary 2 killed (E). NOT mutation-tested: the milestone refusal (the mutant makes the
+test launch a real workflow and hang), and the `start_managed` spy in M.

@@ -169,6 +169,10 @@ describe.skipIf(!available)('runtime-command approval against real Kriya', () =>
     const bogus = 'sha256:' + '9'.repeat(64);
     expect(await decider(ws).decide(request(ws, id, pending, 'approve', { command_fingerprint: bogus }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
     expect(dialogs).toBe(0);
+    // another run (a launch id Kriya never recorded for this folder) and another review/unit (an identity this run never issued) are equally unprovable: no dialog, nothing sent
+    expect(await decider(ws).decide(request(ws, id, pending, 'approve', { launch_id: '20261015T101099-deadbeef' }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
+    expect(await decider(ws).decide(request(ws, id, pending, 'approve', { review_id: 'ra-' + 'f'.repeat(24) }))).toMatchObject({ accepted: false, code: 'COMMAND_NOT_REVIEWABLE' });
+    expect(dialogs).toBe(0);
     // Kriya's own decision action refuses it independently (the host's proof is not the only line of defence)
     const direct = await runKriya({ executable: join(ROOT, '.venv', 'bin', 'kriya'), cwd: ws, env, limits: { timeoutMs: 30_000 },
       argv: ['launch-decision', '--launch-id', id, '--review-id', pending.review_id, '--candidate-digest', bogus, '--decision', 'approve', '--kind', 'runtime_command'] });
