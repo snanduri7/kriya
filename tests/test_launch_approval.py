@@ -521,7 +521,7 @@ def test_if_the_approval_cannot_be_recorded_nothing_is_approved(ws, monkeypatch)
         await asyncio.to_thread(scenario, canonical, pending)
         outcome["approved"] = await asyncio.wait_for(task, 20)
 
-    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 0.5)
+    monkeypatch.setattr(approval, "APPROVAL_WAIT_SECONDS", 5.0)  # was 0.5: under 8-way load the decision thread landed after the review expired (REVIEW_EXPIRED); this test is about a failed save, not expiry
     try:
         with begin_mutating_run(canonical):
             asyncio.run(main_())
