@@ -55,9 +55,13 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(review).getByTestId('change-why')).toHaveTextContent('The change implements the goal and keeps the public signature.'); // the reviewer\'s words, not the policy preamble marker
     expect(review.textContent).not.toMatch(/=== Automated Code Review ===/);
-    const tech = review.querySelector('details.ck-tech')!;
+    const tech = Array.from(review.querySelectorAll('details.ck-tech')).find((d) => d.querySelector('summary')?.textContent === 'Technical details')!;
     expect(tech.hasAttribute('open')).toBe(false);
     expect(tech.textContent).toContain(REVIEW_ID);
+    const full = within(review).getByTestId('full-review');                      // the report is a collapsed disclosure, rendered as Markdown (elements, never literal # or **)
+    expect(full.hasAttribute('open')).toBe(false);
+    expect(full.querySelector('[data-testid="markdown"]')).not.toBeNull();
+    expect(full.textContent).not.toMatch(/^Full review\s*[#*`]|## /);
     const primary = (review.textContent ?? '').replace(tech.textContent ?? '', '');
     expect(primary).not.toContain(REVIEW_ID);
     expect(primary).not.toMatch(/sha256|candidate/);

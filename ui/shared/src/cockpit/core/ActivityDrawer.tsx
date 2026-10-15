@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { toAvailability, useAsync } from './async';
+import { useAsync } from './async';
 import { activityEntries, resultsFromRecords, type ActivityEntry } from './activity';
 import { useProvider, useSession } from './context';
 import { loadLiveRunEvidence, loadRunEvidence, type RunEvidence } from './evidenceClient';

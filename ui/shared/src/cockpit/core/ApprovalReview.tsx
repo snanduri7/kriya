@@ -9,6 +9,7 @@ import { useProvider } from './context';
 import { useExecution, type PendingReview } from './execution';
 import { shortDigest } from './records';
 import { currentChangeVerification } from './presentation';
+import { conciseWhy, renderMarkdown, reviewBody } from './markdown';
 import { useLiveRunFacts } from './runFactsHooks';
 import { useWorkspacePath } from './workspace';
 
@@ -70,7 +71,8 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const lines = facts && facts.state === 'ready' ? currentChangeVerification(facts.gates) : null;
   const added = (data?.files ?? review.files.map((f) => ({ additions: f.lines_added }))).reduce((n, f) => n + f.additions, 0);
   const removed = (data?.files ?? review.files.map((f) => ({ deletions: f.lines_removed }))).reduce((n, f) => n + ('deletions' in f ? f.deletions : 0), 0);
-  const why = data?.review_summary ?? data?.policy_note ?? null;
+  const why = conciseWhy(data?.review_summary ?? data?.policy_note ?? null);
+  const fullReview = reviewBody(data?.reason ?? null);
   // Open in Editor: the first file that already exists in the project (a new file has nothing to open yet).
   const existing = data?.files.find((f) => f.change_type !== 'added') ?? null;
   const openEditor = () => { if (workspace && existing) void provider.openInEditor(`${workspace}/${existing.path}`); };
@@ -95,6 +97,7 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
 
       <h4 className="ck-action-sub">Why</h4>
       {why !== null ? <div className="ck-why" data-testid="change-why">{sanitizeText(why)}</div> : <p className="muted">{shown.state === 'loading' ? 'Loading…' : 'Kriya recorded no explanation for this change.'}</p>}
+      {fullReview !== null ? <details className="ck-tech" data-testid="full-review"><summary>Full review</summary>{renderMarkdown(fullReview)}</details> : null}
 
       <h4 className="ck-action-sub">Verification of this change</h4>
       {lines === null ? <p className="muted" role="status">{facts && facts.state === 'unavailable' ? `Verification results could not be read here (${facts.detail}).` : 'Reading the recorded results…'}</p>

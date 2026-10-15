@@ -175,3 +175,33 @@
 .ck-setup-facts dt { text-transform: uppercase; letter-spacing: .04em; } .ck-setup-facts dd { margin: 0; }
 /* the decision bar of a change review stays in view while a long diff is read */
 .ck-review .ck-decision { position: sticky; bottom: 0; z-index: 2; margin: 4px -14px -12px; padding: 8px 14px; background: #2a2208; border-top: 1px solid var(--ck-warn); }
+
+/* ---- Demo V2 typography, spacing and alignment (bounded pass; existing colour tokens untouched, no new framework) ----------------------------------------------------------------------------
+   Hierarchy: page title 22-24 semibold, primary state 16-18, section title 14-16 semibold, body 14-15, secondary 12-13, code/diff 13-14 monospace.
+   Spacing scale (px): 4 / 8 / 12 / 16 / 24 / 32. Status, diff, why, verification and actions share ONE left edge (no per-block indents). */
+.ck { --ck-t-title: 23px; --ck-t-state: 17px; --ck-t-section: 15px; --ck-t-body: 14px; --ck-t-secondary: 12.5px; --ck-t-code: 13px;
+      --ck-s-1: 4px; --ck-s-2: 8px; --ck-s-3: 12px; --ck-s-4: 16px; --ck-s-5: 24px; --ck-s-6: 32px; }
+.ck-project, .ck-review, .ck-outcome, .ck-current { font-size: var(--ck-t-body); line-height: 1.5; }
+.ck-project .small, .ck-review .small, .ck-outcome .small, .ck-current .small, .ck-project .muted.small { font-size: var(--ck-t-secondary); }
+.ck-project-head h1 { font-size: var(--ck-t-title); font-weight: 600; line-height: 1.25; }
+.ck-composer h2, .ck-current h2 { font-size: var(--ck-t-state); font-weight: 600; }
+.ck-action-head { font-size: var(--ck-t-state); }
+.ck-review .ck-action-sub, .ck-outcome h3, .ck-project h3, .ck-overview h3 { font-size: var(--ck-t-section); font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--ck-fg); }
+.ck-review .ck-action-sub { margin: var(--ck-s-4) 0 var(--ck-s-1); }
+.ck-outcome h3, .ck-project h3 { margin: var(--ck-s-4) 0 var(--ck-s-1); }
+.ck-diffpane, .ck-output, .ck-commands, .ck-review pre, .ck-outcome pre { font-size: var(--ck-t-code); }
+.ck-commands { margin: var(--ck-s-1) 0 var(--ck-s-2); padding-left: var(--ck-s-5); }
+.ck-commands li { margin: var(--ck-s-1) 0; overflow-wrap: anywhere; }
+.ck-why { font-size: var(--ck-t-body); max-height: none; }
+.ck-subject { margin: var(--ck-s-1) 0 var(--ck-s-2); font-weight: 600; }
+.ck-project-facts { list-style: none; margin: var(--ck-s-2) 0; padding: 0; }
+.ck-project-facts li { margin: var(--ck-s-2) 0; }
+.ck-fact-label { display: inline-block; min-width: 9.5em; font-weight: 600; }
+.ck-markdown p, .ck-markdown ul, .ck-markdown ol { margin: var(--ck-s-2) 0; } .ck-markdown .ck-md-heading { font-size: var(--ck-t-section); font-weight: 600; margin: var(--ck-s-3) 0 var(--ck-s-1); }
+.ck-review > *, .ck-outcome > *, .ck-current > * { margin-left: 0; margin-right: 0; }
+.ck-review .ck-decision { gap: var(--ck-s-2); }
+.ck-activity { margin: var(--ck-s-3) 0; padding: var(--ck-s-3); border: 1px solid var(--ck-line); border-radius: 6px; }
+.ck-activity [role="tablist"] { display: flex; gap: var(--ck-s-1); }
+.ck-activity ol, .ck-activity ul { margin: var(--ck-s-2) 0 0; padding-left: var(--ck-s-4); }
+.ck-activity li[data-tone="bad"] { color: var(--ck-bad, inherit); }
+.ck-project-name { margin: 0 0 var(--ck-s-2); font-size: var(--ck-t-state); font-weight: 600; }

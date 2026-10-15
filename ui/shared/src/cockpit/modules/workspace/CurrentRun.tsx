@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityDrawer, ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ActivityDrawer, ApplicationResult, conciseWhy, renderMarkdown, reviewBody, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, runtimeStopWords, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useProvider, useRunRowFacts, useWorkspacePath, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -27,7 +27,8 @@ function Completed({ phase }: { phase: RunPhase }) {
   const files: ChangedFile[] | null = review
     ? review.files.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions, changeType: f.change_type }))
     : facts && facts.state === 'ready' ? facts.changes.map((c) => ({ path: c.path, additions: c.linesAdded, deletions: c.linesRemoved, changeType: c.kind === 'ADDED' || c.kind === 'CREATED' ? 'added' as const : null })) : null;
-  const why = review?.review_summary ?? review?.policy_note ?? null;
+  const why = conciseWhy(review?.review_summary ?? review?.policy_note ?? null);
+  const fullReview = reviewBody(review?.reason ?? null);
   const unreadable = facts && facts.state === 'unavailable' ? `The recorded results could not be read here (${facts.detail}). Use View Details.` : null;
   const reading = (what: string) => (unreadable ?? (outcome.traceRunId === null ? `No trace row was recorded, so ${what} are not available here.` : `Reading the recorded ${what}…`));
   const groups = gates ? verificationGroups(gates) : null;
@@ -55,7 +56,7 @@ function Completed({ phase }: { phase: RunPhase }) {
           </>
         )}
 
-      {why !== null ? <><h3>Why</h3><p data-testid="outcome-why">{why}</p></> : null}
+      {why !== null ? <><h3>Why</h3><p data-testid="outcome-why">{why}</p>{fullReview !== null ? <details className="ck-tech" data-testid="outcome-full-review"><summary>Full review</summary>{renderMarkdown(fullReview)}</details> : null}</> : null}
 
       <h3>Verification</h3>
       {groups === null ? <p className="muted" role="status">{reading('results')}</p>
