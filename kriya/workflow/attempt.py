@@ -10533,6 +10533,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 run_res = validator.run_app_sequence(
                                     resolved_run_commands,
                                     timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                                    # The reviewed subject binds the stdin digest: the re-run executes the SAME input as the first run.
+                                    stdin_payload=rv_stdin_payload,
                                 )
                                 clean_untracked_files_since(ctx.worktree_path, pre_run_untracked_after_repair)
                                 # RUNTIME-VERIFICATION-ENV-STOP-001 residual (focused review
