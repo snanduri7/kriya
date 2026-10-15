@@ -14,7 +14,7 @@ export function RecentRuns() {
   const workspace = current?.path ?? null;
   // This window reads history from ONE state directory (the host's, not the folder's). A folder Kriya has worked in (it has a .kriya directory) that shows no run here may have been run under another state directory: say which one this window reads, rather than a bare "No runs yet".
   const elsewhere = current?.facts.kriya_directory_present === true ? (
-    <p className="muted small" data-testid="history-elsewhere">This folder has a .kriya directory, so Kriya has worked here before. This window reads run history from <span className="mono">{current.facts.state.directory}</span> ({STATE_SOURCE[current.facts.state.source] ?? current.facts.state.source}); if those runs were made with a different Kriya state directory, start Kriya with that one.</p>
+    <p className="muted small" data-testid="history-elsewhere">This folder has a .kriya directory (Kriya has been started here). This window reads run history from <span className="mono">{current.facts.state.directory}</span> ({STATE_SOURCE[current.facts.state.source] ?? current.facts.state.source}), as of its last history snapshot. A run recorded under a different Kriya state directory, or after that snapshot, does not appear here.</p>
   ) : null;
   const ex = useExecution();
   const running = ex.run !== null && ex.run.stage !== 'finished'; // a run is in progress: "No runs yet" would read as if nothing is happening

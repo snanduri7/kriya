@@ -337,9 +337,10 @@ describe('L. A reopened folder whose history is not in this window\'s state dire
     await openProject({ workspace: '/fixture/plain' });
     expect(await screen.findByText('No runs yet.')).toBeInTheDocument();
     const note = await screen.findByTestId('history-elsewhere');
-    expect(note.textContent).toMatch(/has a \.kriya directory, so Kriya has worked here before/);
+    expect(note.textContent).toMatch(/has a \.kriya directory \(Kriya has been started here\)/);
     expect(note.textContent).toMatch(/reads run history from .*\(KRIYA_STATE_DIR \(operator environment\)\)/);
-    expect(note.textContent).toMatch(/start Kriya with that one/);
+    expect(note.textContent).toMatch(/last history snapshot/);
+    expect(note.textContent).toMatch(/different Kriya state directory, or after that snapshot, does not appear here/);
     expect(note.textContent).not.toMatch(/lost|deleted|corrupt/i);   // it states where this window reads; it does not guess what happened to the runs
   });
   it('a folder Kriya has not worked in says only "No runs yet."; a folder with runs lists them and adds no note', async () => {

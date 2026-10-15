@@ -13,7 +13,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --scenario) SCENARIO="${2:-}"; shift 2 ;;
     --app) APP="${2:-}"; shift 2 ;;
-    --state) STATE_OVERRIDE="${2:-}"; shift 2 ;;
+    --state) [ $# -ge 2 ] || die "--state needs a directory"; STATE_OVERRIDE="$2"; shift 2 ;;
     -h|--help) sed -n 2,5p "${BASH_SOURCE[0]}"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -33,6 +33,10 @@ pgrep -f "$APP/Contents/MacOS/Kriya" >/dev/null 2>&1 && die "a Kriya desktop app
 
 STATE="${STATE_OVERRIDE:-$WORK/state}"
 case "$STATE" in /*) ;; *) die "--state must be an absolute directory" ;; esac
+if [ -n "$STATE_OVERRIDE" ]; then
+  [ -d "$STATE" ] || die "--state $STATE does not exist (a typo would silently give an empty history)"
+  [ -f "$STATE/traces.db" ] || echo "WARNING: $STATE has no traces.db: this window will show no run history." >&2
+fi
 GUI="$WORK/gui"; mkdir -p "$GUI/userdata" "$STATE"
 printf '{"kriyaExecutable": "%s", "editor": "vscode"}\n' "$KRIYA_BIN" > "$GUI/userdata/kriya-ui-settings.json"
 ( HOME="$HOME" KRIYA_STATE_DIR="$STATE" nohup "$APP/Contents/MacOS/Kriya" --user-data-dir="$GUI/userdata" >"$GUI/app.stdout.log" 2>"$GUI/app.stderr.log" & )
