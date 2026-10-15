@@ -225,3 +225,16 @@ All TRACED unless marked.
 6. **Model-derived command through it without the new boundary?** YES in CLI milestone mode, not from Desktop. That is the registered follow-up `MILESTONE-REPLAY-UNAPPROVED-COMMANDS-001` (P2, OPEN, target
    scope: before milestone mode is exposed to the desktop or described as approval-gated). INFERRED-UNKNOWN: whether any non-Desktop route (MCP, REPL) can start milestone mode; the MCP/REPL entry points were not traced.
 7. **Boundary claim:** the runtime-command approval is a Desktop security boundary; it is NOT claimed to cover CLI milestone mode. No code was changed for this path.
+
+### 10-D. What the runtime-command boundary does NOT cover: planner-emitted TOOL subtasks (TOOL-001/002/003), traced 2026-10-15 pass 4
+
+- **Claim being avoided:** "no model-derived command can execute from Desktop without a human decision". That is NOT established, and this document does not make it.
+- **TRACED (code, `kriya/agents/agent.py` ~429-497; `kriya/workflow/workflow_controller.py` 4159/4611; context note `kernel-mcp-and-tool-authority.md` TOOL-001):** the Planner may emit a subtask with
+  `execution_method: "tool"`; `validate_plan` accepts any REGISTERED tool name (`kernel.registry.list_components("tool")`); `_run_structured_enforce` runs it through the one governed boundary
+  `kernel.registry.get("tool", ...) -> BaseTool.execute()`. The authority there is the tool's own: `ExecutionPolicy` hard invariants + command allowlist for ShellTool/GitTool, TOOL-002 durable
+  MCP invocation approval (`kriya mcp approve`, a CLI action), TOOL-003 containment, SEC-005 network. TOOL-001's own statement: exactly as safe as `kriya tools execute`.
+- **What is NOT in that path:** no per-run human review, and no `RuntimeCommandSubject`. A desktop launch does not turn these into reviews. So the runtime-command approval is a boundary for
+  **Kriya's runtime-VERIFICATION executor** (finite commands, plus the HITL managed-service refusal), not for TOOL subtasks.
+- **Desktop reach: UNKNOWN as exercised** (a planner must choose `tool`; nothing measured here shows Demo V2 doing so), reachable in principle. Demo 00's plan uses `execution_method: model`
+  with `verification` tool entries (compile/test), which are the gate runners, not TOOL subtasks.
+- **Registered:** `TOOL-SUBTASK-DESKTOP-REVIEW-001` (P2, OPEN, owner decision before the product is described as "every model-chosen command is reviewed").

@@ -19,6 +19,10 @@ Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die
   review             -> records a candidate and a passing gate, then reaches the REAL change-approval path (kriya.control.launch.request_change_approval, the same
                         call the generate callback makes) and waits for the human's decision: approve -> the run succeeds; reject -> the run ends human_rejected,
                         exactly as the workflow's abort does (its result carries a checkpoint-style run_id that is NOT the trace row id)
+  runtime_review     -> records a candidate and a passing gate, then reaches the REAL runtime-command approval path (kriya.control.launch.request_runtime_command_approval, the same call
+                        the generate callback makes for the executor) and waits for the human's decision: approve -> the commands are RECORDED as executed (a run_verification gate outcome
+                        with steps) and the run succeeds; reject -> nothing is recorded as executed and the run FAILS (the real required-verification-declined outcome)
+                        script keys: "runtime_commands" [[argv]...], "runtime_criterion", "runtime_stdout"
   Optional script keys (PRODUCT-UX-COMPLETION screenshots and smokes; all opt-in, absent = the behaviour above):
     "diffs": [{"path": "...", "diff": "<unified diff text>"}]   the change the review is about (and the candidate/trace records follow it) instead of the synthetic one-line diff
     "compiled_goal": true   the trace row of the unit carries the COMPILED "=== Authoritative Goal ===" prompt and names a terminal "<id>.enforce" row that holds the original request
@@ -60,7 +64,7 @@ def _changes_of_diffs(diffs):
 CHANGES = SCRIPT.get("changes") or (_changes_of_diffs(DIFFS) if DIFFS else [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}])
 STEP = float(SCRIPT.get("step_ms", 300)) / 1000.0
 OUTCOME = SCRIPT.get("outcome", "success")
-MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review)\]")
+MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review|runtime_review)\]")
 
 
 def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
@@ -108,6 +112,19 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 while release and not os.path.exists(release):
                     time.sleep(0.05)
             approved = None
+            runtime_decision = None
+            runtime_commands = SCRIPT.get("runtime_commands") or [["mvn", "-q", "package"], ["java", "-cp", "target/classes", "com.example.App"]]
+            if OUTCOME == "runtime_review" and passed:
+                from kriya.control.launch import request_runtime_command_approval
+                from kriya.workflow.runtime_command_approval import build_subject
+                subject = build_subject(unit_id="s4", criterion=SCRIPT.get("runtime_criterion") or 'The application prints "Hello from Kriya" and exits with status 0.',
+                                        working_directory=os.path.join(os.getcwd(), ".kriya", "worktrees", "candidate-1"), commands=runtime_commands, input_channel="none",
+                                        stdin_payload=None, reason="Allow Kriya to execute these command(s)?")
+                awaiting = request_runtime_command_approval(subject)
+                decision = asyncio.run(awaiting) if awaiting is not None else None
+                runtime_decision = bool(decision is not None and decision.approved)
+                if runtime_decision and SCRIPT.get("post_approval_ms"):
+                    time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
             if OUTCOME == "review" and passed:
                 from kriya.control.launch import request_change_approval
                 scripted = CHANGES
@@ -118,7 +135,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 if approved and SCRIPT.get("post_approval_ms"):
                     time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()
-        success = (OUTCOME in ("success", "hold") and passed) or approved is True
+        success = (OUTCOME in ("success", "hold") and passed) or approved is True or runtime_decision is True
         rejected = OUTCOME == "review" and passed and not approved
         status = "success" if success else "human_rejected" if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
@@ -133,6 +150,10 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 events.append(event("approval.decision", now - 0.2, outcome="approved" if approved else "rejected", triggers=["human_in_the_loop"]))
             if success:
                 events += [event("terminal_regression.passed", now - 0.1, passed=True, terminal=True), event("attempt.passed", now, passed=True, applied=True)]
+        gates = SCRIPT.get("gate_outcomes")
+        if runtime_decision is True:  # what the executor records when the approved commands ran: one step per command (argv, exit code, stdout, stderr)
+            gates = (gates or []) + [{"type": "run_verification", "success": True, "attempt": 1, "steps": [
+                {"command": list(c), "exit_code": 0, "stdout": SCRIPT.get("runtime_stdout", "Hello from Kriya\n"), "stderr": "", "timed_out": False} for c in runtime_commands]}]
         logger = TraceLogger(os.path.join(resolve_state_directory(cfg)[0], "traces.db"))
         modified = [c["path"] for c in CHANGES] if success else []
         common = dict(duration_sec=time.time() - started, attempts=1, status=status, files_modified=modified, failure_category=None if success else status if rejected else "quality_gate_failed")
@@ -140,10 +161,10 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             enforce_id = f"{trace_id}.enforce"
             compiled = ("=== Authoritative Goal ===\nThis is the real, unmediated user request - the source of truth for what is actually required.\n\n" + goal
                         + "\n\n=== Planned Implementation ===\nPlanner detail the user never wrote.")
-            logger.log_run(run_id=trace_id, goal=compiled, run_events=events, gate_outcomes=SCRIPT.get("gate_outcomes"), enforce_run_id=enforce_id, **common)
+            logger.log_run(run_id=trace_id, goal=compiled, run_events=events, gate_outcomes=gates, enforce_run_id=enforce_id, **common)
             logger.log_run(run_id=enforce_id, goal=goal, run_events=[], **common)
         else:
-            logger.log_run(run_id=trace_id, goal=goal, run_events=events, gate_outcomes=SCRIPT.get("gate_outcomes"), **common)
+            logger.log_run(run_id=trace_id, goal=goal, run_events=events, gate_outcomes=gates, **common)
         if success:
             _complete_successful_run(context)
     if rejected:
