@@ -45,3 +45,11 @@ Verdict: runtime verification is reachable and executes on the direct plan; the 
 
 ## Not done
 Activity retry UX (Phase 7) and the final failure message (Phase 8): held, because the direct-plan phase hit a stop condition and the order says they follow a proven direct path. `out/Kriya.app` not rebuilt; Demo 00 not reset (rebuild only after the owner decides the gaps).
+
+## Independent review (one bounded, fresh reviewer, d8c2986..7e8f88a)
+Verdict: no BLOCKING findings. IMPORTANT findings, all fixed in the follow-up commit with tests that fail without each fix:
+1. **Unclassified validator types were forgotten** (`candidate_runtime_entrypoint_invalid`, `prose_contamination`, ...). The candidate-finding test is now default-keep: any authoritative, non-delivery type is kept except an explicit operational / internal / catch-all set (`general_error`, `containment_setup_failed`, `plan_scope_conflict`, RESOURCE and INTERNAL categories).
+2. **Prompt and retry scope could disagree after a delivery failure** (the finding said "must also be fixed" about AppTest.java while the targeted retry was scoped to pom.xml). The open finding's subject files are now unioned into the next targeted retry's targets, under the same ALLOWLIST / DENY_ALL scope rules.
+3. **D2 could abort a structured-plan unit on a mixed-scope static message** (`authoritative_deterministic` makes `scope_conflict_is_grounded` true). The raise site passes the unit's ALLOWLIST; a finding printing in-scope and out-of-scope files keeps only the in-scope subject as authority. If none of the printed paths is writable, all are kept and the existing scope handling decides. MEASURED by the reviewer's probe before the fix (`stop_loop=True`, `required_files=['pom.xml']`), covered by a test after it.
+Cosmetic, fixed: stale docstring of `_diagnosis_mismatch_bypass_reason`; long evidence now keeps head AND tail.
+Still open (accepted, documented): replacement of the open set is not order-aware across gates (a later-gate finding is dropped when an earlier gate fires, until it fails again); the open set is in-memory like `last_failure` and not checkpointed across a resume; `MAX_OPEN_FINDINGS` is a guard (production keeps one finding at a time).

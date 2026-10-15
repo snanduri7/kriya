@@ -208,3 +208,28 @@ async def test_run_attempt_production_path_records_the_vacuous_test_file_as_the_
     assert failure.type == "static_rule_violation" and "vacuous_test_assertion" in failure.message
     assert failure.authoritative_files == [TEST_FILE]
     assert state.gate_outcomes[-1]["authoritative_files"] == [TEST_FILE]
+
+
+# --- review of D2: a finding spanning an in-scope and an out-of-scope file must not abort the unit -----------------------------------
+
+@pytest.mark.asyncio
+async def test_a_static_finding_spanning_an_in_scope_and_an_out_of_scope_file_retries_the_in_scope_file(tmp_path):
+    from kriya.policy.filesystem import WriteScopeMode  # noqa: PLC0415
+
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    ctx.write_scope_mode, ctx.allowed_write_relpaths = WriteScopeMode.ALLOWLIST, [TEST_FILE]
+    violation = f"[some_rule] {TEST_FILE} and {POM} are inconsistent."
+    failure = build_static_rule_failure(violation, str(tmp_path), KNOWN, 1, writable_paths=[TEST_FILE])
+    assert failure.authoritative_files == [TEST_FILE]
+
+    state.last_attempt_mode, state.attempt_number = "full_set", 1
+    with patch("kriya.workflow.retry_strategy.classify_environment_failure", return_value=None):
+        stopped = await handle_attempt_failure(state, ctx, QualityGateFailure(failure))
+
+    assert stopped is False and not state.plan_scope_conflict and state.last_implicated_files == [TEST_FILE]
+
+
+def test_when_no_printed_path_is_writable_all_are_kept_and_the_existing_scope_handling_decides(tmp_path):
+    violation = f"[some_rule] {POM} is wrong."
+    assert build_static_rule_failure(violation, str(tmp_path), KNOWN, 1, writable_paths=[TEST_FILE]).authoritative_files == [POM]

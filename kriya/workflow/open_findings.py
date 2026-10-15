@@ -8,11 +8,11 @@ Two kinds of failure, kept apart:
 
 * DELIVERY failures judge only the Developer's response (its shape, anchors, consistency). They say nothing about whether the
   candidate is correct, so they neither open nor close a finding. They are attempt-local and are never accumulated.
-* CANDIDATE findings (build, verification and the candidate-content static checks) are statements about the candidate
+* CANDIDATE findings (any validator-owned type that is not a delivery failure or an operational/internal catch-all) are statements about the candidate
   itself. An authoritative one becomes the open set; it is replaced by the next authoritative candidate finding, because
   gates evaluate a candidate in a fixed order and raise the first violation, so a candidate that reaches another gate has
   passed (or is no longer subject to) the earlier check. Nothing else clears it. Every other failure type (resource, internal,
-  unclassified, missing files) says nothing about the candidate and leaves the set unchanged.
+  unclassified) says nothing about the candidate and leaves the set unchanged.
 
 A finding's subject (type, reason code, files, source, validator evidence) is copied from the validator's own Failure and is
 immutable: model text never edits it.
@@ -36,9 +36,11 @@ DELIVERY_FAILURE_TYPES = frozenset({
     "unaddressed_error_location",
 })
 
-# Generation-completeness types that nevertheless describe the candidate's own content.
-_CANDIDATE_CONTENT_TYPES = frozenset({"static_rule_violation", "duplicate_type_across_files"})
-_CANDIDATE_CATEGORIES = frozenset({FailureCategory.BUILD, FailureCategory.VERIFICATION})
+# Failures that say nothing about the candidate's content: operational / internal / unclassified catch-alls. Everything else that is
+# authoritative and not a delivery failure is a statement about the candidate and is KEPT - a validator type the category table does not
+# know yet must default to remembered, not forgotten (review of D1: candidate_runtime_entrypoint_invalid, prose_contamination, ...).
+_NON_CANDIDATE_CATEGORIES = frozenset({FailureCategory.RESOURCE, FailureCategory.INTERNAL})
+_NON_CANDIDATE_TYPES = frozenset({"general_error", "containment_setup_failed", "plan_scope_conflict"})
 
 MAX_OPEN_FINDINGS = 3
 MAX_EVIDENCE_CHARS = 2000
@@ -62,7 +64,17 @@ class OpenFinding:
 
 
 def is_candidate_finding(failure_type: str) -> bool:
-    return failure_type in _CANDIDATE_CONTENT_TYPES or categorize_failure(failure_type) in _CANDIDATE_CATEGORIES
+    return (failure_type not in DELIVERY_FAILURE_TYPES and failure_type not in _NON_CANDIDATE_TYPES
+            and categorize_failure(failure_type) not in _NON_CANDIDATE_CATEGORIES)
+
+
+def _head_and_tail(text: str, limit: int) -> str:
+    """Build and test output carries its decisive lines at the end: keep both ends."""
+    if len(text) <= limit:
+        return text
+    marker = "\n... [middle omitted] ...\n"
+    keep = limit - len(marker)
+    return text[: keep // 2] + marker + text[-(keep - keep // 2):]
 
 
 def finding_from_failure(failure: Any, attempt: int) -> OpenFinding:
@@ -74,7 +86,7 @@ def finding_from_failure(failure: Any, attempt: int) -> OpenFinding:
         reason_code=(failure.diagnostics or {}).get("reason_code"),
         files=files,
         source=failure.source,
-        evidence=evidence[:MAX_EVIDENCE_CHARS],
+        evidence=_head_and_tail(evidence, MAX_EVIDENCE_CHARS),
         first_attempt=attempt,
     )
 
@@ -97,3 +109,8 @@ def render_open_findings(open_findings: Sequence[OpenFinding]) -> str:
         "Still unresolved from an earlier attempt (no later validator has cleared this finding, so it still applies and "
         "must also be fixed):\n" + blocks
     )
+
+
+def open_finding_files(open_findings: Sequence[OpenFinding]) -> List[str]:
+    """The validator-owned subjects of the open findings, in order, without repeats."""
+    return list(dict.fromkeys(path for finding in open_findings for path in finding.files))

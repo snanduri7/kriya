@@ -256,3 +256,62 @@ def test_best_of_n_reset_forgets_open_findings():
     reset_state_for_independent_candidate(state)
     assert state.open_findings == []
 
+
+
+# --- review of D1: unclassified validator types, retry targets, tail evidence ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_validator_type_the_category_table_does_not_know_is_kept_not_forgotten(tmp_path):
+    """candidate_runtime_entrypoint_invalid / prose_contamination are validator-owned but uncategorised: the default is to remember."""
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    entrypoint = QualityGateFailure(Failure(
+        type="candidate_runtime_entrypoint_invalid", message="main class missing", raw_output="Cannot find hellokriya.Main", likely_files=[POM]))
+    await _record(state, ctx, entrypoint, _protocol(files=(POM,)))
+
+    assert [f.failure_type for f in state.open_findings] == ["candidate_runtime_entrypoint_invalid"]
+    assert "Cannot find hellokriya.Main" in _next_request(state, ctx, targets=(POM,)).render_error()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operational", ["time_budget_exhausted", "internal_framework_error", "general_error", "containment_setup_failed"])
+async def test_operational_failures_are_not_findings_about_the_candidate(tmp_path, operational):
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    await _record(state, ctx, _semantic(), QualityGateFailure(Failure(type=operational, message="x", raw_output="x")))
+
+    assert [f.failure_type for f in state.open_findings] == ["static_rule_violation"]
+
+
+@pytest.mark.asyncio
+async def test_the_next_targeted_retry_keeps_the_open_finding_subject_in_scope_after_a_delivery_failure_on_another_file(tmp_path):
+    """The prompt says 'must also be fixed' about AppTest.java, so the retry must be scoped to AppTest.java too."""
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    state.all_files_written = {POM, MAIN_FILE, TEST_FILE}
+    await _record(state, ctx, _semantic(), _protocol(files=(POM,)))
+
+    assert state.last_implicated_files == [POM, TEST_FILE]
+
+
+@pytest.mark.asyncio
+async def test_an_open_finding_subject_outside_the_write_scope_is_not_added_to_the_targets(tmp_path):
+    from kriya.policy.filesystem import WriteScopeMode  # noqa: PLC0415
+
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    ctx.write_scope_mode, ctx.allowed_write_relpaths = WriteScopeMode.ALLOWLIST, [POM]
+    state.all_files_written = {POM, MAIN_FILE, TEST_FILE}
+    await _record(state, ctx, _semantic(), _protocol(files=(POM,)))
+
+    assert state.last_implicated_files == [POM]
+
+
+@pytest.mark.asyncio
+async def test_long_evidence_keeps_both_its_head_and_its_decisive_tail(tmp_path):
+    _write_project(tmp_path)
+    ctx, state = _ctx(tmp_path), GenerationState()
+    await _record(state, ctx, _semantic(raw="HEAD-LINE\n" + "noise line\n" * 5000 + "DECISIVE-TAIL-LINE"), _protocol())
+
+    evidence = state.open_findings[0].evidence
+    assert len(evidence) <= 2000 and "HEAD-LINE" in evidence and "DECISIVE-TAIL-LINE" in evidence

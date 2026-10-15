@@ -69,7 +69,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.model_transition import fallback_routing_for_context
-from kriya.workflow.open_findings import DELIVERY_FAILURE_TYPES, update_open_findings
+from kriya.workflow.open_findings import DELIVERY_FAILURE_TYPES, open_finding_files, update_open_findings
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import (
@@ -1399,6 +1399,18 @@ async def _record_attempt_failure(
                 )
                 state.rejected_generation_targets.extend(sorted(implicated))
                 narrowed_implicated = []
+            if narrowed_implicated and fail_type in DELIVERY_FAILURE_TYPES and state.open_findings:
+                # D1: a response-shape failure names the file whose RESPONSE was malformed; the still-open validator
+                # finding's own subject must stay in the next targeted retry too, or the prompt says "must also be fixed"
+                # about a file the retry is not scoped to. Same scope rules as the targets above.
+                written = set(state.all_files_written) | set(ctx.established_files)
+                carried = [path for path in open_finding_files(state.open_findings)
+                           if path in written and path not in narrowed_implicated]
+                if getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST and ctx.allowed_write_relpaths:
+                    carried = [path for path in carried if path in set(ctx.allowed_write_relpaths)]
+                elif getattr(ctx, "write_scope_mode", None) == WriteScopeMode.DENY_ALL:
+                    carried = []
+                narrowed_implicated = [*narrowed_implicated, *carried]
             state.last_implicated_files = narrowed_implicated if narrowed_implicated else None
             state.last_missing_files = None
             # Recovery admission (PRV-17, 2026-09-03): a GROUNDED failure

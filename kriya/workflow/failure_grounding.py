@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Collection, Dict, Iterable, List, Optional, Tuple
 
 from kriya.workflow.failure import Failure, FileLocation
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
@@ -944,14 +944,21 @@ def _paths_printed_in(text: str, known_files: Iterable[str]) -> List[str]:
     ]
 
 
-def build_static_rule_failure(static_violation: str, worktree_path: str, known_files: Iterable[str], attempt: int) -> Failure:
+def build_static_rule_failure(
+    static_violation: str, worktree_path: str, known_files: Iterable[str], attempt: int,
+    writable_paths: Optional[Collection[str]] = None,
+) -> Failure:
     """The failure for a deterministic static-rule violation.
 
     D2: every static check prints the repository path(s) its finding is about, so those paths are the validator's own
     subject - deterministic evidence, not a guess. They are recorded as ``authoritative_files``, which attribute_failure()
     ranks above the model's self-diagnosis (a claim about the model's own output); model narrative cannot move the subject
     of a finding the validator located. A violation that prints no known path gets no authority (the pre-existing
-    attribution ladder applies unchanged)."""
+    attribution ladder applies unchanged).
+
+    ``writable_paths`` (the unit's ALLOWLIST write scope, when it has one): a finding spanning an in-scope file and an out-of-scope
+    one keeps only the in-scope subject as authority, so mixed evidence does not turn an ordinary retry into a plan-scope abort
+    (review of D2); if none of the printed paths is writable all are kept and the existing scope handling applies."""
     known_files = list(known_files)
     failure = _build_quality_gate_failure(
         type_="static_rule_violation",
@@ -961,7 +968,9 @@ def build_static_rule_failure(static_violation: str, worktree_path: str, known_f
         known_files=known_files,
         attempt=attempt,
     )
-    failure.authoritative_files = _paths_printed_in(static_violation, known_files)
+    printed = _paths_printed_in(static_violation, known_files)
+    writable = [path for path in printed if path in set(writable_paths or ())]
+    failure.authoritative_files = writable or printed
     return failure
 
 

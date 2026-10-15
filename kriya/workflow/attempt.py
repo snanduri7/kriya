@@ -4819,17 +4819,13 @@ def _diagnosis_mismatch_bypass_reason(
     question directly, two different ways depending on what's cheaply
     available:
 
-    1. If this retry is responding to a static_rule_violation (a CHEAP,
-       already-registered deterministic checker - kriya/workflow/
-       static_checks.py), just re-run that SAME check against the proposed
-       content. If the specific violation it originally flagged is gone,
-       that's authoritative - no prose-matching needed at all. Confirmed
-       live, 2026-08-17 (ignite_qpid_person, run b-10m): a correct fix
-       wrapping a bare `[VERIFICATION] PASS` line in println(...) was
-       rejected 3 times because the marker text was a substring of a
-       larger search block, not signal (b)'s required whole-block match -
-       re-running BareVerificationMarkerCheck against the candidate would
-       have accepted it on the first try, with zero new signal needed.
+    1. If this retry is responding to a static_rule_violation (a CHEAP, already-registered deterministic checker -
+       kriya/workflow/static_checks.py), the same check re-runs on the WHOLE candidate right after the write loop, so the prose
+       heuristic defers to it (D3, live Greenfield run 20261015T152407-5f87716a: the earlier branch here re-ran the check with only
+       the current file overridden and the sibling files still stale on disk, and could never see a response that resolves the
+       finding in another file). Earlier history, kept for the incident that motivated deterministic-validation-first: a correct
+       fix wrapping a bare `[VERIFICATION] PASS` line in println(...) was rejected 3 times because the marker text was a substring
+       of a larger search block; re-running BareVerificationMarkerCheck would have accepted it on the first try.
     2. If this retry is responding to a `compile` failure, there is no
        equally-cheap re-check available - the only authoritative answer is
        the real compiler, which runs immediately after this check anyway.
@@ -9469,6 +9465,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # broadcast, just no longer the ONLY behavior available.
             failure = build_static_rule_failure(
                 static_violation, ctx.worktree_path, static_check_known_files, state.attempt_number,
+                writable_paths=(ctx.allowed_write_relpaths
+                                if getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST else None),
             )
             state.record_gate_outcome(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
