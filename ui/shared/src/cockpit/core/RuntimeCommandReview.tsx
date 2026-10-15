@@ -73,7 +73,7 @@ export function RuntimeCommandReviewCard({ review, launchId }: { review: Pending
     <section className="ck-review ck-action" aria-label="Runtime command review" data-review-id={review.review_id} data-subject="runtime_command" tabIndex={-1}>
       <div className="ck-action-head"><span className="ck-action-flag">ACTION REQUIRED</span><strong>Kriya wants to run commands to verify your application</strong></div>
       <div className="ck-subject muted small" data-testid="approval-subject">Allow Kriya to run verification commands</div>
-      <div className="muted small">Kriya paused this run for your decision. Nothing is run until you allow it.</div>
+      <div className="muted small">Kriya paused this run for your decision. Nothing further is run until you decide.</div>
       {changed || staleRefusal ? <div className="ck-state" role="alert" data-testid="runtime-changed"><strong>The commands changed while you were reviewing them. Review the updated request before continuing.</strong></div> : null}
 
       <h4 className="ck-action-sub">Why</h4>
@@ -81,7 +81,7 @@ export function RuntimeCommandReviewCard({ review, launchId }: { review: Pending
 
       <h4 className="ck-action-sub">Runs in</h4>
       <div data-testid="runtime-runs-in">Kriya isolated worktree</div>
-      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree.</p>
+      <p className="muted small">Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project&apos;s build or Python environment in that worktree. The worktree is a separate working copy of your project, not a security sandbox.</p>
 
       <h4 className="ck-action-sub">Commands</h4>
       {shown.state === 'loading' ? <p className="muted" role="status">Loading the commands…</p> : null}
@@ -113,7 +113,7 @@ export function RuntimeCommandReviewCard({ review, launchId }: { review: Pending
         </div>
       </details>
 
-      <p className="muted small" data-testid="runtime-decision-help"><strong>Continue to Run Approval…</strong> opens a confirmation from the application; nothing runs until you confirm there. <strong>Reject</strong>: nothing is run and this run ends.</p>
+      <p className="muted small" data-testid="runtime-decision-help"><strong>Continue to Run Approval…</strong> opens a confirmation from the application; nothing runs until you confirm there. <strong>Reject</strong>: Kriya will not run these commands; if this check is required for your goal, the run stops.</p>
       <div className="ck-runbar-head ck-decision">
         <span className="grow" />
         {decision.state === 'submitting' ? <Badge tone="info">{decision.decision === 'approve' ? 'Waiting for your confirmation…' : 'Recording your decision…'}</Badge> : null}

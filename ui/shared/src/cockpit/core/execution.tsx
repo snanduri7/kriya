@@ -159,9 +159,9 @@ const PAGE = 200;
 
 /** The notification a run state warrants, or null. Pure: a pending review (Kriya's record, the run live) is "approval_required"; a recorded success is
  * "run_succeeded"; any other recorded end except the person's own rejection is "run_unsuccessful". `key` makes each event ask once (a new review is a new event). */
-export function notificationFor(run: RunView): { kind: 'approval_required' | 'run_succeeded' | 'run_unsuccessful'; key: string } | null {
+export function notificationFor(run: RunView): { kind: 'approval_required' | 'runtime_approval_required' | 'run_succeeded' | 'run_unsuccessful'; key: string } | null {
   if (run.stage !== 'finished' && run.review) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.review.review_id}` };
-  if (run.stage !== 'finished' && run.runtimeReview) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.runtimeReview.review_id}` };
+  if (run.stage !== 'finished' && run.runtimeReview) return { kind: 'runtime_approval_required', key: `runtime_approval_required:${run.launchId}:${run.runtimeReview.review_id}` };
   if (run.stage === 'finished' && run.outcome) {
     if (run.outcome.kind === 'rejected') return null; // the person just decided this themselves
     return { kind: run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful', key: `${run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful'}:${run.launchId}` };
@@ -200,11 +200,11 @@ function deriveCore(status: LaunchStatus | null, notRecorded: boolean, host: Exe
     const succeeded = record.found && record.terminal_status === 'SUCCESS';
     // The RunRecord is the authority: a run that reached SUCCESS was not stopped by any decision, whatever was noted along the way.
     if (review && !succeeded && review.status === 'REJECTED') {
-      if (review.kind === 'runtime_command') return { kind: 'rejected', label: 'Commands not allowed', detail: 'You did not allow Kriya to run the verification commands, so nothing was run and the application could not be verified.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
+      if (review.kind === 'runtime_command') return { kind: 'rejected', label: 'Commands not allowed', detail: 'You did not allow Kriya to run the verification commands, so the application could not be verified by running it.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
       return { kind: 'rejected', label: 'Changes rejected', detail: 'You rejected the proposed changes; Kriya applied nothing.', source: "Kriya launch record (your recorded decision) and the run's own record", traceRunId, workflowStatus };
     }
     if (review && !succeeded && review.status === 'EXPIRED' && review.kind === 'runtime_command') {
-      return { kind: 'review_expired', label: 'Request expired', detail: 'The request to run the verification commands was not decided in time, so Kriya declined it: nothing was run.', source: 'Kriya launch record (the review expired undecided) and the run\'s own record', traceRunId, workflowStatus };
+      return { kind: 'review_expired', label: 'Request expired', detail: review.decision?.source === 'host-gone' ? 'This window went away while the request to run the verification commands was waiting, so Kriya declined it.' : review.decision?.source === 'interrupted' ? 'The run was interrupted while the request to run the verification commands was waiting, so Kriya declined it.' : 'The request to run the verification commands was not decided in time, so Kriya declined it: the commands were not run.', source: 'Kriya launch record (the review expired undecided) and the run\'s own record', traceRunId, workflowStatus };
     }
     if (review && !succeeded && review.status === 'EXPIRED') {
       return { kind: 'review_expired', label: 'Review expired', detail: review.decision?.source === 'host-gone' ? 'This window went away while the review was waiting, so Kriya declined it: nothing was applied.' : review.decision?.source === 'interrupted' ? 'The run was interrupted while the review was waiting: nothing was applied.' : 'The review was not decided in time, so Kriya declined it: nothing was applied.', source: 'Kriya launch record (the review\'s recorded end)', traceRunId, workflowStatus };

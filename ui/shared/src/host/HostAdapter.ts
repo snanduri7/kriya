@@ -49,7 +49,7 @@ export interface WorkspaceChoice { chosen: boolean; path: string | null; /** RUN
 export interface ProjectParentChoice { chosen: boolean; token: string | null; parent: string | null; refused?: 'RUN_ACTIVE' | null }
 export interface ProjectCreateResult { created: boolean; path: string | null; code: string | null; message: string | null; reason: string | null }
 /** A native notification for one of three durable moments. The host builds the text; only the closed kind and the launch id cross. */
-export type NotifyKind = 'approval_required' | 'run_succeeded' | 'run_unsuccessful';
+export type NotifyKind = 'approval_required' | 'runtime_approval_required' | 'run_succeeded' | 'run_unsuccessful';
 export interface NotifyRequest { kind: NotifyKind; launch_id: string }
 export interface NotifyResult { shown: boolean; reason: string }
 export type MenuCommand = 'openFolder' | 'newProject' | 'showRun';

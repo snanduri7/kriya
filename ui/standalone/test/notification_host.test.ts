@@ -83,6 +83,15 @@ describe('when it is shown', () => {
     expect(host.notify({ kind: 'approval_required', launch_id: LID })).toEqual({ shown: false, reason: 'duplicate' });
     expect(shown).toHaveLength(APPROVAL_REPEAT_MAX);
   });
+  it('the runtime-command review has its own kind, its own words, and its own allowance: source reviews cannot use it up (independent review I4)', () => {
+    const { host, shown } = make();
+    for (let i = 0; i < APPROVAL_REPEAT_MAX; i += 1) host.notify({ kind: 'approval_required', launch_id: LID });   // the allowance of source reviews is spent
+    expect(host.notify({ kind: 'runtime_approval_required', launch_id: LID })).toEqual({ shown: true, reason: 'shown' });
+    expect(shown.at(-1)!.body).toContain('verification commands');
+    expect(shown.at(-1)!.body).not.toMatch(/proposed change|Nothing is applied/);
+    expect(notificationText('runtime_approval_required', null).title).toBe('Kriya needs your permission');
+    expect(notificationText('approval_required', null).body).toContain('A proposed change');
+  });
   it('clicking a notification activates the window (the host sends the fixed showRun command); the click carries no data', () => {
     const { host, clicks, activations } = make();
     host.notify({ kind: 'approval_required', launch_id: LID });

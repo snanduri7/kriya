@@ -64,6 +64,9 @@ describe('the runtime-command review: the exact commands first, in words a perso
     expect(within(review).getByRole('button', { name: 'Reject' })).toBeEnabled();
     expect(within(review).queryByRole('button', { name: /Approve/ })).toBeNull();
     expect(within(review).getByTestId('runtime-decision-help')).toHaveTextContent(/opens a confirmation from the application; nothing runs until you confirm there/);
+    expect(within(review).getByTestId('runtime-decision-help')).toHaveTextContent(/Reject: Kriya will not run these commands; if this check is required for your goal, the run stops/);   // not "this run ends": an optional check lets the run go on
+    expect(review).toHaveTextContent('not a security sandbox');
+    expect(review).not.toHaveTextContent(/Nothing is run until you allow it/);
     expect(cardSource).not.toMatch(/Approve &amp; Continue|Approve & Continue/);
   });
 
@@ -135,11 +138,11 @@ describe('the decision: ONE renderer click, then the native confirmation; nothin
     await waitFor(() => expect(host.exec!.runtimeDecisions).toHaveLength(1));
     expect(host.exec!.runtimeDecisions[0]!.decision).toBe('reject');
     expect(host.exec!.confirmationsShown).toBe(0);
-    await within(bar).findByText(/nothing will be run/);   // the interim note names the RIGHT subject (not "nothing will be applied")
+    await within(bar).findByText(/Kriya will not run those commands/);   // the interim note names the RIGHT subject (not "nothing will be applied") and does not promise the run ends
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'rejected'));
     expect(bar).toHaveTextContent('Commands not allowed');
-    expect(bar).toHaveTextContent(/You did not allow Kriya to run the verification commands, so nothing was run/);
+    expect(bar).toHaveTextContent(/You did not allow Kriya to run the verification commands, so the application could not be verified by running it/);
     expect(bar).not.toHaveTextContent(/Changes rejected|proposed changes/);
   });
 
@@ -286,7 +289,10 @@ describe('the pure rules', () => {
     const ended = (kind: string, status: string) => ({ launch: { phase: 'ENDED', approval_required: null, run: { run_id: 'r' }, ended: { exit_code: 1, workflow_status: null, trace_run_id: null, error: null, failure_category: null }, declined_decisions: [], pending_approval: { kind, status, decision: null } }, run_record: { found: true, terminal_status: 'FAILURE', commit_result: null } }) as unknown as LaunchStatus;
     const runtime = deriveOutcome(ended('runtime_command', 'EXPIRED'), false, null);
     expect(runtime).toMatchObject({ kind: 'review_expired', label: 'Request expired' });
-    expect(runtime!.detail).toMatch(/nothing was run/);
+    expect(runtime!.detail).toMatch(/commands were not run/);
+    const gone = (source: string) => ({ ...ended('runtime_command', 'EXPIRED'), launch: { ...(ended('runtime_command', 'EXPIRED') as unknown as { launch: object }).launch, pending_approval: { kind: 'runtime_command', status: 'EXPIRED', decision: { source } } } }) as unknown as LaunchStatus;
+    expect(deriveOutcome(gone('host-gone'), false, null)!.detail).toMatch(/window went away/);
+    expect(deriveOutcome(gone('interrupted'), false, null)!.detail).toMatch(/interrupted/);
     expect(deriveOutcome(ended('change_approval', 'EXPIRED'), false, null)).toMatchObject({ kind: 'review_expired', label: 'Review expired' });
     expect(deriveOutcome(ended('runtime_command', 'REJECTED'), false, null)).toMatchObject({ kind: 'rejected', label: 'Commands not allowed' });
     expect(deriveOutcome(ended('change_approval', 'REJECTED'), false, null)).toMatchObject({ kind: 'rejected', label: 'Changes rejected' });

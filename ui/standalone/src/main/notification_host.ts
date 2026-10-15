@@ -12,7 +12,7 @@
  */
 import { LAUNCH_ID_RE } from './ipc_contract';
 
-export const NOTIFY_KINDS = ['approval_required', 'run_succeeded', 'run_unsuccessful'] as const;
+export const NOTIFY_KINDS = ['approval_required', 'runtime_approval_required', 'run_succeeded', 'run_unsuccessful'] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 export interface NotifyRequest { kind: NotifyKind; launch_id: string }
 export type NotifyReason = 'shown' | 'invalid' | 'unknown_launch' | 'duplicate' | 'focused' | 'unsupported';
@@ -46,6 +46,7 @@ export function folderLabel(path: string | null): string | null {
 export function notificationText(kind: NotifyKind, folder: string | null): { title: string; body: string } {
   const where = folder ? ` in ${folder}` : '';
   switch (kind) {
+    case 'runtime_approval_required': return { title: 'Kriya needs your permission', body: `Kriya wants to run verification commands${where}. Nothing further is run until you decide.` };
     case 'approval_required': return { title: 'Kriya needs your approval', body: `A proposed change${where} is waiting for your review. Nothing is applied until you decide.` };
     case 'run_succeeded': return { title: 'Kriya run finished', body: `The run${where} ended with success recorded by Kriya. Open Kriya to see what changed.` };
     case 'run_unsuccessful': return { title: 'Kriya run did not finish successfully', body: `The run${where} ended without a success recorded by Kriya. Open Kriya for the details.` };
@@ -64,10 +65,11 @@ export class NotificationHost {
     if (typeof kind !== 'string' || !(NOTIFY_KINDS as readonly string[]).includes(kind)) return { shown: false, reason: 'invalid' };
     if (typeof launch !== 'string' || !LAUNCH_ID_RE.test(launch)) return { shown: false, reason: 'invalid' };
     if (this.deps.currentLaunch() !== launch) return { shown: false, reason: 'unknown_launch' };
-    if (kind === 'approval_required') {
-      const seen = this.approvals.get(launch);
+    if (kind === 'approval_required' || kind === 'runtime_approval_required') {
+      const counter = `${kind}:${launch}`;   // counted per SUBJECT: a run with several source reviews must not use up the allowance of its one runtime review
+      const seen = this.approvals.get(counter);
       if (seen && seen.count >= APPROVAL_REPEAT_MAX) return { shown: false, reason: 'duplicate' };
-      this.approvals.set(launch, { count: (seen?.count ?? 0) + 1, at: this.deps.now() }); // consumed even when not shown: a later focus change must not replay an old event
+      this.approvals.set(counter, { count: (seen?.count ?? 0) + 1, at: this.deps.now() }); // consumed even when not shown: a later focus change must not replay an old event
       while (this.approvals.size > 20) this.approvals.delete(this.approvals.keys().next().value as string);
     } else {
       const key = `${kind}:${launch}`;

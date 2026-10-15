@@ -21,6 +21,8 @@ function Completed({ phase }: { phase: RunPhase }) {
   const lastApproval = run.status?.launch.pending_approval?.status === 'APPROVED' ? run.status.launch.pending_approval : null;
   const approvedReview = lastApproval?.kind === 'change_approval' ? lastApproval : null;    // (a runtime-command approval is not a change review: the change diff is never asked of it)
   const allowedCommands = lastApproval?.kind === 'runtime_command';
+  const lastDecision = run.status?.launch.pending_approval ?? null;
+  const declinedCommands = lastDecision?.kind === 'runtime_command' && lastDecision.status === 'REJECTED';   // the run still completed: the verification was optional for this goal, and it was NOT run
   const reviewed = useChangeReview(run.launchId, approvedReview?.review_id ?? null);
   const review = reviewed.state === 'ready' || reviewed.state === 'degraded' ? reviewed.data : null;
   const gates = facts && facts.state === 'ready' ? facts.gates : null;
@@ -42,7 +44,7 @@ function Completed({ phase }: { phase: RunPhase }) {
     <div className="ck-outcome">
       <p className="ck-applied" data-testid="applied-statement">
         {created ? <strong>✓ Application created successfully</strong> : applied ? <strong>✓ Your change was applied successfully.</strong> : <span>Kriya did not record that the change was applied to your folder. Check your folder before relying on it.</span>}
-        {approvedReview ? ' You approved the change.' : ''}{allowedCommands ? ' You allowed Kriya to run the verification commands.' : ''}
+        {approvedReview ? ' You approved the change.' : ''}{allowedCommands ? ' You allowed Kriya to run the verification commands.' : ''}{declinedCommands ? ' You did not allow the verification commands, so the application was not verified by running it.' : ''}
       </p>
       {created && projectName ? <p className="ck-project-name" data-testid="created-project">{projectName}</p> : null}
 
@@ -159,7 +161,7 @@ export function CurrentRun() {
       {!finished && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
       {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
       {!finished && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
-      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; {pendingKind === 'runtime_command' ? 'nothing will be run' : 'nothing will be applied'}.</div> : null}
+      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> {pendingKind === 'runtime_command' ? 'Kriya will not run those commands.' : 'Kriya is ending the run; nothing will be applied.'}</div> : null}
       {finished && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
       {finished && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
       <details className="ck-tech">
