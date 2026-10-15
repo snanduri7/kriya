@@ -10418,7 +10418,7 @@ async def test_workflow_accepted_candidate_streaming_unchanged(tmp_path):
         return_value={"success": True, "output": ""},
     ):
         res = await we.run_generation_workflow(
-            goal="Write a small Python script that prints hi",
+            goal="Write a small Python script named app.py",   # not "...that prints hi": an explicit output requirement now makes execution mandatory (see the reviewer-disposition test above)
             workspace_path=str(tmp_path),
             stream_callback=lambda step, token: streamed_events.append((step, token)),
         )
