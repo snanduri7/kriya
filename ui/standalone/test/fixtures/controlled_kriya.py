@@ -121,7 +121,7 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             runtime_commands = SCRIPT.get("runtime_commands") or [["mvn", "-q", "package"], ["java", "-cp", "target/classes", "com.example.App"]]
             if OUTCOME == "greenfield_flow" and passed:
                 from kriya.control.launch import request_change_approval
-                files = [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -0,0 +1,3 @@\n+public class HelloKriya {{\n+  public static void main(String[] a) {{ System.out.println(\"Hello from Kriya\"); }}\n+}}\n"} for c in CHANGES]
+                files = ([{"filepath": d["path"], "content": d["diff"]} for d in DIFFS] if DIFFS else [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -0,0 +1,3 @@\n+public class HelloKriya {{\n+  public static void main(String[] a) {{ System.out.println(\"Hello from Kriya\"); }}\n+}}\n"} for c in CHANGES])
                 awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe application prints the requested greeting and includes a unit test.")
                 approved = asyncio.run(awaiting) if awaiting is not None else False
             if (OUTCOME == "runtime_review" or (OUTCOME == "greenfield_flow" and approved is True)) and passed:

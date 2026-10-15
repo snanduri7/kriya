@@ -1,0 +1,18 @@
+{
+ "welcome": "Kriya | Open Folder… | ▾ | Kriya | Give Kriya an engineering goal. Watch it plan, execute, validate, recover, and prove what happened. | New Project… | ⌘N | Open Folder… | ⌘O",
+ "new_project": true,
+ "create_project": true,
+ "setup_advanced": true,
+ "create_setup": true,
+ "review_open": true,
+ "native_approve_config": true,
+ "project_ready": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-failure.CFSb1w/projects/hello-kriya | ✓ Ready | What do you want Kriya to do? | Engineering goal | ✓ Configuration approved | ✓ Ready | · | qwen3-coder:30b | View readiness details | 0 | / | 16000 | ⌘ Enter | Start Run | Enter a goal to start. | Recent runs | No runs yet. | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details",
+ "goal": true,
+ "goal_entered": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-failure.CFSb1w/projects/hello-kriya | ✓ Ready | What do you want Kriya to do? | Engineering goal | Add input validation to the greeting endpoint. [controlled:failure] | ✓ Configuration approved | ✓ Ready | · | qwen3-coder:30b | View readiness details | 67 | / | 16000 | ⌘ Enter | Start Run | Recent runs | No runs yet. | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details",
+ "start": true,
+ "stopped": {
+  "ok": true,
+  "outcome": "failure",
+  "text": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-failure.CFSb1w/projects/hello-kriya | ✕ | Run failed | Run failed | elapsed | 0:05 | Goal | Add input validation to the greeting endpoint. [controlled:failure] | What happened | The change did not pass Kriya's checks (build, tests or verification). Nothing was applied to your folder. | How far it got | Editing | Technical reason | Technical status | Show Activity | View Failure Details | View Changes | New Goal | Recent runs | Add input validation to the greeting endpoint. [controlled:failure] | ✕ Failed · 5s · 2026-10-15 14:21 | View all runs | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details"
+ }
+}

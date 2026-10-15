@@ -1,0 +1,22 @@
+{
+ "welcome": "Kriya | Open Folder… | ▾ | Kriya | Give Kriya an engineering goal. Watch it plan, execute, validate, recover, and prove what happened. | New Project… | ⌘N | Open Folder… | ⌘O",
+ "new_project": true,
+ "create_project": true,
+ "setup_advanced": true,
+ "create_setup": true,
+ "review_open": true,
+ "native_approve_config": true,
+ "project_ready": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-reject.J9RbLO/projects/hello-kriya | ✓ Ready | What do you want Kriya to do? | Engineering goal | ✓ Configuration approved | ✓ Ready | · | qwen3-coder:30b | View readiness details | 0 | / | 16000 | ⌘ Enter | Start Run | Enter a goal to start. | Recent runs | No runs yet. | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details",
+ "goal": true,
+ "goal_entered": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-reject.J9RbLO/projects/hello-kriya | ✓ Ready | What do you want Kriya to do? | Engineering goal | Create a small Java 17 Maven application named hello-kriya that prints 'Hello from Kriya' and includes a unit test. Make the application runnable. | ✓ Configuration approved | ✓ Ready | · | qwen3-coder:30b | View readiness details | 146 | / | 16000 | ⌘ Enter | Start Run | Recent runs | No runs yet. | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details",
+ "start": true,
+ "runtime_review": {
+  "ok": true,
+  "text": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-reject.J9RbLO/projects/hello-kriya | ● | Waiting for permission to run commands | needs you | elapsed | 0:05 | Goal | Create a small Java 17 Maven application named hello-kriya that prints 'Hello from Kriya' and includes a unit test. Make the application runnable. | ✓ | Planning | ( | done | ) | ✓ | Editing | ( | done | ) | ✓ | Validating | ( | done | ) | ○ | Finished | ( | not started | ) | ACTION REQUIRED | Kriya wants to run commands to verify your application | Allow Kriya to run verification commands | Kriya paused this run for your decision. Nothing is run until you allow it. | Why | The application prints 'Hello from Kriya' and exits with status 0. | Runs in | Kriya isolated worktree | Kriya runs verification in an isolated worktree. Your project folder is updated only through the normal approved apply path. Before the commands run, Kriya may prepare the project's build or Python environment in that worktree. | Commands | mvn -q package | java -cp target/classes dev.kriya.App | Input | No interactive input | Technical details | Continue to Run Approval… | opens a confirmation from the application; nothing runs until you confirm there. | Reject | : nothing is run and this run ends. | Reject | Continue to Run Approval… | Technical status | Show Activity | View Details | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details"
+ },
+ "reject": {
+  "ok": true,
+  "outcome": "rejected",
+  "text": "Kriya | hello-kriya | ▾ | ⌂ | Project | ☰ | Runs | ✦ | Skills | ⚒ | Tools | ⚙ | Settings | hello-kriya | /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-rt-reject.J9RbLO/projects/hello-kriya | ■ | Run stopped | Commands not allowed | elapsed | 0:07 | Goal | Create a small Java 17 Maven application named hello-kriya that prints 'Hello from Kriya' and includes a unit test. Make the application runnable. | What happened | You did not allow Kriya to run the verification commands, so nothing was run and the application could not be verified. | How far it got | Editing | Technical reason | Technical status | Show Activity | View Failure Details | View Changes | New Goal | Recent runs | Create a small Java 17 Maven application named hello-kriya that prints 'Hello from Kriya'… | ✕ Failed · 7s · 2026-10-15 14:20 | View all runs | Project details | Technical details | Skills | Tools and capabilities | Model routing | Run configuration details"
+ }
+}
