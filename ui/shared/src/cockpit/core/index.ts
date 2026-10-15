@@ -13,6 +13,7 @@ export * from './runFacts';
 export * from './elapsed';
 export * from './runFactsHooks';
 export { ApprovalReview, useChangeReview, CHANGED_MESSAGE } from './ApprovalReview';
+export { RuntimeCommandReviewCard, useRuntimeCommandReview, displayCommand, displayArg } from './RuntimeCommandReview';
 export { FileDiff } from './ChangeDiff';
 export * from './presentation';
 export { RunCardView } from './RunCardView';
@@ -28,4 +29,4 @@ export { CockpitProviders, ModuleScope, useCapabilities, useDispatch, useModuleS
 export * from '../design';
 export * from './deep';
 export * from './describe';
-export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, createDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type DecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';
+export { ExecutionProvider, useExecution, foldRecords, deriveOutcome, notificationFor, progressCounts, activeReview, activeRuntimeCommandReview, createDecider, createRuntimeCommandDecider, DEFAULT_INTERVALS, NO_PROGRESS, type ExecutionApi, type PendingReview, type PendingRuntimeCommandReview, type DecisionState, type RuntimeDecisionState, type RunView, type RunOutcome, type OutcomeKind, type RunProgress, type BriefRecord, type PreflightState, type StartRefusal, type RunStage, type RunTiming, type PollIntervals } from './execution';

@@ -7,9 +7,9 @@
  * The host-process side (`ExecutionHostPort`) reports only the process, exactly like the real host.
  */
 import type { ExecutionHostPort, NotifyRequest, NotifyResult } from '../../../host/HostAdapter';
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, ExecutionState, StartRunResult } from '../../../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, ConfigurationApprovalStatus, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionState, StartRunResult } from '../../../model/kup';
 
-export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review';
+export type FixtureOutcome = 'success' | 'failure' | 'died' | 'refused' | 'never_recorded' | 'approval_required' | 'stuck_starting' | 'success_after_stale_read' | 'success_with_declined' | 'review' | 'runtime_review';
 
 export interface FixtureExecutionOptions {
   /** How the next launch ends (default 'success'). */
@@ -49,6 +49,10 @@ export interface FixtureExecutionOptions {
   };
   /** How the scripted change review behaves (DEV/TEST ONLY): Kriya cannot serve the exact change (`unavailable`: no stored diff / `unverified`: the stored diff does not match its digests), or the change is larger than one response (`truncated`). */
   review?: { fault?: 'unavailable' | 'unverified'; truncated?: boolean; /** The review answers with a candidate digest that is NOT the pending review's (a host or store out of step). */ digestMismatch?: boolean };
+  /** How the scripted runtime-command review behaves (DEV/TEST ONLY): Kriya cannot prove the recorded commands against their fingerprint (`unverified`), so none are shown. */
+  runtimeReview?: { fault?: 'unverified' };
+  /** The host has no runtime-command decision path (an older host): the review is shown but cannot be decided from this window. */
+  noRuntimeDecisionPort?: boolean;
   /** The host refuses the start with this typed refusal (EXECUTION_BUSY is produced by the real host; here for UI tests). */
   refuseStart?: { code: string; message: string };
 }
@@ -58,6 +62,11 @@ export const LAUNCHED_TRACE_ID = 'fx-launched';
 export const REVIEW_ID = 'ra-' + 'a1'.repeat(12);
 export const REVIEW_DIGEST = 'sha256:' + 'b2'.repeat(32);
 export const REVIEW_REASON = 'Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe change implements the goal and keeps the public signature.';
+/** The scripted runtime-command review (Demo V2): the exact commands Kriya asks to run, in the isolated worktree. */
+export const RUNTIME_COMMANDS: [string, ...string[]][] = [['mvn', '-q', 'package'], ['java', '-cp', 'target/classes', 'com.example.App']];
+export const RUNTIME_WORKTREE = '/fixture/.kriya/worktrees/candidate-1';
+export const RUNTIME_CRITERION = 'The application prints "Hello from Kriya" and exits with status 0.';
+export const RUNTIME_FINGERPRINT = 'sha256:' + '5e'.repeat(32);
 export type ReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
 const REVIEW_FRAME = 3;
 const RECORD_KINDS = ['run.opened', 'unit.opened', 'attempt.opened', 'model.request', 'model.response', 'candidate.change', 'gate.result', 'gate.result', 'attempt.closed', 'run.closed'];
@@ -84,6 +93,8 @@ export class FixtureExecution {
   readonly notifications: NotifyRequest[] = [];
   /** Every decision request the host received (for assertions). */
   readonly decisions: DecideApprovalRequest[] = [];
+  /** Every runtime-command decision request that reached Kriya (a request refused or cancelled in the host never gets here). */
+  readonly runtimeDecisions: DecideRuntimeCommandRequest[] = [];
   readonly port: ExecutionHostPort;
   /** Every configuration approval request the host received, and every status read (for assertions). */
   readonly approvals: ApproveConfigurationRequest[] = [];
@@ -119,6 +130,7 @@ export class FixtureExecution {
       },
       state: async (): Promise<ExecutionState> => this.hostState(),
       decideApproval: async (request): Promise<DecideApprovalResult> => this.decide(request),
+      ...(options.noRuntimeDecisionPort ? {} : { decideRuntimeCommand: async (request: DecideRuntimeCommandRequest): Promise<DecideRuntimeCommandResult> => this.decideRuntime(request) }),
       ...(options.configuration?.noApprovalPort ? {} : { approveConfiguration: async (request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult> => this.confirmThenApprove(request) }),
       ...(options.configuration?.noSetupPort ? {} : { initializeProject: async (request: InitializeProjectRequest): Promise<InitializeProjectResult> => this.initializeProjectNow(request) }),
       notify: async (request): Promise<NotifyResult> => { this.notifications.push(request); return { shown: true, reason: 'shown' }; },
@@ -196,7 +208,8 @@ export class FixtureExecution {
   /** Test hook: jump to the final frame (a run waiting on an undecided review cannot be finished: it is waiting). */
   finish(): void { if (this.frame >= 0 && !this.reviewPending()) this.frame = 4; }
   /** The run is waiting on the human's decision (a pending review exists and nobody has decided it). */
-  reviewPending(): boolean { return this.outcome === 'review' && this.frame === REVIEW_FRAME && this.reviewStatus === 'PENDING'; }
+  private reviewOutcome(): boolean { return this.outcome === 'review' || this.outcome === 'runtime_review'; }
+  reviewPending(): boolean { return this.reviewOutcome() && this.frame === REVIEW_FRAME && this.reviewStatus === 'PENDING'; }
   /** Test hook: the execution process is killed (SIGKILL) where it stands - the launch record stays RUNNING, the workspace lock is released, nothing is sealed. */
   killProcess(): void { this.killed = true; }
   /** Test hook: Kriya's launch.status answers a typed error (other than not-found) from now on. */
@@ -229,13 +242,14 @@ export class FixtureExecution {
   }
   private idFor(n: number): string { return n === 1 ? REVIEW_ID : 'ra-' + String(n).padStart(2, '0').repeat(12); }
   private digestFor(n: number): string { return n === 1 ? REVIEW_DIGEST : 'sha256:' + String(n).padStart(2, '0').repeat(32); }
+  private runtimeFingerprint(): string { return this.reviewSequence === 1 ? RUNTIME_FINGERPRINT : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
   private reviewDigest(): string { return this.reviewSequence === 1 ? REVIEW_DIGEST : 'sha256:' + String(this.reviewSequence).padStart(2, '0').repeat(32); }
 
   /** The process is alive (the real host's `active()`): not yet at the final frame. */
   active(): boolean { return this.frame >= 0 && this.frame < 4 && !this.killed; }
   /** The run's final records are durable (a finished, sealed run the history now lists). */
-  private succeeds(): boolean { return (this.outcome === 'review' && this.reviewStatus === 'APPROVED') || this.outcome === 'success' || this.outcome === 'success_after_stale_read' || this.outcome === 'success_with_declined'; }
-  ended(): boolean { return this.frame === 4 && (this.succeeds() || this.outcome === 'failure' || (this.outcome === 'review' && this.reviewStatus === 'REJECTED')); }
+  private succeeds(): boolean { return (this.reviewOutcome() && this.reviewStatus === 'APPROVED') || this.outcome === 'success' || this.outcome === 'success_after_stale_read' || this.outcome === 'success_with_declined'; }
+  ended(): boolean { return this.frame === 4 && (this.succeeds() || this.outcome === 'failure' || (this.reviewOutcome() && this.reviewStatus === 'REJECTED')); }
 
   private hostState(): ExecutionState {
     if (this.frame < 0) return { phase: 'idle', launch_id: null, workspace: null, started_at: null, ended_at: null, exit: null, diagnostic: null };
@@ -279,8 +293,17 @@ export class FixtureExecution {
   }
 
   private pendingReview(): Json | null {
-    if (this.outcome !== 'review' || this.frame < REVIEW_FRAME) return null;
+    if (!this.reviewOutcome() || this.frame < REVIEW_FRAME) return null;
     const decided = this.reviewStatus !== 'PENDING';
+    if (this.outcome === 'runtime_review') {
+      return {
+        review_id: this.reviewId(), sequence: this.reviewSequence, kind: 'runtime_command', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
+        candidate_digest: this.runtimeFingerprint(), command_fingerprint: this.runtimeFingerprint(), unit_id: 's4', criterion: RUNTIME_CRITERION, commands: RUNTIME_COMMANDS, working_directory: RUNTIME_WORKTREE,
+        working_directory_kind: 'ISOLATED_WORKTREE', input_channel: 'none', stdin_present: false, stdin_sha256: null, environment_names: [],
+        reason: 'Kriya wants to run commands to verify the application', reason_truncated: false, reason_sha256: 'sha256:' + 'd4'.repeat(32),
+        decision: decided ? { decision: this.reviewStatus === 'APPROVED' ? 'approve' : 'reject', decided_at: '2026-10-10T10:11:30+00:00', source: 'launch-decision' } : null,
+      };
+    }
     return {
       review_id: this.reviewId(), sequence: this.reviewSequence, kind: 'change_approval', status: this.reviewStatus, requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
       candidate_digest: this.reviewDigest(), files: [{ filepath: 'src/clamp.py', diff_sha256: 'sha256:' + 'c3'.repeat(32), lines_added: 3, lines_removed: 0 }],
@@ -292,8 +315,8 @@ export class FixtureExecution {
   private statusFor(outcome: FixtureOutcome): Json | null {
     const f = this.frame;
     const lines = LINES_AT[f] ?? 0;
-    const approved = outcome === 'review' && this.reviewStatus === 'APPROVED';
-    const rejected = outcome === 'review' && this.reviewStatus === 'REJECTED';
+    const approved = (outcome === 'review' || outcome === 'runtime_review') && this.reviewStatus === 'APPROVED';
+    const rejected = (outcome === 'review' || outcome === 'runtime_review') && this.reviewStatus === 'REJECTED';
     const ok = outcome === 'success' || outcome === 'success_after_stale_read' || outcome === 'success_with_declined' || approved;
     const sealed = f === 4 && (ok || outcome === 'failure' || rejected);
     const refused = outcome === 'refused' && f === 4;
@@ -334,8 +357,41 @@ export class FixtureExecution {
     if (request.workspace !== this.launchWorkspace) return no('WRONG_WORKSPACE', 'this launch belongs to a different workspace');
     if (this.killed) return no('LAUNCH_NOT_ACTIVE', 'the run that was waiting for this decision is no longer running');
     if (this.frame === 4) return no('LAUNCH_ENDED', 'the run has already ended; there is nothing left to approve');
+    if (this.outcome === 'runtime_review' && this.frame >= REVIEW_FRAME) return no('WRONG_REVIEW_KIND', 'that review asks to run commands; it is decided as a runtime-command review');
     if (this.outcome !== 'review' || this.frame < REVIEW_FRAME) return no('NOT_PENDING', 'no change is waiting for review in this launch');
     if (this.reviewSuperseded || request.review_id !== this.reviewId() || request.candidate_digest !== this.reviewDigest()) return no('STALE_REVIEW', 'the change under review is no longer the one you were shown; review it again');
+    if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
+    this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
+    return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };
+  }
+
+  /** `runtime_command.review`, scripted: the same refusals Kriya makes, otherwise the exact recorded command set of the review that was asked for. */
+  runtimeReview(request: { workspace: string; launch_id: string; review_id: string }): { data: Json } | { code: string; message: string; extra: Json } {
+    if (this.frame < 0 || request.launch_id !== LAUNCH_ID) return { code: 'LAUNCH_NOT_FOUND', message: `no launch ${request.launch_id} is recorded for this folder`, extra: { reason: 'not_recorded' } };
+    if (this.outcome === 'review' && this.frame >= REVIEW_FRAME && request.review_id === this.reviewId()) return { code: 'REVIEW_NOT_FOUND', message: `review ${request.review_id} is not a runtime-command review`, extra: { reason: 'wrong_kind' } };
+    if (this.outcome !== 'runtime_review' || request.review_id !== this.reviewId()) return { code: 'REVIEW_NOT_FOUND', message: `launch ${request.launch_id} has no review ${request.review_id}`, extra: { reason: 'not_recorded' } };
+    if (this.options.runtimeReview?.fault === 'unverified') return { code: 'REVIEW_COMMAND_UNVERIFIED', message: 'the recorded commands do not match the fingerprint the review is bound to; they are not shown', extra: { reason: 'fingerprint_mismatch' } };
+    return { data: {
+      launch_id: LAUNCH_ID, review_id: request.review_id, run_id: LAUNCH_ID, status: this.reviewSuperseded ? 'EXPIRED' : this.reviewStatus, verified: true, command_fingerprint: this.runtimeFingerprint(), unit_id: 's4',
+      criterion: RUNTIME_CRITERION, commands: RUNTIME_COMMANDS, working_directory: RUNTIME_WORKTREE, working_directory_kind: 'ISOLATED_WORKTREE', input_channel: 'none', stdin_present: false, environment_names: [],
+      requested_at: '2026-10-10T10:11:00+00:00', expires_at: '2026-10-10T11:11:00+00:00',
+    } };
+  }
+  /** The host's runtime-command decision, scripted: an approve passes the (scripted) NATIVE confirmation first; Cancel sends nothing and leaves the review pending. Kriya's closed refusals, in order, otherwise. */
+  private decideRuntime(request: DecideRuntimeCommandRequest): DecideRuntimeCommandResult {
+    const no = (code: string, message: string): DecideRuntimeCommandResult => ({ accepted: false, code, message, launch_id: null, review_id: null, decision: null, decided_at: null });
+    if (request.decision === 'approve') {
+      this.confirmationsShown += 1;
+      if (this.nativeAnswers.length > 0 && this.nativeAnswers.shift() === false) return no('CONFIRMATION_DECLINED', 'Nothing was run. The request is still waiting for your decision.');
+    }
+    this.runtimeDecisions.push(request);
+    if (this.frame < 0 || request.launch_id !== LAUNCH_ID) return no('LAUNCH_NOT_FOUND', `no launch ${request.launch_id} is recorded for this folder`);
+    if (request.workspace !== this.launchWorkspace) return no('WRONG_WORKSPACE', 'this launch belongs to a different workspace');
+    if (this.killed) return no('LAUNCH_NOT_ACTIVE', 'the run that was waiting for this decision is no longer running');
+    if (this.frame === 4) return no('LAUNCH_ENDED', 'the run has already ended; there is nothing left to approve');
+    if (this.outcome === 'review' && this.frame >= REVIEW_FRAME) return no('WRONG_REVIEW_KIND', 'that review is a change review; it is decided as a change review');
+    if (this.outcome !== 'runtime_review' || this.frame < REVIEW_FRAME) return no('NOT_PENDING', 'no runtime command is waiting for review in this launch');
+    if (this.reviewSuperseded || request.review_id !== this.reviewId() || request.command_fingerprint !== this.runtimeFingerprint()) return no('STALE_REVIEW', 'the commands under review are no longer the ones you were shown; review them again');
     if (this.reviewStatus !== 'PENDING') return no('ALREADY_DECIDED', `this review is already ${this.reviewStatus.toLowerCase()}`);
     this.reviewStatus = request.decision === 'approve' ? 'APPROVED' : 'REJECTED';
     return { accepted: true, code: 'ACCEPTED', message: `${request.decision} recorded for review ${request.review_id}; the waiting run records it and continues`, launch_id: LAUNCH_ID, review_id: this.reviewId(), decision: request.decision, decided_at: '2026-10-10T10:11:30+00:00' };

@@ -52,16 +52,13 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   const provider = useProvider();
   const workspace = useWorkspacePath();
   const [nonce, setNonce] = useState(0);
-  const [confirming, setConfirming] = useState(false);
   const [changed, setChanged] = useState(false);
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
   const seenReview = useRef(review.review_id);
   const shown = useChangeReview(launchId, review.review_id, nonce);
   // A new review identity means the candidate changed while this one was on screen: say so; the diff below is already the new one.
   useEffect(() => {
-    if (seenReview.current !== review.review_id) { seenReview.current = review.review_id; setChanged(true); setConfirming(false); }
+    if (seenReview.current !== review.review_id) { seenReview.current = review.review_id; setChanged(true); }
   }, [review.review_id]);
-  useEffect(() => { if (confirming) cancelRef.current?.focus(); }, [confirming]);
   const decision = ex.decision;
   const busy = decision.state === 'submitting' || decision.state === 'accepted';
   const data = shown.state === 'ready' || shown.state === 'degraded' ? shown.data : null;
@@ -77,10 +74,11 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
   // Open in Editor: the first file that already exists in the project (a new file has nothing to open yet).
   const existing = data?.files.find((f) => f.change_type !== 'added') ?? null;
   const openEditor = () => { if (workspace && existing) void provider.openInEditor(`${workspace}/${existing.path}`); };
-  const decide = (choice: 'approve' | 'reject') => { void ex.decide(choice, review.review_id, data?.candidate_digest ?? ''); }; // approve is only reachable from the confirmation, which exists only while `viewable`; the decider also refuses a digest that is not the pending one
+  const decide = (choice: 'approve' | 'reject') => { void ex.decide(choice, review.review_id, data?.candidate_digest ?? ''); }; // approve is only offered while `viewable` (the exact change is on screen); the decider also refuses a digest that is not the pending one
   return (
     <section className="ck-review ck-action" aria-label="Change review" data-review-id={review.review_id} tabIndex={-1}>
       <div className="ck-action-head"><span className="ck-action-flag">ACTION REQUIRED</span><strong>Kriya wants to change your project</strong></div>
+      <div className="ck-subject muted small" data-testid="approval-subject">Review proposed code change</div>
       <div className="muted small">Kriya paused this run for your decision. Nothing is applied to your folder until you approve.</div>
       {changed || staleRefusal ? <div className="ck-state" role="alert" data-testid="change-changed"><strong>{CHANGED_MESSAGE}</strong></div> : null}
 
@@ -114,22 +112,13 @@ export function ApprovalReview({ review, launchId }: { review: PendingReview; la
         <span className="grow" />
         {decision.state === 'submitting' ? <Badge tone="info">Recording your decision…</Badge> : null}
         {decision.state === 'accepted' ? <Badge tone="info">{decision.decision === 'approve' ? 'Approval sent' : 'Rejection sent'}</Badge> : null}
-        {!busy && !confirming ? (
+        {!busy ? (
           <>
             <button type="button" onClick={() => decide('reject')}>Reject</button>
-            {viewable ? <button type="button" className="ck-primary ck-cta" onClick={() => setConfirming(true)}>Approve &amp; Continue</button> : null}
+            {viewable ? <button type="button" className="ck-primary ck-cta" onClick={() => decide('approve')}>Approve &amp; Continue</button> : null}
           </>
         ) : null}
       </div>
-      {confirming && !busy && viewable ? (
-        <div role="alertdialog" aria-label="Confirm approval" className="ck-state" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setConfirming(false); } }}>
-          <div><strong>Approve the change shown above ({review.files.length} file{review.files.length === 1 ? '' : 's'})?</strong> Kriya will continue its verification and, if it passes, apply it to your folder.</div>
-          <div className="ck-runbar-head">
-            <button type="button" onClick={() => { setConfirming(false); decide('approve'); }}>Confirm approval</button>
-            <button type="button" ref={cancelRef} onClick={() => setConfirming(false)}>Cancel</button>
-          </div>
-        </div>
-      ) : null}
       {decision.state === 'accepted' ? <div className="muted small">Your decision was recorded. Kriya {decision.decision === 'approve' ? 'is running its final checks' : 'is ending the run'}.</div> : null}
       {decision.state === 'refused' && !staleRefusal ? <div role="alert"><strong>Kriya did not accept the decision</strong> ({decision.code}): {decision.message}{REFUSAL_HELP[decision.code] ? ` ${REFUSAL_HELP[decision.code]}` : ''}</div> : null}
     </section>

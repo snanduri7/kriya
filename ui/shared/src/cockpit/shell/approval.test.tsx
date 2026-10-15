@@ -71,14 +71,12 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(help).toHaveTextContent(/Reject: nothing is applied and this run ends/);
   });
 
-  it('Approve shows the change, asks for confirmation, then sends ONE typed decision carrying the digest of the change that was SHOWN; the run then continues and ends from Kriya\'s records', async () => {
+  it('Approve shows the change and ONE click sends ONE typed decision carrying the digest of the change that was SHOWN (no second renderer confirmation); the run then continues and ends from Kriya\'s records', async () => {
     const { host, bar } = await reachReview();
     await diff();
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
-    expect(host.exec!.decisions).toEqual([]); // not yet: confirmation first
-    const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
-    expect(within(dialog).queryByRole('button', { name: /without viewing/i })).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm approval' }));
+    expect(within(bar).queryByRole('alertdialog')).toBeNull(); // the exact diff was the review; there is no "Confirm approval" step
+    expect(within(bar).queryByRole('button', { name: /Confirm approval/ })).toBeNull();
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]).toEqual({ workspace: '/fixture/workspace', launch_id: LAUNCH_ID, review_id: REVIEW_ID, candidate_digest: REVIEW_DIGEST, decision: 'approve' });
     expect(Object.keys(host.exec!.decisions[0]!).sort()).toEqual(['candidate_digest', 'decision', 'launch_id', 'review_id', 'workspace']);
@@ -106,10 +104,9 @@ describe('the review of a change: the EXACT change first, then why, verification
   it('a double click sends exactly one decision; the buttons are gone while it is in flight', async () => {
     const { host, bar } = await reachReview();
     await diff();
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
-    const confirm = within(bar).getByRole('button', { name: 'Confirm approval' });
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
+    const approve = within(bar).getByRole('button', { name: 'Approve & Continue' });
+    fireEvent.click(approve);
+    fireEvent.click(approve);
     await waitFor(() => expect(host.exec!.decisions.length).toBeGreaterThan(0));
     expect(host.exec!.decisions).toHaveLength(1);
     await within(bar).findByText(/Your change was approved/);
@@ -138,7 +135,6 @@ describe('the review of a change: the EXACT change first, then why, verification
     expect(shown.textContent).not.toContain('return max(low, min(value, high))');
     expect(host.exec!.decisions).toEqual([]); // nothing was approved on the person\'s behalf
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
-    fireEvent.click(within(bar).getByRole('button', { name: 'Confirm approval' }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     expect(host.exec!.decisions[0]!.review_id).not.toBe(REVIEW_ID);
     expect(host.exec!.decisions[0]!.candidate_digest).not.toBe(REVIEW_DIGEST);
@@ -348,14 +344,13 @@ describe('the decision is about the review that was displayed', () => {
 });
 
 describe('keyboard use of the approval (hardening, Phase J)', () => {
-  it('the confirmation opens with focus on Cancel (a stray Enter never approves), Escape cancels it, and nothing is sent', async () => {
+  it('there is no second renderer confirmation: Escape and a stray Enter on the review send nothing; only the explicit Approve & Continue click does', async () => {
     const { host, bar } = await reachReview();
     await screen.findByTestId('proposed-change');
-    fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
-    const dialog = within(bar).getByRole('alertdialog', { name: 'Confirm approval' });
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
-    fireEvent.keyDown(dialog, { key: 'Escape' });
-    expect(within(bar).queryByRole('alertdialog', { name: 'Confirm approval' })).toBeNull();
+    const review = within(bar).getByRole('region', { name: 'Change review' });
+    fireEvent.keyDown(review, { key: 'Escape' });
+    fireEvent.keyDown(review, { key: 'Enter' });
+    expect(within(bar).queryByRole('alertdialog')).toBeNull();
     expect(host.exec!.decisions).toEqual([]);
   });
 

@@ -12,7 +12,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionHostPort } from '../../host/HostAdapter';
-import type { ApproveConfigurationResult, InitializeProjectResult, DecideApprovalResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
+import type { ApproveConfigurationResult, InitializeProjectResult, DecideApprovalResult, DecideRuntimeCommandResult, ExecutionPreflight, ExecutionState, LaunchStatus } from '../../model/kup';
 import type { ProviderError, UIProvider } from './provider';
 import { useWorkspace } from './workspace';
 import type { SelectionStore } from './selectionStore';
@@ -69,6 +69,8 @@ export interface RunView {
   outcome: RunOutcome | null;
   /** The change review the run is WAITING on right now (Kriya's record: PENDING, the run live) - the only state in which a decision can be taken. */
   review: PendingReview | null;
+  /** The RUNTIME-COMMAND review the run is waiting on right now (a distinct subject: allowing Kriya to run exact commands). At most one of `review` / `runtimeReview` is set. */
+  runtimeReview: PendingRuntimeCommandReview | null;
   timing: RunTiming;
 }
 
@@ -112,11 +114,26 @@ export interface ExecutionApi {
   /** Approve or reject the review that is pending NOW, with the identities Kriya gave it; Kriya validates them and the waiting run - not this window - continues. */
   /** `displayedDigest` is the candidate digest of the change that was SHOWN to the person (from `change_approval.review`); an approval without it, or with a digest that is no longer the pending one, is refused locally. */
   decide(decision: 'approve' | 'reject', displayedReviewId: string, displayedDigest: string): Promise<void>;
+  /** This host can take a runtime-command decision (it has the dedicated, natively-confirmed path). Without it the runtime review is shown but cannot be approved from here. */
+  canDecideRuntimeCommand: boolean;
+  /** The state of the decision being taken on the pending RUNTIME-COMMAND review. A native Cancel is `declined`: no decision exists and the review is still waiting. */
+  runtimeDecision: RuntimeDecisionState;
+  /** Allow (approve) or refuse (reject) the commands of the runtime review pending NOW. `displayedFingerprint` is the command fingerprint of the command set that was SHOWN (from `runtime_command.review`); an
+   * approve without it, or with one that is no longer the pending review's, is refused locally. An approve then goes to the host, which re-proves the subject and asks the person in a NATIVE confirmation. */
+  decideRuntimeCommand(decision: 'approve' | 'reject', displayedReviewId: string, displayedFingerprint: string): Promise<void>;
 }
 
 export type DecisionState =
   | { state: 'idle' }
   | { state: 'submitting'; reviewId: string; decision: 'approve' | 'reject' }
+  | { state: 'refused'; reviewId: string; decision: 'approve' | 'reject'; code: string; message: string }
+  | { state: 'accepted'; reviewId: string; decision: 'approve' | 'reject' };
+
+export type RuntimeDecisionState =
+  | { state: 'idle' }
+  | { state: 'submitting'; reviewId: string; decision: 'approve' | 'reject' }
+  /** The person pressed Cancel on the NATIVE confirmation: nothing was sent, nothing was approved or rejected, and the review is still waiting. */
+  | { state: 'declined'; reviewId: string }
   | { state: 'refused'; reviewId: string; decision: 'approve' | 'reject'; code: string; message: string }
   | { state: 'accepted'; reviewId: string; decision: 'approve' | 'reject' };
 
@@ -144,6 +161,7 @@ const PAGE = 200;
  * "run_succeeded"; any other recorded end except the person's own rejection is "run_unsuccessful". `key` makes each event ask once (a new review is a new event). */
 export function notificationFor(run: RunView): { kind: 'approval_required' | 'run_succeeded' | 'run_unsuccessful'; key: string } | null {
   if (run.stage !== 'finished' && run.review) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.review.review_id}` };
+  if (run.stage !== 'finished' && run.runtimeReview) return { kind: 'approval_required', key: `approval_required:${run.launchId}:${run.runtimeReview.review_id}` };
   if (run.stage === 'finished' && run.outcome) {
     if (run.outcome.kind === 'rejected') return null; // the person just decided this themselves
     return { kind: run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful', key: `${run.outcome.kind === 'success' ? 'run_succeeded' : 'run_unsuccessful'}:${run.launchId}` };
@@ -256,6 +274,39 @@ export function createDecider(deps: { port: ExecutionHostPort; run(): RunView | 
   };
 }
 
+/** One runtime-command decision at a time on the review pending NOW. Same shape as `createDecider`, for the OTHER subject: the identities travel exactly as Kriya gave them (review id, command fingerprint), never a
+ * command; an approve needs the fingerprint of the command set that was SHOWN. Native Cancel (`CONFIRMATION_DECLINED`) is its own state - not a refusal, not a rejection. */
+export function createRuntimeCommandDecider(deps: { port: ExecutionHostPort; run(): RunView | null; set(state: RuntimeDecisionState): void }): (choice: 'approve' | 'reject', displayedReviewId: string, displayedFingerprint: string) => Promise<void> {
+  let busy = false;
+  return async (choice, displayedReviewId, displayedFingerprint) => {
+    const current = deps.run();
+    const review = current?.runtimeReview ?? null;
+    const decideRuntime = deps.port.decideRuntimeCommand?.bind(deps.port);
+    if (!current || !review || busy || !decideRuntime) return;
+    if (review.review_id !== displayedReviewId) {
+      deps.set({ state: 'refused', reviewId: review.review_id, decision: choice, code: 'STALE_REVIEW', message: 'The commands under review are no longer the ones you were shown.' });
+      return;
+    }
+    if (choice === 'approve' && displayedFingerprint !== review.command_fingerprint) {
+      deps.set({ state: 'refused', reviewId: review.review_id, decision: choice, code: 'STALE_REVIEW', message: 'The commands changed while you were reviewing them. Review the updated commands before continuing.' });
+      return;
+    }
+    busy = true;
+    deps.set({ state: 'submitting', reviewId: review.review_id, decision: choice });
+    let answer: DecideRuntimeCommandResult;
+    try {
+      answer = await decideRuntime({ workspace: current.workspace, launch_id: current.launchId, review_id: review.review_id, command_fingerprint: review.command_fingerprint, decision: choice });
+    } catch (error) {
+      answer = { accepted: false, code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), launch_id: null, review_id: null, decision: null, decided_at: null };
+    } finally {
+      busy = false;
+    }
+    if (answer.accepted) deps.set({ state: 'accepted', reviewId: review.review_id, decision: choice });
+    else if (answer.code === 'CONFIRMATION_DECLINED') deps.set({ state: 'declined', reviewId: review.review_id });
+    else deps.set({ state: 'refused', reviewId: review.review_id, decision: choice, code: answer.code, message: answer.message });
+  };
+}
+
 /** Add one page of verified evidence records to the tallies: counts per recorded kind, the highest seq, and the newest few records. Pure; the run-phase mapping reads only this. */
 export function foldRecords(progress: RunProgress, raw: ReadonlyArray<Record<string, unknown>>): RunProgress {
   const records = raw.map(brief).filter((b) => Number.isFinite(b.seq));
@@ -282,6 +333,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const [refusal, setRefusal] = useState<StartRefusal | null>(null);
   const [run, setRun] = useState<RunView | null>(null);
   const [decision, setDecision] = useState<DecisionState>({ state: 'idle' });
+  const [runtimeDecision, setRuntimeDecision] = useState<RuntimeDecisionState>({ state: 'idle' });
   const startingRef = useRef(false);
   const runRef = useRef<RunView | null>(null);
   const acquireRef = useRef(acquire);
@@ -320,7 +372,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
       if (!live || runRef.current !== null) return;
       if ((host.phase === 'starting' || host.phase === 'running') && host.launch_id !== null && host.workspace === workspace) {
         const at = performance.now();
-        setRun({ launchId: host.launch_id, workspace, host, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, timing: { clickedAt: at, acknowledgedAt: at, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
+        setRun({ launchId: host.launch_id, workspace, host, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, runtimeReview: null, timing: { clickedAt: at, acknowledgedAt: at, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
       }
     }).catch(() => undefined);
     return () => { live = false; };
@@ -371,7 +423,7 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         if (r?.code === 'PREFLIGHT_BLOCKED') refreshPreflight();
         return;
       }
-      setRun({ launchId: result.launch_id, workspace, host: null, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, timing: { clickedAt, acknowledgedAt, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
+      setRun({ launchId: result.launch_id, workspace, host: null, status: null, statusError: null, progress: NO_PROGRESS, stage: 'starting', outcome: null, review: null, runtimeReview: null, timing: { clickedAt, acknowledgedAt, recordSeenAt: null, terminalAt: null, refreshedAt: null } });
     } catch (error) {
       setRefusal({ code: 'HOST_ERROR', message: error instanceof Error ? error.message : String(error), blockers: [] });
     } finally {
@@ -422,8 +474,9 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
         if (!prev || prev.launchId !== launchId) return prev;
         const stage: RunStage = outcome ? 'finished' : data && data.launch.phase === 'RUNNING' ? 'running' : 'starting';
         const review = outcome ? null : activeReview(data);
+        const runtimeReview = outcome ? null : activeRuntimeCommandReview(data);
         return {
-          ...prev, host: hostState ?? prev.host, status: data ?? prev.status, progress, stage, outcome, review,
+          ...prev, host: hostState ?? prev.host, status: data ?? prev.status, progress, stage, outcome, review, runtimeReview,
           statusError: status.ok || notRecorded ? null : status.error,
           timing: { ...prev.timing, recordSeenAt: prev.timing.recordSeenAt ?? (data ? now : null), terminalAt: outcome ? now : null },
         };
@@ -464,12 +517,18 @@ export function ExecutionProvider({ provider, selection, acquire, intervals = DE
   const deciderRef = useRef<ReturnType<typeof createDecider> | null>(null);
   useEffect(() => { deciderRef.current = port ? createDecider({ port, run: () => runRef.current, set: setDecision }) : null; }, [port]);
   const decide = useCallback(async (choice: 'approve' | 'reject', displayedReviewId: string, displayedDigest: string) => { await deciderRef.current?.(choice, displayedReviewId, displayedDigest); }, []);
+  const runtimeDeciderRef = useRef<ReturnType<typeof createRuntimeCommandDecider> | null>(null);
+  useEffect(() => { runtimeDeciderRef.current = port ? createRuntimeCommandDecider({ port, run: () => runRef.current, set: setRuntimeDecision }) : null; }, [port]);
+  const decideRuntimeCommand = useCallback(async (choice: 'approve' | 'reject', displayedReviewId: string, displayedFingerprint: string) => { await runtimeDeciderRef.current?.(choice, displayedReviewId, displayedFingerprint); }, []);
+  const canDecideRuntimeCommand = typeof port?.decideRuntimeCommand === 'function';
 
   const dismiss = useCallback(() => setRun((prev) => (prev && prev.stage === 'finished' ? null : prev)), []);
   const locked = starting || (run !== null && run.stage !== 'finished');
   // A decision belongs to the review it was taken on: a new review (a retry produced a new candidate) starts with no decision.
+  // A runtime decision belongs to the review it was taken on: a new review starts with none.
+  const shownRuntimeDecision = useMemo<RuntimeDecisionState>(() => (runtimeDecision.state === 'idle' || (run?.runtimeReview && runtimeDecision.reviewId !== run.runtimeReview.review_id) ? { state: 'idle' } : runtimeDecision), [runtimeDecision, run]);
   const shownDecision = useMemo<DecisionState>(() => (decision.state === 'idle' || (run?.review && decision.reviewId !== run.review.review_id) ? { state: 'idle' } : decision), [decision, run]);
-  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide }),
-    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, shownDecision, decide]);
+  const value = useMemo<ExecutionApi>(() => ({ available: port !== null, goal, setGoal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, decision: shownDecision, decide, canDecideRuntimeCommand, runtimeDecision: shownRuntimeDecision, decideRuntimeCommand }),
+    [port, goal, preflight, refreshPreflight, preflightStale, canApproveConfiguration, approveConfiguration, canInitializeProject, initializeProject, starting, refusal, start, run, locked, dismiss, shownDecision, decide, canDecideRuntimeCommand, shownRuntimeDecision, decideRuntimeCommand]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }

@@ -142,6 +142,7 @@ export function ConfigApprovalCard({ onDetails, onApproved }: { onDetails(): voi
   return (
     <section className="ck-state ck-action" aria-label="Configuration approval">
       <div className="ck-action-head"><span className="ck-action-flag">ACTION REQUIRED</span><strong>Configuration approval required</strong></div>
+      <div className="ck-subject muted small" data-testid="approval-subject">Approve protected project configuration</div>
       <p style={{ margin: '4px 0' }}>This project&apos;s configuration uses {settings === null ? 'operator-controlled settings' : `${settings} operator-controlled setting${settings === 1 ? '' : 's'}`}. Review and approve the current configuration before starting Kriya.</p>
       <div className="ck-runbar-head">
         <button type="button" className="ck-primary ck-cta" onClick={() => setOpen(true)}>Review &amp; Approve</button>

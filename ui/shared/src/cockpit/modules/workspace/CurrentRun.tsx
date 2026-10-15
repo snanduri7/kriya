@@ -1,4 +1,4 @@
-import { ApplicationResult, ApprovalReview, Badge, CopyText, FileDiff, failureSummary, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
+import { ApplicationResult, ApprovalReview, RuntimeCommandReviewCard, Badge, CopyText, FileDiff, failureSummary, OPEN_TARGETS, RUN_DOCUMENTS_PAGE, activityText, changeSummary, progressCounts, runPhase, useApplicationOutcome, useChangeReview, useDispatch, useElapsed, useExecution, useNavigate, useRunRowFacts, VerificationLines, verificationGroups, type ChangedFile, type RunPhase } from '../../core';
 
 const TONE = { info: 'info', warn: 'warn', ok: 'ok', bad: 'bad' } as const;
 const MARK = { done: '✓', current: '●', pending: '○' } as const;
@@ -111,7 +111,8 @@ export function CurrentRun() {
   const finished = phase.terminal;
   const outcome0 = run.outcome;
   const decided = run.status?.launch.pending_approval?.status;
-  const finishing = !finished && !run.review && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED';
+  const pendingKind = run.status?.launch.pending_approval?.kind;
+  const finishing = !finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'APPROVED' && pendingKind !== 'runtime_command';
   const viewDetails = (tab?: (typeof OPEN_TARGETS)[keyof typeof OPEN_TARGETS]) => {
     if (finished && run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     else dispatch({ type: 'selectLiveRun', launchId: run.launchId });
@@ -136,9 +137,10 @@ export function CurrentRun() {
           {phase.steps.map((s) => <li key={s.id} data-status={s.status} aria-current={s.status === 'current' ? 'step' : undefined}><span aria-hidden="true">{MARK[s.status]}</span> {s.label}<span className="sr-only"> ({s.status === 'done' ? 'done' : s.status === 'current' ? 'in progress' : 'not started'})</span></li>)}
         </ol>
       ) : null}
-      {!finished && !run.review ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
+      {!finished && !run.review && !run.runtimeReview ? <p className="ck-detail" data-testid="current-activity"><span className="muted">Current activity</span><br />{activityText(phase.state, finishing)}</p> : null}
       {!finished && run.review ? <ApprovalReview review={run.review} launchId={run.launchId} /> : null}
-      {!finished && !run.review && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; nothing will be applied.</div> : null}
+      {!finished && run.runtimeReview ? <RuntimeCommandReviewCard review={run.runtimeReview} launchId={run.launchId} /> : null}
+      {!finished && !run.review && !run.runtimeReview && run.status?.launch.phase === 'RUNNING' && decided === 'REJECTED' ? <div role="note"><strong>Your rejection was recorded.</strong> Kriya is ending the run; nothing will be applied.</div> : null}
       {finished && phase.state === 'COMPLETED' ? <Completed phase={phase} /> : null}
       {finished && phase.state !== 'COMPLETED' ? <Stopped phase={phase} /> : null}
       <details className="ck-tech">

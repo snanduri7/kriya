@@ -23,6 +23,9 @@ export const IPC_CHANNELS = {
   // GUI final: the review decision. ONE typed action (workspace + the identities Kriya gave the pending review + approve|reject); the host forwards it to
   // Kriya's review-decision action and reports Kriya's answer. The renderer cannot name a command, an option or a different authority.
   decideApproval: 'kriya:host:execution:decide',
+  // Demo V2: the runtime-command decision, a DIFFERENT subject from the change review above (allowing Kriya to run exact verification commands, not applying a change). ONE typed action
+  // ({workspace, launch_id, review_id, command_fingerprint, decision}); an approve is re-proved by the host and confirmed by a native dialog in the main process. See runtime_command_host.ts.
+  decideRuntimeCommand: 'kriya:host:execution:decide-runtime',
   // GUI configuration approval: ONE typed action ({workspace, fingerprint}) that asks Kriya to record the approval for the configuration the person reviewed.
   // Deliberately NOT part of the generic query channel (`configuration.approve` is refused there, like `workspace.create`); the renderer can never name a setting,
   // a value, a path or a digest to trust. See config_approval_host.ts.

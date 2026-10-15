@@ -1,4 +1,4 @@
-import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, DecideApprovalRequest, DecideApprovalResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
+import type { ApproveConfigurationRequest, ApproveConfigurationResult, InitializeProjectRequest, InitializeProjectResult, DecideApprovalRequest, DecideApprovalResult, DecideRuntimeCommandRequest, DecideRuntimeCommandResult, ExecutionState, KupEnvelope, KupRequest, StartRunRequest, StartRunResult } from '../model/kup';
 
 /**
  * The ONE host boundary (gate A-2, P-R1). Every capability a host supplies to
@@ -77,6 +77,9 @@ export interface ExecutionHostPort {
   state(): Promise<ExecutionState>;
   /** Review decision (GUI final): the host forwards ONE typed decision to Kriya's `launch-decision` action and reports Kriya's answer. It never decides. */
   decideApproval(request: DecideApprovalRequest): Promise<DecideApprovalResult>;
+  /** Runtime-command decision (Demo V2): a DIFFERENT subject from the change review - allowing Kriya to run the exact verification commands it recorded. The host re-proves the pending review, shows a
+   * NATIVE confirmation (main process) and only then forwards ONE typed decision to Kriya's `launch-decision --kind runtime_command`. A native Cancel answers `CONFIRMATION_DECLINED` and sends nothing: the review stays pending. */
+  decideRuntimeCommand?(request: DecideRuntimeCommandRequest): Promise<DecideRuntimeCommandResult>;
   /** Configuration approval: the host forwards ONE typed request ({workspace, fingerprint of the configuration the person reviewed}) to Kriya's `configuration.approve` and reports Kriya's answer.
    * It never approves "whatever is current", never carries a setting, value or path, and holds no authority: Kriya re-resolves the configuration and refuses (APPROVAL_STALE) if it changed. Absent on a host with no execution backend. */
   approveConfiguration?(request: ApproveConfigurationRequest): Promise<ApproveConfigurationResult>;

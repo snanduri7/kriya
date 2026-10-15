@@ -29,7 +29,7 @@ const progressOf = (records: Rec[]): RunProgress => records.reduce<RunProgress>(
 
 const status = (phase: 'STARTING' | 'RUNNING' | 'ENDED', approval?: 'PENDING' | 'APPROVED'): LaunchStatus => ({ launch: { phase, pending_approval: approval ? { status: approval } : undefined } } as unknown as LaunchStatus);
 function run(records: Rec[], extra: Partial<RunView> = {}): RunView {
-  return { launchId: 'l1', workspace: '/w', host: null, status: status('RUNNING'), statusError: null, progress: progressOf(records), stage: 'running', outcome: null, review: null,
+  return { launchId: 'l1', workspace: '/w', host: null, status: status('RUNNING'), statusError: null, progress: progressOf(records), stage: 'running', outcome: null, review: null, runtimeReview: null,
     timing: { clickedAt: 0, acknowledgedAt: 0, recordSeenAt: 0, terminalAt: null, refreshedAt: null }, ...extra };
 }
 const states = (records: Rec[]) => runPhase(run(records)).state;

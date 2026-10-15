@@ -22,10 +22,10 @@ export function ActiveRunBanner() {
     if (run.stage !== 'finished') dispatch({ type: 'selectLiveRun', launchId: run.launchId });
     else if (run.outcome?.traceRunId) dispatch({ type: 'selectRun', runId: run.outcome.traceRunId });
     go(PROJECT_PAGE);
-    if (run.stage !== 'finished' && run.review) {
+    if (run.stage !== 'finished' && (run.review || run.runtimeReview)) {
       // the page may still be rendering: try for a short while until the review section exists
       let tries = 0;
-      const focus = () => { const el = document.querySelector<HTMLElement>('section[aria-label="Change review"]'); if (el) el.focus(); else if (tries++ < 10) setTimeout(focus, 50); };
+      const focus = () => { const el = document.querySelector<HTMLElement>('section[aria-label="Change review"], section[aria-label="Runtime command review"]'); if (el) el.focus(); else if (tries++ < 10) setTimeout(focus, 50); };
       setTimeout(focus, 0);
     }
   }, [run, dispatch, go]);

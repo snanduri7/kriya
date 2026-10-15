@@ -67,7 +67,14 @@ export function runPhase(run: RunView): RunPhase {
   if (run.review) {
     return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for your approval', detail: 'Kriya paused the run and applies nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3.5) };
   }
-  const approved = run.status?.launch.pending_approval?.status === 'APPROVED' && run.status.launch.phase === 'RUNNING';
+  if (run.runtimeReview) {
+    return { ...base, state: 'WAITING_FOR_APPROVAL', label: 'Waiting for permission to run commands', detail: 'Kriya paused the run and runs nothing until you decide.', tone: 'warn', needsAction: true, steps: steps(3.5) };
+  }
+  const pendingApproval = run.status?.launch.pending_approval;
+  const approved = pendingApproval?.status === 'APPROVED' && run.status?.launch.phase === 'RUNNING';
+  if (approved && pendingApproval?.kind === 'runtime_command') {
+    return { ...base, state: 'RUNNING', label: 'Verifying your application', detail: 'You allowed the reviewed commands. Kriya is running them in its isolated worktree and checking the result.', tone: 'info', steps: steps(3) };
+  }
   if (approved) {
     return { ...base, state: 'VALIDATING', label: 'Finishing', detail: 'Your change was approved. Kriya is running final checks.', tone: 'info', steps: steps(3) };
   }

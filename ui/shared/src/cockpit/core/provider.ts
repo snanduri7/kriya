@@ -4,7 +4,7 @@
  * which one it holds, and never contains separate "real" and "fake" logic.
  */
 import type {
-  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
+  Capabilities, EvidenceCallContent, EvidenceChangeContent, EvidenceManifest, EvidenceRecords, EvidenceVerify, HistoryList, RunDetail, SnapshotAcquireResult, SnapshotList, SnapshotVerify, WorkspaceDescribe, WorkspaceStatus, ExecutionPreflight, LaunchStatus, ExecutionContext, ExecutionModelProbe, ConfigurationApprovalStatus, ChangeApprovalReview, RuntimeCommandReview, SkillsList, SkillsDescribe, ToolsList, ToolsDescribe, ToolsApprovalState,
 } from '../../model/kup';
 import type { ExecutionHostPort, HostSettings, OpenInIdeResult, WorkspaceHost } from '../../host/HostAdapter';
 import type { Provenance } from './evidence';
@@ -50,6 +50,8 @@ export interface UIProvider {
   configurationApprovalStatus(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ConfigurationApprovalStatus>>;
   /** The EXACT proposed change of one review, proved by Kriya against the review's digests (approval-scoped; not the evidence store and not content_visibility). A refusal is a typed error and nothing is shown as a diff. */
   changeApprovalReview(workspace: string, launchId: string, reviewId: string, signal?: AbortSignal): Promise<ProviderResult<ChangeApprovalReview>>;
+  /** The EXACT recorded command set of one runtime-command review (commands in order, where they run, input channel), re-proved by Kriya against the command fingerprint the review is bound to. A refusal is a typed error and no command is shown. */
+  runtimeCommandReview(workspace: string, launchId: string, reviewId: string, signal?: AbortSignal): Promise<ProviderResult<RuntimeCommandReview>>;
   /** The Skills, tools and per-role model routing a run in this folder would have (configuration/file-derived; starts nothing). */
   executionContext(workspace: string, signal?: AbortSignal): Promise<ProviderResult<ExecutionContext>>;
   /** One bounded probe of the configured local model server(s): is it answering, and does it serve each configured model. */

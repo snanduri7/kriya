@@ -78,7 +78,7 @@ function RunsList() {
       {active ? (
         <div className="ck-active-row">
           <button type="button" aria-selected={liveSelected === active.launchId} aria-label="Active run - return to it" onClick={() => { dispatch({ type: 'selectLiveRun', launchId: active.launchId }); go(RUN_DOCUMENTS_PAGE); }}>
-            <div><span aria-hidden="true">● </span>Active run{active.review ? ' · approval waiting' : ''}</div>
+            <div><span aria-hidden="true">● </span>Active run{active.review || active.runtimeReview ? ' · approval waiting' : ''}</div>
             <div className="muted small">{active.stage === 'starting' ? 'Starting' : 'Running'} · return to it</div>
           </button>
         </div>

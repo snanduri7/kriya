@@ -53,7 +53,6 @@ describe('notifications over a whole run', () => {
     await new Promise((r) => setTimeout(r, 150));
     expect(host.exec!.notifications).toHaveLength(1);
     fireEvent.click(within(bar).getByRole('button', { name: 'Approve & Continue' }));
-    fireEvent.click(await within(bar).findByRole('button', { name: /Approve without viewing diff|Confirm approval/ }));
     await waitFor(() => expect(host.exec!.decisions).toHaveLength(1));
     act(() => host.exec!.finish());
     await waitFor(() => expect(bar).toHaveAttribute('data-outcome', 'success'));

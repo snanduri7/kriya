@@ -471,7 +471,11 @@ export class FixtureHost implements HostAdapter {
         }
         return this.records(request.run_id, findEvidence(request.run_id), request as unknown as Json);
       }
-      case 'runtime_command.review': return this.err('runtime_command.review', 'REVIEW_NOT_FOUND', 'the fixture host holds no runtime-command review');
+      case 'runtime_command.review': {
+        if (!this.folder(request.workspace) || !this.exec) return this.err('runtime_command.review', 'WORKSPACE_UNAVAILABLE', `no such folder: ${request.workspace}`, { reason: 'not_found' });
+        const answer = this.exec.runtimeReview(request);
+        return 'data' in answer ? this.env('runtime_command.review', answer.data, this.live, null) : this.err('runtime_command.review', answer.code, answer.message, answer.extra);
+      }
       default: { const never: never = request; return this.err('unknown', 'INVALID_REQUEST', `fixture host does not answer ${JSON.stringify(never)}`); }
     }
   }

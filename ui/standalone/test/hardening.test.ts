@@ -122,7 +122,7 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     expect(preloadTs).not.toMatch(/ipcRenderer\.invoke\((?!IPC_CHANNELS\.)/);
     expect(preloadTs).not.toMatch(/spawn|child_process|shell|exec\(/i);
     expect(preloadTs).toContain('notifyRun: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.notifyRun, request)');
-    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['executionState', 'notifyRun', 'startRun']); // (decideApproval and the project steps are classified in their own tests)
+    expect(Object.keys(IPC_CHANNELS).filter((k) => /run|exec/i.test(k)).sort()).toEqual(['decideRuntimeCommand', 'executionState', 'notifyRun', 'startRun']); // (decideApproval, decideRuntimeCommand [own host test] and the project steps are classified in their own tests)
   });
   it('both execution handlers verify the sender, and startRun hands the raw request to the host (which validates it) - the handler builds nothing', () => {
     for (const name of ['startRun', 'executionState']) {
@@ -172,6 +172,21 @@ describe('M6 execution (hardening): Start Run is the only execution action and i
     expect(mainTs).toContain('return approvals.decide(raw);');
     expect(read(join(MAIN, 'preload.ts'))).toContain('decideApproval: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideApproval, request)');
     expect(read(join(MAIN, 'ipc_contract.ts'))).toContain("Object.keys(v).sort().join() !== 'candidate_digest,decision,launch_id,review_id,workspace'");
+  });
+  it('the runtime-command decision is ONE typed action with a native confirmation in main: validated, workspace-checked, no process/Electron/file in the proxy (Demo V2)', () => {
+    const host = read(join(MAIN, 'runtime_command_host.ts'));
+    expect(host).toContain('validateDecideRuntimeCommand(raw)');
+    expect(host).toContain('buildRuntimeCommandDecisionArgv(request.value)');
+    expect(host).toContain('this.deps.currentWorkspace() !== workspace');
+    expect(host).toContain('this.deps.reviewable(');
+    expect(host).not.toMatch(/from '(node:)?child_process'|from 'electron'|from '(node:)?fs'|writeFile|appendFile|mkdir/);
+    expect(mainTs).toContain('return runtimeCommands.decide(raw);');
+    expect(mainTs).toContain("reviewable: (workspace, launchId, reviewId) => kupQuery({ operation: 'runtime_command.review', workspace, launch_id: launchId, review_id: reviewId })");
+    expect(read(join(MAIN, 'preload.ts'))).toContain('decideRuntimeCommand: (request: unknown) => ipcRenderer.invoke(IPC_CHANNELS.decideRuntimeCommand, request)');
+    expect(read(join(MAIN, 'ipc_contract.ts'))).toContain("Object.keys(v).sort().join() !== 'command_fingerprint,decision,launch_id,review_id,workspace'");
+    // the native text is fixed in main: the confirmation function takes no argument and builds the dialog from the constant
+    expect(mainTs).toContain('async function confirmRuntimeCommands(): Promise<boolean>');
+    expect(mainTs).toContain('const options = runtimeConfirmationDialog();');
   });
   it('the launch id is minted in main and never accepted from the renderer', () => {
     expect(mainTs).toContain('mintLaunchId,');
