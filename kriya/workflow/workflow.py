@@ -63,7 +63,12 @@ from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
     classify_ownership_violations,
 )
-from kriya.workflow.attempt import AttemptContext, _stop_on_environment_gate_result, run_attempt
+from kriya.workflow.attempt import (
+    AttemptContext,
+    _stop_on_environment_gate_result,
+    assert_candidate_unchanged_since_source_review,
+    run_attempt,
+)
 from kriya.workflow.attribution import (
     FutureOwnerVerificationDeferral,
     resolve_future_owner_verification_deferral,
@@ -5251,6 +5256,7 @@ class WorkflowEngine:
             targeted_max_retries=TARGETED_MAX_RETRIES,
             stream_callback=stream_callback,
             approval_callback=approval_callback,
+            defer_runtime_until_source_review=True,
             active_skills=active_skills,
             active_skill_rules_snapshot=active_skill_rules_snapshot,
             developer=self.developer,
@@ -5342,6 +5348,8 @@ class WorkflowEngine:
             # run_attempt() is even called, guarantees no exception path can skip it.
             state.pre_approval_review = None
             state.verified_candidate_binding = None
+            attempt_ctx.deferred_runtime_verification = None
+            attempt_ctx.post_source_review_guard = None
             # LR-R1-M1: the whole iteration is the attempt's evidence identity
             # (observational; reset in this try's finally).
             attempt_evidence_token = attempt_evidence_scope.enter_attempt_iteration(lambda: state.attempt_number)
@@ -5373,28 +5381,39 @@ class WorkflowEngine:
                 # judgment must never reach approval or copy sandbox files into
                 # the real workspace merely because the legacy aggregate gate
                 # boolean remained true.
-                required_evidence = _build_required_verification_evidence(
-                    required_verification,
-                    quality_gates_passed=True,
-                    gate_outcomes=state.gate_outcomes,
-                )
-                unresolved_requirements = [
-                    item.get("description", "") for item in required_evidence
-                    if item.get("passed") is not True
-                ]
-                if unresolved_requirements:
-                    message = (
-                        "REQUIRED VERIFICATION UNRESOLVED: no authoritative passing evidence "
-                        f"was produced for {unresolved_requirements!r}; refusing pre-apply success."
+                def _raise_if_required_verification_unresolved(runtime_pending: bool = False) -> None:
+                    # runtime_pending: the runtime execution is held until the source is approved (Gap B), so only the requirements that need that execution wait for it;
+                    # every other unresolved requirement still stops the run before any approval is asked.
+                    checkable = [
+                        item for item in required_verification or []
+                        if not (runtime_pending and item.get("type") == "judgment" and item.get("requires_runtime_execution") is True)
+                    ]
+                    required_evidence = _build_required_verification_evidence(
+                        checkable,
+                        quality_gates_passed=True,
+                        gate_outcomes=state.gate_outcomes,
                     )
-                    failure = Failure(
-                        type="verification_infrastructure_failure",
-                        message=message,
-                        raw_output=message,
-                        attempt=state.attempt_number,
-                    )
-                    state.record_gate_outcome(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
+                    unresolved_requirements = [
+                        item.get("description", "") for item in required_evidence
+                        if item.get("passed") is not True
+                    ]
+                    if unresolved_requirements:
+                        message = (
+                            "REQUIRED VERIFICATION UNRESOLVED: no authoritative passing evidence "
+                            f"was produced for {unresolved_requirements!r}; refusing pre-apply success."
+                        )
+                        failure = Failure(
+                            type="verification_infrastructure_failure",
+                            message=message,
+                            raw_output=message,
+                            attempt=state.attempt_number,
+                        )
+                        state.record_gate_outcome(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
+
+                # Gap B: when the runtime execution is held until the person has approved the source (human-in-the-loop), the requirements that need it cannot be judged yet;
+                # the complete check runs again right after that deferred step (below), before anything is applied.
+                _raise_if_required_verification_unresolved(runtime_pending=attempt_ctx.deferred_runtime_verification is not None)
 
                 # PRD-022: near-duplicates the candidate actually created,
                 # against the grounded owners PRD-021 found before planning.
@@ -5606,22 +5625,27 @@ class WorkflowEngine:
                     ),
                     EFFECTIVE_LEDGER_KEY: resolved_obligation_ledger.to_snapshot(),
                 }
-                _save_stage_checkpoint(
-                    "candidate_gates_passed",
-                    effective_obligation_ledger=resolved_obligation_ledger,
-                    **candidate_checkpoint_fields,
-                    plan=plan,
-                    design=design,
-                    final_files=final_files_for_checkpoint,
-                    original_files=state.all_original_contents,
-                    gate_outcomes=state.gate_outcomes,
-                    model_hops=state.model_hops,
-                    retry_count=state.budgets.retry_count,
-                    targeted_retry_count=state.budgets.targeted_retry_count,
-                    candidate_gates_passed=True,
-                    terminal_regression_passed=False,
-                    overall_attempt_passed=False,
-                )
+                def _save_candidate_gates_checkpoint(checkpoint_fields: Dict[str, Any], checkpoint_files: Dict[str, str]) -> None:
+                    _save_stage_checkpoint(
+                        "candidate_gates_passed",
+                        effective_obligation_ledger=resolved_obligation_ledger,
+                        **checkpoint_fields,
+                        plan=plan,
+                        design=design,
+                        final_files=checkpoint_files,
+                        original_files=state.all_original_contents,
+                        gate_outcomes=state.gate_outcomes,
+                        model_hops=state.model_hops,
+                        retry_count=state.budgets.retry_count,
+                        targeted_retry_count=state.budgets.targeted_retry_count,
+                        candidate_gates_passed=True,
+                        terminal_regression_passed=False,
+                        overall_attempt_passed=False,
+                    )
+
+                # Gap B: "candidate gates passed" is only true once the held runtime verification has also run, so a resume can never skip it. Saved after that step when held.
+                if attempt_ctx.deferred_runtime_verification is None:
+                    _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
                 # 4.5. Pre-Apply Human Approval Gate
                 # (state.pre_approval_review is reset once per loop iteration, above -
@@ -5973,6 +5997,39 @@ class WorkflowEngine:
                         f"Not applied: human approval was required ({escalation_reason}) but no "
                         "approval_callback was provided to run_generation_workflow().",
                     )
+
+                # Gap B (owner decision 2026-10-15): in human-in-the-loop mode the runtime execution was held back by run_attempt until the person approved the source (a source
+                # approval here means "this exact candidate may keep being verified"; nothing is applied to the real workspace until the terminal gate). It runs now, against the
+                # same bytes: the byte binding taken when the candidate gates passed must still hold before the commands run (checked again immediately before execution, inside
+                # the gate, and after it), the self-correction micro-loop is off, and a failure re-enters the ordinary retry loop whose new candidate is reviewed again.
+                deferred_runtime = attempt_ctx.deferred_runtime_verification
+                attempt_ctx.deferred_runtime_verification = None
+                if deferred_runtime is not None:
+                    if not (need_human_approval and approval_callback):
+                        message = (
+                            "RUNTIME_VERIFICATION_DEFERRED_WITHOUT_SOURCE_REVIEW: runtime verification was held for a source review that was not asked. "
+                            "Nothing was run and nothing was applied."
+                        )
+                        failure = Failure(
+                            type="verification_infrastructure_failure", message=message, raw_output=message, attempt=state.attempt_number,
+                        )
+                        state.record_gate_outcome(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
+                    reviewed_binding = state.verified_candidate_binding
+
+                    def _candidate_is_the_reviewed_one(reviewed: Any = reviewed_binding) -> bool:
+                        current_binding = _bind_direct_candidate(worktree_path, workspace_path, state)
+                        return reviewed is not None and current_binding is not None and current_binding.digest == reviewed.digest
+
+                    attempt_ctx.post_source_review_guard = _candidate_is_the_reviewed_one
+                    try:
+                        assert_candidate_unchanged_since_source_review(state, attempt_ctx)
+                        await deferred_runtime()
+                        assert_candidate_unchanged_since_source_review(state, attempt_ctx)
+                    finally:
+                        attempt_ctx.post_source_review_guard = None
+                    _raise_if_required_verification_unresolved()
+                    _save_candidate_gates_checkpoint(candidate_checkpoint_fields, final_files_for_checkpoint)
 
                 # Worktree cleanup deliberately does NOT happen here anymore - see the
                 # real live incident this fix closes, 2026-08-22 (ignite_qpid_protocol

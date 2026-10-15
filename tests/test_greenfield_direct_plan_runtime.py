@@ -13,6 +13,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
 
@@ -62,17 +63,20 @@ class DirectRun:
     test_calls: int = 0
     log_at_execution: List[Any] = field(default_factory=list)
     applied_at_execution: List[Dict[str, bool]] = field(default_factory=list)
+    bytes_at_execution: List[Dict[str, str]] = field(default_factory=list)
     person: Any = None
     canonical: Any = None
 
 
-def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, review_plan=None, person_cls=Person):
+def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode="human-in-the-loop", app_succeeds=True, required_verification=None, tamper_during_execution=None, best_of_n=1, review_plan=None, person_cls=Person):
     """`kriya generate` with the packaged defaults: the engine called directly (no controller), one direct unit."""
     model_runtime.clear_model_runtime_cache()
     cfg = AppConfig()
     cfg.llm.model, cfg.llm.context_window, cfg.llm.extra_body, cfg.llm_chain = "dev-model", 32768, {}, []
     cfg.autonomy.mode = mode
     cfg.autonomy.spec_compliance_enabled = False
+    cfg.autonomy.best_of_n_first_attempt = best_of_n
+    cfg.autonomy.self_correction_loop_enabled = True        # explicit: the post-approval run must not enter it (Gap B)
     cfg.paths.skills, cfg.paths.memory = str(tmp_path / "skills"), str(tmp_path / "memory")
     cfg.logging.file_enabled = cfg.logging.run_file_enabled = False
     assert cfg.workflow_controller.enabled is False and cfg.autonomy.run_verification_enabled is True   # the packaged defaults the live run used
@@ -108,6 +112,9 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
 
     def run_app(_self, commands, **_kwargs):
         run.executed.append(commands)
+        if tamper_during_execution is not None:
+            tamper_during_execution(_self.workspace_path)
+        run.bytes_at_execution.append({path: (Path(_self.workspace_path) / path).read_text() for path in files})
         run.log_at_execution.append(run.person.log[:])
         run.applied_at_execution.append({path: (workspace / path).exists() for path in files})
         output, code = ("Hello from Kriya\n", 0) if app_succeeds else ("Exception in thread main\n", 1)
@@ -137,7 +144,7 @@ def run_direct(tmp_path, *, plan=None, files=FILES, judge=JUDGE, goal=GOAL, mode
              patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=test_gate), \
              patch("kriya.tools.validate.PolymorphicValidator.run_pom_validate", new=lambda *a, **k: {"success": True, "output": "ok"}), \
              patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", new=run_app):
-            run.result = asyncio.run(engine.run_generation_workflow(goal, str(workspace), approval_callback=_callback()))
+            run.result = asyncio.run(engine.run_generation_workflow(goal, str(workspace), approval_callback=_callback(), required_verification=required_verification))
     finally:
         run.person.stop()
         session.finish(0, None, None)
@@ -189,14 +196,22 @@ def test_the_approved_commands_execute_once_and_only_after_the_decision(approved
     assert log[-2:] == [("pending", "runtime_command"), ("deciding", "runtime_command")]       # nothing ran before the person decided
 
 
-def test_CHARACTERISATION_the_runtime_review_precedes_the_source_review_on_the_direct_plan(approved_run):
-    """MEASURED, pinned so an owner decision flips it deliberately: the legacy/direct pipeline runs run-verification inside the candidate
-    gates, BEFORE the final change approval. So the person is asked to run commands for source they have not yet been shown, and at
-    execution time nothing has been applied to their folder (the candidate runs in the isolated worktree). The structured (enforce)
-    plan orders it the other way (tests/test_greenfield_runtime_end_to_end.py)."""
-    assert [p["kind"] for p in approved_run.person.seen] == ["runtime_command", "change_approval"]
+def test_gap_b_the_source_review_precedes_the_runtime_review_and_nothing_runs_before_it(approved_run):
+    """GAP B (owner decision 2026-10-15). In human-in-the-loop mode no model-generated candidate is executed for runtime verification before the person has approved its source.
+    The person is shown the exact multi-file change FIRST; only after approving it is asked to run commands; the commands then run in the isolated worktree (nothing is applied to
+    the owner's folder yet); the change reaches the owner's folder only after the verification."""
+    assert [p["kind"] for p in approved_run.person.seen] == ["change_approval", "runtime_command"]
+    [log] = approved_run.log_at_execution
+    assert log == [("pending", "change_approval"), ("deciding", "change_approval"), ("pending", "runtime_command"), ("deciding", "runtime_command")]
     [applied] = approved_run.applied_at_execution
-    assert not any(applied.values())
+    assert not any(applied.values())                                                             # still isolated while it runs
+
+
+def test_gap_b_the_executed_bytes_are_the_approved_bytes_and_those_are_the_applied_bytes(approved_run):
+    """Candidate continuity: reviewed source = executed source = applied source (the existing byte binding, no parallel identity)."""
+    [executed] = approved_run.bytes_at_execution
+    assert executed == FILES
+    assert {path: (approved_run.workspace / path).read_text() for path in FILES} == FILES
 
 
 def test_application_outcome_is_executed_with_the_printed_output(approved_run):
@@ -222,7 +237,7 @@ def test_gap_a_rejecting_the_required_runtime_review_is_not_success_and_applies_
     assert run.executed == []                                                                    # the reviewed command never ran
     assert not _succeeded(run.result)                                                            # ...and the run is NOT a success
     assert _applied(run) == set()                                                                # ...and nothing reached the owner's folder
-    assert not [p for p in run.person.seen if p["kind"] == "change_approval"]                    # the person is never asked to approve unverified source
+    assert [p["kind"] for p in run.person.seen] == ["change_approval", "runtime_command"]        # source first (approved), then the refused runtime review
     assert not any(g.get("type") == "run_verification" for g in run.gate_outcomes)               # no runtime verdict was recorded
     declined = [g for g in run.gate_outcomes if g.get("type") == "verification_infrastructure_failure"]
     assert declined and declined[-1]["success"] is False and "REQUIRED_RUNTIME_VERIFICATION_DECLINED" in str(declined[-1]["output"])
@@ -289,6 +304,153 @@ def test_gap_a_a_decision_of_the_wrong_kind_cannot_approve_the_runtime_review(tm
     run = run_direct(tmp_path, person_cls=Confused)
     assert refusals == ["WRONG_REVIEW_KIND", "PENDING"]
     assert run.executed and _succeeded(run.result)
+
+
+def test_gap_b_rejecting_the_source_means_the_runtime_review_never_appears_and_nothing_runs(tmp_path):
+    run = run_direct(tmp_path, review_plan={"change_approval": ("reject", 0.0)})
+    assert [p["kind"] for p in run.person.seen] == ["change_approval"]                          # the runtime review was never raised
+    assert run.executed == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert not any(g.get("type") == "run_verification" for g in run.gate_outcomes)
+
+
+def test_gap_b_a_changed_candidate_after_source_approval_is_never_executed_or_applied(tmp_path):
+    """The approval covers exactly the reviewed bytes. A byte changed after the approval (here: in the window where the runtime review is being prepared) makes it stale: the guard
+    runs immediately before execution, so nothing runs, nothing is applied, and the stop is the typed CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW."""
+    from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
+    real = attempt_module._approve_runtime_commands
+
+    async def tamper_then_review(ctx, state, judgment, intro):
+        (Path(ctx.worktree_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed after the source review\n")
+        return await real(ctx, state, judgment, intro)
+
+    with patch.object(attempt_module, "_approve_runtime_commands", new=tamper_then_review):
+        run = run_direct(tmp_path)
+    assert run.executed == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+    stale = [g for g in run.gate_outcomes if g.get("type") == "verification_infrastructure_failure"]
+    assert stale and "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(stale[-1]["output"])
+
+
+def test_gap_b_other_autonomy_modes_keep_their_existing_order_and_policy(tmp_path):
+    """Pinned so the deferral is not global: outside human-in-the-loop nothing asks for a source or a runtime review (unchanged) and the application still runs once."""
+    run = run_direct(tmp_path, mode="autonomous")
+    assert run.person.seen == []
+    assert len(run.executed) == 1 and _succeeded(run.result)
+    assert _applied(run) == set(FILES)
+
+
+def test_gap_b_a_runtime_failure_after_source_approval_applies_nothing_and_the_retry_is_reviewed_again(tmp_path):
+    """The failing run is repaired by the ordinary retry loop (self-correction, which edits files, is off after approval); every new candidate is a new source review."""
+    run = run_direct(tmp_path, app_succeeds=False)
+    kinds = [p["kind"] for p in run.person.seen]
+    assert kinds[0] == "change_approval" and kinds.count("change_approval") == kinds.count("runtime_command")
+    assert _applied(run) == set() and not _succeeded(run.result)
+
+
+def test_gap_b_an_unresolvable_required_verification_still_stops_the_run_before_any_review(tmp_path):
+    """The deferral only holds back the requirements that NEED the runtime execution; any other unresolved requirement stops the run before the person is asked anything."""
+    run = run_direct(tmp_path, required_verification=[{"type": "judgment", "description": "a requirement no gate can prove"}])
+    assert run.person.seen == [] and run.executed == []
+    assert not _succeeded(run.result) and _applied(run) == set()
+
+
+def test_gap_b_a_requirement_that_needs_the_runtime_is_judged_after_it_runs(tmp_path):
+    run = run_direct(tmp_path, required_verification=[{"type": "judgment", "requires_runtime_execution": True, "description": "prints the greeting"}])
+    assert [p["kind"] for p in run.person.seen] == ["change_approval", "runtime_command"] and len(run.executed) == 1
+    assert _succeeded(run.result)
+
+
+def test_gap_b_the_complete_required_verification_check_runs_after_the_deferred_runtime_step(tmp_path):
+    """Executed but not authoritatively proven: the run cannot be applied. This is what the post-deferral check is for (the pre-approval one skipped the runtime requirement)."""
+    from kriya.workflow import workflow as workflow_module  # noqa: PLC0415
+    real = workflow_module._gate_outcome_proven
+
+    def unproven_runtime(outcome):
+        return None if outcome and outcome.get("type") == "run_verification" else real(outcome)
+
+    with patch.object(workflow_module, "_gate_outcome_proven", new=unproven_runtime):
+        run = run_direct(tmp_path, required_verification=[{"type": "judgment", "requires_runtime_execution": True, "description": "prints the greeting"}])
+    assert not _succeeded(run.result) and _applied(run) == set()
+    assert any("REQUIRED VERIFICATION UNRESOLVED" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_runtime_verification_held_for_a_review_that_is_not_asked_fails_closed(tmp_path):
+    """Defence in depth: if the deferral were ever armed where no source review is asked, nothing may run unreviewed."""
+    from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
+    with patch.object(attempt_module, "_defer_runtime_execution_until_source_review", new=lambda state, ctx: True):
+        run = run_direct(tmp_path, mode="autonomous")
+    assert run.executed == [] and not _succeeded(run.result) and _applied(run) == set()
+    assert any("RUNTIME_VERIFICATION_DEFERRED_WITHOUT_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_a_candidate_changed_before_the_runtime_review_is_not_even_offered_for_review(tmp_path):
+    """The first check right after the source approval: the runtime review for the old candidate is never raised, so it cannot be mistaken for authorizing the new one."""
+    from kriya.workflow import workflow as workflow_module  # noqa: PLC0415
+    real, calls = workflow_module.assert_candidate_unchanged_since_source_review, []
+
+    def tamper_first(state, ctx):
+        if not calls:
+            (Path(ctx.worktree_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// changed right after the source approval\n")
+        calls.append(1)
+        return real(state, ctx)
+
+    with patch.object(workflow_module, "assert_candidate_unchanged_since_source_review", new=tamper_first):
+        run = run_direct(tmp_path)
+    assert [p["kind"] for p in run.person.seen] == ["change_approval"]
+    assert run.executed == [] and not _succeeded(run.result) and _applied(run) == set()
+    assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_a_candidate_changed_by_the_execution_itself_is_not_applied(tmp_path):
+    """The last check, after the commands ran: bytes the run changed are not the bytes that were approved, and the typed reason says so."""
+    edit = lambda workspace_path: (Path(workspace_path) / MAIN_FILE).write_text(FILES[MAIN_FILE] + "// edited while running\n")  # noqa: E731 - one-line test hook
+    run = run_direct(tmp_path, tamper_during_execution=edit)
+    assert len(run.executed) == 1 and not _succeeded(run.result) and _applied(run) == set()
+    assert any("CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW" in str(g.get("output")) for g in run.gate_outcomes)
+
+
+def test_gap_b_the_candidate_checkpoint_is_saved_only_after_the_held_runtime_verification(tmp_path):
+    """A resume must never treat the candidate gates as passed while the runtime verification is still unrun."""
+    from kriya.workflow import workflow as workflow_module  # noqa: PLC0415
+    real, saved = workflow_module.save_checkpoint, []
+
+    def record(workspace_path, run_id, payload):
+        saved.append((payload.get("stage"), [g.get("type") for g in payload.get("gate_outcomes") or []]))
+        return real(workspace_path, run_id, payload)
+
+    with patch.object(workflow_module, "save_checkpoint", new=record):
+        run = run_direct(tmp_path)
+    assert _succeeded(run.result)
+    candidate_saves = [types for stage, types in saved if stage == "candidate_gates_passed"]
+    assert candidate_saves and all("run_verification" in types for types in candidate_saves)
+
+
+def test_gap_b_no_self_correction_edits_the_candidate_after_the_source_approval(tmp_path):
+    from unittest.mock import AsyncMock as _AsyncMock  # noqa: PLC0415
+    with patch("kriya.workflow.self_correction.run_self_correction_loop", new=_AsyncMock(side_effect=AssertionError("self-correction ran after the source approval"))) as loop:
+        run = run_direct(tmp_path, app_succeeds=False)
+    assert loop.await_count == 0
+    assert not _succeeded(run.result) and _applied(run) == set()
+
+
+def test_gap_b_best_of_n_does_not_bring_back_execution_before_the_source_review(tmp_path):
+    run = run_direct(tmp_path, best_of_n=2)
+    assert [p["kind"] for p in run.person.seen] == ["change_approval", "runtime_command"]
+    assert run.log_at_execution[0][:2] == [("pending", "change_approval"), ("deciding", "change_approval")]
+    assert _succeeded(run.result)
+
+
+def test_gap_b_a_new_attempt_never_inherits_the_held_execution_of_a_discarded_candidate():
+    """A held execution belongs to exactly one candidate: run_attempt clears it on entry (Best-of-N runs several candidates through one call site)."""
+    from unittest.mock import MagicMock  # noqa: PLC0415
+
+    from kriya.workflow import attempt as attempt_module  # noqa: PLC0415
+    ctx = MagicMock(spec=attempt_module.AttemptContext)
+    ctx.deferred_runtime_verification = lambda: None
+    with pytest.raises(AttributeError):    # the spec'd double has no fields beyond the first statement: the call stops right after the entry reset
+        asyncio.run(attempt_module.run_attempt(MagicMock(spec=GenerationState), ctx))
+    assert ctx.deferred_runtime_verification is None
 
 
 def test_CHARACTERISATION_the_direct_plan_never_closes_the_goal_requirements(approved_run):
