@@ -23,6 +23,8 @@ Script (JSON in KRIYA_CONTROLLED_SCRIPT): {"outcome": "success|failure|crash|die
                         the generate callback makes for the executor) and waits for the human's decision: approve -> the commands are RECORDED as executed (a run_verification gate outcome
                         with steps) and the run succeeds; reject -> nothing is recorded as executed and the run FAILS (the real required-verification-declined outcome)
                         script keys: "runtime_commands" [[argv]...], "runtime_criterion", "runtime_stdout"
+  greenfield_flow    -> the Demo 00 shape in two decisions: the REAL change-approval path (one source review), then the REAL runtime-command approval path (the verification-only step), each waiting
+                        for its own human decision; approve both -> the run succeeds with the commands recorded as executed; script key "tests": n records n test cases on the test gate
   Optional script keys (PRODUCT-UX-COMPLETION screenshots and smokes; all opt-in, absent = the behaviour above):
     "diffs": [{"path": "...", "diff": "<unified diff text>"}]   the change the review is about (and the candidate/trace records follow it) instead of the synthetic one-line diff
     "compiled_goal": true   the trace row of the unit carries the COMPILED "=== Authoritative Goal ===" prompt and names a terminal "<id>.enforce" row that holds the original request
@@ -64,7 +66,7 @@ def _changes_of_diffs(diffs):
 CHANGES = SCRIPT.get("changes") or (_changes_of_diffs(DIFFS) if DIFFS else [{"path": "src/clamp.py", "kind": "added", "lines_added": 3, "lines_removed": 0}])
 STEP = float(SCRIPT.get("step_ms", 300)) / 1000.0
 OUTCOME = SCRIPT.get("outcome", "success")
-MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review|runtime_review)\]")
+MARKER = re.compile(r"\[controlled:(success|failure|crash|die|approval|review|runtime_review|greenfield_flow)\]")
 
 
 def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, resume_id, json_output, milestones, output, **kwargs):
@@ -102,7 +104,10 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             gate_script = SCRIPT.get("gate", "pass")
             passed = OUTCOME != "failure" and gate_script == "pass"
             gate_name = {"compile_fail": "compile", "test_fail": "test", "regression_fail": "regression_test"}.get(gate_script, "test")
-            scope.emit("gate.result", {"gate": gate_name, "success": passed, "stage": "targeted", "exit_code": 0 if passed else 1})
+            gate_payload = {"gate": gate_name, "success": passed, "stage": "targeted", "exit_code": 0 if passed else 1}
+            if SCRIPT.get("tests") is not None and gate_name == "test":   # the structured test summary the recorder keeps (cases, status counts)
+                gate_payload["test_execution"] = {"cases": int(SCRIPT["tests"]), "status_counts": {"passed": int(SCRIPT["tests"])}}
+            scope.emit("gate.result", gate_payload)
             if OUTCOME == "crash":
                 raise RuntimeError("scripted crash inside the run")
             if OUTCOME == "die":
@@ -114,7 +119,12 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
             approved = None
             runtime_decision = None
             runtime_commands = SCRIPT.get("runtime_commands") or [["mvn", "-q", "package"], ["java", "-cp", "target/classes", "com.example.App"]]
-            if OUTCOME == "runtime_review" and passed:
+            if OUTCOME == "greenfield_flow" and passed:
+                from kriya.control.launch import request_change_approval
+                files = [{"filepath": c["path"], "content": f"--- a/{c['path']}\n+++ b/{c['path']}\n@@ -0,0 +1,3 @@\n+public class HelloKriya {{\n+  public static void main(String[] a) {{ System.out.println(\"Hello from Kriya\"); }}\n+}}\n"} for c in CHANGES]
+                awaiting = request_change_approval(files, SCRIPT.get("review_reason") or "Human-in-the-loop review policy\n\n=== Automated Code Review ===\nThe application prints the requested greeting and includes a unit test.")
+                approved = asyncio.run(awaiting) if awaiting is not None else False
+            if (OUTCOME == "runtime_review" or (OUTCOME == "greenfield_flow" and approved is True)) and passed:
                 from kriya.control.launch import request_runtime_command_approval
                 from kriya.workflow.runtime_command_approval import build_subject
                 subject = build_subject(unit_id="s4", criterion=SCRIPT.get("runtime_criterion") or 'The application prints "Hello from Kriya" and exits with status 0.',
@@ -135,8 +145,8 @@ def controlled_generate(ctx, goal, file, yes, knowledge_policy, ack, resume, res
                 if approved and SCRIPT.get("post_approval_ms"):
                     time.sleep(float(SCRIPT["post_approval_ms"]) / 1000.0)
         pointer = scope.store_pointer()
-        success = (OUTCOME in ("success", "hold") and passed) or approved is True or runtime_decision is True
-        rejected = OUTCOME == "review" and passed and not approved
+        success = (OUTCOME in ("success", "hold") and passed) or (approved is True and OUTCOME != "greenfield_flow") or runtime_decision is True
+        rejected = (OUTCOME == "review" or (OUTCOME == "greenfield_flow" and runtime_decision is None)) and passed and not approved
         status = "success" if success else "human_rejected" if rejected else "failure"
         events = [{"kind": "evidence.attempt_store", "attempt": 0, "source": "workflow.run_generation_workflow", "authority": "auxiliary",
                    "message": "attempt evidence store", "failure_type": None, "operation": None, "details": pointer, "created_at": started}]
