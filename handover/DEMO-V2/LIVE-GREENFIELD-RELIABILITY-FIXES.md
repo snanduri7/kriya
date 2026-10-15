@@ -56,3 +56,6 @@ Verdict: no BLOCKING findings. IMPORTANT findings, all fixed in the follow-up co
 3. **D2 could abort a structured-plan unit on a mixed-scope static message** (`authoritative_deterministic` makes `scope_conflict_is_grounded` true). The raise site passes the unit's ALLOWLIST; a finding printing in-scope and out-of-scope files keeps only the in-scope subject as authority. If none of the printed paths is writable, all are kept and the existing scope handling decides. MEASURED by the reviewer's probe before the fix (`stop_loop=True`, `required_files=['pom.xml']`), covered by a test after it.
 Cosmetic, fixed: stale docstring of `_diagnosis_mismatch_bypass_reason`; long evidence now keeps head AND tail.
 Still open (accepted, documented): replacement of the open set is not order-aware across gates (a later-gate finding is dropped when an earlier gate fires, until it fails again); the open set is in-memory like `last_failure` and not checkpointed across a resume; `MAX_OPEN_FINDINGS` is a guard (production keeps one finding at a time).
+
+## Update 2026-10-15 (post-live)
+The owner's real Demo 00 run passed; result presentation, Activity grouping and the eight full-suite failures are in `POST-LIVE-GREENFIELD-CLOSURE.md`.

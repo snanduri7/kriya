@@ -225,6 +225,14 @@ describe('engineering evidence and the formal requirement ledger are separate qu
     expect(primaryVerification([g('runtime_verification', false), g('run_verification', true)]).map((l) => l.text)).toEqual(['Runtime verification failed']); // a graded pass never outvotes a failed process
     expect(primaryVerification([g('run_verification_hung', false)]).map((l) => l.text)).toEqual(['Runtime verification failed']);
   });
+  it('a FAILED planned-change check stays in the primary list and the disclosure gives no reassurance (review I-1)', () => {
+    const gates = [g('compile'), g('tests'), g('goal_spec_compliance', false)];
+    expect(primaryVerification(gates).map((l) => l.text)).toEqual(['Build passed', 'Tests passed', 'Does not match the planned change']);
+    expect(formalRequirementStatus(gates)!.explanation).not.toMatch(/direct evidence|does not mean anything failed/);
+  });
+  it('no reassurance when no engineering check is recorded at all (review C-1)', () => {
+    expect(formalRequirementStatus([g('goal_spec_compliance')])!.explanation).not.toMatch(/direct evidence/);
+  });
   it('says nothing when there is nothing to qualify', () => {
     expect(formalRequirementStatus([])).toBeNull();
   });

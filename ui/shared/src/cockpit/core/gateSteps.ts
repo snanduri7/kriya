@@ -4,7 +4,7 @@
  * check records its own build prerequisite. Showing every record as a line shows one build as "Build passed" twice. The grouping is structural, never a comparison of display strings:
  *
  *  - an outcome belongs to the nearest earlier, unclaimed validator result of the SAME family in the same unit and attempt (the closed FAMILY table below), and the pair is ONE step;
- *  - a validator result no outcome claims stays a step of its own - except a PASSING repeat of a family the attempt already reported, in an attempt that records outcomes at all (that is a
+ *  - a validator result no outcome claims stays a step of its own - except a PASSING repeat of the build family the attempt already reported, in an attempt that records outcomes at all (that is a
  *    prerequisite of a later gate, such as the build the runtime check repeats; it adds no new fact). A failure is never folded.
  *
  * Nothing is dropped from the evidence: `sources` lists every record behind a step, and the technical layer still lists each record.
@@ -69,7 +69,7 @@ export function gateSteps(records: readonly EvidenceRecord[]): GateStep[] {
   }
   // A validator result no outcome claimed, passing, repeating a family the attempt already reported (and the attempt records outcomes at all): a prerequisite of a later gate. A failure stays.
   for (const [i, step] of steps.entries()) {
-    if (!alone.has(step) || claimed.has(step) || step.success !== true || !mirroredScopes.has(`${step.unitId ?? '-'}|${step.attempt ?? '-'}`)) continue;
+    if (!alone.has(step) || claimed.has(step) || step.family !== 'build' || step.success !== true || !mirroredScopes.has(`${step.unitId ?? '-'}|${step.attempt ?? '-'}`)) continue;
     step.folded = steps.slice(0, i).some((s) => !s.folded && s.family === step.family && s.attempt === step.attempt && s.unitId === step.unitId);
   }
   return steps;

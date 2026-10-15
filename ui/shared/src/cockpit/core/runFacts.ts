@@ -18,7 +18,8 @@ export interface GateFact {
 }
 export interface ChangeFact { path: string; linesAdded: number | null; linesRemoved: number | null; kind: string }
 
-const GATE_NAME: Record<string, string> = { compile: 'Compile', test: 'Tests', tests: 'Tests', targeted_test: 'Targeted tests', regression_test: 'Regression tests', goal_spec_compliance: 'Goal compliance', static_analysis: 'Static analysis' };
+const GATE_NAME: Record<string, string> = { compile: 'Compile', test: 'Tests', tests: 'Tests', targeted_test: 'Targeted tests', regression_test: 'Regression tests', goal_spec_compliance: 'Goal compliance', static_analysis: 'Static analysis',
+  pom_validate: 'Build file check', runtime_verification: 'Application run', run_verification: 'Runtime verification', original_requirements: 'Original requirements' };
 export const gateName = (type: string): string => GATE_NAME[type] ?? type;
 
 /** The latest recorded result of each gate type, in the order the types were first recorded. */
@@ -33,6 +34,9 @@ export function validationFacts(records: readonly EvidenceRecord[]): GateFact[] 
     const prior = latest.get(row.type);
     // a mirrored outcome never replaces what the terminal record said about requirement verification either
     const merged: GateFact = { ...fact, ...(prior && prior.tests && !fact.tests ? { tests: prior.tests } : {}), ...(fact.requirementsVerified == null && prior?.requirementsVerified != null ? { requirementsVerified: prior.requirementsVerified } : {}) };
+    // a hung runtime check and a completed one are the same check: the later one speaks (a hang in attempt 1 must not poison a pass in attempt 2)
+    if (row.type === 'run_verification') latest.delete('run_verification_hung');
+    if (row.type === 'run_verification_hung') latest.delete('run_verification');
     latest.set(row.type, merged);
   }
   return [...latest.values()];

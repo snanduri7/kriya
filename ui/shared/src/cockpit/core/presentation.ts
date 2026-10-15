@@ -148,7 +148,8 @@ export interface FormalRequirementStatus {
 export function primaryVerification(gates: readonly GateFact[]): VerificationLine[] {
   return verificationGroups(gates).groups.flatMap((g) => g.lines).filter((l) => !isFormalLine(l));
 }
-const isFormalLine = (l: VerificationLine): boolean => l.line === 'planned' || (l.line === 'behavior' && l.status === 'unknown');
+// a FAILED planned-change check is a failure the person must see: only a passing/unknown model assessment moves under the ledger
+const isFormalLine = (l: VerificationLine): boolean => (l.line === 'planned' && l.status !== 'failed') || (l.line === 'behavior' && l.status === 'unknown');
 
 /** The formal requirement status of a run that has verification results. null when there is nothing to qualify (no results), when a recorded run-level requirements verification positively verified
  * every requirement (its own wording is then in the primary list), or when that verification FAILED (the primary list already says "Requested behavior not verified"). */
@@ -157,7 +158,8 @@ export function formalRequirementStatus(gates: readonly GateFact[]): FormalRequi
   const run = gates.filter((g) => g.type === 'original_requirements');
   if (run.some((g) => g.passed === false || g.requirementsVerified === true)) return null;
   const lines = verificationGroups(gates).groups.flatMap((g) => g.lines);
-  const allPassed = lines.filter((l) => !isFormalLine(l)).every((l) => l.status === 'passed');
+  const primary = lines.filter((l) => !isFormalLine(l));
+  const allPassed = primary.length > 0 && primary.every((l) => l.status === 'passed');
   return {
     headline: 'Requirement ledger: not fully verified',
     explanation: `${allPassed ? 'Kriya has direct evidence for the checks above. ' : ''}Some natural-language requirements of your request have not been independently closed by Kriya's formal requirement ledger.${allPassed ? ' This is separate from those checks and does not mean anything failed.' : ''}`,

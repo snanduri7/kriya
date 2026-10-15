@@ -19,7 +19,7 @@ describe('TechnicalVerification: no empty rows, no empty section', () => {
   it('drops an empty row and keeps the valid ones with a readable name and the exact recorded type', () => {
     render(<TechnicalVerification gates={[gate('compile'), gate(''), gate('tests', false), gate('run_verification', null)]} />);
     const items = within(screen.getByRole('list', { name: 'Technical verification' })).getAllByRole('listitem').map((li) => li.textContent);
-    expect(items).toEqual(['✓ Compile (compile)', '✕ Tests (tests)', '• run_verification']);
+    expect(items).toEqual(['✓ Compile (compile)', '✕ Tests (tests)', '• Runtime verification (run_verification)']);
     expect(items.every((t) => /[A-Za-z]/.test(t ?? ''))).toBe(true); // a row is never just a mark or a dash
   });
   it('the live Demo 00 run lists its eight recorded checks, each with its type', () => {

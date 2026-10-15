@@ -37,3 +37,13 @@ describe('change facts', () => {
     expect(changeFacts([rec(1, 'candidate.change', 1, { path: 'X', decision: 'REJECTED' }), rec(2, 'candidate.change', 1, { path: 'Y', decision: 'STAGED', unchanged: true })])).toEqual([]);
   });
 });
+
+describe('validationFacts: a hung runtime check does not poison a later completed one (review I-3)', () => {
+  const rec = (seq: number, kind: string, payload: Record<string, unknown>) => ({ seq, kind, attempt_number: 1, payload, blobs: {} }) as never;
+  it('the later of run_verification_hung / run_verification speaks', () => {
+    const hungThenPass = validationFacts([rec(1, 'mirror.gate_outcome', { type: 'run_verification_hung', success: false }), rec(2, 'mirror.gate_outcome', { type: 'run_verification', success: true })]);
+    expect(hungThenPass.map((f) => [f.type, f.passed])).toEqual([['run_verification', true]]);
+    const passThenHung = validationFacts([rec(1, 'mirror.gate_outcome', { type: 'run_verification', success: true }), rec(2, 'mirror.gate_outcome', { type: 'run_verification_hung', success: false })]);
+    expect(passThenHung.map((f) => [f.type, f.passed])).toEqual([['run_verification_hung', false]]);
+  });
+});

@@ -51,6 +51,11 @@ describe('folding a repeat that adds no fact', () => {
     const steps = gateSteps([...attemptWithOutcomes, result(3, 'compile', true, {}, second), result(4, 'tests', true, {}, second), outcome(5, 'targeted_test', true, second)]);
     expect(steps.find((s) => s.sources[0] === 3)!.folded).toBe(false);
   });
+  it('only a BUILD repeat is a prerequisite: a second passing test run in the attempt is its own fact (review I-2)', () => {
+    const steps = gateSteps([result(1, 'tests', true, { test_execution: { cases: 1 } }), outcome(2, 'targeted_test', true), result(3, 'tests', true, { test_execution: { cases: 40 } })]);
+    expect(steps.map((s) => s.folded)).toEqual([false, false]);
+    expect(texts([result(1, 'tests', true, { test_execution: { cases: 1 } }), outcome(2, 'targeted_test', true), result(3, 'tests', true, { test_execution: { cases: 40 } })])).toEqual(['Tests passed (1 test)', 'Tests passed (40 tests)']);
+  });
   it('a repeat in ANOTHER attempt is a new fact', () => {
     const steps = gateSteps([...attemptWithOutcomes, result(3, 'compile', true, {}, { attempt_number: 2 }), outcome(4, 'compile', true, { attempt_number: 2 })]);
     expect(steps.map((s) => s.folded)).toEqual([false, false]);
