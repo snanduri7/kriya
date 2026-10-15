@@ -1,0 +1,47 @@
+# Live Greenfield reliability fixes (D1, D2, D3) and the direct-plan runtime proof
+
+Continues `LIVE-GREENFIELD-FAILURE-ROOT-CAUSE.md` (run `20261015T152407-5f87716a`). Labels: MEASURED / TRACED / CONFIRMED / INFERRED / UNKNOWN.
+Forensic checkpoint `d8c2986` was pushed first (normal push, 5a42377..d8c2986). No live model, no full suite, no tag.
+
+## D1 - an unresolved validator finding survives a response-shape failure
+- **Observation (MEASURED):** attempt 1's `static_rule_violation [vacuous_test_assertion]` (AppTest.java); attempts 3-5 were told only `operation_contract`; attempt 5's own analysis: "the previous error was a malformed response".
+- **Producer (TRACED):** `retry_strategy._record_attempt_failure` set `state.last_failure` / `error_context` to the latest failure; `RetryPackage.render_error()` rendered only that. `_REPAIR_FEEDBACK_FAILURE_TYPES` already inherited the failure *signature* but not the *evidence*.
+- **Fix:** `kriya/workflow/open_findings.py` (new) + `GenerationState.open_findings`. Delivery failures (the existing repair-feedback set) neither open nor close a finding; the next authoritative candidate finding (build / verification / candidate-content static) replaces the set; every other type leaves it unchanged; advisory failures never change it. `RetryPackage.render_error()` and `prior_error_text()` (the `prior_error_context` given to the Developer agent) append the open findings that differ from the failure already shown. Bounded: <=3 findings x 2000 chars; no history of delivery errors. The finding's type/reason code/files/source/evidence are copied from the validator's `Failure` and immutable.
+- **Proof:** `tests/test_d1_open_findings.py` (14). Original symptom test fails on `d8c2986`: the rendered request is exactly the live text (protocol error only). Mutations M1-M5 (delivery replaces the set, attempt.py not passing the findings, render dropped, candidate finding never replaces, `prior_error_text` drops the block): all killed.
+- **Residual:** the finding is not persisted across a process restart/resume (the retry state is in-memory per run, as `last_failure` is). Replacement-on-next-candidate-finding is conservative: it can drop a finding whose gate runs *after* the one that fired (UNKNOWN frequency; same as before the fix).
+
+## D2 - the validator owns the subject of its finding
+- **Observation (MEASURED, seq 167):** `static_rule_violation` named AppTest.java; the attempt's FIX ANALYSIS, about something else, mentioned "the pom.xml excerpt"; `attribution_tier: self_diagnosis`, `likely_files: [pom.xml]`; attempt 6 repaired pom.xml.
+- **Producer (TRACED):** `attribution.attribute_failure` ranks `self_diagnosed_files` above locator/judge; only `Failure.authoritative_files` (deterministic evidence, PRV-05 run 7) outranks it, and the static-rule raise site never set it.
+- **Authority order (existing, now documented by tests):** `authoritative_files` > model self-diagnosis > locator/judge > triage > full set. A later failure that carries its own `authoritative_files` may move the target.
+- **Fix:** `failure_grounding.build_static_rule_failure` records the exact known repository paths the check printed (whole-path match: `pom.xml` is not found inside `module/pom.xml`; a bare word is not a path) as `authoritative_files`. A violation printing no known path gets no authority. Cross-file subjects (several printed paths) are preserved whole.
+- **Proof:** `tests/test_d2_validator_attribution_authority.py` (10, includes the real `run_attempt` raise site). Pre-fix the live case reproduces exactly (`['pom.xml']`). Mutations M1-M4 killed.
+- **Residual:** only `static_rule_violation` was changed (the measured case). Other validators whose location is the defect site (for example `pom_semantic_validation`) were not touched. Out-of-scope authoritative targets in a structured plan follow the existing plan-scope-conflict path.
+
+## D3 - `diagnosis_mismatch` false positive
+- **My first design was REFUTED by the recorded blobs and reverted.** I assumed a cross-file relationship (widen the evidence scope to sibling files). The sealed records show the attempt-5 AppTest already imported `org.junit.jupiter.api.Test`, so no sibling half was new at attempt 6; widening would not have cleared the case. The report's own wording (coordinate notation) was right.
+- **Mechanism (CONFIRMED by replay + production-path test):** the retry responded to `static_rule_violation`; `find_edits_ignoring_own_diagnosis` compared Maven-coordinate prose against pom.xml alone and vetoed it, discarding the whole candidate before the static rule (which judges the whole candidate after the write loop) could speak. The old static branch of `_diagnosis_mismatch_bypass_reason` re-ran the check with only the current file overridden and the sibling files still stale on disk.
+- **Definition used:** a prose-vs-diff heuristic is advisory evidence about a response; it must not pre-empt the deterministic gate that is the authority for the finding being repaired and judges the whole candidate right after the write loop. A retry responding to such a gate defers to it (existing policy for compile / pom_semantic_validation / targeted_test; `static_rule_violation` joins). The heuristic itself is unchanged and still vetoes retries that respond to failures with no deterministic re-check; the once-per-file veto budget is unchanged. No Maven-, language- or model-specific rule.
+- **Proof:** `tests/test_d3_diagnosis_mismatch_scope.py` (13). On the recorded response: pre-fix `diagnosis_mismatch` on pom.xml, post-fix `static_rule_violation` about AppTest.java (its nested `assertTrue(true)` is still vacuous, MEASURED), veto budget unspent. A candidate that resolves the finding is accepted despite the same notation-only analysis. Unsupported-diagnosis rejection still works for non-gate retries. Mutations M1-M3 killed.
+- **Residual (honest):** the notation false positive still exists for a retry answering a failure with no deterministic re-check (for example `run_verification`): the once-per-file veto budget bounds it to one wasted retry per file. A notation-aware matcher would be a new heuristic; not done.
+
+## Offline replay of the recorded run (no model)
+`handover/DEMO-V2/evidence/live-greenfield-failure/replay_after_d1_d3.py`: recorded attempt-1 static finding, then recorded operation_contract failures: the request still names `vacuous_test_assertion` and AppTest.java (D1); with the model's analysis naming pom.xml the target is `['src/test/java/hellokriya/AppTest.java']` (live: `['pom.xml']`) (D2). D3 is the production-path test above.
+
+## Retry-progress analysis (no code change)
+`retry_progress.classify_progress`: a seen vector is REPEATED_VECTOR; a changed workspace is PROGRESS by design (PRD-026). An F1 -> F2 -> F1 cycle with different candidate bytes is therefore PROGRESS, bounded only by the attempt budget. In the live run the cycle existed because feedback lost F1 and the target moved (D1, D2, D3). Tying progress to *resolution of open findings* would be a redesign of the progress engine (stop condition 4). With D1 the open finding is now visible to the model on every retry, which removes the measured mechanism. Not changed; retry counts untouched. Open as an owner decision.
+
+## Direct-plan runtime reachability (Phase 6)
+The live run used the packaged default (`workflow_controller.enabled` False): `kriya generate` is a pass-through to `run_generation_workflow`, a ONE-UNIT direct plan (TRACED: `cli._dispatch_generation`, `plan_adapters.direct_execution_plan`). The earlier controlled proof used the four-unit enforce plan. New: `tests/test_greenfield_direct_plan_runtime.py` (9), through the real engine and launch-approval layer, only transport / toolchain / process execution stubbed.
+
+Proven on the approve path: all three files accepted and applied; one multi-file source review (never empty); build and test gates ran; the runtime judge was consulted; a typed `runtime_command` review was raised (`unit_id` null, `ISOLATED_WORKTREE`, no stdin); the exact reviewed argv executed once, after the decision; `ApplicationOutcome` EXECUTED with stdout; the grader judged the captured output.
+
+**Three MEASURED direct-plan gaps (stop condition 'direct plans silently lose runtime verification'; pinned as characterisation, not fixed):**
+1. **Declining the runtime review still reports success.** Nothing executes, no `run_verification` outcome is recorded, `ApplicationOutcome` is NOT_APPLICABLE, every gate passes, and the change is still applied. The structured plan fails the run in the same situation.
+2. **Order:** the runtime review is raised BEFORE the source review (run-verification sits inside the candidate gates). The person is asked to run commands for source they have not been shown; at execution nothing is applied to their folder (isolated worktree).
+3. **Requirement ledger never closes:** `REQ-1` / `REQ-2` stay `pending / NOT_YET_VERIFIED` even after an executed, graded-PASS run, so "full-goal verification true" is not reachable on this plan shape.
+
+Verdict: runtime verification is reachable and executes on the direct plan; the three gaps need an owner decision (and 1 is a correctness defect on the decline path).
+
+## Not done
+Activity retry UX (Phase 7) and the final failure message (Phase 8): held, because the direct-plan phase hit a stop condition and the order says they follow a proven direct path. `out/Kriya.app` not rebuilt; Demo 00 not reset (rebuild only after the owner decides the gaps).
