@@ -11,7 +11,7 @@ from pathlib import Path
 
 HANDOVER = Path(__file__).resolve().parent.parent / "handover"
 REQUIRED = ("id", "priority", "status", "discovered_in", "target_scope", "blocking", "closure_evidence")
-STATUSES = {"OPEN", "DEFERRED", "CLOSED"}
+STATUSES = {"OPEN", "DEFERRED", "CLOSED", "TRACKED_IN_OPEN_ITEMS"}
 PRIORITIES = {"P0", "P1", "P2", "P3"}
 
 

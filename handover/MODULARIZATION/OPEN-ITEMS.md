@@ -1,20 +1,25 @@
 # OPEN-ITEMS - every known issue, bug, gap and deferral of the full-modularization workstream
 
-Owner directive (2026-10-16): "keep track of any issues, bugs or gaps and close them at appropriate stages". This is the ONE ledger.
-`tests/architecture/test_open_items.py` parses it: every row names the slice that CLOSES it; an OPEN row whose closing slice is in
-`DONE_SLICES` fails the build ("due and not closed"); a CLOSED row must carry closure evidence; `OWNER` marks an item that needs an owner
-decision, taken at the Q1 gate (nothing may leave the workstream unrecorded). Rules for the orchestrator: (1) after every batch, add the
-new items its report and my verification found, with their closing slice; (2) before launching a slice, copy every OPEN row due in that
-slice into the worker prompt; (3) at every wave end, re-read this file and the registry; (4) Q1 refuses to pass with an OPEN row that
-is not `OWNER`-decided. Behaviour defects also get a row in `handover/BACKLOG_REGISTRY.csv` (the id is the same). "Closes in" is the
-LAST slice that must have closed the item; the Item text names intermediate slices.
+Owner directive (2026-10-16): "keep track of any issues, bugs or gaps and close them at appropriate stages". This is the ONE ledger for
+issues that must be resolved DURING this workstream; `handover/BACKLOG_REGISTRY.csv` is authoritative only for product debt that
+intentionally survives it. The same issue is never OPEN in both: a ledger item with a registry id is cross-referenced (the registry row
+has status TRACKED_IN_OPEN_ITEMS and names its OI id), and only an owner-approved deferral moves it to the registry.
+`tests/architecture/test_open_items.py` parses this file: every row names the slice that CLOSES it; an OPEN row whose closing slice is in
+`DONE_SLICES` fails ("due and not closed"); a CLOSED row must carry closure evidence; DEFERRED_BY_OWNER must carry `backlog=<registry id>;
+reason=...; not-blocking=...` and the registry row must exist. Q1 FINAL RULE (owner, 2026-10-16): Q1 cannot be accepted with any row
+OPEN, any row NEEDS_OWNER_DECISION, or any CLOSED row without evidence; "needs owner decision" is not an exemption, an item genuinely outside
+the modularization scope needs an explicit owner-approved deferral (DEFERRED_BY_OWNER). The test applies that rule the moment Q1 is added
+to `DONE_SLICES`. Orchestrator rules: (1) after every batch, add the new items its report and my verification found, with their closing
+slice; (2) before launching a slice, copy every OPEN row due in that slice into the worker prompt; (3) at every wave end, re-read this
+file and the registry; (4) close a row only with evidence. "Closes in" is the LAST slice that must have closed the item; the Item text
+names intermediate slices. R1/R2 are owner-approved correction slices placed after E14 (before F1) because D3/M1 were PRESERVE slices.
 
 | ID | Kind | Item | Found in | Closes in | Status | Closure evidence |
 |---|---|---|---|---|---|---|
 | OI-01 | tripwire gap | A2 finders do not resolve import aliases (`import os as _o; _o.getcwd()` evades every ownership tripwire). Registry: FINDER-ALIAS-BLIND-001 | W3 verification (M1) | Q1 | OPEN | - |
-| OI-02 | defect (existing behaviour) | Readers of `KRIYA_STATE_DIR` disagree on relative / `~` values (state_paths refuses; tools.validate and acceptance_jvm resolve against the cwd; model_runtime does not expand `~`). Registry: STATE-DIR-RESOLUTION-DIVERGES-001. PRESERVE forbade fixing it | D3 | OWNER | OPEN | - |
-| OI-03 | durability hardening | `atomic_write_file` fsyncs neither temp file nor directory (power loss may leave a renamed-but-empty control-state file). Registry: ATOMIC-WRITE-NO-FSYNC-001 | M1 | OWNER | OPEN | - |
-| OI-04 | defect (existing behaviour) | `atomic_write_file` leaves `<target>.kriya-tmp-<pid>` when write/replace raises. Registry: ATOMIC-WRITE-TEMP-LEFTOVER-001 | M1 | OWNER | OPEN | - |
+| OI-02 | defect (existing behaviour) | Readers of `KRIYA_STATE_DIR` disagree on relative / `~` values (state_paths refuses; tools.validate and acceptance_jvm resolve against the cwd; model_runtime does not expand `~`). Registry: STATE-DIR-RESOLUTION-DIVERGES-001. PRESERVE forbade fixing it. OWNER APPROVED FIX 2026-10-16 (do not preserve the inconsistency): explicit/injected state dir > `KRIYA_STATE_DIR` > `~/.kriya/state`; one resolver in CONFIG; env read at the composition boundary only; history/trace/evidence/run persistence and model_runtime/tools.validate/acceptance_jvm all use it; no project-local fallback; characterize the old matrix first (golden `environment_homes.json` exists); tests: explicit, env, default, restart/reopen, two isolated roots | D3 | R2 | OPEN | - |
+| OI-03 | durability hardening | `atomic_write_file` fsyncs neither temp file nor directory (power loss may leave a renamed-but-empty control-state file). Registry: ATOMIC-WRITE-NO-FSYNC-001. OWNER APPROVED FIX 2026-10-16: temp file in the destination dir -> full write -> flush -> fsync(temp) -> atomic replace -> fsync(parent dir) where supported; central only, no caller-specific durability code; destination intact on any pre-replace failure; platform limits documented honestly; deterministic failure-path tests | M1 | R1 | OPEN | - |
+| OI-04 | defect (existing behaviour) | `atomic_write_file` leaves `<target>.kriya-tmp-<pid>` when write/replace raises. Registry: ATOMIC-WRITE-TEMP-LEFTOVER-001. OWNER APPROVED FIX 2026-10-16 in the same slice as OI-03: every pre-replace failure attempts to remove the temp file; a cleanup error never replaces or hides the original failure; a successful write leaves no temp artifact | M1 | R1 | OPEN | - |
 | OI-05 | possible defect (INFERRED) | Result dict `run_id` and its `checkpoint:` reference differ from the RunRecord/evidence run id on both entry paths. Registry: KERNEL-RESULT-RUNID-DIVERGES-001. Confirm or refute with a discriminating check; H5 links runs by id | E1 | E14 | OPEN | - |
 | OI-06 | possible defect (INFERRED) | Legacy `human_rejected` result has no `failure_category`. Registry: KERNEL-HUMAN-REJECTED-NO-CATEGORY-001 | E1 | E14 | OPEN | - |
 | OI-07 | security observation (INFERRED harmless) | `is_local_url` treats the documentation range 203.0.113.0/24 as local (Python `ipaddress.is_private`). Not routable; confirm with a discriminating check and decide | C1 | I2 | OPEN | - |
