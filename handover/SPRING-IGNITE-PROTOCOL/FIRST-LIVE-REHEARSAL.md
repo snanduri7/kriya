@@ -3,6 +3,9 @@
 Everything here is for you to run with the real local model. Nothing has been run with a model yet. One run is one observation, not a reliability claim.
 **Run it once.** If it fails, capture the evidence in section 13 and stop (section 14).
 
+## 0. One decision only you can make before starting
+This scenario's configuration sets `knowledge.offline_mode: true`. Reason: a desktop launch is always knowledge-policy strict and cannot acknowledge KnowledgeGuard's post-cutoff warning for "Apache Ignite 2.18.0", so without the setting the run would stop before any model call. Effects you should accept knowingly: (a) the guard does not look up release dates, so its post-cutoff warning is NOT put into the model's prompt (the verified `ignite-java17` skill supplies the Ignite rules); (b) the guard is cleared because a skill folder whose name contains `ignite` exists; it does not read the skill's verified flag (the reset's digest check guarantees the folder is the verified skill); (c) the configuration-approval dialog does NOT list this setting. Details: `QUALIFICATION.md` section 3. **If you do not accept it, do not run this rehearsal;** the alternative is a product change that has not been authorised.
+
 ## 1. Prerequisite status (all checked without a model)
 | Item | Status |
 |---|---|
@@ -42,7 +45,7 @@ demo-v2/scripts/launch_gui.sh   --scenario 04                 # starts the app; 
 About six new files (historically three units; with the test, more). At minimum: `pom.xml`, a Spring XML under `src/main/resources`, `Protocol.java`, `ProtocolParser.java`, a main class, a JUnit test under `src/test/java`. Not expected: any `ignite/` directory, any file outside the project, a modified `kriya.yaml`.
 
 ## 7. What to inspect BEFORE approving the source
-- **pom**: Java 17 (`source`/`target` 17); `ignite-core` AND `ignite-spring` at 2.18.0; a JUnit 5 test dependency; `exec-maven-plugin` as **`exec:exec`** with `<executable>java</executable>`, many `--add-opens` (at least `java.base/java.nio` and `java.base/java.util`), `-classpath` + `<classpath/>`, and `${exec.mainClass}` as the last argument. Reject `exec:java` with `jvmArguments`.
+- **pom**: Java 17 (`source`/`target`/`release` exactly **17**; the model is told the machine's JDK is 26, so check it did not copy 21 or 26: `java` runs Temurin 21 and would reject newer classes); `ignite-core` AND `ignite-spring` at 2.18.0; a JUnit 5 test dependency; `exec-maven-plugin` as **`exec:exec`** with `<executable>java</executable>`, many `--add-opens` (at least `java.base/java.nio` and `java.base/java.util`), `-classpath` + `<classpath/>`, and `${exec.mainClass}` as the last argument. Reject `exec:java` with `jvmArguments`.
 - **Spring XML**: an `IgniteConfiguration` bean and EXACTLY ONE start mechanism: either an `IgniteSpringBean` (then the code must use `getBean("<id>")` and never `Ignition.start`) or a plain configuration with `Ignition.start("<xml>")`. Both together = a crash ("already been started").
 - **Protocol / ProtocolParser**: the five fields; `equals` compares `body` by content; header arithmetic: dataLength in 3 bytes, time in 4 bytes, both big-endian; a malformed length is rejected.
 - **Main**: an explicitly typed cache (`IgniteCache<Integer, Protocol>` or equivalent); `put`, then `get` into a separate variable; the printed values come from the object read back from the cache; the context/node is closed (try-with-resources) so the JVM can exit.
@@ -57,12 +60,13 @@ Historically `mvn -e -q compile exec:exec -Dexec.mainClass=<main class>` (the Ru
 
 ## 10. Expected native confirmation
 A separate native sheet for the runtime command (Cancel is the default). It is a different decision from the source approval.
+**What running it means:** the application runs on your machine (no container). Ignite's defaults open listeners on all interfaces (TCP 47100, 47500, 10800, 11211, UDP 47400) and use multicast discovery, so another Ignite node on the same network could join it while it runs (a few seconds). Maven is not forced offline: before you start, `touch /tmp/kriya-04-start`; afterwards `find ~/.m2/repository -newer /tmp/kriya-04-start -type f | head` shows anything it downloaded (an expected result is none; any file is a deviation from "no public network" to record).
 
 ## 11. Expected runtime evidence and final screen
 - Application section: the recorded command, **exit code 0**, and the program's output. Ignite prints a long banner, so the result line is far below the first 15 lines: use **Show full output**.
 - The output contains `Ignite node started OK` ... `Ignite node stopped OK` and exactly: `[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700000000, bodyLength=15, equals=true`. (`[VERIFICATION] PASS` appears only if the generated code prints it; the goal does not ask for it.)
 - Final screen: **Run completed**; Build, Tests, Runtime verification passed; the formal requirement ledger may still say "not fully verified" (by design, the output line is evidence, not a closed requirement).
-- After the run, with no model: `demo-v2/scripts/verify_demo.sh --scenario 04 --phase post` (independent offline `mvn test`, then the application through Maven under the app's PATH, and the exact expected line). Expect "0 failed".
+- After the run, with no model: `demo-v2/scripts/verify_demo.sh --scenario 04 --phase post`. It works on a throw-away COPY of the project (your evidence is untouched) and checks: no `ignite/` left in the project, offline `mvn test` with at least one test executed and none skipped, the application through Maven under the app's PATH exits 0, the exact expected line, Ignite's own start and stop lines, and a `Protocol` class in Ignite's marshaller registry. Expect "0 failed". It cannot tell whether the printed values were read back from the cache (that is your source review) and it hard-codes the `exec:exec` launch.
 - Roughly: the historical Ignite run took 356 s for three units without tests; expect minutes, not seconds, and possibly more attempts.
 
 ## 12. If a failure occurs: classify the FIRST wrong decision, not the final symptom
@@ -72,7 +76,7 @@ Use the table in `QUALIFICATION.md` section 9: KnowledgeGuard stop (control plan
 - A screenshot of the final screen and of the screen where it stopped.
 - The folder `~/kriya-demo-v2-work/scenario-04/` as it is: `workspace/` (whatever was generated), `state/` (Kriya's run records), `gui/app.stderr.log`, `gui/app.stdout.log`.
 - The run id shown on the page, and for a stop at the start: the page's *Technical reason / Details* text.
-- Optionally (no model): `demo-v2/scripts/verify_demo.sh --scenario 04 --phase post > ~/kriya-demo-v2-work/scenario-04/evidence/post-check.txt 2>&1`.
+- Optionally (no model; it runs the generated code, but only in a copy): `demo-v2/scripts/verify_demo.sh --scenario 04 --phase post > ~/kriya-demo-v2-work/scenario-04/evidence/post-check.txt 2>&1`.
 - Which step you were at (sections 5 to 11) and what you clicked last.
 
 ## 14. Do NOT retry repeatedly

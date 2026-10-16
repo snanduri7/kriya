@@ -170,7 +170,7 @@ assert c['paths']['skills'] == '$W04/skills' and c['skills']['load_global'] is F
 assert c['workflow_controller'] == {'enabled': True, 'mode': 'enforce'}
 assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm']['base_url']"
   if [ "$PHASE" = idle ]; then
-    LISTING="$(cd "$S04" 2>/dev/null && ls -A | tr '\n' ' ')"
+    LISTING="$(cd "$S04" 2>/dev/null && ls -A | tr '\n' ' ' || true)"
     [ "$LISTING" = "kriya.yaml " ] && pass "the project folder holds ONLY kriya.yaml: no source, no pom.xml, no test, no git repository, no generated file" || fail "the project folder is not 'kriya.yaml' only: $LISTING"
     [ -z "$(ls -A "$W04/state" 2>/dev/null)" ] && pass "no Kriya state from an earlier run" || fail "Kriya state from an earlier run is present in $W04/state"
     preflight_absent_check_04() {
@@ -202,20 +202,27 @@ assert c['llm']['model'] == 'qwen3-coder:30b' and 'localhost:11434' in c['llm'][
     [ "$XMLN" -ge 1 ] && pass "$XMLN Spring XML file(s) under src/main/resources" || fail "no Spring XML under src/main/resources"
     TESTS="$(find "$S04/src/test/java" -name '*.java' 2>/dev/null | wc -l | tr -d ' ' || true)"
     [ "$TESTS" -ge 1 ] && pass "$TESTS test file(s) were created" || fail "no test under src/test/java"
-    # Independent re-check, OUTSIDE Kriya's own gates, under the desktop app's own PATH: offline Maven test run, then the application through Maven and the exact expected line.
-    if ( cd "$S04" && PATH="$APP_PATH" mvn -o -B clean test >"$W04/evidence/post-test.log" 2>&1 ); then
+    # Independent re-check, OUTSIDE Kriya's own gates, under the desktop app's own PATH. It runs in a THROW-AWAY COPY of the project: the evidence workspace is never rebuilt, cleaned or written to
+    # (a failed run's generated code is evidence; it is also model code, so it is only ever executed in the copy).
+    [ -e "$S04/ignite" ] && fail "an ignite/ work directory is left in the project (runtime state must not be part of the project)" || pass "no ignite/ work directory is left in the project"
+    CHECK="$W04/evidence/post-check-copy"; rm -rf "$CHECK"; mkdir -p "$W04/evidence"; cp -R "$S04" "$CHECK"; rm -rf "$CHECK/target" "$CHECK/ignite"
+    if ( cd "$CHECK" && PATH="$APP_PATH" mvn -o -B clean test >"$W04/evidence/post-test.log" 2>&1 ); then
       N="$(sed -n 's/^\[INFO\] Tests run: \([0-9]*\), Failures: 0, Errors: 0.*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
-      [ -n "$N" ] && [ "$N" -ge 1 ] && pass "independent offline 'mvn test' passes with $N test(s) executed (never 0)" || fail "independent offline 'mvn test' passed but executed no tests (see $W04/evidence/post-test.log)"
+      SK="$(sed -n 's/^\[[A-Z]*\] Tests run: [0-9]*, Failures: 0, Errors: 0, Skipped: \([0-9]*\).*/\1/p' "$W04/evidence/post-test.log" | tail -1)"
+      [ -n "$N" ] && [ "$N" -ge 1 ] && [ "${SK:-0}" = "0" ] && pass "independent offline 'mvn test' passes with $N test(s) executed, none skipped" || fail "independent offline 'mvn test' passed but executed no tests or skipped some (see $W04/evidence/post-test.log)"
     else fail "independent offline 'mvn test' failed (see $W04/evidence/post-test.log)"; fi
     MAINS="$(grep -rl 'public static void main' "$S04/src/main/java" 2>/dev/null | head -1 || true)"
     if [ -n "$MAINS" ]; then
       PKG="$(sed -n 's/^package \([A-Za-z0-9_.]*\);.*/\1/p' "$MAINS" | head -1)"; CLS="$(basename "$MAINS" .java)"; FQN="${PKG:+$PKG.}$CLS"
-      if ( cd "$S04" && PATH="$APP_PATH" mvn -o -B -q compile exec:exec -Dexec.mainClass="$FQN" >"$W04/evidence/post-run.log" 2>&1 ); then
+      if ( cd "$CHECK" && PATH="$APP_PATH" mvn -o -B compile exec:exec -Dexec.mainClass="$FQN" >"$W04/evidence/post-run.log" 2>&1 ); then
+        pass "the application ran and exited 0 by itself (mvn -o compile exec:exec -Dexec.mainClass=$FQN)"
         grep -qxF "$EXPECTED_RESULT_LINE" "$W04/evidence/post-run.log" && pass "the application printed exactly: $EXPECTED_RESULT_LINE" || fail "the application did not print the expected line (see $W04/evidence/post-run.log)"
-        pass "the application exited 0 by itself (mvn compile exec:exec -Dexec.mainClass=$FQN)"
+        grep -q 'Ignite node started OK' "$W04/evidence/post-run.log" && grep -q 'Ignite node stopped OK' "$W04/evidence/post-run.log" && pass "Ignite itself logged 'node started OK' and 'node stopped OK' (the program did not merely print a line)" || fail "no Ignite start/stop lines in the run output: the application may not have used Ignite"
+        # Ignite registers a user class in <work>/db/marshaller/<typeId>.classname0 the first time it marshals it for a cache: direct evidence a Protocol instance went into an Ignite cache.
+        if grep -rqs 'Protocol' "$CHECK"/ignite/work/db/marshaller/ 2>/dev/null; then pass "Ignite's marshaller registry names a Protocol class (a Protocol instance was put into an Ignite cache)"; else fail "Ignite's marshaller registry names no Protocol class (nothing proves a Protocol went into a cache)"; fi
       else fail "the application did not run and exit 0 through 'mvn -o compile exec:exec -Dexec.mainClass=$FQN' (see $W04/evidence/post-run.log)"; fi
     else fail "no class with public static void main under src/main/java"; fi
-    rm -rf "$S04/ignite"   # Ignite's work directory is runtime state written by the independent re-check above, not part of the project
+    rm -rf "$CHECK"
     check "Kriya recorded state for the run" test -n "$(ls -A "$W04/state" 2>/dev/null)"
   fi
   finish

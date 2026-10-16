@@ -8,7 +8,7 @@
 #   04              the GREENFIELD start with knowledge: an EMPTY project folder holding only kriya.yaml (rendered from config/kriya.template.yaml, needs the operator's approval) and the verified ignite-java17 skill in $DEMO_V2_WORK/scenario-04/skills.
 #                   --check-build: also runs the model-free qualification (scripts/qualify_spring_ignite.sh): offline Maven, JUnit, Spring XML, Ignite 2.18.0, Protocol/ProtocolParser, cache put/get, clean exit
 #   --no-services   03: do not start the scripted stub (start it yourself with scripts/stub_ctl.sh start when you begin scenario 03)
-#   all             00, 01, 02 and 03 prepared one after the other with --no-services: the owner start state, nothing running
+#   all             00, 01, 02, 03 and 04 prepared one after the other with --no-services: the owner start state, nothing running
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 

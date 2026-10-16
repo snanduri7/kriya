@@ -1,0 +1,27 @@
+21 all24 (True, '') none (False, 'Exception in thread "main" java.lang.ExceptionInInitializerError')
+  drop --add-opens=java.base/jdk.internal.access=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/sun.nio.ch=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/sun.util.calendar=ALL-UNNAMED -> PASS
+  drop --add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED -> PASS
+  drop --add-opens=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED -> PASS
+  drop --add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.io=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.nio=ALL-UNNAMED -> FAIL Exception in thread "main" java.lang.ExceptionInInitializerError
+  drop --add-opens=java.base/java.net=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.util=ALL-UNNAMED -> FAIL Exception during start processors, node will be stopped and close connections
+  drop --add-opens=java.base/java.util.concurrent=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.lang=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.lang.invoke=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.math=ALL-UNNAMED -> PASS
+  drop --add-opens=java.sql/java.sql=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.lang.reflect=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.time=ALL-UNNAMED -> PASS
+  drop --add-opens=java.base/java.text=ALL-UNNAMED -> PASS
+  drop --add-opens=java.management/sun.management=ALL-UNNAMED -> PASS
+  drop --add-opens=java.desktop/java.awt.font=ALL-UNNAMED -> PASS
+  minimal-by-single-drop (each needed alone): ['--add-opens=java.base/java.nio=ALL-UNNAMED', '--add-opens=java.base/java.util=ALL-UNNAMED']
+  run with ONLY those: True 

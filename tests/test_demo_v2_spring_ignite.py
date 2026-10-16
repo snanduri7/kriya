@@ -217,7 +217,7 @@ def test_reference_pom_satisfies_the_build_contract() -> None:
     assert "<goal>" not in pom and "exec:java" not in pom and "<mainClass>" not in pom and "jvmArguments" not in pom  # exec:exec only: exec:java cannot apply JVM flags
     assert "<executable>java</executable>" in pom and "<classpath/>" in pom
     assert pom.rstrip().index("<argument>${exec.mainClass}</argument>") > pom.index("<classpath/>")  # the main class is the FINAL argument, overridable
-    for required in ("--add-opens=java.base/java.nio=ALL-UNNAMED", "--add-opens=java.base/java.util=ALL-UNNAMED"):  # MEASURED required on Java 17 and 21 (QUALIFICATION.md section 6)
+    for required in ("--add-opens=java.base/java.nio=ALL-UNNAMED", "--add-opens=java.base/java.util=ALL-UNNAMED"):  # MEASURED required on Java 17 and 21 (QUALIFICATION.md section 6; raw output in evidence/)
         assert required in pom
     assert pom.count("--add-opens=") == 24  # the full documented Ignite list from the verified skill (22 of them are optional for this workload)
 
@@ -318,6 +318,63 @@ def test_reset_refuses_when_the_skill_in_the_repository_was_edited(tmp_path: Pat
     assert result.returncode != 0 and "does not have its recorded digest" in result.stderr
 
 
-@pytest.mark.parametrize("script", ["qualify_spring_ignite.sh", "prepare_demo.sh", "reset_demo.sh", "verify_demo.sh", "launch_gui.sh"])
-def test_scenario_04_scripts_name_the_scenario_in_their_usage(script: str) -> None:
-    assert "04" in (DEMO_V2 / "scripts" / script).read_text(encoding="utf-8")
+@pytest.mark.parametrize("script", ["prepare_demo.sh", "reset_demo.sh", "verify_demo.sh", "launch_gui.sh"])
+def test_scenario_04_is_an_accepted_scenario_of_every_shared_script(script: str, tmp_path: Path) -> None:
+    help_text = subprocess.run(["bash", str(DEMO_V2 / "scripts" / script), "--help"], capture_output=True, text=True, check=False, timeout=30,
+                               env={**os.environ, "DEMO_V2_WORK": str(tmp_path / "work")}).stdout
+    assert re.search(r"--scenario 00\|01\|02\|03\|04", help_text), help_text
+
+
+# ---- verify_demo.sh --phase post for scenario 04 (needs Maven + the offline repository; skipped where they are absent) ----
+
+_HAS_OFFLINE_STACK = shutil.which("mvn") is not None and (Path.home() / ".m2/repository/org/apache/ignite/ignite-core/2.18.0/ignite-core-2.18.0.jar").is_file() \
+    and (Path.home() / ".m2/repository/org/junit/jupiter/junit-jupiter/5.8.2/junit-jupiter-5.8.2.pom").is_file()
+
+
+def _post(work: Path) -> list:
+    """The PASS/FAIL lines of `verify_demo.sh --scenario 04 --phase post` (the tracked-tree line is about this checkout, not the project, and is excluded)."""
+    result = subprocess.run(["bash", str(DEMO_V2 / "scripts" / "verify_demo.sh"), "--scenario", "04", "--phase", "post"], capture_output=True, text=True, check=False, timeout=300,
+                            env={**os.environ, "DEMO_V2_WORK": str(work), "KRIYA_BIN": str(work / "no-such-kriya")})
+    return [line for line in result.stdout.splitlines() if line.startswith(("PASS", "FAIL")) and "tracked tree" not in line]
+
+
+def _project(tmp_path: Path) -> Path:
+    work = tmp_path / "work"
+    assert _run_reset(work).returncode == 0
+    workspace = work / "scenario-04" / "workspace"
+    shutil.copytree(REFERENCE, workspace, dirs_exist_ok=True)
+    (work / "scenario-04" / "config").mkdir(exist_ok=True)
+    (work / "scenario-04" / "config" / "kriya.yaml").write_text((SCENARIO / "config" / "kriya.template.yaml").read_text(encoding="utf-8").replace("@WORK@", str(work / "scenario-04")), encoding="utf-8")
+    (work / "scenario-04" / "state" / "run.marker").write_text("x")
+    return work
+
+
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+def test_post_check_passes_on_the_reference_and_leaves_the_project_untouched(tmp_path: Path) -> None:
+    work = _project(tmp_path)
+    workspace = work / "scenario-04" / "workspace"
+    before = _dir_digest(workspace)
+    lines = _post(work)
+    assert lines and not [line for line in lines if line.startswith("FAIL")], lines
+    for needed in ("Ignite itself logged", "marshaller registry names a Protocol", "executed, none skipped", "printed exactly"):
+        assert any(needed in line and line.startswith("PASS") for line in lines), needed
+    assert _dir_digest(workspace) == before  # the evidence workspace is never rebuilt, cleaned or written to
+
+
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+def test_post_check_rejects_a_program_that_prints_the_line_without_ignite(tmp_path: Path) -> None:
+    work = _project(tmp_path)
+    main = work / "scenario-04" / "workspace" / "src" / "main" / "java" / "com" / "example" / "Main.java"
+    main.write_text('package com.example;\npublic class Main { public static void main(String[] a) { System.out.println("' + _env(FIXTURE / "fixture.env")["EXPECTED_RESULT_LINE"] + '"); } }\n', encoding="utf-8")
+    failures = [line for line in _post(work) if line.startswith("FAIL")]
+    assert any("Ignite start/stop" in line for line in failures) and any("marshaller" in line for line in failures), failures
+
+
+@pytest.mark.skipif(not _HAS_OFFLINE_STACK, reason="needs mvn and the offline Maven repository (Ignite 2.18.0, JUnit 5.8.2)")
+def test_post_check_rejects_missing_tests_and_a_leftover_ignite_directory(tmp_path: Path) -> None:
+    work = _project(tmp_path)
+    workspace = work / "scenario-04" / "workspace"
+    shutil.rmtree(workspace / "src" / "test")
+    (workspace / "ignite").mkdir()
+    failures = [line for line in _post(work) if line.startswith("FAIL")]
+    assert any("no test under src/test/java" in line for line in failures) and any("ignite/ work directory is left" in line for line in failures), failures

@@ -44,7 +44,8 @@ SHELL_JAVA="$(java -version 2>&1 | head -1 || true)"
 info "desktop app environment: java = $APP_JAVA"
 info "desktop app environment: mvn  = $APP_MVN"
 info "this shell:              java = $SHELL_JAVA (JAVA_HOME=${JAVA_HOME:-unset})"
-printf 'app_java=%s\napp_mvn=%s\nshell_java=%s\nshell_java_home=%s\n' "$APP_JAVA" "$APP_MVN" "$SHELL_JAVA" "${JAVA_HOME:-unset}" > "$EVIDENCE/toolchain.txt"
+printf 'app_java=%s\napp_mvn=%s\nshell_java=%s\nshell_java_home=%s\ngit_head=%s\ngit_tracked_status=%s\n' "$APP_JAVA" "$APP_MVN" "$SHELL_JAVA" "${JAVA_HOME:-unset}" \
+  "$(git -C "$REPO_ROOT" rev-parse HEAD)" "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no | tr '\n' ';')" > "$EVIDENCE/toolchain.txt"
 APP_MAJOR="$(printf '%s' "$APP_JAVA" | sed -n 's/.*version "\([0-9]*\).*/\1/p')"
 if [ -n "$APP_MAJOR" ] && [ "$APP_MAJOR" -ge 17 ]; then pass "java $APP_MAJOR (>= 17) is what the desktop app's PATH resolves; the project targets Java 17 through its compiler settings"; else fail "java 17+ is not available on the desktop app's PATH ('$APP_JAVA')"; fi
 env -i PATH="$APP_PATH" HOME="$HOME" mvn -version >/dev/null 2>&1 && pass "mvn is available on the desktop app's PATH" || fail "mvn is not available on the desktop app's PATH"
@@ -85,11 +86,11 @@ run_runtime_leg() {
   local label="$1"; shift
   local out="$EVIDENCE/runtime-$label.json"
   if env -i "$@" PYTHONDONTWRITEBYTECODE=1 "$KRIYA_PY" -I "$HELPER" runtime --repo "$REPO_ROOT" --fixture "$DEMO_V2_DIR/$REFERENCE_DIR" >"$out" 2>"$EVIDENCE/runtime-$label.err"; then
-    pass "runtime leg '$label': Spring XML loaded, Ignite 2.18.0 started, ProtocolParser + cache put/get ran, exact [RESULT] line printed, Ignite stopped, exit 0 ($("$KRIYA_PY" -I -c "import json; r=json.load(open('$out')); print(str(r['elapsed_seconds'])+' s')"))"
+    pass "runtime leg '$label': Spring XML loaded, Ignite 2.18.0 started and stopped, ProtocolParser ran, a Protocol was put into an Ignite cache (marshaller registry), exact [RESULT] line printed, exit 0 ($("$KRIYA_PY" -I -c "import json; r=json.load(open('$out')); print(str(r['elapsed_seconds'])+' s')"))"
   else fail "runtime leg '$label' failed (see $out and $EVIDENCE/runtime-$label.err)"; fi
 }
 run_runtime_leg "desktop-app-environment" PATH="$APP_PATH" HOME="$HOME"
-if [ -n "$JAVA17_HOME" ]; then run_runtime_leg "java17" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"; else info "no Java 17 installation found by java_home: the explicit Java 17 leg was SKIPPED"; fi
+if [ -n "$JAVA17_HOME" ]; then run_runtime_leg "java17" PATH="$JAVA17_HOME/bin:$APP_PATH" HOME="$HOME" JAVA_HOME="$JAVA17_HOME"; else fail "no Java 17 installation found by java_home: the explicit Java 17 leg cannot run (the scenario targets Java 17)"; fi
 ! pgrep -f "com.example.Main" >/dev/null 2>&1 && pass "no application process is left running" || fail "an application process (com.example.Main) is still running"
 
 # ---- 6. optional: the same candidate under OCI containment, network DENIED ----
