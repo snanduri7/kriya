@@ -7,7 +7,8 @@ artifacts; ``_mark_run_in_progress``).
 ``preflight`` answers, before Start Run, what a run in this folder would be: which configuration Kriya would load, where it would record
 its state, which models it would route to, what security authority applies, and whether the cockpit could observe the result. It is
 computed by the SAME resolution a terminal ``kriya generate`` performs when run from that folder (the process working directory decides
-configuration discovery - kriya/config/config.py): the caller's ``load_in`` temporarily enters the folder. Nothing is cached: every call
+configuration discovery - kriya/config/resolution.py): ``ConfigService.resolve(ctx)`` (CONFIG, since D3; before, the caller's ``load_in``)
+temporarily enters the folder under CONTEXT's one working-directory lock. Nothing is cached: every call
 resolves again, so an approval granted or revoked a moment ago is seen. The host displays the answer and decides nothing from it; the
 launched process re-runs the same function and refuses on any blocker, so the preflight cannot be forged by the host.
 
@@ -24,10 +25,11 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from kriya.application.evidence import store_summary
 from kriya.application.services import EVIDENCE_STORE_UNREADABLE, LAUNCH_NOT_FOUND, ApplicationRefusal
+from kriya.config.service import ConfigService, ResolvedConfiguration
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
 from kriya.control.launch import PHASE_ENDED, PHASE_STARTING
@@ -38,7 +40,6 @@ from kriya.core.state_paths import StateDirectoryError, resolve_state_directory,
 
 logger = logging.getLogger(__name__)
 
-LoadIn = Callable[[str], Tuple[Any, Any, Dict[str, Any], Optional[Dict[str, str]]]]  # workspace -> (state, cfg, authority, failure)
 ToolVisibility = Callable[[], List[Dict[str, Any]]]
 
 KNOWLEDGE_POLICY = "strict"
@@ -80,12 +81,13 @@ def _model_identity(cfg) -> Dict[str, Any]:
             "fallback_chain": [entry.model for entry in cfg.llm_chain], "role_overrides": roles}
 
 
-def build_preflight(workspace: str, cockpit_state_directory: Optional[str], *, load_in: LoadIn, tool_visibility: ToolVisibility) -> Dict[str, Any]:
+def build_preflight(workspace: str, cockpit_state_directory: Optional[str], *, resolved: ResolvedConfiguration,
+                    tool_visibility: ToolVisibility) -> Dict[str, Any]:
     """The preflight document for a canonical ``workspace``. ``cockpit_state_directory`` is where the reading side looks (None when the caller
-    is the launched process itself, which cannot know). ``load_in`` resolves the folder's configuration with the folder as the working
-    directory and ``tool_visibility`` reports the toolchains (both mechanisms of the caller: a cwd change and process probes)."""
+    is the launched process itself, which cannot know). ``resolved`` is the folder's configuration (``ConfigService.resolve``) and
+    ``tool_visibility`` reports the toolchains (a process probe of the caller)."""
     blockers: List[Dict[str, str]] = []
-    state, cfg, authority, failure = load_in(workspace)
+    state, cfg, authority, failure = resolved.as_load_in()
     if failure is not None:
         blockers.append(failure)
     assessment = assess_recovery(workspace)
@@ -219,7 +221,10 @@ class RunHandle:
 
 
 class RunService:
-    def preflight(self, ctx: RequestContext, cfg, workspace: str, *, load_in: LoadIn, tool_visibility: ToolVisibility) -> Dict[str, Any]:
+    def __init__(self, config: Optional[ConfigService] = None) -> None:
+        self._config = config if config is not None else ConfigService()
+
+    def preflight(self, ctx: RequestContext, cfg, workspace: str, *, tool_visibility: ToolVisibility) -> Dict[str, Any]:
         """``execution.preflight`` for the admitted folder ``workspace``, observed from the cockpit's own state directory."""
         from kriya.application.services import CONFIG_LOAD_FAILED
 
@@ -227,12 +232,13 @@ class RunService:
             cockpit_state, _source = resolve_state_directory(cfg)
         except StateDirectoryError as error:
             raise ApplicationRefusal(CONFIG_LOAD_FAILED, str(error)) from error
-        return build_preflight(workspace, cockpit_state, load_in=load_in, tool_visibility=tool_visibility)
+        return build_preflight(workspace, cockpit_state, resolved=self._config.resolve(ctx), tool_visibility=tool_visibility)
 
-    def build_preflight(self, ctx: RequestContext, workspace: str, cockpit_state_directory: Optional[str], *, load_in: LoadIn,
+    def build_preflight(self, ctx: RequestContext, workspace: str, cockpit_state_directory: Optional[str], *,
                         tool_visibility: ToolVisibility) -> Dict[str, Any]:
-        """The preflight document itself (the launched process passes ``cockpit_state_directory=None``: it cannot know where a reader looks)."""
-        return build_preflight(workspace, cockpit_state_directory, load_in=load_in, tool_visibility=tool_visibility)
+        """The preflight document itself (the launched process passes ``cockpit_state_directory=None``: it cannot know where a reader looks).
+        ``ctx.workspace`` is the folder ``workspace`` (its canonical root): its configuration is resolved there."""
+        return build_preflight(workspace, cockpit_state_directory, resolved=self._config.resolve(ctx), tool_visibility=tool_visibility)
 
     def status(self, ctx: RequestContext, cfg, workspace: str, launch_id: str) -> Dict[str, Any]:
         """``launch.status`` of launch ``launch_id`` (validated by the caller) in the admitted folder ``workspace``."""

@@ -14,15 +14,17 @@ the service only orders those calls. It is ONE MORE CLIENT of that subsystem:
 * A trust file in effect or a store that would resolve inside the workspace is a typed ``APPROVAL_UNAVAILABLE``: the local store would
   not be the thing consulted, or must not be written.
 
-The caller resolves the folder's configuration state (``resolve_config_state`` with the folder as the working directory: a cwd
-mechanism APPLICATION does not own) and reads ``KRIYA_TRUST_FILE`` (an environment read, D3); ``approve`` runs while the caller holds
-its working-directory lock, so the comparison and the write see the same configuration.
+Since D3 the service resolves the folder's configuration itself through ``ConfigService`` (CONFIG: the folder entered under CONTEXT's one
+working-directory lock, exactly as the KUP adapter did before) and reads the trust file through CONFIG's environment reader; ``approve``
+resolves, compares and writes under ONE hold of that lock, so the comparison and the write see the same configuration. A configuration
+that cannot be read is the typed ``CONFIG_LOAD_FAILED`` refusal the adapter gave before.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from kriya.application.services import APPROVAL_STALE, APPROVAL_UNAVAILABLE, ApplicationRefusal
+from kriya.application.services import APPROVAL_STALE, APPROVAL_UNAVAILABLE, CONFIG_LOAD_FAILED, ApplicationRefusal
+from kriya.config.service import ConfigService
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
 from kriya.policy.authority import (
@@ -82,12 +84,24 @@ def _result(state, outcome: str, approval_digest: Optional[str]) -> Dict[str, An
             "approval_digest": approval_digest, "scope": SCOPE}
 
 
-class ConfigurationService:
-    def __init__(self, authority: Optional[AuthorityPort] = None) -> None:
-        self._authority = authority if authority is not None else AuthorityPort()
+def _state(config: ConfigService):
+    """The folder's resolution state; the caller is ``inside`` the folder. Typed CONFIG_LOAD_FAILED on failure."""
+    try:
+        return config.resolution_state()
+    except Exception as error:  # noqa: BLE001 - a malformed or unreadable kriya.yaml is a typed refusal, never a traceback (as execution.preflight)
+        raise ApplicationRefusal(CONFIG_LOAD_FAILED, f"the configuration cannot be read: {type(error).__name__}: {str(error)[:300]}") from error
 
-    def approval_status(self, ctx: RequestContext, workspace: str, state, *, trust_file: Optional[str]) -> Dict[str, Any]:
-        """The approval state of the folder ``workspace`` (canonical) whose configuration resolved to ``state``. Read-only."""
+
+class ConfigurationService:
+    def __init__(self, authority: Optional[AuthorityPort] = None, config: Optional[ConfigService] = None) -> None:
+        self._authority = authority if authority is not None else AuthorityPort()
+        self._config = config if config is not None else ConfigService()
+
+    def approval_status(self, ctx: RequestContext, workspace: str) -> Dict[str, Any]:
+        """The approval state of the folder ``workspace`` (canonical; ``ctx.workspace``). Read-only."""
+        with self._config.inside(ctx):
+            state = _state(self._config)
+        trust_file = self._config.trust_file()
         data: Dict[str, Any] = {
             "workspace": workspace, "identity": workspace_identity(workspace), "status": "not_required", "reason": None, "required": False, "can_approve": False,
             "blocking_reason": None, "protected_fields": _fields(state.violations), "fingerprint": review_fingerprint(state.violations, state.config_dict),
@@ -104,9 +118,14 @@ class ConfigurationService:
         data.update(status="approved" if covered else "required", reason=reason, can_approve=not covered and not trust_file)
         return data
 
-    def approve(self, ctx: RequestContext, state, reviewed: str, *, trust_file: Optional[str]) -> Dict[str, Any]:
+    def approve(self, ctx: RequestContext, reviewed: str) -> Dict[str, Any]:
         """Record the approval of exactly the configuration ``reviewed`` names (its review fingerprint), through
-        ``AuthorityPort.grant_config_approval``. The caller holds its working-directory lock from resolving ``state`` until this returns."""
+        ``AuthorityPort.grant_config_approval``: resolved, compared and written under one hold of the working-directory lock."""
+        trust_file = self._config.trust_file()
+        with self._config.inside(ctx):  # the working directory cannot change between the comparison and the write
+            return self._approve(_state(self._config), reviewed, trust_file)
+
+    def _approve(self, state, reviewed: str, trust_file: Optional[str]) -> Dict[str, Any]:
         current = review_fingerprint(state.violations, state.config_dict)
         if current != reviewed:
             raise ApplicationRefusal(APPROVAL_STALE, "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",

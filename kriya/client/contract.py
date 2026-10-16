@@ -14,11 +14,16 @@ Each service port below is typed parameter for parameter with the application se
 TEMPORARY local-only parameters. Some ports still take a mechanism or a live object that cannot cross a transport, because the domain
 module that will own it does not exist yet. They are listed in ``LOCAL_ONLY_PARAMETERS`` with the slice that removes each (the contract
 suite fails on any callable/object parameter that is not listed), so a RemoteKriyaClient's gap is explicit, not hidden:
-the folder's configuration resolved with the folder as working directory (``load_in``, ``state``: D3 ``ConfigService.resolve(ctx)``),
-the trust-file path read from the environment (``trust_file``: D3) (the approval writer ``grant`` is gone since C1: the service reaches it through ``AuthorityPort``),
+(the folder's configuration resolved with the folder as working directory - ``load_in``, ``state`` - and the trust-file path
+- ``trust_file`` - are gone since D3: the services resolve them through ``ConfigService.resolve(ctx)``; the approval writer ``grant`` is
+gone since C1: the service reaches it through ``AuthorityPort``),
 the toolchain probe (``tool_visibility``: L1 ``ExecutionPort``), the model-endpoint probe (``probe``: I2 ``InferenceRuntimePort.health``),
 the run composition (``deps``/``artifacts`` of ``runs.start``: O2,
-which moves ``kriya generate`` onto the client) and the resolved configuration object itself (``cfg``: D3 ``ResolvedConfiguration``).
+which moves ``kriya generate`` onto the client) and the resolved configuration object itself (``cfg``: re-tagged D3 -> O1, and O2 for
+the run composition; MEASURED in D3: the KUP adapter answers one request with several service calls that share ONE per-request
+configuration - history.list makes four - so a service resolving ``ctx``'s configuration per call would load it four times and could
+see four different files; removing ``cfg`` needs the request-scoped resolution of the transport, which is O1's (and O2's for
+``kriya generate``)).
 """
 from __future__ import annotations
 
@@ -30,7 +35,6 @@ if TYPE_CHECKING:
         EvidenceAnswer,
         EvidenceLocation,
         HistoryLocation,
-        LoadIn,
         ProbeEndpoint,
         RecordsPage,
         ReviewDecisionRequest,
@@ -42,7 +46,6 @@ if TYPE_CHECKING:
         ToolVisibility,
     )
     from kriya.config import AppConfig
-    from kriya.config.config import ConfigResolutionState
     from kriya.context import RequestContext
 
 
@@ -55,9 +58,8 @@ class ProjectsPort(Protocol):
 
 
 class RunsPort(Protocol):
-    def preflight(self, ctx: "RequestContext", cfg: "AppConfig", workspace: str, *, load_in: "LoadIn",
-                  tool_visibility: "ToolVisibility") -> Dict[str, Any]: ...
-    def build_preflight(self, ctx: "RequestContext", workspace: str, cockpit_state_directory: Optional[str], *, load_in: "LoadIn",
+    def preflight(self, ctx: "RequestContext", cfg: "AppConfig", workspace: str, *, tool_visibility: "ToolVisibility") -> Dict[str, Any]: ...
+    def build_preflight(self, ctx: "RequestContext", workspace: str, cockpit_state_directory: Optional[str], *,
                         tool_visibility: "ToolVisibility") -> Dict[str, Any]: ...
     def status(self, ctx: "RequestContext", cfg: "AppConfig", workspace: str, launch_id: str) -> Dict[str, Any]: ...
     def start(self, ctx: "RequestContext", cfg: "AppConfig", artifacts: "RunArtifacts", deps: "RunServiceDeps") -> "RunHandle": ...
@@ -74,9 +76,8 @@ class ReviewsPort(Protocol):
 
 
 class ConfigurationPort(Protocol):
-    def approval_status(self, ctx: "RequestContext", workspace: str, state: "ConfigResolutionState", *,
-                        trust_file: Optional[str]) -> Dict[str, Any]: ...
-    def approve(self, ctx: "RequestContext", state: "ConfigResolutionState", reviewed: str, *, trust_file: Optional[str]) -> Dict[str, Any]: ...
+    def approval_status(self, ctx: "RequestContext", workspace: str) -> Dict[str, Any]: ...
+    def approve(self, ctx: "RequestContext", reviewed: str) -> Dict[str, Any]: ...
 
 
 class ModelsPort(Protocol):
@@ -137,17 +138,15 @@ PORTS: Mapping[str, type] = {
 # (port, method, parameter) -> the slice that replaces it with a transportable value. Closed: the contract suite fails on an unlisted
 # mechanism/object parameter and on a listed one that no longer exists.
 LOCAL_ONLY_PARAMETERS: Mapping[Tuple[str, str, str], str] = {
-    **{(port, method, "cfg"): "D3" for port, methods in (
-        ("projects", ("describe",)), ("runs", ("preflight", "status", "start", "mark_in_progress")),
+    ("runs", "start", "cfg"): "O2", ("runs", "mark_in_progress", "cfg"): "O2",
+    **{(port, method, "cfg"): "O1" for port, methods in (
+        ("projects", ("describe",)), ("runs", ("preflight", "status")),
         ("models", ("skills", "context", "probe")), ("skills", ("list", "describe")), ("tools", ("list", "describe", "approval_state")),
         ("evidence", ("location", "manifest", "verify", "records", "content", "store_summary")),
         ("history", ("location", "snapshot", "summary", "acquire", "snapshots", "verify_snapshot", "prune", "list", "list_in_workspace",
                      "detail", "prompt")), ("health", ("capabilities",))) for method in methods},
-    ("runs", "preflight", "load_in"): "D3", ("runs", "build_preflight", "load_in"): "D3",
     ("runs", "preflight", "tool_visibility"): "L1", ("runs", "build_preflight", "tool_visibility"): "L1",
     ("runs", "start", "artifacts"): "O2", ("runs", "start", "deps"): "O2",
-    ("configuration", "approval_status", "state"): "D3", ("configuration", "approve", "state"): "D3",
-    ("configuration", "approval_status", "trust_file"): "D3", ("configuration", "approve", "trust_file"): "D3",
     ("models", "probe", "probe"): "I2",
 }
 

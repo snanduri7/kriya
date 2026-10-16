@@ -330,7 +330,7 @@ MODULE_TIER_FILES = {
         "test_autonomy_config_registry_hosts.py", "test_code_intel_config.py", "test_config.py",
         "test_config_command.py", "test_config_extra.py", "test_execution_policy_config.py",
         "test_kup_config_approval.py", "test_qual_config_001.py", "test_sec009_config_authority.py",
-        "test_workflow_execution_policy_config_wiring.py", "test_environment_reader.py",
+        "test_workflow_execution_policy_config_wiring.py", "test_environment_reader.py", "test_config_service.py",
         "contracts/test_config_resolution_contract.py"
     }),
     "provider": frozenset({

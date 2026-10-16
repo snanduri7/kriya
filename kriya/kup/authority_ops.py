@@ -1,8 +1,9 @@
 """KUP ``configuration.approval_status`` and ``configuration.approve``: the desktop as ONE MORE CLIENT of the SEC-009 configuration-authority subsystem.
 
-Transport only (full modularization B3): argument validation, the folder's configuration resolved with the folder as the working directory
-(a cwd mechanism the adapter owns, under ``_CWD_LOCK``), the ``KRIYA_TRUST_FILE`` read, and the envelope. The use case is
-``client.configuration`` (``kriya.application.ConfigurationService``, through the ``KriyaClient``); what follows describes it.
+Transport only (full modularization B3, D3): argument validation and the envelope. The use case is ``client.configuration``
+(``kriya.application.ConfigurationService``, through the ``KriyaClient``), which since D3 also resolves the folder's configuration
+(``ConfigService``: the folder entered under CONTEXT's one working-directory lock) and reads the trust file (CONFIG's environment
+reader); what follows describes it.
 
 Nothing here decides authority. What needs approval, how it is digested, where the artifact lives and when it stops covering the configuration are all
 ``kriya.config.authority`` / ``kriya.config.authority_approval``, exactly as for ``kriya authority inspect|approve``. This module only (1) resolves the folder's
@@ -20,13 +21,10 @@ Boundaries, each pinned by a test:
 """
 from __future__ import annotations
 
-import os
 import re
 from typing import Any, Dict
 
-from kriya.config.environment import trust_file as environment_trust_file
 from kriya.kup import policy
-from kriya.kup.execution import _CWD_LOCK
 from kriya.kup.inspect import envelope, live_consistency
 from kriya.kup.store import SnapshotError
 from kriya.kup.workspace_ops import validated_workspace
@@ -34,27 +32,9 @@ from kriya.kup.workspace_ops import validated_workspace
 FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-def _resolve_locked(workspace: str):
-    """The folder's configuration state, resolved with ``workspace`` as the working directory (as a terminal run there). The caller holds ``_CWD_LOCK``.
-    Typed CONFIG_LOAD_FAILED on failure."""
-    from kriya.config.config import resolve_config_state
-
-    previous = os.getcwd()
-    os.chdir(workspace)
-    try:
-        return resolve_config_state()
-    except Exception as error:  # noqa: BLE001 - a malformed or unreadable kriya.yaml is a typed refusal, never a traceback (as execution.preflight)
-        raise SnapshotError(policy.CONFIG_LOAD_FAILED, f"the configuration cannot be read: {type(error).__name__}: {str(error)[:300]}") from error
-    finally:
-        os.chdir(previous)
-
-
 def status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:  # noqa: ARG001 - the operation table passes the configuration to every handler
     _requested, workspace = validated_workspace(request)
-    with _CWD_LOCK:
-        state = _resolve_locked(workspace)
-    trust_file = environment_trust_file() or None
-    data = client.configuration.approval_status(client.context(workspace_root=workspace, request_id=request_id), workspace, state, trust_file=trust_file)
+    data = client.configuration.approval_status(client.context(workspace_root=workspace, request_id=request_id), workspace)
     return envelope("configuration.approval_status", request_id, data=data, source=None, consistency=live_consistency())
 
 
@@ -63,8 +43,5 @@ def approve(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, 
     if not isinstance(reviewed, str) or not FINGERPRINT_RE.match(reviewed):
         raise SnapshotError(policy.INVALID_REQUEST, "fingerprint must be the review fingerprint Kriya gave (sha256:<64 hex>)", reason="invalid_fingerprint")
     _requested, workspace = validated_workspace(request)
-    trust_file = environment_trust_file() or None
-    with _CWD_LOCK:  # resolve, compare and write under one hold: the working directory cannot change between the comparison and the write
-        state = _resolve_locked(workspace)
-        data = client.configuration.approve(client.context(workspace_root=workspace, request_id=request_id), state, reviewed, trust_file=trust_file)
+    data = client.configuration.approve(client.context(workspace_root=workspace, request_id=request_id), reviewed)
     return envelope("configuration.approve", request_id, data=data, source=None, consistency=live_consistency())

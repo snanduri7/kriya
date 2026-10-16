@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from kriya.config.environment import expand_user
+from kriya.config.environment import Environment, expand_user
 from kriya.config.environment import trust_file as environment_trust_file
 
 # D3: the resolution names below moved to kriya/config/resolution.py; re-exported here (PARTIAL_FACADES). Removed in P1.
@@ -1621,13 +1621,14 @@ class AppConfig(BaseModel):
             )
         return self
 
-def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = None) -> AppConfig:
+def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = None, *,
+                environment: Optional[Environment] = None) -> AppConfig:
     """Resolves config_path via resolve_config_state(), then applies SEC-009
     P1/P2 authority: any violation is checked against a valid, digest-
     matching, currently-valid approval artifact (kriya/config/
     authority_approval.py) - the local per-workspace store, or `trust_file`
     for CI/operator-supplied trust (defaulting to the KRIYA_TRUST_FILE env
-    var if not passed explicitly). Only violations that remain uncovered
+    var of ``environment``, default the process's, if not passed explicitly). Only violations that remain uncovered
     after that check raise ConfigAuthorityError, BEFORE AppConfig is ever
     constructed and therefore BEFORE Kernel/PluginManager/MCPManager can see
     this configuration. With no valid approval, behavior is byte-identical
@@ -1641,7 +1642,7 @@ def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = N
     state = resolve_config_state(config_path)
 
     if state.violations:
-        effective_trust_file = trust_file or environment_trust_file()
+        effective_trust_file = trust_file or environment_trust_file(environment)
         if effective_trust_file:
             # Refuses a trust-file path resolving inside the workspace root -
             # the load-bearing guard against a checked-out branch shipping

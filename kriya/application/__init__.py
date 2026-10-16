@@ -42,7 +42,6 @@ _EXPORTS = {
     "ApprovalService": "kriya.application.approval",
     "ReviewDecisionRequest": "kriya.application.approval",
     "ApprovalRefused": "kriya.application.approval",
-    "LoadIn": "kriya.application.run",
     "ToolVisibility": "kriya.application.run",
     "ProbeEndpoint": "kriya.application.model",
     "EvidenceAnswer": "kriya.application.evidence",

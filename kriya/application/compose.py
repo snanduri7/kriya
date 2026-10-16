@@ -12,7 +12,7 @@ the per-call ``TraceHistory`` reader parameter is gone.
 from __future__ import annotations
 
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:  # annotations only: each service module is imported when the service is first used
     from kriya.application.approval import ApprovalService
@@ -25,12 +25,17 @@ if TYPE_CHECKING:  # annotations only: each service module is imported when the 
     from kriya.application.project import ProjectService
     from kriya.application.review import ReviewService
     from kriya.application.run import RunService
+    from kriya.config.service import ConfigService
 
 SERVICE_NAMES = ("projects", "runs", "approvals", "reviews", "configuration", "models", "skills", "tools", "evidence", "history", "health")
 
 
 class ApplicationServices:
-    """The use-case services of one process (MODULE-CONTRACTS §15 ``ApplicationServices``), each built once on first use."""
+    """The use-case services of one process (MODULE-CONTRACTS §15 ``ApplicationServices``), each built once on first use. ``config`` is
+    the ``ConfigService`` the services that resolve a folder's configuration use (D3; default: the process environment's)."""
+
+    def __init__(self, config: "Optional[ConfigService]" = None) -> None:
+        self._config = config
 
     @cached_property
     def projects(self) -> "ProjectService":
@@ -40,7 +45,7 @@ class ApplicationServices:
     @cached_property
     def runs(self) -> "RunService":
         from kriya.application.run import RunService
-        return RunService()
+        return RunService(self._config)
 
     @cached_property
     def approvals(self) -> "ApprovalService":
@@ -55,7 +60,7 @@ class ApplicationServices:
     @cached_property
     def configuration(self) -> "ConfigurationService":
         from kriya.application.configuration import ConfigurationService
-        return ConfigurationService()
+        return ConfigurationService(config=self._config)
 
     @cached_property
     def models(self) -> "ModelService":
@@ -88,9 +93,9 @@ class ApplicationServices:
         return HealthService()
 
 
-def compose() -> ApplicationServices:
+def compose(config: "Optional[ConfigService]" = None) -> ApplicationServices:
     """The services of this process. Nothing is resolved here: no configuration, environment, home or working directory is read."""
-    return ApplicationServices()
+    return ApplicationServices(config)
 
 
 __all__ = ["ApplicationServices", "SERVICE_NAMES", "compose"]

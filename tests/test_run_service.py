@@ -60,7 +60,7 @@ def _ctx(ws: str) -> RequestContext:
 # ------------------------------------------------------------------ preflight / status
 
 def test_preflight_through_the_service_is_the_kup_answer(ws):
-    data = RunService().preflight(_ctx(ws), AppConfig(), ws, load_in=execution._load_in, tool_visibility=execution.tool_visibility)
+    data = RunService().preflight(_ctx(ws), AppConfig(), ws, tool_visibility=execution.tool_visibility)
     envelope = run_kup_operation(AppConfig(), {"operation": "execution.preflight", "workspace": ws})
     assert envelope["error"] is None and envelope["data"] == data
     assert data["ready"] is True and data["toolchains"]["tools"] == TOOLS, "the tool probe handed in is the one reported"
@@ -69,8 +69,8 @@ def test_preflight_through_the_service_is_the_kup_answer(ws):
 
 def test_the_launched_process_document_is_the_preflight_seen_from_nowhere(ws):
     """``kriya generate --launch-id`` re-resolves the document with no cockpit directory: the same blockers and facts, observability unknown."""
-    seen = RunService().preflight(_ctx(ws), AppConfig(), ws, load_in=execution._load_in, tool_visibility=execution.tool_visibility)
-    own = RunService().build_preflight(_ctx(ws), ws, None, load_in=execution._load_in, tool_visibility=execution.tool_visibility)
+    seen = RunService().preflight(_ctx(ws), AppConfig(), ws, tool_visibility=execution.tool_visibility)
+    own = RunService().build_preflight(_ctx(ws), ws, None, tool_visibility=execution.tool_visibility)
     assert own["state"]["cockpit_directory"] is None and own["state"]["observable_by_cockpit"] is None
     assert {k: v for k, v in own.items() if k != "state"} == {k: v for k, v in seen.items() if k != "state"}
 
@@ -78,7 +78,7 @@ def test_the_launched_process_document_is_the_preflight_seen_from_nowhere(ws):
 def test_an_unusable_cockpit_state_directory_is_a_typed_refusal_on_the_wire(ws, monkeypatch):
     monkeypatch.setenv("KRIYA_STATE_DIR", "relative/state")
     with pytest.raises(ApplicationRefusal) as caught:
-        RunService().preflight(_ctx(ws), AppConfig(), ws, load_in=execution._load_in, tool_visibility=execution.tool_visibility)
+        RunService().preflight(_ctx(ws), AppConfig(), ws, tool_visibility=execution.tool_visibility)
     assert caught.value.reason_code == "CONFIG_LOAD_FAILED" and caught.value.extra == {}
     envelope = run_kup_operation(AppConfig(), {"operation": "execution.preflight", "workspace": ws})
     assert envelope["data"] is None and envelope["error"] == {"code": "CONFIG_LOAD_FAILED", "message": caught.value.message, "database_state": None}

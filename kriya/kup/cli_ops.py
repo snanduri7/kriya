@@ -19,7 +19,9 @@ import os
 from typing import Any, Dict, Optional
 
 from kriya.client import ApplicationRefusal  # the adapter sees the application only through the client boundary (B4)
-from kriya.core.state_paths import StateDirectoryError
+from kriya.config.resolution import (
+    StateDirectoryError,  # CONFIG owns the state-directory error since D3 (core.state_paths re-exports it)
+)
 from kriya.kup import evidence_ops, policy
 from kriya.kup.inspect import (
     capabilities,

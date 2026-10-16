@@ -52,7 +52,7 @@ def test_the_public_names_are_the_owners_objects():
 def test_the_members_still_to_come_name_real_open_slices():
     from tests.architecture.test_import_direction import DONE_SLICES, SLICES  # noqa: PLC0415
 
-    assert set(ARRIVES_LATER) == {"typed_approval_requests", "waited_seconds", "config_authority"}     # "stale" landed in C3
+    assert set(ARRIVES_LATER) == {"typed_approval_requests", "waited_seconds"}     # "stale" landed in C3, "config_authority" in D3
     assert all(slice_id in SLICES and slice_id not in DONE_SLICES for slice_id in ARRIVES_LATER.values())
     assert not any(hasattr(AuthorityPort, name) for name in ARRIVES_LATER), "a member listed as arriving later must not exist as a stub"
 

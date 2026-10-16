@@ -47,8 +47,6 @@ ARRIVES_LATER: Mapping[str, str] = {
     "typed_approval_requests": "G4",
     # the elapsed human wait returned with the decision, consumed by BudgetLedger.record_human_wait
     "waited_seconds": "H4",
-    # ConfigAuthorityReport is part of ResolvedConfiguration, built by ConfigService
-    "config_authority": "D3",
 }
 
 
@@ -144,6 +142,14 @@ class AuthorityPort:
         from kriya.config import authority_approval
 
         return authority_approval.grant_local_approval(violations, config_dict, workspace_root, out_path)
+
+    def config_authority(self, ctx: Any, config: Any = None) -> Any:
+        """The SEC-009 outcome (``ConfigAuthorityReport``) of ``ctx``'s configuration: ``ConfigService.resolve(ctx).authority`` (D3). The
+        decisions are config.authority's field classification and authority_approval's approval check, made inside ``load_config``;
+        nothing is re-decided here. ``config`` is the ConfigService to resolve with (default: the process environment's)."""
+        from kriya.config.service import ConfigService
+
+        return (config if config is not None else ConfigService()).resolve(ctx).authority
 
 
 __all__ = [

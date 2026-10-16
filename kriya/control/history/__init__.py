@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.request import pathname2url
 
 from kriya.core import db as _db
-from kriya.core.state_paths import resolve_state_directory
+from kriya.core.state_paths import resolve_state_directory, trace_db_path
 from kriya.foundation.ids import RUN_ID_RULE, is_valid_run_id
 
 # The store's own vocabulary. Every value is IDENTICAL to the KUP wire vocabulary (kriya/kup/policy.py), which reports these bounds
@@ -77,7 +77,8 @@ def snapshot_directory(cfg) -> str:
 
 
 def trace_store_path(cfg) -> str:
-    return os.path.join(resolve_state_directory(cfg)[0], "traces.db")
+    """``<state dir>/traces.db``: STATE's one trace-database path (core.state_paths.trace_db_path; D3 removed the D2 duplicate)."""
+    return trace_db_path(cfg)
 
 
 def stat_metadata(path: str) -> Optional[Dict[str, Any]]:

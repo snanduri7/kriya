@@ -1,11 +1,11 @@
 """KUP execution operations (GUI M6): ``execution.preflight`` and ``launch.status``.
 
-Transport only (full modularization B3): argument validation, the envelope, and the two mechanisms the use case is handed - ``_load_in``
-(the folder's configuration resolved with the folder as the process working directory, under ``_CWD_LOCK``, which every KUP operation that
-enters a folder shares) and ``tool_visibility`` (looked up here at call time: the documented patch point). The use cases are
+Transport only (full modularization B3, D3): argument validation, the envelope, and the toolchain probe the use case is handed
+(``tool_visibility``, looked up here at call time: the documented patch point). Since D3 the folder's configuration is resolved by
+``ConfigService`` (CONFIG) inside the service; ``_load_in`` stays as the catalog/context operations' tuple-shaped name for the same
+resolution, and ``_CWD_LOCK`` is CONTEXT's one working-directory lock. The use cases are
 ``kriya.application.RunService.preflight`` / ``.status`` (``client.runs`` through the ``KriyaClient``; kriya/application/run.py); what follows describes them.
-The launched process itself (``kriya generate --launch-id``) re-resolves the same document through ``RunService.build_preflight`` with
-these two mechanisms.
+The launched process itself (``kriya generate --launch-id``) re-resolves the same document through ``RunService.build_preflight``.
 
 ``execution.preflight`` answers, before Start Run, what a run in this folder would be: which configuration Kriya would load, where it would
 record its state, which models it would route to, what security authority applies, and whether the cockpit could observe the result. It is
@@ -20,58 +20,31 @@ workspace run lock. It never infers an outcome from a process exit; a launch tha
 """
 from __future__ import annotations
 
-import os
-import threading
 from typing import Any, Dict
 
+from kriya.config.service import ConfigService
+from kriya.context.model import RequestContext
+from kriya.context.working_directory import WORKING_DIRECTORY_LOCK
 from kriya.control.launch import valid_launch_id
-from kriya.core.state_paths import resolve_state_directory
 from kriya.kup import policy
 from kriya.kup.inspect import envelope, live_consistency, source_block
 from kriya.kup.store import SnapshotError
 from kriya.kup.workspace_ops import validated_workspace
 from kriya.platform.toolchain_locator import tool_visibility
 
-_CWD_LOCK = threading.Lock()
-
-
-def _blocker(code: str, message: str) -> Dict[str, str]:
-    return {"code": code, "message": message}
+# The ONE working-directory lock (CONTEXT, since D3); the KUP name is kept for the catalog/context operations' skill discovery.
+_CWD_LOCK = WORKING_DIRECTORY_LOCK
 
 
 def _load_in(workspace: str):
-    """(state, cfg, authority, failure): configuration resolved with ``workspace`` as the working directory, exactly as a terminal run there."""
-    from kriya.config.authority import ConfigAuthorityError
-    from kriya.config.config import load_config, resolve_config_state
-
-    with _CWD_LOCK:
-        previous = os.getcwd()
-        os.chdir(workspace)
-        try:
-            try:
-                state = resolve_config_state()
-            except Exception as error:  # a malformed kriya.yaml fails here, before any classification: a typed blocker, never a traceback
-                return None, None, {"status": "failed", "fields": []}, _blocker("CONFIG_LOAD_FAILED", f"{type(error).__name__}: {str(error)[:300]}")
-            try:
-                cfg = load_config()
-            except ConfigAuthorityError as error:
-                fields = [{"field": v.field_path, "source": v.source.value, "classification": v.classification.value, "reason": v.reason}
-                          for v in sorted(error.violations, key=lambda x: x.field_path)]
-                return state, None, {"status": "refused", "fields": fields}, _blocker(
-                    "CONFIG_AUTHORITY_REFUSED",
-                    f"{len(fields)} field(s) in this folder's configuration need an operator approval (kriya authority approve): "
-                    + ", ".join(f["field"] for f in fields[:6]))
-            except Exception as error:  # a malformed or unreadable configuration: typed, never a traceback
-                return state, None, {"status": "failed", "fields": []}, _blocker("CONFIG_LOAD_FAILED", f"{type(error).__name__}: {str(error)[:300]}")
-            status = "approved" if state.violations else "no_findings"
-            return state, cfg, {"status": status, "fields": [v.field_path for v in state.violations]}, None
-        finally:
-            os.chdir(previous)
+    """(state, cfg, authority, failure) of the folder ``workspace``: ``ConfigService.resolve`` (CONFIG, since D3) in the tuple shape the
+    catalog/context operations unpack. The name stays: tests patch ``kriya.kup.{catalog_ops,context_ops}._load_in``."""
+    return ConfigService().resolve(RequestContext.local(workspace)).as_load_in()
 
 
 def preflight(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, Any]:
     _requested, workspace = validated_workspace(request)
-    data = client.runs.preflight(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, load_in=_load_in, tool_visibility=tool_visibility)
+    data = client.runs.preflight(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, tool_visibility=tool_visibility)
     cockpit_state = data["state"]["cockpit_directory"]
     return envelope("execution.preflight", request_id, data=data, source=source_block(cockpit_state, client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None), consistency=live_consistency())
 
@@ -82,5 +55,5 @@ def launch_status(cfg, request: Dict[str, Any], request_id: str, client) -> Dict
         raise SnapshotError(policy.INVALID_REQUEST, "launch_id must have the shape YYYYMMDDTHHMMSS-xxxxxxxx")
     _requested, workspace = validated_workspace(request)
     data = client.runs.status(client.context(workspace_root=workspace, request_id=request_id), cfg, workspace, str(launch_id))
-    state_dir = resolve_state_directory(cfg)[0]
-    return envelope("launch.status", request_id, data=data, source=source_block(state_dir, client.history.location(client.context(workspace_root=None, request_id=request_id), cfg).trace_database, None), consistency=live_consistency())
+    location = client.history.location(client.context(workspace_root=None, request_id=request_id), cfg)  # the state directory of cfg
+    return envelope("launch.status", request_id, data=data, source=source_block(location.state_directory, location.trace_database, None), consistency=live_consistency())

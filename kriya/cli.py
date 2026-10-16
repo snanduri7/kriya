@@ -2904,7 +2904,7 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
     from kriya.context.workspace_identity import canonical_workspace, workspace_identity
     from kriya.control.launch import LaunchRefused, LaunchSession, validate_goal
     from kriya.kup import (
-        execution as kup_execution,  # the cwd lock and toolchain probe the preflight is handed (O2: through the client)
+        execution as kup_execution,  # the toolchain probe the preflight is handed (O2: through the client)
     )
 
     extra = [name for name, value in (("GOAL", goal), ("--file", file), ("--yes", yes), ("--resume", resume), ("--resume-id", resume_id),
@@ -2920,7 +2920,7 @@ def _launched_generate(ctx, launch_id, goal, file, yes, knowledge_policy, ack_kn
             goal_text = validate_goal(sys.stdin.read(16001))
             workspace = canonical_workspace(os.getcwd())
             preflight = RunService().build_preflight(RequestContext.local(workspace, request_id=launch_id), workspace, None,
-                                                     load_in=kup_execution._load_in, tool_visibility=kup_execution.tool_visibility)
+                                                     tool_visibility=kup_execution.tool_visibility)
             session = LaunchSession(workspace, workspace_identity(workspace), launch_id, goal_text, preflight,
                                     {"knowledge_policy": KNOWLEDGE_POLICY, "interactive": False})
             session.open()

@@ -15,7 +15,7 @@ before any D3 production edit. Each covers a MATRIX, not one happy path:
   certifications, adjudications, the model-runtime fingerprint store, the acceptance/validator state roots, both probe switches, the git
   probe PATH/HOME, the OCI image overrides read at import, path expansion in policy and the kernel) with the override unset, empty,
   ``~``-relative, relative and absolute;
-* ``kup_config_forms.json``: the KUP operations that resolve a folder's configuration through the real ``_load_in``/``_resolve_locked``
+* ``kup_config_forms.json``: the KUP operations that resolve a folder's configuration through the real ``_load_in``/``_resolve_locked`` (since D3: ``ConfigService.resolve``)
   (no monkeypatch): a malformed folder, a refused folder, a trust file in effect, inside the workspace and relative.
 
 Normalization replaces only values that differ between two runs of the SAME code (temporary paths, the workspace identities derived from

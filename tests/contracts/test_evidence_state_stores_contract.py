@@ -78,8 +78,11 @@ CHECKPOINT_STORES = {"local": "kriya.control.checkpoint"}
 HISTORY_STORES = {"local": "kriya.control.history.port"}
 # MODULE-CONTRACTS §6 signatures that are not today's (closed; each names the slice that closes it).
 STATE_ARRIVES_LATER = {
-    "CheckpointStore.save(ws: WorkspaceContext, checkpoint) -> str": "D3",  # today: save_checkpoint(workspace_path, run_id, data) -> None
-    "HistoryStore.snapshot(ws, state_dir) -> SnapshotRef": "D3",           # today: acquire(cfg, run_active_check=...) from the resolved cfg
+    # Re-tagged D3 -> O1: a WorkspaceContext-keyed store needs WorkspaceContext.state_dir resolved by ConfigService, whose precedence
+    # (KRIYA_STATE_DIR > paths.state > default) is STATE's core.state_paths, which CONFIG may not import; it arrives with the per-request
+    # configuration of the transport (the client contract's ``cfg`` parameters, O1).
+    "CheckpointStore.save(ws: WorkspaceContext, checkpoint) -> str": "O1",  # today: save_checkpoint(workspace_path, run_id, data) -> None
+    "HistoryStore.snapshot(ws, state_dir) -> SnapshotRef": "O1",           # today: acquire(cfg, run_active_check=...) from the resolved cfg
     "HistoryStore.detail(snapshot, run_id, include_prompt)": "O1",         # today: trace(snapshot).detail / .prompt
 }
 
@@ -97,7 +100,7 @@ def test_a_checkpoint_store_round_trips_lists_and_deletes(tmp_path, name):
     assert store.find_latest_checkpoint(workspace) == "20261016T000000-aaaaaaaa"
     store.delete_checkpoint(workspace, "20261016T000000-aaaaaaaa")
     assert store.load_checkpoint(workspace, "20261016T000000-aaaaaaaa") is None and store.list_checkpoints(workspace) == []
-    assert set(STATE_ARRIVES_LATER.values()) <= {"D3", "O1"}
+    assert set(STATE_ARRIVES_LATER.values()) <= {"O1"}
 
 
 @pytest.mark.parametrize("name", sorted(HISTORY_STORES))
