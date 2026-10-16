@@ -74,7 +74,26 @@ EXPECTED = {
     "legacy_planner_schema_invalid": ("WorkflowResult", None, None, "planner_output_schema_invalid", ["FAILURE"], False),
     "legacy_architect_file_list_rejected": ("WorkflowResult", None, None, "architect_file_list_rejected", ["FAILURE"], False),
     "legacy_stage2a_dependency_rejected": ("dict", None, None, None, ["FAILURE"], False),
+    # E4 characterization of stages 5-7 and the pre-apply boundary (written from 3e5751c, before that code moved): the
+    # approval-gate abort returns its own dict (no failure_category in it, as human_rejected; the traces.db row carries it)
+    "legacy_static_analysis_blocked": ("WorkflowResult", False, "static_analysis_blocked", None, ["FAILURE"], True),
+    "legacy_static_analysis_unknown": ("WorkflowResult", False, "static_analysis_unknown", None, ["FAILURE"], True),
+    "legacy_static_analysis_unavailable": ("WorkflowResult", False, "static_analysis_unavailable", None, ["FAILURE"], True),
+    "legacy_static_analysis_passed": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_approval_required_no_callback": ("WorkflowResult", False, None, None, ["FAILURE"], True),
+    "legacy_autonomous_success": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_approval_diff_size_trigger": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_commit_revision_conflict": ("WorkflowResult", False, "workspace_commit_failed", None, ["FAILURE"], True),
+    "legacy_final_review_deadline_refused": ("WorkflowResult", False, "final_review_refused", None, ["FAILURE"], True),
+    "legacy_rejected_candidate_review": ("WorkflowResult", False, "quality_gates_exhausted", None, ["FAILURE"], True),
+    "legacy_lessons_staged": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_dependency_skill_accrued": ("WorkflowResult", True, None, None, ["SUCCESS"], True),
+    "legacy_workspace_refused": ("WorkflowResult", False, None, "needs_review", [], False),
+    "direct_workspace_refused": ("dict", False, None, "needs_review", ["COMMIT_ELIGIBLE"], False),
 }
+# PRD-008 refusals: refused before any model call, so no attempt-evidence store exists (the prior run's record is the
+# only RunRecord of the engine scenario; the controller scenario has none).
+NO_EVIDENCE = frozenset({"legacy_workspace_refused", "direct_workspace_refused"})
 
 
 def test_every_golden_shows_its_terminal_path_and_real_evidence():
@@ -89,6 +108,8 @@ def test_every_golden_shows_its_terminal_path_and_real_evidence():
         assert [record["lifecycle_state"] for record in golden["run_records"]] == lifecycles, name
         kinds = [record["kind"] for store in golden["evidence"] for record in store["records"]]
         assert ("attempt.opened" in kinds) is attempted, name
-        if not name.startswith("milestone_"):   # the FakeEngine milestone runs make no model call: no evidence store
+        if name in NO_EVIDENCE:
+            assert golden["evidence"] == [], name
+        elif not name.startswith("milestone_"):   # the FakeEngine milestone runs make no model call: no evidence store
             assert kinds[0] == "run.opened" and "run.closed" in kinds, name
             assert all(store["verification"] == "VERIFIED" and store["sealed"] for store in golden["evidence"]), name

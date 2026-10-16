@@ -1,0 +1,114 @@
+{
+ "_scenario": {
+  "doc": "PRD-008: an unsettled commit cycle of a prior run: the engine itself refuses the fresh run before any model call (WorkflowEngine.workspace_refusal_result).",
+  "generated_from": "3e5751c",
+  "name": "direct_workspace_refused",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "PRD-008 refusal (engine): an unsettled prior commit cycle, needs_review before any model call"
+ },
+ "evidence": [],
+ "extra": {
+  "approvals": [],
+  "checkpoints": [],
+  "model_calls": {
+   "architect": 0,
+   "developer": 0,
+   "lessons": 0,
+   "planner": 0,
+   "reviewer": 0
+  },
+  "requests": {
+   "architect": [],
+   "developer": [],
+   "lessons": [],
+   "planner": [],
+   "reviewer": []
+  },
+  "skills_files": {},
+  "steps": [],
+  "streamed": [],
+  "trace_rows": [],
+  "workspace_files": {
+   "calc.py": "sha256:af626eb7a9c3d865",
+   "test_calc.py": "sha256:b32b234d219ef07c"
+  }
+ },
+ "result": {
+  "legacy_result": {
+   "keys": [
+    "error",
+    "files",
+    "quality_gates_passed",
+    "reason_codes",
+    "recovery_command",
+    "run_id",
+    "status",
+    "uncertain_commit_ids",
+    "uncertain_run_ids",
+    "unreadable_run_records"
+   ],
+   "values": {
+    "error": null,
+    "files": [],
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "UNCERTAIN_RUN_RECORD_COMMIT_STATE"
+    ],
+    "recovery_command": {
+     "chars": 18,
+     "text": "sha256:4a46860a829709c6"
+    },
+    "run_id": null,
+    "status": "needs_review",
+    "uncertain_commit_ids": [],
+    "uncertain_run_ids": [
+     "prior"
+    ],
+    "unreadable_run_records": []
+   }
+  },
+  "type": "dict"
+ },
+ "run_events": [],
+ "run_records": [
+  {
+   "active_work_unit": null,
+   "approved_plan_hash": null,
+   "base_source_revision": null,
+   "base_tree_hash": null,
+   "candidate_hash": null,
+   "commit_intent": "APPLY_VERIFIED_CANDIDATE",
+   "commit_result": null,
+   "commit_transaction_id": "tx-prior",
+   "commits": [
+    {
+     "candidate_hash": null,
+     "intent": "APPLY_VERIFIED_CANDIDATE",
+     "result": null,
+     "transaction_id": "tx-prior"
+    }
+   ],
+   "created_at": "<clock>",
+   "effective_config_fingerprint": null,
+   "execution_plan": null,
+   "goal_hash": null,
+   "lifecycle_state": "COMMIT_ELIGIBLE",
+   "milestone_reuse": null,
+   "model_runtime_fingerprint_ids": [],
+   "obligation_ledger_hash": null,
+   "obligation_ledger_revision": null,
+   "recovery": null,
+   "resume_decision": null,
+   "retry_counters": {},
+   "retry_state_reference": null,
+   "revision": 3,
+   "run_id": "prior",
+   "schema_version": 3,
+   "terminal_status": null,
+   "updated_at": "<time>",
+   "verification_evidence_ids": [],
+   "work_unit_states": null,
+   "workspace_identity": "workspace"
+  }
+ ]
+}

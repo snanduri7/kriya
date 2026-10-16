@@ -1,0 +1,89 @@
+{
+ "_scenario": {
+  "doc": "PRD-008: in-progress commit evidence of a crashed run: the controller refuses the fresh run before any model call (needs_review, UNCERTAIN_COMMIT_STATE), no new RunRecord.",
+  "generated_from": "3e5751c",
+  "name": "legacy_workspace_refused",
+  "normalized": "run ids, uuid/transaction ids, ISO times, tmp/state/workspace paths and workspace identity, trace row ids -> first-appearance tokens; CLOCK_KEYS -> <clock>; timing-derived digests (VOLATILE_DIGEST_KEYS, progress vector, junit file, prompt segments) -> <vdigest>; pytest and junit gate output reduced to collected/outcome/FAILED lines; free text -> digests",
+  "terminal_path": "PRD-008 refusal (controller): in-progress commit evidence, needs_review before any model call"
+ },
+ "evidence": [],
+ "extra": {
+  "approvals": [],
+  "checkpoints": [],
+  "model_calls": {
+   "architect": 0,
+   "developer": 0,
+   "lessons": 0,
+   "planner": 0,
+   "reviewer": 0
+  },
+  "requests": {
+   "architect": [],
+   "developer": [],
+   "lessons": [],
+   "planner": [],
+   "reviewer": []
+  },
+  "skills_files": {},
+  "steps": [],
+  "streamed": [],
+  "trace_rows": [],
+  "workspace_files": {
+   "calc.py": "sha256:af626eb7a9c3d865",
+   "test_calc.py": "sha256:b32b234d219ef07c"
+  }
+ },
+ "result": {
+  "control_state": null,
+  "decisions": [],
+  "fields": [
+   "run_id",
+   "control_state",
+   "route",
+   "legacy_result",
+   "subtask_results",
+   "decisions",
+   "verification_report"
+  ],
+  "legacy_result": {
+   "keys": [
+    "error",
+    "files",
+    "quality_gates_passed",
+    "reason_codes",
+    "recovery_command",
+    "run_id",
+    "status",
+    "uncertain_commit_ids",
+    "uncertain_run_ids",
+    "unreadable_run_records"
+   ],
+   "values": {
+    "error": null,
+    "files": [],
+    "quality_gates_passed": false,
+    "reason_codes": [
+     "UNCERTAIN_COMMIT_STATE"
+    ],
+    "recovery_command": {
+     "chars": 18,
+     "text": "sha256:4a46860a829709c6"
+    },
+    "run_id": "<run:1>",
+    "status": "needs_review",
+    "uncertain_commit_ids": [
+     "crashed"
+    ],
+    "uncertain_run_ids": [],
+    "unreadable_run_records": []
+   }
+  },
+  "route": null,
+  "run_id": "<run:1>",
+  "subtask_results": [],
+  "type": "WorkflowResult",
+  "verification_report": null
+ },
+ "run_events": [],
+ "run_records": []
+}

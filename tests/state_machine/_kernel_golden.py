@@ -127,8 +127,9 @@ def _reduce_junit(text: str) -> str:
 class Normalizer:
     """Replaces volatile values by first-appearance tokens; one instance per scenario capture."""
 
-    def __init__(self, literals: Mapping[str, str], volatile_keys: Iterable[str] = ()):
+    def __init__(self, literals: Mapping[str, str], volatile_keys: Iterable[str] = (), volatile_sizes: Iterable[str] = ()):
         self._volatile_keys = VOLATILE_DIGEST_KEYS | frozenset(volatile_keys)
+        self._size_keys = SIZE_KEYS | frozenset(volatile_sizes)
         # literal value -> token prefix (longest first so a path is replaced before its parent)
         self._literals = sorted(((value, prefix) for value, prefix in literals.items() if value),
                                 key=lambda item: -len(item[0]))
@@ -174,7 +175,7 @@ class Normalizer:
     def value(self, value: Any, key: str = "") -> Any:
         if key in CLOCK_KEYS and isinstance(value, (int, float, str)) and not isinstance(value, bool):
             return "<clock>"
-        if key in SIZE_KEYS and isinstance(value, int) and not isinstance(value, bool):
+        if key in self._size_keys and isinstance(value, int) and not isinstance(value, bool):
             return "<size>"
         if key in self._volatile_keys and isinstance(value, str):
             return "<vdigest>"
@@ -345,6 +346,8 @@ class Outcome:
     extra: Dict[str, Any] = dataclasses.field(default_factory=dict)
     # Keys MEASURED to be volatile in THIS scenario only (e.g. a config fingerprint over a config that names tmp paths).
     volatile_keys: tuple = ()
+    # Integer keys MEASURED to vary in THIS scenario only (a size that counts a tmp path's characters) -> <size>.
+    volatile_sizes: tuple = ()
     # Values MEASURED to be volatile in THIS scenario only, replaced like the paths (value -> token prefix): an early
     # exit's result run_id is the 8-hex traces.db row id, which the run_events form tokenizes as "trace".
     literals: Dict[str, str] = dataclasses.field(default_factory=dict)
@@ -378,6 +381,21 @@ TERMINAL_PATHS: Dict[str, str] = {
     "legacy_planner_schema_invalid": "stage 2 stop: planner_output_schema_invalid after the bounded structured-plan repairs",
     "legacy_architect_file_list_rejected": "stage 3 stop: architect_file_list_rejected (every file-list entry escapes)",
     "legacy_stage2a_dependency_rejected": "stage 2A: a new design dependency rejected by the human raises ValueError",
+    # E4 characterization (stages 5-7 and the pre-apply boundary), before that code left run_generation_workflow
+    "legacy_static_analysis_blocked": "pre-apply stop: static_analysis BLOCKED (a new HIGH finding), before the approval gate",
+    "legacy_static_analysis_unknown": "pre-apply stop: static_analysis UNKNOWN (the scanner failed inside the gate)",
+    "legacy_static_analysis_unavailable": "pre-apply stop: static_analysis UNAVAILABLE (provider probe failed, analysis required)",
+    "legacy_static_analysis_passed": "static_analysis PASS: the banner reaches the approver, success",
+    "legacy_approval_required_no_callback": "approval gate abort: approval_required (human-in-the-loop, no approval callback)",
+    "legacy_autonomous_success": "autonomous mode: no approval asked, the Reviewer runs once at stage 5, success",
+    "legacy_approval_diff_size_trigger": "autonomous mode, diff over risk_threshold_lines: approval asked (diff_size) and granted, success",
+    "legacy_commit_revision_conflict": "terminal apply refused: the workspace changed during the approval (workspace_commit_failed)",
+    "legacy_final_review_deadline_refused": "final review refused by the generation deadline after commit (typed refusal branch)",
+    "legacy_rejected_candidate_review": "autonomous mode, gates exhausted: the rejected-candidate diagnostic review (prompt override, filter, no streaming)",
+    "legacy_lessons_staged": "stage 7: a fallback rescue's extracted fact staged under skills/auto-<repo>/ after the commit",
+    "legacy_dependency_skill_accrued": "stage 7: auto-accrual scaffolds only the suggested dependency the final content uses",
+    "legacy_workspace_refused": "PRD-008 refusal (controller): in-progress commit evidence, needs_review before any model call",
+    "direct_workspace_refused": "PRD-008 refusal (engine): an unsettled prior commit cycle, needs_review before any model call",
 }
 GENERATED_FROM = "4eaf610"
 # Scenarios added after E1 name the commit their golden was written from (every E1 golden stays GENERATED_FROM).
@@ -387,6 +405,12 @@ GENERATED_FROM_BY_SCENARIO: Dict[str, str] = {
         "legacy_planner_output_incomplete", "legacy_planner_unauthorized_path", "legacy_planner_schema_invalid",
         "legacy_architect_file_list_rejected", "legacy_stage2a_dependency_rejected")
 }
+GENERATED_FROM_BY_SCENARIO.update({name: "3e5751c" for name in (
+    "legacy_static_analysis_blocked", "legacy_static_analysis_unknown", "legacy_static_analysis_unavailable",
+    "legacy_static_analysis_passed", "legacy_approval_required_no_callback", "legacy_autonomous_success",
+    "legacy_approval_diff_size_trigger", "legacy_commit_revision_conflict", "legacy_final_review_deadline_refused",
+    "legacy_rejected_candidate_review", "legacy_lessons_staged", "legacy_dependency_skill_accrued",
+    "legacy_workspace_refused", "direct_workspace_refused")})
 
 
 def generated_from(name: str) -> str:
@@ -405,7 +429,7 @@ def capture(outcome: Outcome, tmp_path: Path, name: str = "") -> Dict[str, Any]:
         os.path.realpath(str(tmp_path)): "tmp", str(tmp_path): "tmp",
         **outcome.literals,
     }
-    norm = Normalizer(literals, outcome.volatile_keys)
+    norm = Normalizer(literals, outcome.volatile_keys, outcome.volatile_sizes)
     doc = (SCENARIOS[name].__doc__ or "").strip() if name in SCENARIOS else ""
     form = {
         "_scenario": {
@@ -933,3 +957,336 @@ def legacy_stage2a_dependency_rejected(tmp_path: Path) -> Outcome:
     run raises ValueError before any Developer call."""
     design = "Use mylib==1.2.3 in calc.py.\n```json\n" + json.dumps({"files": ["calc.py"]}) + "\n```"
     return _stage_run(tmp_path, architect=lambda n: design, approve=False)
+
+
+# ----------------------------------------------------------------------------- E4 characterization (stages 5-7)
+
+# What the E4 scenarios script: the Reviewer's answer (a fixed text, so the review that reaches the result, the
+# approval context and the step callback is visible), the lesson extraction's answer (LiveFailureChannel), and the
+# approver. Written from 3e5751c, before the review, approval/apply and lesson code left run_generation_workflow.
+APPLY_REVIEW = "Review: the change adds mul(a, b) to calc.py; tests cover add and sub."
+LESSON_SYSTEM = "You are a senior software engineer. Extract durable"
+APPLY_FACTS = json.dumps([{"category": "Rules", "value": "calc.py helpers stay pure arithmetic functions.",
+                           "quote": "def mul(a, b)"}])
+DEPENDENCY_SUGGESTION = ("Build error: cannot resolve symbol Mylib\n=== KRIYA PLATFORM DEPENDENCY SUGGESTIONS ===\n"
+                         "<dependency><groupId>org.example</groupId><artifactId>mylib-core</artifactId>"
+                         "<version>1.4.2</version></dependency>\n"
+                         "<dependency><groupId>org.unused</groupId><artifactId>never-used</artifactId>"
+                         "<version>0.1</version></dependency>\n")
+
+
+def _tree_digests(root: Path, *, skip: Iterable[str] = (".git", ".kriya")) -> Dict[str, str]:
+    """relpath -> content digest of every file under ``root`` (outside ``skip``), sorted."""
+    found: Dict[str, str] = {}
+    if not root.is_dir():
+        return found
+    for directory, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in skip)
+        for name in sorted(files):
+            path = Path(directory) / name
+            found[str(path.relative_to(root))] = digest(path.read_bytes())
+    return dict(sorted(found.items()))
+
+
+def _apply_role_script(llm, *, developer: Callable[[str, int, str], str],
+                       reviewer: Callable[[int, str, str], str], lessons: Callable[[int], str]) -> Dict[str, List[Any]]:
+    """Answers by ROLE: Planner and Architect fixed, the Developer by ``developer(model, n, text)`` (the production
+    sentinel protocol, a legacy repair shape when asked), the Reviewer by ``reviewer(n, system, user)`` (may raise),
+    the live-failure lesson extraction by ``lessons(n)``, every other role a neutral PASS. Records each role's requests
+    (digested by the capture) and the Developer's models."""
+    from _protocol_responses import sentinel, wants_structured
+    from _scripted_run import PRIMARY
+
+    seen: Dict[str, List[Any]] = {"planner": [], "architect": [], "developer": [], "reviewer": [], "lessons": []}
+
+    async def complete(system_prompt, user_prompt, *args, **kwargs):
+        system_prompt = system_prompt or ""
+        if system_prompt.startswith("You are the Kriya Planner Agent"):
+            seen["planner"].append(user_prompt)
+            return "Step 1: add mul"
+        if system_prompt.startswith("You are the Kriya Architect Agent"):
+            seen["architect"].append(user_prompt)
+            return json.dumps({"files": ["calc.py"]})
+        if system_prompt.startswith(REVIEWER):
+            seen["reviewer"].append({"system": system_prompt, "user": user_prompt})
+            return reviewer(len(seen["reviewer"]), system_prompt, user_prompt)
+        if system_prompt.startswith(LESSON_SYSTEM):
+            seen["lessons"].append(user_prompt)
+            return lessons(len(seen["lessons"]))
+        if not system_prompt.startswith(_scripted_run.DEVELOPER_PROMPTS):
+            return json.dumps({"verdict": "PASS", "requirements": []})
+        model = kwargs.get("model_override") or PRIMARY
+        seen["developer"].append({"model": model, "request": user_prompt})
+        content = developer(model, len(seen["developer"]), f"{system_prompt}\n{user_prompt}")
+        if wants_structured(system_prompt):
+            return sentinel("calc.py", analysis="add mul to calc.py", content=content)
+        if "FILE CONTENT:" in user_prompt:
+            return f"FIX ANALYSIS: repair calc.py\nFILE CONTENT:\n{content}"
+        return json.dumps([{"filepath": "calc.py", "content": content}])
+    llm.complete = complete
+    return seen
+
+
+def _apply_run(tmp_path: Path, *, developer: Callable[[str, int, str], str] = lambda m, n, t: GOOD,
+               reviewer: Callable[[int, str, str], str] = lambda n, s, u: APPLY_REVIEW,
+               lessons: Callable[[int], str] = lambda n: "[]", chain: bool = False,
+               configure: Optional[Callable[[Any], None]] = None, approve: Optional[bool] = True,
+               on_approval: Optional[Callable[[Path], None]] = None, controller: bool = True,
+               prepare: Optional[Callable[[Path], None]] = None, patches: Iterable[Any] = ()) -> Outcome:
+    """One isolated run (legacy controller, or the engine directly) of the calc scenario for stages 5-7; ``extra``
+    records what the result dict and the E1 form do not show: the step callbacks, the streamed progress lines, every
+    approval request (its diffs and escalation reason, digested), every traces.db row, the stage checkpoints left
+    behind, each scripted role's requests (digested), the workspace files after the run and every file the run staged
+    under the (tmp) skills directory. ``approve=None`` runs without an approval callback; ``on_approval`` acts on the
+    workspace while the person is asked; ``prepare`` acts on the workspace before the run."""
+    import contextlib
+
+    from _scripted_run import engine, git_workspace
+
+    from kriya.control.checkpoint import list_checkpoints
+    from kriya.core.state_paths import trace_db_path
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    git_workspace(workspace, {"calc.py": BASE, "test_calc.py": TESTS})
+    if prepare is not None:
+        prepare(workspace)
+    skills_dir = tmp_path / "skills"
+
+    def isolated(cfg):
+        cfg.paths.skills = str(skills_dir)
+        cfg.paths.memory = str(tmp_path / "memory")
+        cfg.skills.load_global = False
+        cfg.skills.load_cwd = False
+        cfg.knowledge.offline_mode = True
+        if configure is not None:
+            configure(cfg)
+    eng, llm, cfg = engine(chain=chain, configure=isolated)
+    seen = _apply_role_script(llm, developer=developer, reviewer=reviewer, lessons=lessons)
+    steps: List[Any] = []
+    streamed: List[Any] = []
+    approvals: List[Any] = []
+
+    def approval_callback(diffs, reason):
+        approvals.append({"diffs": [dict(d) for d in diffs], "reason": str(reason)})
+        if on_approval is not None:
+            on_approval(workspace)
+        return approve
+
+    kwargs: Dict[str, Any] = dict(
+        goal=GOAL, workspace_path=str(workspace), approval_callback=approval_callback if approve is not None else None,
+        step_callback=lambda name, text: steps.append([name, str(text)]),
+        stream_callback=lambda name, token: streamed.append([name, str(token)]))
+    with contextlib.ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
+        if controller:
+            result: Any = asyncio.run(WorkflowController(eng).execute(migration_mode="legacy", **kwargs))
+        else:
+            result = asyncio.run(eng.run_generation_workflow(**kwargs))
+    rows, trace_ids = [], {}
+    if os.path.isfile(trace_db_path(cfg)):
+        conn = sqlite3.connect(trace_db_path(cfg))
+        conn.row_factory = sqlite3.Row
+        try:
+            for r in conn.execute("SELECT * FROM runs ORDER BY timestamp, rowid"):
+                rows.append({"status": r["status"], "failure_category": r["failure_category"], "attempts": r["attempts"],
+                             "files_modified": r["files_modified"], "failure_report": r["failure_report"]})
+                trace_ids[str(r["run_id"])] = "trace"
+        finally:
+            conn.close()
+    checkpoints = [{"stage": c.get("stage"), "keys": sorted(c)} for c in list_checkpoints(str(workspace))]
+    return Outcome(result=result, workspace=str(workspace), cfg=cfg, volatile_keys=("effective_config_fingerprint",),
+                   literals=trace_ids,
+                   extra={"steps": steps, "streamed": streamed, "approvals": approvals, "trace_rows": rows,
+                          "checkpoints": checkpoints, "model_calls": {role: len(calls) for role, calls in seen.items()},
+                          "requests": seen, "workspace_files": _tree_digests(workspace),
+                          "skills_files": _tree_digests(skills_dir)})
+
+
+def _static_analysis(knobs: Any = None, **settings: Any):
+    """The fake static-analysis provider registered for the run and enabled in its config (tests/_fake_static_analysis.py),
+    with a tmp waiver home."""
+    from _fake_static_analysis import FAKE, FakeRegistration
+
+    from kriya.config.config import StaticAnalysisConfig
+
+    def configure(cfg):
+        cfg.static_analysis = StaticAnalysisConfig(enabled=True, provider=FAKE, **settings)
+    return configure, FakeRegistration(knobs)
+
+
+def _static_analysis_run(tmp_path: Path, *, knobs: Any = None, developer: Callable[[str, int, str], str] = lambda m, n, t: GOOD,
+                         **settings: Any) -> Outcome:
+    from unittest.mock import patch
+
+    configure, registration = _static_analysis(knobs, **settings)
+    # registered before the config is built: the config refuses an unregistered provider
+    with registration, patch.dict(os.environ, {"KRIYA_STATIC_ANALYSIS_HOME": str(tmp_path / "waivers")}):
+        outcome = _apply_run(tmp_path, developer=developer, configure=configure)
+    # MEASURED volatile: the evidence digest covers the evidence's tmp paths (it differs per basetemp); every place
+    # it appears (result, events, commit evidence ids) becomes one token.
+    legacy = getattr(outcome.result, "legacy_result", None) or {}
+    evidence_digest = (legacy.get("static_analysis") or {}).get("evidence_digest")
+    if evidence_digest:
+        outcome.literals[evidence_digest] = "sa_evidence"
+    return outcome
+
+
+@scenario("legacy_static_analysis_blocked")
+def legacy_static_analysis_blocked(tmp_path: Path) -> Outcome:
+    """PRD-031A at the direct pre-apply boundary: the candidate introduces a HIGH finding (the fake provider) -> a
+    BLOCKED result, a deterministic stop before the approval gate (no approval asked, nothing applied)."""
+    return _static_analysis_run(tmp_path, developer=lambda m, n, t: GOOD + "# BAD_HIGH\n")
+
+
+@scenario("legacy_static_analysis_unknown")
+def legacy_static_analysis_unknown(tmp_path: Path) -> Outcome:
+    """The scanner fails inside the gate: UNKNOWN (never PASS), a deterministic stop before the approval gate."""
+    from _fake_static_analysis import FakeKnobs
+    return _static_analysis_run(tmp_path, knobs=FakeKnobs(raise_in_scan=True))
+
+
+@scenario("legacy_static_analysis_unavailable")
+def legacy_static_analysis_unavailable(tmp_path: Path) -> Outcome:
+    """The provider probe fails while static analysis is REQUIRED: UNAVAILABLE, a deterministic stop."""
+    from _fake_static_analysis import FakeKnobs
+    return _static_analysis_run(tmp_path, knobs=FakeKnobs(probe_failure="PROVIDER_PROBE_FAILED"), requirement="required")
+
+
+@scenario("legacy_static_analysis_passed")
+def legacy_static_analysis_passed(tmp_path: Path) -> Outcome:
+    """A clean candidate under an enabled provider: PASS, the approver sees the static-analysis banner, success."""
+    return _static_analysis_run(tmp_path)
+
+
+@scenario("legacy_approval_required_no_callback")
+def legacy_approval_required_no_callback(tmp_path: Path) -> Outcome:
+    """Human-in-the-loop with no approval callback: the gate refuses to apply (approval_required), the sandbox is
+    removed, the full trace row is written, nothing reaches the workspace."""
+    return _apply_run(tmp_path, approve=None)
+
+
+@scenario("legacy_autonomous_success")
+def legacy_autonomous_success(tmp_path: Path) -> Outcome:
+    """Autonomous mode, a small diff: no approval asked, no pre-approval review, the Reviewer runs once at stage 5."""
+    def autonomous(cfg):
+        cfg.autonomy.mode = "autonomous"
+    return _apply_run(tmp_path, configure=autonomous)
+
+
+@scenario("legacy_approval_diff_size_trigger")
+def legacy_approval_diff_size_trigger(tmp_path: Path) -> Outcome:
+    """Autonomous mode, but the diff exceeds risk_threshold_lines: approval is asked (the diff_size trigger, with the
+    pre-approval review attached) and granted; success."""
+    def risky(cfg):
+        cfg.autonomy.mode = "autonomous"
+        cfg.autonomy.risk_threshold_lines = 1
+    return _apply_run(tmp_path, configure=risky)
+
+
+@scenario("legacy_commit_revision_conflict")
+def legacy_commit_revision_conflict(tmp_path: Path) -> Outcome:
+    """The person edits calc.py in the real workspace while being asked to approve: the terminal commit refuses the
+    batch (its base revision changed): workspace_commit_failed, nothing of the candidate applied."""
+    def edit(workspace: Path) -> None:
+        (workspace / "calc.py").write_text(BASE + "\n# edited by the operator during the review\n")
+    return _apply_run(tmp_path, on_approval=edit)
+
+
+@scenario("legacy_final_review_deadline_refused")
+def legacy_final_review_deadline_refused(tmp_path: Path) -> Outcome:
+    """Every Reviewer request is stopped by the run's generation deadline (InferenceDeadlineError): the pre-approval
+    review is not attached (review.pre_approval_unattached) and the final review is the typed refusal
+    (final_review_refused with the deadline's reason code); the applied candidate stays committed."""
+    from kriya.core.llm import InferenceDeadlineError
+
+    def stopped(n: int, system: str, user: str) -> str:
+        raise InferenceDeadlineError("GENERATION_DEADLINE_EXHAUSTED",
+                                     {"deadline_source": "run", "remaining_budget_at_dispatch_ms": 0})
+    return _apply_run(tmp_path, reviewer=stopped)
+
+
+@scenario("legacy_rejected_candidate_review")
+def legacy_rejected_candidate_review(tmp_path: Path) -> Outcome:
+    """Autonomous mode, gates exhausted: the final review is the rejected-candidate diagnostic (its own system prompt,
+    the failing attempt's files, no live streaming, the diagnostic filter on the answer). MEASURED at 3e5751c: in
+    human-in-the-loop mode the same run never reaches this branch when its last attempt fails at the terminal full
+    regression (after the held gates passed): the last pre-approval review is reused as the final review
+    (legacy_gates_exhausted; OPEN-ITEMS OI-42)."""
+    def autonomous(cfg):
+        cfg.autonomy.mode = "autonomous"
+
+    def diagnostic(n: int, system: str, user: str) -> str:
+        return ("REJECTED CANDIDATE DIAGNOSTIC\nThe add() body raises.\nHow to run: python -m pytest\n")
+    outcome = _apply_run(tmp_path, developer=lambda m, n, t: _oscillating(n), reviewer=diagnostic, configure=autonomous)
+    # MEASURED volatile: the rejected-candidate review quotes the last gate output (pytest's rootdir is a tmp path), so
+    # the fitted review request's sizes and kept-text digest differ per basetemp (its normalized text stays pinned).
+    outcome.volatile_sizes = ("kept_chars", "room_tokens", "used_tokens")
+    outcome.volatile_keys = (*outcome.volatile_keys, "kept_digest")
+    return outcome
+
+
+@scenario("legacy_lessons_staged")
+def legacy_lessons_staged(tmp_path: Path) -> Outcome:
+    """A fallback-model rescue (hard-won): after the terminal commit the live-failure channel extracts a fact and it is
+    staged under the skills directory (skills/auto-<repo>/)."""
+    from _scripted_run import FALLBACK
+    return _apply_run(tmp_path, chain=True, developer=lambda m, n, t: GOOD if m == FALLBACK else _oscillating(n),
+                      lessons=lambda n: APPLY_FACTS)
+
+
+@scenario("legacy_dependency_skill_accrued")
+def legacy_dependency_skill_accrued(tmp_path: Path) -> Outcome:
+    """Auto-accrual: the first compile gate fails with dependency suggestions; the retry's final content uses only one
+    of the two suggested artifacts, so only that coordinate is scaffolded as a skill."""
+    from unittest.mock import patch
+
+    from kriya.tools.validate import PolymorphicValidator
+
+    real = PolymorphicValidator.run_compile_check
+    calls = {"n": 0}
+
+    def compile_check(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"success": False, "output": DEPENDENCY_SUGGESTION}
+        return real(self, *args, **kwargs)
+    return _apply_run(tmp_path, developer=lambda m, n, t: GOOD + "# uses mylib-core\n",
+                      patches=[patch.object(PolymorphicValidator, "run_compile_check", compile_check)])
+
+
+def _unsettled_prior_run(workspace: Path) -> None:
+    """A prior run whose commit cycle began and never settled (PRD-008: the workspace may hold a partial commit)."""
+    from kriya.control.persistence import save_run_record
+    from kriya.control.run_record import RunLifecycle, RunRecord
+
+    new = RunRecord.new("prior", "workspace", None, None)
+    running = new.transition(RunLifecycle.RUNNING)
+    eligible = running.begin_commit("tx-prior", intent="APPLY_VERIFIED_CANDIDATE", candidate_hash=None)
+    for index, record in enumerate([new, running, eligible]):
+        save_run_record(str(workspace), record, expected_revision=index or None)
+
+
+def _in_progress_commit_evidence(workspace: Path) -> None:
+    """Commit evidence a crashed run left IN_PROGRESS."""
+    directory = workspace / ".kriya" / "control" / "commits"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "crashed.json").write_text(json.dumps({
+        "schema_version": 1, "transaction_id": "crashed", "state": "in_progress", "started_at_unix": 1.0,
+        "updated_at_unix": 1.0, "operations": [], "result_revisions": {}, "failure": None}))
+
+
+@scenario("legacy_workspace_refused")
+def legacy_workspace_refused(tmp_path: Path) -> Outcome:
+    """PRD-008: in-progress commit evidence of a crashed run: the controller refuses the fresh run before any model
+    call (needs_review, UNCERTAIN_COMMIT_STATE), no new RunRecord."""
+    return _apply_run(tmp_path, prepare=_in_progress_commit_evidence)
+
+
+@scenario("direct_workspace_refused")
+def direct_workspace_refused(tmp_path: Path) -> Outcome:
+    """PRD-008: an unsettled commit cycle of a prior run: the engine itself refuses the fresh run before any model call
+    (WorkflowEngine.workspace_refusal_result)."""
+    return _apply_run(tmp_path, prepare=_unsettled_prior_run, controller=False)
