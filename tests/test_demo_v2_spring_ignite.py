@@ -243,7 +243,9 @@ def test_reference_main_builds_its_result_from_the_value_read_back_from_the_cach
     assert "ProtocolCacheDemo.resultLine(original, retrieved)" in main
     assert demo.index("cache.put(KEY, protocol)") < demo.index("Protocol retrieved = cache.get(KEY)") < demo.index("return retrieved;")
     result_line = demo[demo.index("public static String resultLine"):]
-    assert "retrieved.getTime()" in result_line and "original.getTime()" not in result_line  # only the comparison involves the original
+    for accessor in ("getProtocolVersion", "getSoftwareVersion", "getDataLength", "getTime"):
+        assert f"retrieved.{accessor}()" in result_line and f"original.{accessor}()" not in result_line  # only the comparison involves the original
+    assert "retrieved.getBody().length" in result_line and "original.getBody()" not in result_line
     # The text checks above are only a sanity net: the causal proof is the runtime witness leg, the JUnit witness test and the mutation self-check (below).
 
 
@@ -261,6 +263,8 @@ def test_reference_test_is_meaningful_not_vacuous() -> None:
     # a genuine embedded-Ignite round trip with field assertions, and a cache-side witness proving the returned value is the cache's
     assert "new ClassPathXmlApplicationContext(springXml)" in cache_test and "ProtocolCacheDemo.roundTrip(cache, decoded)" in cache_test
     assert "assertEquals(ORIGINAL.getTime() + 5000, retrieved.getTime())" in cache_test and "assertNotEquals(ORIGINAL, retrieved)" in cache_test
+    for shifted in ("ORIGINAL.getProtocolVersion() + 1", "ORIGINAL.getSoftwareVersion() + 1", "ORIGINAL.getDataLength() + 1", '"Hello, Protocol!"'):
+        assert shifted in cache_test, shifted  # the witness cache changes EVERY field, so no field can be taken from the original
     assert "assertEquals(1700000000L, retrieved.getTime())" in cache_test and "Mockito" not in cache_test and "mock(" not in cache_test
     assert "assertTrue(true)" not in test and "assertTrue(1" not in test and "assertEquals(true, true)" not in test
     assert "parser.decode(parser.encode(original))" in test and "assertEquals(original, decoded)" in test  # a real round trip
@@ -407,8 +411,9 @@ def test_every_cache_get_mutant_of_the_reference_is_killed_and_the_control_passe
                             capture_output=True, text=True, check=False, timeout=900)
     report = json.loads(result.stdout)
     assert report["control_passes"] is True, report
-    assert set(report["cases"]) == {"unmutated_reference", "get_result_discarded", "get_replaced_by_a_local_copy", "main_prints_the_original_not_the_retrieved", "main_bypasses_the_cache_round_trip"}
-    assert report["surviving_mutants"] == [], report
+    assert set(report["cases"]) == {"unmutated_reference", "get_result_discarded", "get_replaced_by_a_local_copy", "get_used_for_time_only", "result_line_other_fields_from_the_original",
+                                    "main_prints_the_original_not_the_retrieved", "main_bypasses_the_cache_round_trip"}
+    assert report["surviving_mutants"] == [] and report["invalid_mutants"] == [], report
     assert "junit" in report["cases"]["get_result_discarded"]["killed_by"]  # discarding the get result fails the real-Ignite JUnit test, not only the runtime leg
     assert report["cases"]["main_prints_the_original_not_the_retrieved"]["killed_by"] == ["witness_leg"]  # a print-level bypass is only visible at runtime
     assert result.returncode == 0
@@ -418,3 +423,4 @@ def test_negative_control_the_witness_expectation_differs_from_the_plain_one() -
     helper = _helper()
     assert helper.WITNESS_LINE != _env(FIXTURE / "fixture.env")["EXPECTED_RESULT_LINE"]  # otherwise the witness leg could not tell a bypass from the real thing
     assert "time=1700001000" in helper.WITNESS_LINE and "equals=false" in helper.WITNESS_LINE
+    assert "protocolVersion=2" in helper.WITNESS_LINE and "softwareVersion=3" in helper.WITNESS_LINE and "dataLength=16" in helper.WITNESS_LINE and "bodyLength=16" in helper.WITNESS_LINE

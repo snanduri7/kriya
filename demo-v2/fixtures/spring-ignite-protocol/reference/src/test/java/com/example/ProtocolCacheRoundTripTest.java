@@ -44,13 +44,16 @@ class ProtocolCacheRoundTripTest {
 
     @Test
     void theReturnedProtocolIsWhatTheCacheHoldsNotWhatWasPut() {
-        // This cache stores every protocol with its time moved by 5000, so only a value really read back from the cache carries it.
+        // This cache stores a DIFFERENT protocol (time + 5000, both versions + 1, one byte appended to the body), so only a value
+        // really read back from the cache carries every one of those changes.
         Protocol retrieved = roundTrip("ignite-test-witness.xml");
         assertEquals(ORIGINAL.getTime() + 5000, retrieved.getTime());
-        assertEquals(ORIGINAL.getProtocolVersion(), retrieved.getProtocolVersion());
-        assertArrayEquals(ORIGINAL.getBody(), retrieved.getBody());
+        assertEquals(ORIGINAL.getProtocolVersion() + 1, retrieved.getProtocolVersion());
+        assertEquals(ORIGINAL.getSoftwareVersion() + 1, retrieved.getSoftwareVersion());
+        assertEquals(ORIGINAL.getDataLength() + 1, retrieved.getDataLength());
+        assertArrayEquals("Hello, Protocol!".getBytes(StandardCharsets.UTF_8), retrieved.getBody());
         assertNotEquals(ORIGINAL, retrieved);
-        assertEquals("[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700005000, bodyLength=15, equals=false",
+        assertEquals("[RESULT] protocolVersion=2, softwareVersion=3, dataLength=16, time=1700005000, bodyLength=16, equals=false",
                 ProtocolCacheDemo.resultLine(ORIGINAL, retrieved));
     }
 }

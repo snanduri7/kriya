@@ -10,8 +10,9 @@ import org.apache.ignite.cache.CacheInterceptorAdapter;
 
 /**
  * Cache-side witness. With offset 0 (the default, and always when no file ./cache-witness exists) it changes nothing.
- * With a non-zero offset the cache itself stores the protocol with {@code time} moved by that offset, so a program can only
- * report the shifted time if it really used the value the cache returned.
+ * With a non-zero offset the cache itself stores a DIFFERENT protocol: {@code time} moved by that offset, protocolVersion and
+ * softwareVersion raised by one, and one byte appended to the body (so dataLength changes too). A program can only report
+ * those values if it really used the whole value the cache returned.
  */
 public class WitnessInterceptor extends CacheInterceptorAdapter<Integer, Protocol> {
     private long timeOffset;
@@ -36,6 +37,9 @@ public class WitnessInterceptor extends CacheInterceptorAdapter<Integer, Protoco
         if (timeOffset == 0) {
             return newVal;
         }
-        return new Protocol(newVal.getProtocolVersion(), newVal.getSoftwareVersion(), newVal.getTime() + timeOffset, newVal.getBody());
+        byte[] body = newVal.getBody();
+        byte[] longer = java.util.Arrays.copyOf(body, body.length + 1);
+        longer[body.length] = '!';
+        return new Protocol(newVal.getProtocolVersion() + 1, newVal.getSoftwareVersion() + 1, newVal.getTime() + timeOffset, longer);
     }
 }

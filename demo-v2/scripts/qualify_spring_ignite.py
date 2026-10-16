@@ -8,8 +8,9 @@ Subcommands print ONE JSON object on stdout and exit 0 only when every check ins
       and checks the application-owned success line, the Ignite start and the exit code.
       --contained uses the OCI backend (network DENIED); the Maven cache is pre-seeded from --cache-seed so no
       network is needed (the workflow's own compile/test gates would normally have filled it).
-      --witness additionally places ./cache-witness (offset 1000) in the project: the cache itself then stores every Protocol with `time` moved by 1000,
-      so the expected line changes to time=1700001000, equals=false, and only a program that really used the value read back from the cache can print it.
+      --witness additionally places ./cache-witness (offset 1000) in the project: the cache itself then stores a DIFFERENT Protocol (time + 1000, protocolVersion and softwareVersion + 1,
+      one byte appended to the body), so the expected line changes in every field, and only a program that really used the whole value read back from the cache can print it.
+      Limit (stated, not hidden): a program that reads ./cache-witness itself and fakes the shift defeats the runtime leg; the JUnit tests catch such a fake inside ProtocolCacheDemo, not inside Main alone.
   mutants  --repo R --fixture F
       Mutation self-check of the read-back proof: each mutant (cache.get discarded / replaced by a local copy / Main printing the original / round trip bypassed)
       must be KILLED by the JUnit round-trip tests or by the witness runtime leg; a surviving mutant fails the qualification.
@@ -57,7 +58,7 @@ def _expected_line() -> str:
 
 
 WITNESS_OFFSET = 1000
-WITNESS_LINE = "[RESULT] protocolVersion=1, softwareVersion=2, dataLength=15, time=1700001000, bodyLength=15, equals=false"
+WITNESS_LINE = "[RESULT] protocolVersion=2, softwareVersion=3, dataLength=16, time=1700001000, bodyLength=16, equals=false"
 
 
 def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
@@ -124,49 +125,61 @@ def cmd_runtime(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 MUTANTS = (
-    # name, file, text to replace, replacement: each breaks the READ-BACK in one specific way
-    ("get_result_discarded", "src/main/java/com/example/ProtocolCacheDemo.java", "Protocol retrieved = cache.get(KEY);",
-     "cache.get(KEY);\n        Protocol retrieved = protocol;"),
-    ("get_replaced_by_a_local_copy", "src/main/java/com/example/ProtocolCacheDemo.java", "Protocol retrieved = cache.get(KEY);",
-     "cache.get(KEY);\n        Protocol retrieved = new Protocol(protocol.getProtocolVersion(), protocol.getSoftwareVersion(), protocol.getTime(), protocol.getBody());"),
-    ("main_prints_the_original_not_the_retrieved", "src/main/java/com/example/Main.java", "ProtocolCacheDemo.resultLine(original, retrieved)",
-     "ProtocolCacheDemo.resultLine(original, original)"),
-    ("main_bypasses_the_cache_round_trip", "src/main/java/com/example/Main.java", "Protocol retrieved = ProtocolCacheDemo.roundTrip(cache, decoded);",
-     "Protocol retrieved = decoded;"),
+    # name, file, ((text, replacement), ...): each breaks the READ-BACK in one specific way
+    ("get_result_discarded", "src/main/java/com/example/ProtocolCacheDemo.java",
+     (("Protocol retrieved = cache.get(KEY);", "cache.get(KEY);\n        Protocol retrieved = protocol;"),)),
+    ("get_replaced_by_a_local_copy", "src/main/java/com/example/ProtocolCacheDemo.java",
+     (("Protocol retrieved = cache.get(KEY);",
+       "cache.get(KEY);\n        Protocol retrieved = new Protocol(protocol.getProtocolVersion(), protocol.getSoftwareVersion(), protocol.getTime(), protocol.getBody());"),)),
+    ("get_used_for_time_only", "src/main/java/com/example/ProtocolCacheDemo.java",
+     (("Protocol retrieved = cache.get(KEY);",
+       "Protocol fromCache = cache.get(KEY);\n        Protocol retrieved = new Protocol(protocol.getProtocolVersion(), protocol.getSoftwareVersion(), fromCache.getTime(), protocol.getBody());"),)),
+    ("result_line_other_fields_from_the_original", "src/main/java/com/example/ProtocolCacheDemo.java",
+     (("retrieved.getProtocolVersion()", "original.getProtocolVersion()"), ("retrieved.getSoftwareVersion()", "original.getSoftwareVersion()"),
+      ("retrieved.getDataLength()", "original.getDataLength()"), ("retrieved.getBody().length", "original.getBody().length"))),
+    ("main_prints_the_original_not_the_retrieved", "src/main/java/com/example/Main.java",
+     (("ProtocolCacheDemo.resultLine(original, retrieved)", "ProtocolCacheDemo.resultLine(original, original)"),)),
+    ("main_bypasses_the_cache_round_trip", "src/main/java/com/example/Main.java",
+     (("Protocol retrieved = ProtocolCacheDemo.roundTrip(cache, decoded);", "Protocol retrieved = decoded;"),)),
 )
 
 
-def _mvn_test_passes(project: str) -> bool:
+def _mvn_test(project: str) -> Dict[str, bool]:
     result = subprocess.run(["mvn", "-o", "-B", "clean", "test"], cwd=project, capture_output=True, text=True, check=False, timeout=600)
-    return result.returncode == 0 and "Tests run: 5, Failures: 0, Errors: 0, Skipped: 0" in result.stdout
+    return {"passes": result.returncode == 0 and "Tests run: 5, Failures: 0, Errors: 0, Skipped: 0" in result.stdout,
+            "compile_error": "COMPILATION ERROR" in result.stdout}  # a mutant that does not compile is an invalid mutant, never a kill
 
 
 def cmd_mutants(args: argparse.Namespace) -> Dict[str, Any]:
     fixture = Path(args.fixture)
     report: Dict[str, Any] = {"cases": {}}
     with tempfile.TemporaryDirectory(prefix="qualify04-mutants-") as tmp:
-        for name, rel, old, new in (("unmutated_reference", None, None, None), *MUTANTS):
+        for name, rel, pairs in (("unmutated_reference", None, ()), *MUTANTS):
             project = os.path.join(tmp, name)
             shutil.copytree(fixture, project)
             if rel is not None:
                 target = Path(project, rel)
                 text = target.read_text(encoding="utf-8")
-                if text.count(old) != 1:
-                    report["cases"][name] = {"error": f"mutation target not found exactly once in {rel}"}
+                if any(text.count(old) != 1 for old, _ in pairs):
+                    report["cases"][name] = {"error": f"a mutation target was not found exactly once in {rel}"}
                     continue
-                target.write_text(text.replace(old, new), encoding="utf-8")
+                for old, new in pairs:
+                    text = text.replace(old, new)
+                target.write_text(text, encoding="utf-8")
             pristine = project + "-for-witness"  # the JUnit run leaves target/ and ignite/ behind; the runtime leg must start from the mutated sources only
             shutil.copytree(project, pristine)
-            tests_pass = _mvn_test_passes(project)
+            junit = _mvn_test(project)
+            tests_pass = junit["passes"]
             witness = cmd_runtime(argparse.Namespace(repo=args.repo, fixture=pristine, contained=False, cache_seed="", witness=True))
-            case = {"junit_passes": tests_pass, "witness_leg_ok": bool(witness.get("ok"))}
-            case["killed"] = not (tests_pass and case["witness_leg_ok"])
+            case = {"junit_passes": tests_pass, "witness_leg_ok": bool(witness.get("ok")), "compile_error": junit["compile_error"]}
+            case["killed"] = not (tests_pass and case["witness_leg_ok"]) and not junit["compile_error"]
             case["killed_by"] = [label for label, alive in (("junit", not tests_pass), ("witness_leg", not case["witness_leg_ok"])) if alive]
             report["cases"][name] = case
     control = report["cases"].get("unmutated_reference", {})
     report["control_passes"] = control.get("junit_passes") is True and control.get("witness_leg_ok") is True
     report["surviving_mutants"] = [n for n, c in report["cases"].items() if n != "unmutated_reference" and not c.get("killed")]
-    report["ok"] = report["control_passes"] and not report["surviving_mutants"] and len(report["cases"]) == len(MUTANTS) + 1
+    report["invalid_mutants"] = [n for n, c in report["cases"].items() if c.get("compile_error") or "error" in c]
+    report["ok"] = report["control_passes"] and not report["surviving_mutants"] and not report["invalid_mutants"] and len(report["cases"]) == len(MUTANTS) + 1
     return report
 
 
