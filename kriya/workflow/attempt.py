@@ -31,6 +31,16 @@ from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
+from kriya.policy import approval as source_review
+from kriya.policy.approval import (
+    MAX_REVIEW_ROUNDS,
+    RuntimeCommandSubject,
+    TypedApprovalCallback,
+    approval_matches,
+    commands_authored_in_goal,
+)
+from kriya.policy.approval import ask as ask_runtime_commands
+from kriya.policy.approval import build_subject as build_runtime_subject
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import (
     AuthorizedFileWriter,
@@ -224,15 +234,6 @@ from kriya.workflow.retry_prompts import (
     _build_targeted_retry_prompt,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
-from kriya.workflow.runtime_command_approval import (
-    MAX_REVIEW_ROUNDS,
-    RuntimeCommandSubject,
-    TypedApprovalCallback,
-    approval_matches,
-    commands_authored_in_goal,
-)
-from kriya.workflow.runtime_command_approval import ask as ask_runtime_commands
-from kriya.workflow.runtime_command_approval import build_subject as build_runtime_subject
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.skill_extraction import _skill_verification_context
 from kriya.workflow.state import (
@@ -7124,23 +7125,24 @@ def defer_execution_until_source_review(state: GenerationState, ctx: "AttemptCon
     (``ctx.defer_execution_until_source_review_enabled``, run_generation_workflow) has the executing gates held in ``ctx.deferred_executing_gates`` and run right after the approval.
     The non-executing checks (completeness, static rules, stack contract) still run first. Held even with NO approver: the review can then never succeed, so the run ends at the approval gate
     (approval_required) having executed nothing. Never deferred: other autonomy modes (their approval policy - sensitive paths, size, process profile - is unchanged and out of this decision's
-    scope) and an attempt that wrote no source (a verification-only unit has no source review)."""
+    scope) and an attempt that wrote no source (a verification-only unit has no source review).
+
+    The decision is AUTHORITY's (``kriya.policy.approval.defer_execution_until_source_review``, slice C3); this kernel adapter keeps the
+    name and reads its three inputs from the attempt."""
     autonomy = ctx.kernel.config.autonomy
-    return bool(
-        ctx.defer_execution_until_source_review_enabled and autonomy.mode == "human-in-the-loop"
-        and state.all_files_written
-    )
+    return source_review.defer_execution_until_source_review(
+        ctx.defer_execution_until_source_review_enabled, autonomy.mode, state.all_files_written)
 
 
 def assert_candidate_unchanged_since_source_review(state: GenerationState, ctx: "AttemptContext") -> None:
     """Right before the reviewed commands execute: the candidate bytes must still be the ones the person approved. A change makes that approval stale - nothing executes and nothing
-    is applied (a typed ``verification_infrastructure_failure``, stop-the-run; the ordinary retry loop is the only way to a new candidate and a new source review)."""
-    guard = ctx.post_source_review_guard
-    if guard is None or guard():
+    is applied (a typed ``verification_infrastructure_failure``, stop-the-run; the ordinary retry loop is the only way to a new candidate and a new source review).
+
+    Whether the approval is stale is AUTHORITY's decision (``kriya.policy.approval.stale``, slice C3, with the stop text); this kernel adapter
+    keeps the name and turns a stale answer into the attempt's own typed failure."""
+    if not source_review.stale(ctx.post_source_review_guard):
         return
-    message = (
-        "CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW: the candidate changed after you approved its source, so that approval no longer covers it. Nothing was run and nothing was applied."
-    )
+    message = source_review.CANDIDATE_CHANGED_AFTER_SOURCE_REVIEW_MESSAGE
     failure = Failure(type="verification_infrastructure_failure", message=message, raw_output=message, attempt=state.attempt_number)
     state.record_gate_outcome(failure.to_gate_outcome())
     raise QualityGateFailure(failure)

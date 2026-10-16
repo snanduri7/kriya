@@ -40,9 +40,15 @@ from kriya.application.services import (
 )
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identity
-from kriya.control.launch_approval import KIND_RUNTIME, WORKING_DIRECTORY_KIND, _sha, candidate_digest, split_reason
 from kriya.control.persistence import UnreadableRunRecordError, load_launch_record, load_launch_review_diff
-from kriya.workflow.runtime_command_approval import fingerprint_of
+from kriya.policy.approval import (
+    KIND_RUNTIME,
+    WORKING_DIRECTORY_KIND,
+    _sha,
+    candidate_digest,
+    fingerprint_of,
+    split_reason,
+)
 
 # The most diff LINES one response carries. Past it the file is marked truncated and the host must NOT offer approval: a diff shown in part is not "the exact change".
 MAX_LINES_TOTAL = 20000

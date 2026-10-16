@@ -11,7 +11,7 @@ with its reason code. Later slices that move authority code (C3, E4, E9, G4, M1)
 | byte binding reviewed == built == tested == runtime == applied | ``test_reviewed_built_tested_runtime_and_applied_bytes_are_bound`` | ``commit_terminal_candidate`` + ``bind_candidate`` (``VERIFIED_CANDIDATE_EVIDENCE_STALE``/``_MISSING``) and the engine's build-time guard | ``test_candidate_verification_binding.py``, ``test_greenfield_direct_plan_runtime.py::test_gap_b_strong_reviewed_built_tested_executed_and_applied_bytes_are_identical`` |
 | a required runtime reject cannot succeed and cannot apply | ``test_required_runtime_reject_cannot_succeed_or_apply`` | the real engine with the runtime-command review rejected (``REQUIRED_RUNTIME_VERIFICATION_DECLINED``) | ``test_greenfield_direct_plan_runtime.py::test_gap_a_*`` |
 | a tool requiring review never executes silently | ``test_a_tool_requiring_review_never_executes_silently`` | a REAL MCP server process through ``MCPTool`` (``MCP_TOOL_REQUIRES_APPROVAL``, zero tools/call) | ``test_tool002_mcp_invocation_authority.py`` |
-| egress is fail-closed (unlisted destination refused) | ``test_egress_is_fail_closed`` | ``LLMClient.complete`` under ``local_only`` (``EgressViolationError`` before any request), ``ExecutionPolicy`` (``NETWORK_TARGET_DENIED``), ``capability_for`` | ``test_llm_egress_policy_integration.py``, ``test_prd012_egress.py`` |
+| egress is fail-closed (unlisted destination refused) | ``test_egress_is_fail_closed``, ``test_tool_calling_egress_is_fail_closed`` (C3) | ``LLMClient.complete`` under ``local_only`` (``EgressViolationError`` before any request), ``ExecutionPolicy`` (``NETWORK_TARGET_DENIED``), ``capability_for`` | ``test_llm_egress_policy_integration.py``, ``test_prd012_egress.py`` |
 | MCP identity binding | ``test_mcp_invocation_approval_is_bound_to_the_exact_identity`` | the durable approval store + ``ExecutionPolicy`` resolver (``MCP_TOOL_DURABLE_APPROVAL_VALID`` only for the exact binding) | ``test_tool002_p2_*``, ``test_tool003_*`` |
 | no write to the owner workspace before apply | ``test_nothing_reaches_the_owner_workspace_before_apply`` | the real engine: owner folder observed at every executing gate, and after a rejected source review | ``test_greenfield_direct_plan_runtime.py::test_gap_b_the_source_review_precedes_the_runtime_review_and_nothing_runs_before_it`` |
 
@@ -222,6 +222,28 @@ def test_egress_is_fail_closed(monkeypatch):
     assert hostless.decision is PolicyDecision.DENY                   # no scheme -> no hostname -> not local (fail closed)
     with pytest.raises(ValueError):
         capability_for("some_new_authority")
+
+
+def test_tool_calling_egress_is_fail_closed(monkeypatch):
+    """The tool-calling path (``LLMClient.complete_with_tools``) has its OWN ``local_only`` check, separate from ``complete``'s (a gap
+    noted at C1: only test_llm_egress_policy_integration.py covered it). Attempted: a tool-calling request to an unlisted destination,
+    configured AND as a per-call override. Refused: ``EgressViolationError`` before any transport is touched."""
+    cfg = AppConfig()
+    assert cfg.autonomy.egress_policy == "local_only"
+    cfg.llm.base_url = NON_LOCAL
+    llm = LLMClient(cfg)
+    sent = AsyncMock(side_effect=AssertionError("a request was attempted to an unlisted destination"))
+    monkeypatch.setattr(LLMClient, "_request_once", sent)
+    monkeypatch.setattr(llm.client.chat.completions, "create", sent)
+    with pytest.raises(EgressViolationError):
+        asyncio.run(llm.complete_with_tools(messages=[{"role": "user", "content": "u"}], tools=[]))
+    local = AppConfig()
+    local.llm.base_url = "http://127.0.0.1:11434/v1"
+    local_llm = LLMClient(local)
+    monkeypatch.setattr(local_llm.client.chat.completions, "create", sent)
+    with pytest.raises(EgressViolationError):
+        asyncio.run(local_llm.complete_with_tools(messages=[], tools=[], base_url_override=NON_LOCAL))
+    assert sent.await_count == 0
 
 
 # ----------------------------------------------------------------------------- MCP identity binding

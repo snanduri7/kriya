@@ -39,6 +39,9 @@ FACADES: Dict[str, Facade] = {
                                   "build identity moved to FOUNDATION in A1; old import path kept"),
     "kriya/core/tomlcompat.py": Facade("kriya.foundation.tomlcompat", "P1",
                                        "tomllib shim moved to FOUNDATION in A1; old import path kept"),
+    "kriya/workflow/runtime_command_approval.py": Facade(
+        "kriya.policy.approval", "P1",
+        "C3: runtime-command subject/fingerprint/decision owned by AUTHORITY; 9 test files import the old path"),
 }
 
 
@@ -57,6 +60,16 @@ PARTIAL_FACADES: Dict[str, PartialFacade] = {
     "kriya/workflow/process_profile.py": PartialFacade(
         "kriya.policy.risk", ("ContextDepth", "ExecutionWeight", "ProcessProfile", "VerificationTier"), "P1",
         "C2: profile vocabulary owned by AUTHORITY; the profile table and process_profile_for stay"),
+    "kriya/control/launch_approval.py": PartialFacade(
+        "kriya.policy.approval",
+        ("KIND_CHANGE", "KIND_RUNTIME", "KINDS", "REFUSAL_CODES", "REVIEW_SECTION_HEADER", "RUNTIME_COMMAND_REVIEW", "WORKING_DIRECTORY_KIND",
+         "ApprovalRefused", "RuntimeCommandReviewPort", "_sha", "candidate_digest", "split_reason"), "P1",
+        "C3: review kinds/codes, ApprovalRefused, candidate digest and split_reason owned by AUTHORITY's approval module (plus the review "
+        "port the record and wait take as a parameter); the review record, wait and decide stay"),
+    "kriya/core/llm.py": PartialFacade(
+        "kriya.policy.egress", ("is_local_url",), "P1",
+        "C3: the local/private-address definition owned by AUTHORITY (policy.execution no longer imports the provider back); "
+        "8 production modules (cli, kup.context_ops, production_doctor, core.model_runtime, core.model_qualification, memory.embedding, workflow.attempt, workflow.egress_authority) and the regression index use the old path"),
 }
 
 

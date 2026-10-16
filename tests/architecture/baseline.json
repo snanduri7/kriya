@@ -1,6 +1,6 @@
 {
- "files": 365,
- "edges": 1519,
+ "files": 366,
+ "edges": 1522,
  "top_level_sccs": [
   [
    "kriya.tools.containment",
@@ -12,7 +12,7 @@
   ]
  ],
  "all_import_scc_sizes": [
-  136,
+  125,
   6,
   2,
   2
@@ -24,16 +24,15 @@
    "kriya.analyzer": 1,
    "kriya.capabilities": 3,
    "kriya.config": 1,
-   "kriya.control": 10,
+   "kriya.control": 9,
    "kriya.core": 12,
    "kriya.knowledge": 2,
    "kriya.mcp": 1,
    "kriya.memory": 2,
-   "kriya.policy": 3,
    "kriya.skills": 1,
    "kriya.static_analysis": 1,
-   "kriya.tools": 3,
-   "kriya.workflow": 91
+   "kriya.tools": 2,
+   "kriya.workflow": 85
   },
   {
    "kriya.tools": 6
@@ -57,7 +56,6 @@
    "kriya.config",
    "kriya.config.config",
    "kriya.control.commit_state",
-   "kriya.control.control_store",
    "kriya.control.decisions",
    "kriya.control.launch",
    "kriya.control.launch_approval",
@@ -84,14 +82,10 @@
    "kriya.mcp.mcp",
    "kriya.memory.embedding",
    "kriya.memory.vector",
-   "kriya.policy.enforcement",
-   "kriya.policy.execution",
-   "kriya.policy.filesystem",
    "kriya.skills.skill",
    "kriya.static_analysis.service",
    "kriya.tools.test_execution",
    "kriya.tools.validate",
-   "kriya.tools.web",
    "kriya.workflow.acceptance_approval",
    "kriya.workflow.acceptance_jvm",
    "kriya.workflow.acceptance_oracle",
@@ -119,7 +113,6 @@
    "kriya.workflow.deterministic_failure_diagnostic",
    "kriya.workflow.edit_capability",
    "kriya.workflow.edit_feasibility",
-   "kriya.workflow.edit_safety",
    "kriya.workflow.egress_authority",
    "kriya.workflow.example_oracle",
    "kriya.workflow.example_oracle_java",
@@ -131,7 +124,6 @@
    "kriya.workflow.investigation",
    "kriya.workflow.jvm_module_ownership",
    "kriya.workflow.language_adapters",
-   "kriya.workflow.live_lookup",
    "kriya.workflow.localization_decision",
    "kriya.workflow.milestone_completion",
    "kriya.workflow.milestones",
@@ -144,7 +136,6 @@
    "kriya.workflow.plan_targets",
    "kriya.workflow.plan_validation",
    "kriya.workflow.planner_repair",
-   "kriya.workflow.planning_diagnostics",
    "kriya.workflow.prompt_composition",
    "kriya.workflow.proposal_binding",
    "kriya.workflow.pytest_stability",
@@ -161,11 +152,8 @@
    "kriya.workflow.review_context",
    "kriya.workflow.run_trace",
    "kriya.workflow.self_correction",
-   "kriya.workflow.semantic_region_authority",
-   "kriya.workflow.semantic_scope_derivation",
    "kriya.workflow.skill_extraction",
    "kriya.workflow.state",
-   "kriya.workflow.static_checks",
    "kriya.workflow.subtask_checkpoint",
    "kriya.workflow.subtask_executor",
    "kriya.workflow.subtask_telemetry",

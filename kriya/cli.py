@@ -26,11 +26,11 @@ from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.core.state_paths import trace_db_path
 from kriya.plugins.plugin import PluginManager
+from kriya.policy.approval import TypedApprovalCallback
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
 from kriya.workflow.failure_reporting import dominant_category
-from kriya.workflow.runtime_command_approval import TypedApprovalCallback
 from kriya.workflow.workflow_controller import WorkflowController
 
 logger = logging.getLogger(__name__)
@@ -3061,7 +3061,7 @@ def _runtime_command_decision(subject: Any, yes: bool) -> Any:
     that resolves to the human's decision is returned; a launch that cannot hold the review declines (recorded as approval required). Outside a launch it is the terminal behaviour,
     unchanged (the same prompt text, `--yes`)."""
     from kriya.control.launch import note_approval_required, request_runtime_command_approval
-    from kriya.workflow.runtime_command_approval import RuntimeCommandDecision
+    from kriya.policy.approval import RuntimeCommandDecision
 
     awaiting = request_runtime_command_approval(subject)
     if awaiting is not None:

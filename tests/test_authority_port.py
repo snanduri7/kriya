@@ -1,8 +1,12 @@
-"""AuthorityPort facade (full modularization, slice C1; MODULE-CONTRACTS.md §4).
+"""AuthorityPort facade (full modularization, slices C1 and C3; MODULE-CONTRACTS.md §4).
 
 The port is a pass-through: each method gives exactly the owner function's answer, on the allowing AND the refusing path, and reaches
 the owner function by its module name at call time (a patch of the owner name is what the port runs). The public names re-exported
 from ``kriya.policy.authority`` are the owners' objects. ``ARRIVES_LATER`` is closed and names real, not-yet-done slices.
+
+C3: ``stale`` and the runtime-command review port (``RuntimeCommandReviewPort``, the parameter ``control.launch_approval`` takes)
+are AUTHORITY's ``kriya.policy.approval``; the old import paths (``workflow.runtime_command_approval``, ``control.launch_approval``,
+``core.llm.is_local_url``) hand out the owner's objects.
 """
 from __future__ import annotations
 
@@ -14,10 +18,12 @@ from test_launch_approval import FILES, LID, _run
 from test_prd031a_static_analysis import BASE_A, _workspace, _write
 
 import kriya.policy.authority as authority
+import kriya.workflow.runtime_command_approval as rca
 from kriya.config import authority_approval
 from kriya.control import launch_approval
+from kriya.core import llm
 from kriya.mcp import invocation_approval
-from kriya.policy import filesystem
+from kriya.policy import approval, egress, filesystem
 from kriya.policy.authority import ARRIVES_LATER, AuthorityPort
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, MCPCapabilityProfileIdentity, MCPToolIdentity
@@ -46,7 +52,7 @@ def test_the_public_names_are_the_owners_objects():
 def test_the_members_still_to_come_name_real_open_slices():
     from tests.architecture.test_import_direction import DONE_SLICES, SLICES  # noqa: PLC0415
 
-    assert set(ARRIVES_LATER) == {"stale", "typed_approval_requests", "waited_seconds", "config_authority"}
+    assert set(ARRIVES_LATER) == {"typed_approval_requests", "waited_seconds", "config_authority"}     # "stale" landed in C3
     assert all(slice_id in SLICES and slice_id not in DONE_SLICES for slice_id in ARRIVES_LATER.values())
     assert not any(hasattr(AuthorityPort, name) for name in ARRIVES_LATER), "a member listed as arriving later must not exist as a stub"
 
@@ -161,3 +167,98 @@ def test_grant_config_approval_is_the_one_write_path(monkeypatch):
     monkeypatch.setattr(authority_approval, "grant_local_approval", refuse)
     with pytest.raises(OSError):
         AuthorityPort().grant_config_approval(["v"], {}, "/ws")
+
+
+# ----------------------------------------------------------------------------- C3: approval helpers owned by policy.approval
+
+def test_the_old_approval_paths_are_the_policy_owned_objects():
+    for name in ("MAX_ARGV_CHARS", "MAX_COMMANDS", "MAX_REVIEW_ROUNDS", "REVIEW_KIND", "RuntimeCommandDecision", "RuntimeCommandSubject",
+                 "TypedApprovalCallback", "approval_matches", "ask", "build_subject", "commands_authored_in_goal", "fingerprint_of",
+                 "reviewable", "stdin_digest"):
+        assert getattr(rca, name) is getattr(approval, name), name
+    for name in ("KIND_CHANGE", "KIND_RUNTIME", "KINDS", "REFUSAL_CODES", "REVIEW_SECTION_HEADER", "WORKING_DIRECTORY_KIND", "ApprovalRefused",
+                 "_sha", "candidate_digest", "split_reason"):
+        assert getattr(launch_approval, name) is getattr(approval, name), name
+    assert approval.RuntimeCommandSubject.__module__ == approval.ApprovalRefused.__module__ == "kriya.policy.approval"
+    assert llm.is_local_url is egress.is_local_url and egress.is_local_url.__module__ == "kriya.policy.egress"
+    # ask's isinstance dispatch sees ONE class whichever path built the callback
+    typed = rca.TypedApprovalCallback(lambda _f, _r: True, lambda _s: approval.RuntimeCommandDecision("sha256:x"))
+    subject = rca.build_subject(unit_id=None, criterion="c", working_directory="/wt", commands=[["a"]], input_channel="none",
+                                stdin_payload=None, reason="r")
+    assert asyncio.run(approval.ask(typed, subject)) == approval.RuntimeCommandDecision("sha256:x")
+
+
+@pytest.mark.parametrize("guard,expected", [(None, False), (lambda: True, False), (lambda: False, True)],
+                         ids=["outside_the_post_approval_phase", "unchanged", "changed"])
+def test_stale_is_the_policy_decision_and_consults_the_guard_once(guard, expected):
+    calls = []
+
+    def counted():
+        calls.append(1)
+        return guard()
+
+    probe = None if guard is None else counted
+    assert AuthorityPort().stale(probe) is expected
+    assert approval.stale(guard) is expected
+    assert calls == ([] if guard is None else [1])
+
+
+def test_stale_forwards_to_the_owner_by_name(monkeypatch):
+    seen = []
+    monkeypatch.setattr(approval, "stale", lambda guard: seen.append(guard) or True)
+    assert AuthorityPort().stale(None) is True and seen == [None]
+
+
+class _RecordingReview:
+    """A RuntimeCommandReviewPort that answers like the default and records what the review record and wait asked it."""
+
+    def __init__(self, reviewable=True):
+        self.calls, self._reviewable = [], reviewable
+
+    def fingerprint_of(self, working_directory, commands, input_channel, stdin_sha256):
+        self.calls.append("fingerprint_of")
+        return "sha256:" + "f" * 64
+
+    def reviewable(self, subject):
+        self.calls.append("reviewable")
+        return self._reviewable
+
+    def decision(self, approved_fingerprint):
+        self.calls.append(("decision", approved_fingerprint))
+        return ("typed", approved_fingerprint)
+
+
+def _runtime_subject():
+    return approval.build_subject(unit_id="u", criterion="prints", working_directory="/wt", commands=[["mvn", "-q", "exec:java"]],
+                                  input_channel="none", stdin_payload=None, reason="run it")
+
+
+def test_runtime_command_review_through_the_port_is_the_parameter_launch_approval_takes():
+    port = AuthorityPort().runtime_command_review()
+    assert port is approval.RUNTIME_COMMAND_REVIEW
+    subject = _runtime_subject()
+    assert port.fingerprint_of("/wt", subject.commands, "none", None) == approval.fingerprint_of("/wt", subject.commands, "none", None)
+    assert port.reviewable(subject) is True and port.reviewable(approval.build_subject(
+        unit_id=None, criterion="", working_directory="/wt", commands=[], input_channel="none", stdin_payload=None, reason="")) is False
+    assert port.decision("sha256:a") == approval.RuntimeCommandDecision("sha256:a") and port.decision(None).approved is False
+    # the default record is the one the port's functions give; an injected port is the one the record uses (no lazy import decides it)
+    default = launch_approval.build_pending_runtime(LID, "wsid", 1, subject)
+    assert default["candidate_digest"] == default["command_fingerprint"] == subject.fingerprint
+    injected = _RecordingReview()
+    record = launch_approval.build_pending_runtime(LID, "wsid", 1, subject, review=injected)
+    assert record["candidate_digest"] == "sha256:" + "f" * 64 and injected.calls == ["reviewable", "fingerprint_of"]
+    refusing = _RecordingReview(reviewable=False)
+    assert launch_approval.build_pending_runtime(LID, "wsid", 1, subject, review=refusing) is None and refusing.calls == ["reviewable"]
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_the_runtime_wait_answers_with_the_ports_typed_decision(monkeypatch, approved):
+    async def await_decision(session, review_id, digest):
+        return approved
+
+    monkeypatch.setattr(launch_approval, "await_decision", await_decision)
+    expected = "sha256:" + "e" * 64 if approved else None
+    assert asyncio.run(AuthorityPort().await_runtime_decision("S", "ra-1", "sha256:" + "e" * 64)) == approval.RuntimeCommandDecision(expected)
+    injected = _RecordingReview()
+    answer = asyncio.run(launch_approval.await_runtime_decision("S", "ra-1", "sha256:" + "e" * 64, review=injected))
+    assert answer == ("typed", expected) and injected.calls == [("decision", expected)]

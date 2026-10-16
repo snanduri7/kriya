@@ -65,6 +65,7 @@ import shlex
 from typing import Callable, FrozenSet, List, Optional, Sequence, Tuple
 
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
+from kriya.policy.egress import is_local_url
 from kriya.policy.model import (
     ActionRequest,
     ActionType,
@@ -808,11 +809,10 @@ class ExecutionPolicy:
         is_local_url/EgressViolationError enforcement (MA4.3) is a separate,
         independent hard boundary this stage's rules can never substitute
         for - see kriya/policy/__init__.py. This is why the local/non-local
-        check below deliberately reuses kriya.core.llm.is_local_url itself
-        (a deferred import - kriya/core/llm.py imports this module at
-        module level, so importing it back at module level here would be
-        circular; a function-local import is safe since by the time this
-        method is ever CALLED, both modules are already fully loaded) rather
+        check below deliberately uses the SAME is_local_url the hard
+        boundary uses (kriya/policy/egress.py since slice C3; kriya/core/llm.py
+        re-exports it as itself, so there is still exactly one definition and
+        no function-local import back into the provider) rather
         than a second, independently-written local/private-address check
         that could quietly drift from the real enforcement boundary's own
         definition of "local" and produce misleading audit telemetry.
@@ -828,8 +828,6 @@ class ExecutionPolicy:
             return None
         if not request.network_target:
             return None
-
-        from kriya.core.llm import is_local_url
 
         target_is_local = is_local_url(request.network_target)
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 import re
@@ -33,6 +32,20 @@ from kriya.control.persistence import (
     save_launch_review_decision,
 )
 from kriya.control.run_ownership import probe_run_lock
+
+# Moved to AUTHORITY's approval owner (kriya/policy/approval.py) in slice C3, re-exported here as themselves for this module's importers. Removed in P1.
+from kriya.policy.approval import KIND_CHANGE as KIND_CHANGE
+from kriya.policy.approval import KIND_RUNTIME as KIND_RUNTIME
+from kriya.policy.approval import KINDS as KINDS
+from kriya.policy.approval import REFUSAL_CODES as REFUSAL_CODES
+from kriya.policy.approval import REVIEW_SECTION_HEADER as REVIEW_SECTION_HEADER
+from kriya.policy.approval import RUNTIME_COMMAND_REVIEW as RUNTIME_COMMAND_REVIEW
+from kriya.policy.approval import WORKING_DIRECTORY_KIND as WORKING_DIRECTORY_KIND
+from kriya.policy.approval import ApprovalRefused as ApprovalRefused
+from kriya.policy.approval import RuntimeCommandReviewPort as RuntimeCommandReviewPort
+from kriya.policy.approval import _sha as _sha
+from kriya.policy.approval import candidate_digest as candidate_digest
+from kriya.policy.approval import split_reason as split_reason
 from kriya.workflow.edit_safety import FileRevisionConflict
 
 logger = logging.getLogger(__name__)
@@ -46,23 +59,7 @@ POLL_SECONDS = 0.25
 REASON_MAX_CHARS = 60000
 HISTORY_MAX = 20
 
-REFUSAL_CODES = ("INVALID_REQUEST", "LAUNCH_NOT_FOUND", "LAUNCH_RECORD_UNREADABLE", "WRONG_WORKSPACE", "LAUNCH_ENDED", "LAUNCH_NOT_ACTIVE", "NOT_PENDING",
-                 "STALE_REVIEW", "ALREADY_DECIDED", "REVIEW_EXPIRED", "DECISION_NOT_RECORDED", "WRONG_REVIEW_KIND")
-# The two subjects a launch can hold for a human. A decision names the kind it is for, and `decide` refuses it for a review of the other kind: the change-approval action can never
-# approve a runtime-command review, nor the reverse.
-KIND_CHANGE, KIND_RUNTIME = "change_approval", "runtime_command"
-KINDS = (KIND_CHANGE, KIND_RUNTIME)
-WORKING_DIRECTORY_KIND = "ISOLATED_WORKTREE"   # Kriya runs verification in its isolated candidate worktree, never in the project folder
 CRITERION_MAX_CHARS = 500
-
-
-class ApprovalRefused(Exception):
-    """A decision that was not accepted. ``code`` is one of REFUSAL_CODES."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
 
 def _now() -> datetime:
@@ -71,30 +68,6 @@ def _now() -> datetime:
 
 def _stamp(moment: datetime) -> str:
     return moment.isoformat(timespec="milliseconds")
-
-
-# The delimiter between the approval policy note and the automated reviewer's report inside the reason text the change gate composes (kriya/workflow/workflow.py). One owner:
-# the gate writes it with this constant and `split_reason` reads it with the same one, so a display never has to guess where the reviewer's words start.
-REVIEW_SECTION_HEADER = "=== Automated Code Review ==="
-
-
-def split_reason(reason: str) -> tuple:
-    """(policy_note, review_summary) of a gate reason. review_summary is None when the reason carries no reviewer section; the text is never altered or summarised."""
-    marker = f"\n\n{REVIEW_SECTION_HEADER}\n"
-    if marker in reason:
-        note, summary = reason.split(marker, 1)
-        return note.strip(), summary.strip()
-    return reason.strip(), None
-
-
-def _sha(text: str) -> str:
-    return "sha256:" + hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
-
-
-def candidate_digest(files: List[Dict[str, str]]) -> str:
-    """The identity of the candidate as the gate presented it: the per-file digests of the unified diffs, in order."""
-    parts = [[str(f.get("filepath", "")), _sha(str(f.get("content", "")))] for f in files]
-    return _sha(json.dumps(parts, separators=(",", ":"), sort_keys=True))
 
 
 def review_identity(launch_id: str, workspace_identity_value: str, sequence: int, digest: str, reason: str) -> str:
@@ -126,17 +99,18 @@ def build_pending(launch_id: str, workspace_identity_value: str, sequence: int, 
     }
 
 
-def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequence: int, subject: Any) -> Optional[Dict[str, Any]]:
+def build_pending_runtime(launch_id: str, workspace_identity_value: str, sequence: int, subject: Any,
+                          review: RuntimeCommandReviewPort = RUNTIME_COMMAND_REVIEW) -> Optional[Dict[str, Any]]:
     """The pending RUNTIME-COMMAND review: the exact resolved commands, in order, the directory kind and the input channel, bound by ``candidate_digest`` (= the subject's command
     fingerprint). None - the review is not offered - when the commands cannot be shown faithfully: a secret scrub that would alter any argument means what the person would read is not
-    what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do."""
+    what would run. Secret stdin/environment values never enter the record: only ``stdin_present`` / the stdin digest and environment NAMES do. ``review`` is the subject's
+    fingerprint/reviewability owner (AUTHORITY's ``kriya.policy.approval``; slice C3: a parameter, not a lazy import of the kernel-side module)."""
     from kriya.policy.telemetry import scrub_potential_secrets
-    from kriya.workflow.runtime_command_approval import fingerprint_of, reviewable
 
     commands = [list(c) for c in subject.commands]
-    if not reviewable(subject) or any(scrub_potential_secrets(a) != a for c in commands for a in c):
+    if not review.reviewable(subject) or any(scrub_potential_secrets(a) != a for c in commands for a in c):
         return None
-    digest = fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)
+    digest = review.fingerprint_of(subject.working_directory, subject.commands, subject.input_channel, subject.stdin_sha256)
     requested = _now()
     return {
         "review_id": review_identity(launch_id, workspace_identity_value, sequence, digest, subject.reason), "sequence": sequence, "kind": KIND_RUNTIME,
@@ -164,11 +138,10 @@ async def await_decision(session: Any, review_id: str, digest: str) -> bool:
         raise
 
 
-async def await_runtime_decision(session: Any, review_id: str, fingerprint: str) -> Any:
-    """The runtime-command review's wait: the same durable, fail-closed decision as a change review, answered with the fingerprint the approval is bound to."""
-    from kriya.workflow.runtime_command_approval import RuntimeCommandDecision
-
-    return RuntimeCommandDecision(fingerprint if await await_decision(session, review_id, fingerprint) else None)
+async def await_runtime_decision(session: Any, review_id: str, fingerprint: str, review: RuntimeCommandReviewPort = RUNTIME_COMMAND_REVIEW) -> Any:
+    """The runtime-command review's wait: the same durable, fail-closed decision as a change review, answered with the fingerprint the approval is bound to (as
+    ``review``'s typed decision: a ``RuntimeCommandDecision`` by default)."""
+    return review.decision(fingerprint if await await_decision(session, review_id, fingerprint) else None)
 
 
 async def _wait(session: Any, review_id: str, digest: str) -> bool:

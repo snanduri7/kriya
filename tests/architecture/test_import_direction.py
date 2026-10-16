@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1", "C2", "C3"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -52,7 +52,6 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
     ("kriya.control.retention", "kriya.workflow.edit_safety", False),
     ("kriya.control.retention", "kriya.workflow.milestone_completion", False),
     ("kriya.control.launch_approval", "kriya.workflow.edit_safety", False),
-    ("kriya.control.launch_approval", "kriya.workflow.runtime_command_approval", True),
     ("kriya.control.telemetry", "kriya.workflow.checkpoint", False),
     ("kriya.control.telemetry", "kriya.workflow.context_package", False),
     ("kriya.control.run_coordinator", "kriya.workflow.checkpoint", True),
@@ -69,7 +68,6 @@ BACK_EDGES: Tuple[Tuple[str, str, bool], ...] = (
 
 # (source module, target module) -> (removal slice, reason). Generated from
 # the measured violations at slice A1 and edited only by deleting entries.
-_C3 = "approval helpers move to policy.approval / egress takes the client identity"
 _M1 = "file write/commit mechanism moves to REPOSITORY"
 _D2 = "checkpoint/trace/history owned by STATE; kernel inputs passed as parameters"
 _D3 = "env/home/state-path resolution through config.environment / ConfigService"
@@ -101,10 +99,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.application.history", "kriya.workflow.verification_authority"): ("E9", _B2_MOVED + " (ASSIGNED to E9, the runtime-verification seam that consumes deterministic_sequence_kind; work item not in E9's text: put that classification on the KERNEL public surface)"),  # non-public KERNEL module (was kup.application_outcome, B2)
     ("kriya.application.project", "kriya.control.recovery"): ("D2", _B2_MOVED + " (ASSIGNED to D2, the slice that defines STATE's public surface (control.history/checkpoint; recovery takes kernel inputs as parameters); work item not in D2's text: expose assess_recovery there)"),  # non-public STATE module (was kup.cli_ops + kup.workspace_ops, O1)
     ("kriya.application.project", "kriya.tools.git_metadata"): ("M2", _B2_MOVED + " (M2: git_metadata moves to kriya/repository)"),  # non-public EXECUTION module (was kup.workspace_ops, O1)
-    ("kriya.application.approval", "kriya.control.launch_approval"): ("C3", _B3_MOVED + " (was cli.launch_decision, O2; C3: approval helpers owned by policy.approval)"),  # non-public AUTHORITY module
     ("kriya.application.project_init", "kriya.core.model_runtime"): ("I3", _B3_MOVED + " (was kup.project_init_ops, O1; I3 names project_init_ops: one selection site)"),  # non-public PROVIDER module
-    ("kriya.application.review", "kriya.control.launch_approval"): ("C3", _B3_MOVED + " (was kup.review_ops + kup.runtime_command_ops, O1; C3: candidate digest / review helpers owned by policy.approval)"),  # non-public AUTHORITY module
-    ("kriya.application.review", "kriya.workflow.runtime_command_approval"): ("C3", _B3_MOVED + " (was kup.runtime_command_ops, B3; C3 makes runtime_command_approval a facade over policy.approval)"),  # non-public AUTHORITY module
     ("kriya.application.run", "kriya.control.launch"): ("D2", _B3_NEW + " (kup.execution keeps valid_launch_id for argument validation; ASSIGNED to D2, the STATE public-surface slice: expose the launch phases there)"),  # non-public STATE module
     ("kriya.application.run", "kriya.control.recovery"): ("D2", _B3_MOVED + " (was kup.execution, O1; ASSIGNED to D2 as application.project -> control.recovery: expose assess_recovery on the STATE surface)"),  # non-public STATE module
     ("kriya.application.run", "kriya.control.run_ownership"): ("D2", _B3_MOVED + " (was kup.execution, O1; ASSIGNED to D2, the STATE public-surface slice: expose probe_run_lock there)"),  # non-public STATE module
@@ -183,7 +178,7 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.cli", "kriya.workflow.requirement_contract"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.requirement_disposition"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.review_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
-    ("kriya.cli", "kriya.workflow.runtime_command_approval"): ("C3", _C3),  # direction ADAPTER-CLI -> AUTHORITY
+    ("kriya.cli", "kriya.policy.approval"): ("O2", _O2 + " (moved count-neutral in C3 from cli -> workflow.runtime_command_approval, now a facade: the CLI imports the owner; ADAPTER-CLI may import only the composition modules from L2-L3)"),  # direction ADAPTER-CLI -> AUTHORITY
     ("kriya.cli", "kriya.workflow.untrusted_context"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.workflow_controller"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.cli", "kriya.workflow.worktree"): ("O2", _O2),  # direction ADAPTER-CLI -> KERNEL
@@ -269,7 +264,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.memory.vector", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.metrics.thresholds", "kriya.config.authority_approval"): ("P2", _P2),  # direction METRICS -> AUTHORITY
     ("kriya.plugins.plugin", "kriya.core.kernel"): ("P2", _P2),  # direction TOOLBOX -> KERNEL
-    ("kriya.policy.execution", "kriya.core.llm"): ("C3", _C3),  # direction AUTHORITY -> PROVIDER
     ("kriya.policy.filesystem", "kriya.workflow.edit_safety"): ("M1", _M1),  # direction AUTHORITY -> KERNEL
     ("kriya.production_doctor", "kriya.agents.response_protocol"): ("N1", _N1),  # direction ADAPTER-CLI -> KERNEL
     ("kriya.production_doctor", "kriya.analyzer.analyzer"): ("N1", _N1),  # direction ADAPTER-CLI -> RETRIEVAL
@@ -339,7 +333,6 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.workflow.attempt", "kriya.tools.service_runtime"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.attempt", "kriya.tools.test_execution"): ("P2", _P2),  # non-public EXECUTION module
     ("kriya.workflow.attempt", "kriya.workflow.authority_escalation"): ("P2", _P2),  # non-public AUTHORITY module
-    ("kriya.workflow.attempt", "kriya.workflow.runtime_command_approval"): ("C3", _C3),  # non-public AUTHORITY module
     ("kriya.workflow.authority_bundle", "kriya.tools.containment"): ("P2", _P2),  # direction AUTHORITY -> EXECUTION
     ("kriya.workflow.authority_bundle", "kriya.workflow.contract_compilation"): ("P2", _P2),  # direction AUTHORITY -> KERNEL
     ("kriya.workflow.authority_bundle", "kriya.workflow.obligations"): ("P2", _P2),  # direction AUTHORITY -> KERNEL

@@ -14,6 +14,9 @@ The heavier owners (``control.launch_approval`` imports the edit engine, ``workf
 ``scrub_potential_secrets`` from here loads nothing it did not load before C1.
 
 Not on the port yet (``ARRIVES_LATER``): what needs either a body move or a new type, both outside C1's no-behaviour scope.
+
+C3 (``kriya/policy/approval.py``, a leaf: imported at module level): ``stale`` (the post-source-review guard decision) and
+``runtime_command_review`` (the ``RuntimeCommandReviewPort`` ``control.launch_approval`` takes as a parameter).
 """
 from __future__ import annotations
 
@@ -29,6 +32,8 @@ from kriya.config.authority_approval import review_fingerprint as review_fingerp
 from kriya.config.authority_approval import (
     validate_trust_path_outside_workspace as validate_trust_path_outside_workspace,
 )
+from kriya.policy import approval as _approval
+from kriya.policy.approval import RuntimeCommandReviewPort
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, MCPCapabilityProfileIdentity, MCPToolIdentity, PolicyResult
 from kriya.policy.telemetry import scrub_potential_secrets as scrub_potential_secrets
@@ -36,10 +41,10 @@ from kriya.policy.telemetry import scrub_potential_secrets as scrub_potential_se
 # MODULE-CONTRACTS §4 members that are NOT on the C1 port, and the slice that brings each (closed; tests/test_authority_port.py
 # asserts every slice exists in the plan and is not done yet).
 ARRIVES_LATER: Mapping[str, str] = {
-    # the body lives in kriya/workflow/attempt.py (KERNEL); AUTHORITY may not import it, C3 moves it to policy/approval.py
-    "stale": "C3",
-    # typed SourceApprovalRequest / RuntimeCommandApprovalRequest / CandidateIdentity, AuthorityResult/AuthorityDecision: new types
-    "typed_approval_requests": "C3",
+    # typed SourceApprovalRequest / RuntimeCommandApprovalRequest / CandidateIdentity, AuthorityResult/AuthorityDecision: new types.
+    # Re-recorded C3 -> G4 (C3 is PRESERVE and its text names no typed request; no caller would consume them yet): G4 is the first
+    # consumer (staged_identity -> source review, the ``CandidateIdentity`` equality test).
+    "typed_approval_requests": "G4",
     # the elapsed human wait returned with the decision, consumed by BudgetLedger.record_human_wait
     "waited_seconds": "H4",
     # ConfigAuthorityReport is part of ResolvedConfiguration, built by ConfigService
@@ -98,6 +103,16 @@ class AuthorityPort:
         from kriya.control import launch_approval
 
         return launch_approval.decide(workspace_path, launch_id, review_id, candidate_digest_value, decision, kind)
+
+    def runtime_command_review(self) -> RuntimeCommandReviewPort:
+        """``policy.approval.RUNTIME_COMMAND_REVIEW``: the subject's fingerprint, reviewability rule and typed decision, the port
+        ``launch_approval.build_pending_runtime`` / ``await_runtime_decision`` take as their ``review`` parameter (the default they use)."""
+        return _approval.RUNTIME_COMMAND_REVIEW
+
+    def stale(self, guard: Optional[Callable[[], bool]]) -> bool:
+        """``policy.approval.stale``: True when the post-source-review guard says the candidate is no longer the approved one (the guard
+        is consulted exactly once; ``None`` outside the post-approval phase is never stale)."""
+        return _approval.stale(guard)
 
     # ------------------------------------------------------------------ verified-candidate byte binding (workflow.verification_binding)
 

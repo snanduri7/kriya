@@ -1,15 +1,12 @@
 import asyncio
 import functools
 import inspect
-import ipaddress
 import json
 import logging
-import socket
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
-from urllib.parse import urlparse
 
 import httpx
 from openai import AsyncOpenAI
@@ -19,6 +16,10 @@ from kriya.core.attempt_evidence import scope as attempt_evidence_scope
 from kriya.core.inference_runtime import ChatRequest, InferenceRuntimePort, RuntimeErrorKind, runtime_for_binding
 from kriya.core.inference_settings import request_settings
 from kriya.core.model_runtime import context_window_overrides, request_extra_body
+
+# The local/private-address definition the hard egress boundary below and ExecutionPolicy's egress stage share: owned by AUTHORITY since
+# slice C3 (it was defined here and imported back lazily by kriya/policy/execution.py), re-exported as itself for its importers. Removed in P1.
+from kriya.policy.egress import is_local_url as is_local_url
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
 
@@ -48,42 +49,6 @@ class EgressViolationError(ValueError):
     LLMClient._audit_llm_network_access below. Nothing in kriya/policy/ may
     ever replace, gate, or suppress this check."""
     pass
-
-def is_local_url(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
-            # Fail CLOSED, not open - found live, 2026-08-12 (SME architecture
-            # review): a malformed/typo'd base_url (e.g. missing "http://" in
-            # a config file) parses with hostname=None via urlparse, and this
-            # branch was previously treating that as local/allowed - the
-            # opposite of the fail-closed behavior the except block below
-            # already implements for every OTHER failure mode. This function
-            # is a hard safety boundary (see kriya/core/llm.py's egress
-            # enforcement, and CLAUDE.md's "Egress control" section) - an
-            # unparseable hostname is exactly the kind of ambiguous input
-            # that should never be treated as "safe."
-            logger.debug(f"is_local_url check found no hostname for '{url}', treating as non-local (fail closed)")
-            return False
-
-        if hostname.lower() in {"localhost", "127.0.0.1", "[::1]"}:
-            return True
-        if hostname.lower().endswith(".local"):
-            return True
-            
-        addr_info = socket.getaddrinfo(hostname, None)
-        for _family, _, _, _, sockaddr in addr_info:
-            ip = sockaddr[0]
-            ip_obj = ipaddress.ip_address(ip)
-            if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local:
-                continue
-            else:
-                return False
-        return True
-    except Exception as e:
-        logger.debug(f"is_local_url check failed for '{url}', treating as non-local (fail closed): {e}")
-        return False
 
 # PROVIDER-CONTRACT-001A: a model call's deadline. The authority is the
 # active run's generation budget (run_coordinator.claim_run_generation_clock
