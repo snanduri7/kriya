@@ -346,7 +346,8 @@ def test_a_store_that_cannot_be_written_is_a_typed_failure_and_nothing_is_claime
 
 def test_an_unexpected_internal_fault_is_not_swallowed_as_a_refusal(ws, monkeypatch):
     """The broad catch around configuration resolution must only translate resolution failures: a coding error AFTER it (here, in the approval write) surfaces."""
-    monkeypatch.setattr("kriya.kup.authority_ops.grant_local_approval", lambda *a, **k: (_ for _ in ()).throw(TypeError("coding error")))
+    monkeypatch.setattr("kriya.config.authority_approval.grant_local_approval",  # C1: the service reaches it through AuthorityPort (owner name)
+                        lambda *a, **k: (_ for _ in ()).throw(TypeError("coding error")))
     fingerprint = _status(ws)["data"]["fingerprint"]
     with pytest.raises(TypeError):
         _approve(ws, fingerprint)

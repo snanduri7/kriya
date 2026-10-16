@@ -34,7 +34,7 @@ SLICES = frozenset(
     + [f"D{i}" for i in range(1, 4)] + [f"E{i}" for i in range(1, 15)] + [f"F{i}" for i in range(1, 6)]
     + [f"G{i}" for i in range(1, 6)] + [f"H{i}" for i in range(1, 6)] + [f"I{i}" for i in range(1, 5)]
     + ["J1", "J2", "K1", "K2", "L1", "L2", "M1", "M2", "M3", "N1", "N2", "O1", "O2", "O3", "P1", "P2", "Q1", "Q2"])
-DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4"})
+DONE_SLICES = frozenset({"A1", "A2", "A3", "B1", "B2", "B3", "B4", "C1"})
 
 # CURRENT-DEPENDENCY-MAP.md §3, the back-edges into kriya/workflow that close
 # the big cycle (TRACED to the import line there; MEASURED here): (source,
@@ -104,12 +104,10 @@ ALLOWLIST: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("kriya.analyzer.analyzer", "kriya.workflow.checkpoint"): ("D2", _D2),  # direction RETRIEVAL -> KERNEL
     ("kriya.analyzer.graph", "kriya.core.db"): ("P2", _P2),  # non-public FOUNDATION module
     ("kriya.application.catalog", "kriya.tools.service"): ("K1", _B2_MOVED + " (K1: tools/service.py becomes toolbox.catalog)"),  # non-public TOOLBOX module (was kup.catalog_ops, O1)
-    ("kriya.application.history", "kriya.policy.telemetry"): ("C1", _B2_MOVED + " (ASSIGNED to C1, which creates kriya/policy/authority.py, the first public AUTHORITY facade; work item not in C1's text: re-export scrub_potential_secrets from it)"),  # non-public AUTHORITY module (was kup.application_outcome, O1)
     ("kriya.application.history", "kriya.workflow.verification_authority"): ("E9", _B2_MOVED + " (ASSIGNED to E9, the runtime-verification seam that consumes deterministic_sequence_kind; work item not in E9's text: put that classification on the KERNEL public surface)"),  # non-public KERNEL module (was kup.application_outcome, B2)
     ("kriya.application.project", "kriya.control.recovery"): ("D2", _B2_MOVED + " (ASSIGNED to D2, the slice that defines STATE's public surface (control.history/checkpoint; recovery takes kernel inputs as parameters); work item not in D2's text: expose assess_recovery there)"),  # non-public STATE module (was kup.cli_ops + kup.workspace_ops, O1)
     ("kriya.application.project", "kriya.tools.git_metadata"): ("M2", _B2_MOVED + " (M2: git_metadata moves to kriya/repository)"),  # non-public EXECUTION module (was kup.workspace_ops, O1)
     ("kriya.application.approval", "kriya.control.launch_approval"): ("C3", _B3_MOVED + " (was cli.launch_decision, O2; C3: approval helpers owned by policy.approval)"),  # non-public AUTHORITY module
-    ("kriya.application.configuration", "kriya.config.authority_approval"): ("C1", _B3_NEW + " (kup.authority_ops keeps ENV_TRUST_FILE and the patched grant_local_approval name; C1: AuthorityPort.config_authority over config.authority + authority_approval)"),  # non-public AUTHORITY module
     ("kriya.application.project_init", "kriya.core.model_runtime"): ("I3", _B3_MOVED + " (was kup.project_init_ops, O1; I3 names project_init_ops: one selection site)"),  # non-public PROVIDER module
     ("kriya.application.review", "kriya.control.launch_approval"): ("C3", _B3_MOVED + " (was kup.review_ops + kup.runtime_command_ops, O1; C3: candidate digest / review helpers owned by policy.approval)"),  # non-public AUTHORITY module
     ("kriya.application.review", "kriya.workflow.runtime_command_approval"): ("C3", _B3_MOVED + " (was kup.runtime_command_ops, B3; C3 makes runtime_command_approval a facade over policy.approval)"),  # non-public AUTHORITY module

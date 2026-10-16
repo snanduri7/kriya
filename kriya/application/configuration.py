@@ -9,7 +9,8 @@ the service only orders those calls. It is ONE MORE CLIENT of that subsystem:
   returns NO configuration value: existing display redaction covers ``env`` and ``api_key`` only, and there is no authoritative
   per-field "safe to show" metadata, so none is shown.
 * ``approve`` refuses (``APPROVAL_STALE``, nothing written) unless the fingerprint of the configuration it is given equals the one the
-  person reviewed, and writes through the SAME function the CLI uses (``grant``: ``grant_local_approval``, passed by the caller).
+  person reviewed, and writes through the SAME function the CLI uses (``grant_local_approval``, reached through
+  ``AuthorityPort.grant_config_approval`` since C1; before C1 the KUP caller passed it in as ``grant``).
 * A trust file in effect or a store that would resolve inside the workspace is a typed ``APPROVAL_UNAVAILABLE``: the local store would
   not be the thing consulted, or must not be written.
 
@@ -19,11 +20,14 @@ its working-directory lock, so the comparison and the write see the same configu
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from kriya.application.services import APPROVAL_STALE, APPROVAL_UNAVAILABLE, ApplicationRefusal
-from kriya.config.authority_approval import (
+from kriya.context.model import RequestContext
+from kriya.context.workspace_identity import workspace_identity
+from kriya.policy.authority import (
     ApprovalArtifactError,
+    AuthorityPort,
     TrustPathInsideWorkspaceError,
     default_local_approval_path,
     is_approval_current_for,
@@ -32,8 +36,6 @@ from kriya.config.authority_approval import (
     review_fingerprint,
     validate_trust_path_outside_workspace,
 )
-from kriya.context.model import RequestContext
-from kriya.context.workspace_identity import workspace_identity
 
 SCOPE = ("This approval applies only to the current operator-controlled settings of this folder. If any of them is added, removed or changed, "
          "Kriya asks for approval again.")
@@ -81,6 +83,9 @@ def _result(state, outcome: str, approval_digest: Optional[str]) -> Dict[str, An
 
 
 class ConfigurationService:
+    def __init__(self, authority: Optional[AuthorityPort] = None) -> None:
+        self._authority = authority if authority is not None else AuthorityPort()
+
     def approval_status(self, ctx: RequestContext, workspace: str, state, *, trust_file: Optional[str]) -> Dict[str, Any]:
         """The approval state of the folder ``workspace`` (canonical) whose configuration resolved to ``state``. Read-only."""
         data: Dict[str, Any] = {
@@ -99,10 +104,9 @@ class ConfigurationService:
         data.update(status="approved" if covered else "required", reason=reason, can_approve=not covered and not trust_file)
         return data
 
-    def approve(self, ctx: RequestContext, state, reviewed: str, *, trust_file: Optional[str],
-                grant: Callable[..., Any]) -> Dict[str, Any]:
-        """Record the approval of exactly the configuration ``reviewed`` names (its review fingerprint), through ``grant``. The caller holds
-        its working-directory lock from resolving ``state`` until this returns."""
+    def approve(self, ctx: RequestContext, state, reviewed: str, *, trust_file: Optional[str]) -> Dict[str, Any]:
+        """Record the approval of exactly the configuration ``reviewed`` names (its review fingerprint), through
+        ``AuthorityPort.grant_config_approval``. The caller holds its working-directory lock from resolving ``state`` until this returns."""
         current = review_fingerprint(state.violations, state.config_dict)
         if current != reviewed:
             raise ApplicationRefusal(APPROVAL_STALE, "The configuration changed after it was reviewed; nothing was approved. Review the current configuration before approving.",
@@ -114,7 +118,7 @@ class ConfigurationService:
         if covered:
             return _result(state, "already_approved", None)
         try:
-            artifact, _path = grant(state.violations, state.config_dict, state.workspace_root)
+            artifact, _path = self._authority.grant_config_approval(state.violations, state.config_dict, state.workspace_root)
         except OSError as error:
             raise ApplicationRefusal(APPROVAL_UNAVAILABLE, f"The approval could not be saved: {error.strerror or type(error).__name__}", reason="store_unwritable") from error
         return _result(state, "approved", artifact.set_digest[:16])

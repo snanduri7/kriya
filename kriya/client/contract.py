@@ -14,7 +14,7 @@ TEMPORARY local-only parameters. Some ports still take a mechanism or a live obj
 module that will own it does not exist yet. They are listed in ``LOCAL_ONLY_PARAMETERS`` with the slice that removes each (the contract
 suite fails on any callable/object parameter that is not listed), so a RemoteKriyaClient's gap is explicit, not hidden:
 the folder's configuration resolved with the folder as working directory (``load_in``, ``state``: D3 ``ConfigService.resolve(ctx)``),
-the trust-file path read from the environment (``trust_file``: D3), the approval writer (``grant``: C1 ``AuthorityPort.config_authority``),
+the trust-file path read from the environment (``trust_file``: D3) (the approval writer ``grant`` is gone since C1: the service reaches it through ``AuthorityPort``),
 the toolchain probe (``tool_visibility``: L1 ``ExecutionPort``), the model-endpoint probe (``probe``: I2 ``InferenceRuntimePort.health``),
 the per-request trace snapshot (``trace``: D2 ``HistoryStore``), the run composition (``deps``/``artifacts`` of ``runs.start``: O2,
 which moves ``kriya generate`` onto the client) and the resolved configuration object itself (``cfg``: D3 ``ResolvedConfiguration``).
@@ -73,8 +73,7 @@ class ReviewsPort(Protocol):
 class ConfigurationPort(Protocol):
     def approval_status(self, ctx: "RequestContext", workspace: str, state: "ConfigResolutionState", *,
                         trust_file: Optional[str]) -> Dict[str, Any]: ...
-    def approve(self, ctx: "RequestContext", state: "ConfigResolutionState", reviewed: str, *, trust_file: Optional[str],
-                grant: Any) -> Dict[str, Any]: ...
+    def approve(self, ctx: "RequestContext", state: "ConfigResolutionState", reviewed: str, *, trust_file: Optional[str]) -> Dict[str, Any]: ...
 
 
 class ModelsPort(Protocol):
@@ -138,7 +137,6 @@ LOCAL_ONLY_PARAMETERS: Mapping[Tuple[str, str, str], str] = {
     ("runs", "start", "artifacts"): "O2", ("runs", "start", "deps"): "O2",
     ("configuration", "approval_status", "state"): "D3", ("configuration", "approve", "state"): "D3",
     ("configuration", "approval_status", "trust_file"): "D3", ("configuration", "approve", "trust_file"): "D3",
-    ("configuration", "approve", "grant"): "C1",
     ("models", "probe", "probe"): "I2",
     ("evidence", "manifest", "trace"): "D2",
     **{("history", method, "trace"): "D2" for method in ("list", "list_in_workspace", "detail", "prompt")},

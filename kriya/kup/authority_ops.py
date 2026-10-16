@@ -7,7 +7,7 @@ Transport only (full modularization B3): argument validation, the folder's confi
 Nothing here decides authority. What needs approval, how it is digested, where the artifact lives and when it stops covering the configuration are all
 ``kriya.config.authority`` / ``kriya.config.authority_approval``, exactly as for ``kriya authority inspect|approve``. This module only (1) resolves the folder's
 configuration the way a run there would (the process working directory decides discovery, as in ``execution.preflight``), (2) reports it, and (3) on an
-explicit request, writes the approval through the SAME function the CLI uses (``grant_local_approval``).
+explicit request, writes the approval through the SAME function the CLI uses (``grant_local_approval``, reached by the service through ``AuthorityPort`` since C1).
 
 Boundaries, each pinned by a test:
 
@@ -24,7 +24,7 @@ import os
 import re
 from typing import Any, Dict
 
-from kriya.config.authority_approval import ENV_TRUST_FILE, grant_local_approval
+from kriya.config.authority_approval import ENV_TRUST_FILE
 from kriya.kup import policy
 from kriya.kup.execution import _CWD_LOCK
 from kriya.kup.inspect import envelope, live_consistency
@@ -66,6 +66,5 @@ def approve(cfg, request: Dict[str, Any], request_id: str, client) -> Dict[str, 
     trust_file = os.environ.get(ENV_TRUST_FILE) or None
     with _CWD_LOCK:  # resolve, compare and write under one hold: the working directory cannot change between the comparison and the write
         state = _resolve_locked(workspace)
-        data = client.configuration.approve(client.context(workspace_root=workspace, request_id=request_id), state, reviewed, trust_file=trust_file,
-                                            grant=grant_local_approval)
+        data = client.configuration.approve(client.context(workspace_root=workspace, request_id=request_id), state, reviewed, trust_file=trust_file)
     return envelope("configuration.approve", request_id, data=data, source=None, consistency=live_consistency())

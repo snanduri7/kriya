@@ -26,7 +26,7 @@ from kriya.application.evidence import recorded_evidence_id, recorded_workspace_
 from kriya.application.services import TraceHistory
 from kriya.context.model import RequestContext
 from kriya.context.workspace_identity import workspace_identities, workspace_identity
-from kriya.policy.telemetry import scrub_potential_secrets
+from kriya.policy.authority import scrub_potential_secrets
 
 # ------------------------------------------------------------------ application outcome (moved from kriya/kup/application_outcome.py)
 
