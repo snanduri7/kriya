@@ -177,7 +177,8 @@ NOT_REACHED: Dict[Tuple[str, str], str] = {
     (W, "_run_contract_acceptance"): "explicit-contract acceptance: needs a requirement contract",
     (W, "classify_ownership_violations"): "architect ownership choice: needs a brownfield ownership violation",
     (W, "include_response_construction_owners"): "JVM response-construction owners: the scripted projects are Python",
-    (W, "logger"): "a Logger object, not a callable seam (E2 guard: StageDeps.logger)",
+    (W, "logger"): "a Logger object, not a callable seam (E2 guard: StageDeps.logger, proven by "
+                   "tests/test_outcome.py::test_the_moved_lifecycle_code_logs_through_the_engines_patched_logger)",
     (W, "resolve_future_owner_verification_deferral"): "milestone future-owner verification deferral",
     (W, "retrieve_graph_context"): "graph RAG: needs an indexed repository",
     (C, "ArtifactRegistry.derive_from_workspace"): "artifact-registry derivation: brownfield artifacts",

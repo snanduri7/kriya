@@ -306,8 +306,11 @@ def test_the_generation_budget_is_measured_only_from_the_run_clock():
     attempt_source = (REPO / "kriya/workflow/attempt.py").read_text(encoding="utf-8")
     budget_fn = attempt_source.split("def _ensure_generation_time_budget(", 1)[1].split("\ndef ", 1)[0]
     assert "state.budget_started_monotonic" in budget_fn and "generation_started_monotonic" not in budget_fn
-    workflow_source = (REPO / "kriya/workflow/workflow.py").read_text(encoding="utf-8")
-    assert workflow_source.count("claim_run_generation_clock()") == 1
+    # The kernel claims the run clock exactly once (E2 moved the claim from workflow.py into
+    # run_lifecycle.open_run_state; counted over the whole kernel package so a second claim anywhere fails).
+    claims = {path.name: path.read_text(encoding="utf-8").count("claim_run_generation_clock()")
+              for path in (REPO / "kriya/workflow").glob("*.py")}
+    assert {name: count for name, count in claims.items() if count} == {"run_lifecycle.py": 1}
     # Production never sets a deadline of its own: the run budget is the owner.
     for path in (REPO / "kriya").rglob("*.py"):
         text = path.read_text(encoding="utf-8")

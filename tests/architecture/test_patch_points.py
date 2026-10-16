@@ -89,7 +89,10 @@ PATCH_POINTS: Dict[Tuple[str, str], P] = {
     (W, 'derive_contract_transition'): P(4, 'kriya.workflow.contract_lifecycle', ((W, 1),), ()),
     (W, 'handle_attempt_failure'): P(2, 'kriya.workflow.retry_strategy', ((W, 1),), ()),
     (W, 'include_response_construction_owners'): P(1, 'kriya.workflow.file_resolution', ((W, 1),), ()),
-    (W, 'logger'): P(2, W, ((W, 151),), ()),
+    # E2: +1 site (test_outcome proves the moved run-lifecycle code logs through it); 151 -> 145 lookups: 8 moved
+    # logger calls now reach run_lifecycle/outcome as StageDeps.logger / the forwarder's logger= argument, both
+    # resolved here at call time (+2: WorkflowEngine._stage_deps, _record_run_exception).
+    (W, 'logger'): P(3, W, ((W, 145),), ()),
     (W, 'resolve_future_owner_verification_deferral'): P(1, 'kriya.workflow.attribution', ((W, 1),), ()),
     (W, 'retrieve_graph_context'): P(1, 'kriya.workflow.graph_retrieval', ((W, 1),), ()),
     (W, 'run_attempt'): P(1, A, ((W, 1),), ()),
@@ -212,8 +215,58 @@ def test_every_kernel_patch_target_is_pinned_and_still_reaches_what_it_patched(m
 
 def test_the_table_totals_are_the_measured_e1_baseline():
     totals = {module: sum(row.sites for (owner, _t), row in PATCH_POINTS.items() if owner == module) for module in ps.KERNEL_MODULES}
-    assert totals == {A: 87, W: 69, C: 268}
+    assert totals == {A: 87, W: 70, C: 268}   # E1 baseline 87/69/268; E2 +1 W.logger site (test_outcome)
     assert len(PATCH_POINTS) == 83
+
+
+# ----------------------------------------------------------------------------- owner modules (DEPENDENCY-RULES)
+
+# Modules W4 extracted from the three kernel facades. They reach the facades' patched names through an injected
+# ``*Deps`` (``kriya/workflow/stage_context.py``) and never import a facade (a facade import would bind the
+# originals and silently defeat the suite's patches) nor the CLI. E-slices add their modules here.
+KERNEL_OWNER_MODULES = ("kriya.workflow.stage_context", "kriya.workflow.run_lifecycle", "kriya.workflow.outcome")
+FORBIDDEN_FOR_OWNERS = (*ps.KERNEL_MODULES, "kriya.cli")
+
+
+def owner_import_problems(trees: Mapping[str, object]) -> List[str]:
+    """Every import (any scope) of a facade or the CLI in an owner module's tree, as ``module:line -> target``."""
+    import ast
+
+    problems = []
+    for module, tree in sorted(trees.items()):
+        for node in ast.walk(tree):
+            targets: List[str] = []
+            if isinstance(node, ast.Import):
+                targets = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                targets = [node.module] + [f"{node.module}.{alias.name}" for alias in node.names]
+            for target in targets:
+                if any(target == banned or target.startswith(banned + ".") for banned in FORBIDDEN_FOR_OWNERS):
+                    problems.append(f"{module}:{node.lineno} -> {target}")
+    return sorted(set(problems))
+
+
+def test_kernel_owner_modules_never_import_a_facade_or_the_cli():
+    import ast
+
+    trees = {}
+    for module in KERNEL_OWNER_MODULES:
+        path = mm.REPO / (module.replace(".", "/") + ".py")
+        trees[module] = ast.parse(path.read_text(encoding="utf-8"))
+    assert owner_import_problems(trees) == []
+
+
+def test_the_owner_import_rule_catches_a_planted_facade_import():
+    import ast
+
+    planted = {"kriya.workflow.owner": ast.parse(
+        "import kriya.workflow.workflow\n\ndef f():\n    from kriya.workflow.attempt import run_attempt\n"
+        "    from kriya.workflow import workflow_controller\n    from kriya.cli import main\n")}
+    assert owner_import_problems(planted) == [
+        "kriya.workflow.owner:1 -> kriya.workflow.workflow", "kriya.workflow.owner:4 -> kriya.workflow.attempt",
+        "kriya.workflow.owner:4 -> kriya.workflow.attempt.run_attempt",
+        "kriya.workflow.owner:5 -> kriya.workflow.workflow_controller", "kriya.workflow.owner:6 -> kriya.cli",
+        "kriya.workflow.owner:6 -> kriya.cli.main"]
 
 
 # ----------------------------------------------------------------------------- planted self-checks

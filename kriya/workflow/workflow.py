@@ -31,7 +31,6 @@ from kriya.control.launch_approval import REVIEW_SECTION_HEADER
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
-    claim_run_generation_clock,
     coordinated_mutation,
     mark_run_stage,
     owning_run_work_unit,
@@ -181,8 +180,6 @@ from kriya.workflow.failure_grounding import (
 )
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.file_integrity import (
-    DETERMINISTIC_FILE_INTEGRITY_STOPS,
-    VERIFICATION_TREE_STOP_CODES,
     display_text,
     raw_digest,
 )
@@ -243,6 +240,12 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
+from kriya.workflow.outcome import (
+    WORKSPACE_COMMIT_NOT_COMPLETED,
+    completed_result,
+    failure_report_dicts,
+    terminal_failure_category,
+)
 from kriya.workflow.ownership_findings import (
     find_ownership_findings,
     findings_prompt_block,
@@ -274,10 +277,7 @@ from kriya.workflow.requirements import (
     VerificationAuthorityRequired,
     blocking_requirements,
     cited_requirement_ids,
-    requirement_evidence,
     requirement_lineage,
-    requirement_outcomes,
-    requirement_verdict_details,
     requirements_prompt_block,
     seed_requirement_obligations,
     statement_origins,
@@ -318,6 +318,15 @@ from kriya.workflow.review_context import (
     build_reviewer_verified_evidence,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_lifecycle import (
+    RunTrace,
+    TerminalTrace,
+    TraceDetail,
+    open_run_state,
+    persist_run_trace,
+    record_run_exception,
+    trace_run_events,
+)
 from kriya.workflow.run_trace import note_run_trace, record_run_exceptions
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
@@ -336,6 +345,7 @@ from kriya.workflow.skill_extraction import (
 from kriya.workflow.skill_extraction import (
     _likely_misattributed_sibling as _likely_misattributed_sibling,
 )
+from kriya.workflow.stage_context import StageDeps
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.suite_attribution import (
     SCOPE_FULL_REGRESSION,
@@ -459,31 +469,13 @@ def _final_review_error_code(error: BaseException) -> Tuple[str, str]:
 
 
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
-    """MODEL-EVIDENCE-HARDENING-001: a run that raises (e.g. mid-planning,
-    after Planner/Architect calls) still leaves a traces row,
-    ``<trace_id>.exception``, with the exception and every model call no
-    earlier row of it reported (each counted once). Not a RunRecord and never
-    a success; the exception is re-raised unchanged by the caller."""
+    """MODEL-EVIDENCE-HARDENING-001: the ``<trace_id>.exception`` row of a run
+    that raises (kriya/workflow/run_lifecycle.py::record_run_exception), with
+    this module's logger and the run_trace writer resolved at call time
+    (``run_trace.record_run_exceptions`` imports this name lazily)."""
     from kriya.workflow.run_trace import write_outcome_trace
 
-    if not trace.get("trace_id"):
-        return
-    try:
-        trace_db = trace_db_path(engine.kernel.config)
-    except Exception as trace_error:  # the exception itself still propagates
-        logger.warning("No traces.db for the failed run %s: %s", trace.get("trace_id"), trace_error)
-        return
-    write_outcome_trace(
-        trace_db, run_id=f"{trace['trace_id']}.exception", goal=str(trace.get("goal") or ""), status="error",
-        llm=getattr(getattr(engine, "developer", None), "llm", None), source="workflow.run_generation_workflow",
-        started_at=trace.get("started_at"), failure_category=type(error).__name__,
-        milestone_group_id=trace.get("milestone_group_id"), enforce_run_id=trace.get("enforce_run_id"),
-        events=[RunEvent(
-            kind="run.exception", attempt=0, source="workflow.run_generation_workflow",
-            authority=EventAuthority.AUTHORITATIVE, message=f"{type(error).__name__}: {str(error)[:300]}",
-            details={"exception_type": type(error).__name__, "message": str(error)[:2000]},
-        ).to_dict()],
-    )
+    record_run_exception(engine, trace, error, logger=logger, write_outcome_trace=write_outcome_trace)
 
 
 def _role_metrics_of(client: Any) -> Any:
@@ -2120,9 +2112,9 @@ def _run_semantic_safety_gate(state: GenerationState, *, worktree_path: str, wor
     raise QualityGateFailure(failure)
 
 
-# PRD-032: the environment_failure prefix of a terminal commit that did not
-# commit (failure_category ``workspace_commit_failed``).
-WORKSPACE_COMMIT_NOT_COMPLETED = "WORKSPACE_COMMIT_NOT_COMPLETED"
+# PRD-032: WORKSPACE_COMMIT_NOT_COMPLETED (kriya/workflow/outcome.py) is the
+# environment_failure prefix of a terminal commit that did not commit
+# (failure_category ``workspace_commit_failed``).
 
 
 def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
@@ -2261,45 +2253,27 @@ class WorkflowEngine:
         # docstring for why the other 5 real callers still don't).
         self.execution_policy = ExecutionPolicy(sensitive_path_patterns=kernel.config.autonomy.sensitive_paths)
 
-    @staticmethod
-    def _final_review_refusal_payload(state: GenerationState, workspace_path: str) -> Dict[str, Any]:
-        """PROMPT-BUDGET-FIT-001C: the refusal with what had already
-        happened. ``candidate_applied`` is whether this run's candidate reached
-        ``workspace_path``; ``committed_work_units`` comes from the owning
-        RunRecord's commit cycles (None when unavailable). Nothing is rolled
-        back."""
-        from kriya.control.run_coordinator import owning_run_committed_work_units
-
-        try:
-            committed = owning_run_committed_work_units(workspace_path)
-        except Exception as error:  # the refusal is still reported
-            logger.warning(f"Committed work units unavailable: {error}")
-            committed = None
-        return {
-            **state.final_review_refusal,
-            "candidate_applied": bool(state.quality_gates_succeeded),
-            "committed_work_units": committed,
-            "rolled_back": False,
-        }
-
     def _trace_run_events(self, state: GenerationState) -> List[Dict[str, Any]]:
         """The run's events for the trace, after moving any automatic budget
-        expansion recorded by a model client into them (PRD-016)."""
-        state.drain_budget_expansions(
-            self.llm, self.planner.llm, self.architect.llm, self.developer.llm, self.reviewer.llm,
+        expansion recorded by a model client into them (PRD-016;
+        kriya/workflow/run_lifecycle.py::trace_run_events)."""
+        return trace_run_events(
+            state, model_clients=(self.llm, self.planner.llm, self.architect.llm, self.developer.llm, self.reviewer.llm),
+            developer_llm=self.developer.llm, role_metrics_of=_role_metrics_of,
         )
-        metrics = _role_metrics_of(self.developer.llm)
-        if metrics is not None and not state.role_metrics_recorded:
-            # PRD-018: the calls per (role, model, exact runtime) since the
-            # engine's previous trace row (RoleMetrics.take_unreported).
-            state.role_metrics_recorded = True
-            state.record_event(RunEvent(
-                kind="model.role_metrics", attempt=state.attempt_number, source="workflow",
-                authority=EventAuthority.AUXILIARY,
-                message="per-role model metrics of this run (observations, not verification evidence)",
-                details={"rows": metrics.take_unreported()},
-            ))
-        return [event.to_dict() for event in state.run_events]
+
+    def _stage_deps(self) -> StageDeps:
+        """The extracted stages' collaborators, resolved through this module NOW (at call time), so a test patch
+        of a name here (``logger``, ...) reaches the moved code (kriya/workflow/stage_context.py)."""
+        return StageDeps(
+            logger=logger, config=self.kernel.config, new_state=GenerationState,
+            egress_authority_details=egress_authority_details,
+            primary_model_runtime_details=_primary_model_runtime_details,
+            role_independence_details=_role_independence_details,
+            trace_events=self._trace_run_events, static_analysis_fields=static_analysis_result_fields,
+            required_verification_evidence=_build_required_verification_evidence,
+            deterministic_gate_evidence=deterministic_gate_evidence,
+        )
 
     def _audit_approval_rules(
         self, files_written: Iterable[str], workspace_path: str,
@@ -2815,67 +2789,14 @@ class WorkflowEngine:
         # object instead of the bare `error_context` parameter early on and
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
-        # PROVIDER-CONTRACT-001A: the generation budget is the run's, not this
-        # invocation's - a milestone unit or enforce subtask never restarts it.
-        run_clock = claim_run_generation_clock()
-        state = GenerationState(
-            error_context=error_context or "",
-            engineering_route=engineering_route,
+        # kriya/workflow/run_lifecycle.py::open_run_state: the run's clock
+        # claim (PROVIDER-CONTRACT-001A), the state, and the run-level identity
+        # events (egress authority, attempt evidence store, model runtime, role
+        # independence, applied routes).
+        state = await open_run_state(
+            self._stage_deps(), error_context=error_context, engineering_route=engineering_route,
             process_profile=control.process_profile if control is not None else None,
         )
-        if run_clock is not None:
-            state.budget_started_monotonic = run_clock
-        # PRD-012: every outbound channel's configured authority (capability
-        # class, destinations, the trusted field they come from, the
-        # containment they run under) is persisted with the run. Telemetry
-        # only: each channel's own owner still enforces its decision.
-        try:
-            state.record_event(RunEvent(
-                kind="egress.authority", attempt=0, source="workflow.run_generation_workflow",
-                authority=EventAuthority.AUXILIARY, message="configured outbound-network authority",
-                details=egress_authority_details(self.kernel.config),
-            ))
-        except Exception as exc:  # never blocks the run; the gap is logged loudly
-            logger.warning(f"Could not record the run's egress authority: {exc}")
-        # LR-R1-M1: where this run's attempt evidence lives (or why it does
-        # not). The only change the recorder makes to a trace row.
-        state.record_event(RunEvent(
-            kind="evidence.attempt_store", attempt=0, source="workflow.run_generation_workflow",
-            authority=EventAuthority.AUXILIARY, message="attempt evidence store",
-            details=attempt_evidence_scope.store_pointer(),
-        ))
-        # PRD-013/014: the exact runtime of the primary model and its
-        # qualification state, persisted with the run. Every call also adds
-        # its own fingerprint id to the RunRecord (LLMClient).
-        try:
-            state.record_event(RunEvent(
-                kind="model.runtime", attempt=0, source="workflow.run_generation_workflow",
-                authority=EventAuthority.AUXILIARY, message="primary model runtime identity",
-                details=await _primary_model_runtime_details(self.kernel.config),
-            ))
-        except Exception as exc:
-            logger.warning(f"Could not record the run's model runtime identity: {exc}")
-        # PRD-018: which roles share which exact runtime (visibility; the
-        # independence policy itself is enforced before the workflow starts,
-        # kriya/cli.py _workflow_config).
-        try:
-            state.record_event(RunEvent(
-                kind="model.role_independence", attempt=0, source="workflow.run_generation_workflow",
-                authority=EventAuthority.AUXILIARY, message="role to exact-runtime assignment",
-                details=await asyncio.to_thread(_role_independence_details, self.kernel.config),
-            ))
-        except Exception as exc:
-            logger.warning(f"Could not record the run's role-runtime assignment: {exc}")
-        # PRD-019: the routes the workflow command applied (candidates,
-        # rejections, final route), one event per routed role.
-        routing_plan = getattr(self.kernel.config, "_routing_plan", None)
-        for decision in (routing_plan.to_events() if routing_plan is not None else []):
-            state.record_event(RunEvent(
-                kind="model.route", attempt=0, source="workflow.run_generation_workflow",
-                authority=EventAuthority.AUXILIARY,
-                message=f"{decision['role']} routed to {decision['model']} ({decision['source']})",
-                details=decision,
-            ))
         # PRD-020: the user's original requirements, fixed once from the goal
         # this unit verifies (kriya/workflow/requirements.py). None for a
         # unit that verifies something narrower (a milestone, a subtask).
@@ -3130,6 +3051,9 @@ class WorkflowEngine:
         # attribute this run's calls if it raises (_record_run_exception).
         note_run_trace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id,
                        enforce_run_id=enforce_run_id)
+        run_trace = RunTrace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id,
+                             milestone_index=milestone_index, milestone_total=milestone_total,
+                             enforce_run_id=enforce_run_id)
 
         # REQUIREMENT-CLOSURE-PLAIN-GOAL-001: before any model call, every
         # mandatory requirement must have a deterministic closer; a goal that
@@ -6979,33 +6903,10 @@ class WorkflowEngine:
         # record (including the review text's downstream effects). If
         # Reviewer never finishes, this checkpoint is what survives, already
         # carrying the same gate_outcomes/model_hops a post-mortem needs.
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(self.kernel.config)
-            trace_logger = TraceLogger(trace_db)
-            trace_logger.log_run(
-                run_id=trace_id,
-                goal=goal,
-                duration_sec=time.time() - start_time,
-                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
-                status="in_progress",
-                files_modified=list(state.all_files_written),
-                retrieved_chunks=retrieved_chunks,
-                active_skills=active_skills,
-                prompt_rendered=plan_prompt,
-                gate_outcomes=state.gate_outcomes,
-                model_hops=state.model_hops,
-                milestone_group_id=milestone_group_id,
-                milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                run_events=self._trace_run_events(state),
-                evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(
-                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
-                ),
-            )
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
+        persist_run_trace(
+            self._stage_deps(), state, run_trace, TraceDetail(retrieved_chunks, active_skills, plan_prompt),
+            status="in_progress", failure_note="Failed to write intermediate trace checkpoint (pre-Reviewer)",
+        )
 
         # 5. Reviewer
         if state.pre_approval_review is not None:
@@ -7209,208 +7110,16 @@ class WorkflowEngine:
         # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
-            # PRV-17 preflight correction (2026-09-03), extended for recovery
-            # admission (2026-09-03): checked BEFORE the generic
-            # "environment_failure" branch below, even though both cases also
-            # set state.environment_failure to reuse its STOP_ENVIRONMENT
-            # mechanism (see retry_strategy.py's own comments on that reuse) -
-            # an unauthorized/unrecoverable generation target, or a grounded
-            # failure with no authorized repair target, is a plan/scope
-            # defect, never a real machine/toolchain problem, and must not be
-            # reported or traced as one (kriya/cli.py prints the generic
-            # branch below as "[ENVIRONMENT/TOOLCHAIN ISSUE]" with
-            # toolchain-fix advice). Checked by message prefix, not a single
-            # counter, since two distinct retry_strategy.py call sites now
-            # produce this same category (state.unrecoverable_scope_
-            # denial_count's write-time PolicyDeniedError case, and the
-            # pre-call "NO_AUTHORIZED_REPAIR_TARGET" recovery-admission case)
-            # - both are scope defects, never environment ones.
-            is_scope_defect_stop = bool(state.environment_failure) and state.environment_failure.startswith((
-                "UNAUTHORIZED_GENERATION_TARGET:", "NO_AUTHORIZED_REPAIR_TARGET:",
-            ))
-            # PRV-17 (2026-09-08, P7 efficiency finding): same message-prefix
-            # convention as is_scope_defect_stop above - a candidate-
-            # independent deterministic validator/build-configuration defect
-            # (kriya/workflow/deterministic_failure_diagnostic.py) is neither
-            # a machine/toolchain environment problem nor a plan/scope
-            # defect, and must not be reported or traced as either.
-            is_candidate_independent_deterministic_failure = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
-            )
-            # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET EXHAUSTED
-            # (kriya/workflow/attempt.py::_ensure_generation_time_budget)
-            # reuses state.environment_failure/STOP_ENVIRONMENT purely as its
-            # stop mechanism, same as the two categories above - but it is a
-            # TERMINAL STOP CONDITION (the retry loop itself ran out of
-            # configured time), never an ENVIRONMENT/TOOLCHAIN failure, and
-            # must not be reported or traced as one (kriya/cli.py's generic
-            # branch prints "[ENVIRONMENT/TOOLCHAIN ISSUE]" with `kriya
-            # doctor` advice, which cannot help a budget problem). Checked by
-            # the exact message prefix _ensure_generation_time_budget's own
-            # Failure.message always starts with, same convention as the two
-            # categories above - no new state field, no retry/budget
-            # behavior change.
-            is_generation_budget_exhausted_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("GENERATION TIME BUDGET EXHAUSTED:")
-            )
-            # SEC-001 (2026-09-11): same message-prefix convention as the
-            # three categories above - kriya/tools/containment.py's
-            # ContainmentSetupError means ProcessController refused to run
-            # a command uncontained, which is neither an environment/
-            # toolchain problem (kriya doctor cannot fix a missing/
-            # misconfigured containment backend the same way it diagnoses
-            # Java/Maven) nor an ordinary retryable code defect.
-            is_containment_setup_failed_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
-            )
-            # VAL-001 G1-DEVINV2 (2026-09-20): same message-prefix convention
-            # as the four categories above - a full-regression block with no
-            # candidate-attributable evidence (kriya/workflow/workflow.py's
-            # own _full_regression_unattributed branch) is neither an
-            # environment/toolchain problem nor an ordinary retryable code
-            # defect; `kriya doctor` cannot fix an aggregate-level test-suite
-            # delta with no attributable test.
-            is_regression_unattributed_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("REGRESSION_UNATTRIBUTED:")
-            )
-            # PRD-017: same message-prefix convention - a fallback model that
-            # cannot serve the attempt (kriya/workflow/model_transition.py).
-            is_fallback_incompatible_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("FALLBACK_MODEL_INCOMPATIBLE:")
-            )
-            # CONTEXT-EDIT-PROTOCOL-001: same convention - no feasible mutation
-            # operation under the authoritative context (edit_capability.py).
-            is_edit_protocol_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE:")
-            )
-            # PROVIDER-CONTRACT-001: same convention - a provider contract
-            # violation (kriya/core/provider_contract.py reason codes).
-            from kriya.core.provider_contract import PROVIDER_CONTRACT_REASON_CODES
+            failure_category = terminal_failure_category(state)  # kriya/workflow/outcome.py
+        # MA7.6: what KIND of thing kept failing (kriya/workflow/outcome.py).
+        failure_report = failure_report_dicts(state)
 
-            is_provider_contract_stop = bool(state.environment_failure) and any(
-                state.environment_failure.startswith(f"{code}:") for code in PROVIDER_CONTRACT_REASON_CODES)
-            # MODEL-EVIDENCE-HARDENING-001: same convention - a production
-            # retry identity that is not qualified (attempt.py).
-            is_retry_identity_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith("RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED:")
-            )
-            # PRD-020: same convention - an original requirement without
-            # accepted evidence under a blocking policy (requirements.py).
-            is_requirements_unresolved_stop = (
-                bool(state.environment_failure)
-                and state.environment_failure.startswith(f"{REQUIREMENTS_UNRESOLVED}:")
-            )
-            # PRD-029: same convention - a ContractRegistry transition that
-            # could not be made exactly (contract_lifecycle.py).
-            is_contract_registry_stop = bool(state.environment_failure) and any(
-                state.environment_failure.startswith(f"{code}:") or state.environment_failure == code
-                for code in CONTRACT_REGISTRY_STOP_REASON_CODES
-            )
-            # PRD-032: same convention - the verified candidate's terminal
-            # commit did not commit (_raise_terminal_commit_stop).
-            is_workspace_commit_stop = bool(state.environment_failure) and (
-                state.environment_failure.startswith(f"{WORKSPACE_COMMIT_NOT_COMPLETED}:")
-            )
-            # FILE-INTEGRITY-CONTRACT-001: same convention - a target the edit
-            # engine cannot mutate byte-exactly (file_integrity.py reason codes).
-            is_file_integrity_stop = bool(state.environment_failure) and any(
-                state.environment_failure.startswith(f"{code}:") for code in DETERMINISTIC_FILE_INTEGRITY_STOPS)
-            is_verification_tree_stop = bool(state.environment_failure) and any(
-                state.environment_failure.startswith(f"{code}:") for code in VERIFICATION_TREE_STOP_CODES)
-            # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
-            static_analysis_stop = next(
-                (
-                    f"static_analysis_{outcome.lower()}" for outcome in ("BLOCKED", "UNKNOWN", "UNAVAILABLE")
-                    if (state.environment_failure or "").startswith(f"STATIC_ANALYSIS_{outcome}:")
-                ),
-                None,
-            )
-            failure_category = (
-                "final_review_refused" if state.final_review_refusal is not None
-                else "plan_scope_revision_required" if state.plan_scope_conflict
-                else "unauthorized_generation_target" if is_scope_defect_stop
-                else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
-                else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
-                else "containment_setup_failed" if is_containment_setup_failed_stop
-                else "regression_unattributed" if is_regression_unattributed_stop
-                else "fallback_model_incompatible" if is_fallback_incompatible_stop
-                else "context_edit_protocol_unsatisfiable" if is_edit_protocol_stop
-                else "provider_contract_violation" if is_provider_contract_stop
-                else "retry_identity_not_qualified" if is_retry_identity_stop
-                else "requirements_unresolved" if is_requirements_unresolved_stop
-                else "contract_registry_blocked" if is_contract_registry_stop
-                else static_analysis_stop if static_analysis_stop is not None
-                else "workspace_commit_failed" if is_workspace_commit_stop
-                else "file_integrity_unsupported" if is_file_integrity_stop
-                else "verification_tree_mutated" if is_verification_tree_stop
-                else "environment_failure" if state.environment_failure
-                # PRD-026: the retry-progress invariant ended the run.
-                else "no_progress" if state.no_progress_terminated
-                else "quality_gates_exhausted"
-            )
-
-        # MA7.6 (kriya/workflow/failure_reporting.py) - additive, NOT a
-        # replacement for failure_category above: that field answers "why
-        # did the retry loop stop" (2 fixed values, a stable contract
-        # tests/test_traces_command.py already asserts on literally).
-        # This answers a different question - "what KIND of thing kept
-        # failing across the attempts" - by mapping every real gate_outcome
-        # (one per failed attempt, kriya/workflow/failure.py's own
-        # Failure.to_gate_outcome()) through the existing, previously-
-        # unwired categorize_failure()/build_failure_report_entry(). Empty
-        # list on a clean success (state.gate_outcomes only ever holds
-        # failures) or a run that never got past a single passing attempt.
-        failure_report = [
-            build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
-            for outcome in state.gate_outcomes
-        ]
-        failure_report_dicts = [
-            {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
-            for e in failure_report
-        ]
-
-        # Write persistent trace log
-        try:
-            from kriya.control.trace import TraceLogger
-            trace_db = trace_db_path(self.kernel.config)
-            trace_logger = TraceLogger(trace_db)
-            duration = time.time() - start_time
-            trace_logger.log_run(
-                run_id=trace_id,
-                goal=goal,
-                duration_sec=duration,
-                # + best_of_n_candidates_tried: see the identical comment earlier in this
-                # method - retry_count alone understates true effort whenever Best-of-N
-                # discarded independent candidates before this run's winning/final attempt.
-                attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
-                status="success" if quality_passed else "failure",
-                files_modified=list(state.all_files_written),
-                retrieved_chunks=retrieved_chunks,
-                active_skills=active_skills,
-                prompt_rendered=plan_prompt,
-                gate_outcomes=state.gate_outcomes,
-                model_hops=state.model_hops,
-                failure_category=failure_category,
-                failure_report=failure_report_dicts,
-                milestone_group_id=milestone_group_id,
-                milestone_index=milestone_index,
-                milestone_total=milestone_total, enforce_run_id=enforce_run_id,
-                run_events=self._trace_run_events(state),
-                evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(
-                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
-                ),
-            )
-            logger.info(f"Persistent run trace recorded: {trace_id}")
-        except Exception as trace_ex:
-            logger.warning(f"Failed to write run trace: {trace_ex}")
+        # Write persistent trace log (kriya/workflow/run_lifecycle.py)
+        persist_run_trace(
+            self._stage_deps(), state, run_trace, TraceDetail(retrieved_chunks, active_skills, plan_prompt),
+            status="success" if quality_passed else "failure",
+            terminal=TerminalTrace(failure_category, failure_report), recorded_note=True,
+        )
 
         if quality_passed or (state.final_review_refusal is not None and state.quality_gates_succeeded):
             # Full success, or an applied candidate whose final review was
@@ -7439,75 +7148,11 @@ class WorkflowEngine:
             except Exception as ex:
                 logger.debug(f"jdtls shutdown failed (non-fatal): {ex}")
 
-        return {
-            "plan": plan,
-            "design": design,
-            "files": list(state.all_files_written),
-            # ENFORCE-IDENTICAL-WRITE-COMPLETION-001: planned files the candidate returned byte-identical to the
-            # baseline - not a mutation (never applied), but examined, verified-unchanged source a later unit may
-            # treat as established (the milestone driver's established file context).
-            "unchanged_files": sorted(state.identical_rewrites) if quality_passed else [],
-            "quality_gates_passed": quality_passed,
-            "candidate_gates_passed": state.candidate_gates_succeeded,
-            "terminal_regression_passed": state.terminal_regression_succeeded,
-            "overall_attempt_passed": state.overall_attempt_succeeded,
-            "verification_results": _build_required_verification_evidence(
-                required_verification, quality_passed, gate_outcomes=state.gate_outcomes,
-            ),
-            "deterministic_gate_evidence": deterministic_gate_evidence(
-                state.gate_outcomes, state.attempt_number,
-            ),
-            # ENFORCE-VERIFIED-NO-CHANGE-001: "VERIFIED_NO_CHANGE" when the
-            # unit completed without a mutation on deterministic evidence.
-            "completion_kind": state.completion_kind if quality_passed else None,
-            "environment_failure": state.environment_failure if not quality_passed else None,
-            "failure_category": failure_category,
-            # PRD-026 / LR-R1-P4: which no-progress terminal ended the run (None otherwise) - the enforce
-            # controller keys its one bounded upstream-owner reopen on VERIFICATION_RETRY_NO_CHANGE_POSSIBLE.
-            "no_progress_reason": state.no_progress_reason if not quality_passed else None,
-            # The unit's own last deterministic failure (type, message, the gate's output, bounded) - the evidence
-            # a reopened upstream owner receives. Never model text: Failure.raw_output is the validator's output.
-            "last_failure": (
-                {"type": state.last_failure.type, "message": str(state.last_failure.message or "")[-2000:],
-                 "raw_output": str(state.last_failure.raw_output or "")[-4000:]}
-                if state.last_failure is not None and not quality_passed else None
-            ),
-            "retry_progress": state.retry_progress_summary(),
-            # PRD-029: the ContractRegistry transition committed with this
-            # run's source (None when no contract changed).
-            "contract_registry": state.contract_registry_transition,
-            # PRD-032: why the verified candidate was not committed (None
-            # unless its terminal commit did not commit).
-            "workspace_commit_failure": state.terminal_commit_failure,
-            "failure_report": failure_report_dicts,
-            "plan_scope_conflict": state.plan_scope_conflict,
-            "toolchain_warning": state.toolchain_warning,
-            "lsp_warning": state.lsp_warning,
-            "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
-            "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
-            "active_skill_manifest": active_skill_manifest,
-            "generation_metrics": state.generation_metrics(
-                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
-                ),
-            "review": review,
-            "review_included_in_approval": state.pre_approval_review is not None,
-            # PRD-031A: the static-analysis outcome (ACCEPTED_RISK is never PASS).
-            **static_analysis_result_fields(state.static_analysis_result),
-            **({"final_review_refusal": self._final_review_refusal_payload(state, workspace_path)}
-               if state.final_review_refusal is not None else {}),
-            "run_id": run_id,
-            # PRD-021: grounded ownership findings (advisory evidence).
-            **({"ownership_findings": [f.to_dict() for f in state.ownership_findings]}
-               if state.ownership_findings else {}),
-            # PRD-020: the original requirements and each one's authoritative
-            # outcome (the verifier's; PENDING when no verdict was recorded).
-            **({"requirements": {
-                **requirement_set.to_dict(),
-                "outcomes": {rid: outcome.value for rid, outcome in
-                             requirement_outcomes(resolved_obligation_ledger, requirement_set).items()},
-                "evidence": requirement_evidence(resolved_obligation_ledger, requirement_set),
-                # MODEL-EVIDENCE-HARDENING-001: each verdict with its reason
-                # code, evidence, verifier identity and judged candidate.
-                "verdicts": requirement_verdict_details(resolved_obligation_ledger, requirement_set),
-            }} if requirement_set is not None else {}),
-        }
+        return completed_result(
+            self._stage_deps(), state, quality_passed=quality_passed, failure_category=failure_category,
+            failure_report_dicts=failure_report, plan=plan, design=design, review=review,
+            workspace_path=workspace_path, run_id=run_id, required_verification=required_verification,
+            unresolved_skill_gap_names=unresolved_skill_gap_names, skill_staleness_warnings=skill_staleness_warnings,
+            active_skill_manifest=active_skill_manifest, requirement_set=requirement_set,
+            resolved_obligation_ledger=resolved_obligation_ledger,
+        )
