@@ -95,18 +95,29 @@ def test_the_old_module_is_gone():
     assert importlib.util.find_spec("kriya.control.workspace_identity") is None
 
 
+# D3 moved the process-global working-directory lock out of KUP into CONTEXT (`WORKING_DIRECTORY_LOCK`) because the workspace-scoped
+# configuration load still enters the folder (a relative KRIYA_TRUST_FILE resolves against the cwd). That file is the ONE declared cwd
+# exception; O1 removes it together with the chdir (SLICE-PLAN O1; Q2 probes the lock). Every other context file keeps the full B1 invariant.
+CWD_EXCEPTION = "kriya/context/working_directory.py"
+
+
 def test_context_reads_no_environment_home_or_working_directory_and_imports_only_foundation_and_platform():
-    """The A2 cwd table lists CONTEXT as an owner of cwd access; B1 keeps the package free of it anyway (the
-    workspace is an explicit input) and of every environment/home read."""
+    """The A2 cwd table lists CONTEXT as an owner of cwd access; B1 keeps the package free of it anyway (the workspace is an explicit input)
+    and of every environment/home read - except the single declared D3 working-directory lock file, which reads no environment or home either."""
     trees = {path: tree for path, tree in mm.trees().items() if path.startswith("kriya/context/")}
-    assert sorted(trees) == ["kriya/context/__init__.py", "kriya/context/model.py", "kriya/context/workspace_identity.py"]
-    for finder in (sites.environ_sites, sites.home_sites, sites.cwd_sites, sites.sqlite_sites, sites.http_sites,
-                   sites.subprocess_sites):
+    assert sorted(trees) == ["kriya/context/__init__.py", "kriya/context/model.py", CWD_EXCEPTION, "kriya/context/workspace_identity.py"]
+    for finder in (sites.environ_sites, sites.home_sites, sites.sqlite_sites, sites.http_sites, sites.subprocess_sites):
         assert {path: lines for path, tree in trees.items() for lines in [finder(tree)] if lines} == {}, finder.__name__
+    strict = {path: tree for path, tree in trees.items() if path != CWD_EXCEPTION}
+    assert {path: lines for path, tree in strict.items() for lines in [sites.cwd_sites(tree)] if lines} == {}, "cwd_sites"
     table = mm.owner_table()
     targets = {mm.logical(edge.target, table) for edge in mm.scan() if edge.source.startswith("kriya.context")}
     assert targets <= {"FOUNDATION", "PLATFORM", "CONTEXT"}, targets
-    for path in trees:  # no os.chdir either
-        calls = [n for n in ast.walk(trees[path]) if isinstance(n, ast.Attribute) and n.attr == "chdir"]
-        assert calls == [], path
+
+    def chdirs(tree):
+        return [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "chdir"]
+
+    for path, tree in strict.items():  # no os.chdir either
+        assert chdirs(tree) == [], path
+    assert chdirs(trees[CWD_EXCEPTION]), "the declared exception must be real: delete it (and this allowance) when O1 removes the chdir"
     assert os.path.basename(wi.__file__) == "workspace_identity.py" and "context" in wi.__file__
