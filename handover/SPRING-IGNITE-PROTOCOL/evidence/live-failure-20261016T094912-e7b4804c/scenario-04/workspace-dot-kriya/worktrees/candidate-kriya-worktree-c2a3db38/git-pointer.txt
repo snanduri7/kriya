@@ -1,0 +1,1 @@
+gitdir: /Users/sriramnanduri/kriya-demo-v2-work/scenario-04/workspace/.git/worktrees/candidate-kriya-worktree-c2a3db38
